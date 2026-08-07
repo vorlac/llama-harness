@@ -1,3 +1,6 @@
 [submodule "vcpkg"]
 	path = extern/vcpkg
 	url = https://github.com/microsoft/vcpkg
+[submodule "extern/llama-cpp"]
+	path = extern/llama-cpp
+	url = https://github.com/ggml-org/llama.cpp.git

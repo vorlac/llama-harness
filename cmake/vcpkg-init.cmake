@@ -27,7 +27,6 @@ if (WIN32)
     set(EXECUTABLE_EXTENSION ".exe")
 endif()
 set(VCPKG_PROGRAM "${CMAKE_CURRENT_SOURCE_DIR}/extern/vcpkg/vcpkg${EXECUTABLE_EXTENSION}")
-
 if(EXISTS "${VCPKG_PROGRAM}")
     message(NOTICE "Found VCPKG Executable: ${VCPKG_PROGRAM}")
 else()
@@ -36,7 +35,7 @@ else()
 
     if(WIN32)
         set(VCPKG_INSTALL_COMMAND
-            powershell 
+            powershell
             -c
             "${CMAKE_CURRENT_SOURCE_DIR}/extern/vcpkg/bootstrap-vcpkg.bat"
         )

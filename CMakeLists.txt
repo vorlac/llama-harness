@@ -36,8 +36,8 @@ set(compiler_is_msvc "$<CXX_COMPILER_ID:MSVC>")
 set(compiler_is_gnu "$<CXX_COMPILER_ID:GNU>")
 set(compiler_is_clang "$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>>")
 
-find_package(fmt CONFIG REQUIRED)
-find_package(OpenSSL REQUIRED)
+add_subdirectory(extern/llama-cpp)
+find_package(spdlog CONFIG REQUIRED)
 
 file(GLOB_RECURSE
   project_sources
@@ -57,71 +57,24 @@ target_compile_features(${PROJECT_NAME} PRIVATE
     cxx_std_23
 )
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-  NOMINMAX
-
-  $<${compiler_is_msvc}:
-      WIN32_LEAN_AND_MEAN
-      VC_EXTRALEAN
-
-      $<$<CONFIG:Debug>:
-          # debug only msvc defs
-      >
-  >
-
-  $<${compiler_is_gnu}:
-      # gcc defs here
-  >
-
-  $<${compiler_is_clang}:
-      # clang defs here
-  >
-)
-
-target_compile_options(${PROJECT_NAME} PRIVATE
-  $<${compiler_is_msvc}:
-      /std:c++latest
-      /Zc:preprocessor
-      /utf-8
-      /EHsc
-      /nologo
-      /UNICODE
-  >
-
-  $<$<CONFIG:Release>:
-      /Ox
-      /MD
-  >
-
-  $<$<CONFIG:Debug>:
-      /MDd
-  >
-)
-
 target_include_directories(${PROJECT_NAME}
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
 target_link_libraries(${PROJECT_NAME}
-  PRIVATE fmt::fmt
-  PRIVATE OpenSSL::SSL
-  PRIVATE OpenSSL::Crypto
+  PRIVATE spdlog::spdlog
+  PRIVATE ftxui
+  PRIVATE llama
 )
+
+# Standalone measurement tools. These carry no project dependencies so they can
+# also be built directly with a single compiler invocation - see tools/README.md.
+add_subdirectory(tools)
 
 if (AUTOFORMAT_SRC_ON_CONFIGURE MATCHES ON)
   # Formatting rules defined by .clangformat
   # Scoped to src/*.[h]pp and src/*.[c]pp
   include(clang-format)
 endif()
-
-set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  PROPERTY VS_STARTUP_PROJECT
-    ${PROJECT_NAME}
-)
-
-set_property(TARGET ${PROJECT_NAME}
-  PROPERTY VS_DEBUGGER_ENVIRONMENT
-    "PATH=${CMAKE_CURRENT_INSTALL_DIR}/${PROJECT_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
-)
 
 include(cmake-utils)
