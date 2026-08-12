@@ -1,1 +1,1 @@
-{"taskId":"4.2","step":"test-writer dispatched (gitio read-only git queries; ordering override: 4.2 before 4.1)","intendedFiles":["conductor/tests/gitio.test.ts","conductor/adapter/gitio.ts"],"startedAt":"2026-08-12T14:30:00Z"}
+{"taskId":"4.1","step":"test-writer dispatched (state store + questions.ts; big adapter, crash-safety)","intendedFiles":["conductor/tests/state.test.ts","conductor/adapter/state.ts","conductor/adapter/questions.ts"],"startedAt":"2026-08-12T14:55:00Z"}
