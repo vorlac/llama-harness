@@ -1,16 +1,64 @@
 {
   "taskId": "1.1",
-  "planLines": [2059, 2084],
-  "kind": "code (tier B; spec-conformance lens at task gate). Subagents must read §2 in full (plan lines 468-1026) — tests hardcode those schemas.",
+  "planLines": [
+    2059,
+    2084
+  ],
+  "kind": "code (tier B; spec-conformance lens at task gate). Subagents must read \u00a72 in full (plan lines 468-1026) \u2014 tests hardcode those schemas.",
   "assertions": [
-    { "id": "1.1-types", "text": "core/types.ts exports TS types AND hand-written JSON Schema objects (no generator, zero deps) for all 17: Config, RouterConfig, Run, Queue, Item, EvidenceRecord, DecisionRecord, AnomalyRecord, QuestionRecord, StaleRedRegistry, Findings, Verdict, Classification, ClassificationCheck, TestVet, ImplementerResult, JournalRecord", "planLine": 2061, "coveredByTest": null },
-    { "id": "1.1-validate", "text": "validate(schemaName, value) -> {ok, errors[]} implements ONLY the subset type/required/enum/properties/items/additionalProperties (~120 lines)", "planLine": 2065, "coveredByTest": null },
-    { "id": "1.1-examples", "text": "each schema accepts its §2 example verbatim", "planLine": 2077, "coveredByTest": null },
-    { "id": "1.1-reject-required", "text": "rejects a missing required field", "planLine": 2077, "coveredByTest": null },
-    { "id": "1.1-reject-enum", "text": "rejects a wrong enum (e.g. item state \"DONE\")", "planLine": 2078, "coveredByTest": null },
-    { "id": "1.1-reject-extra", "text": "rejects an extra property where additionalProperties is false", "planLine": 2078, "coveredByTest": null },
-    { "id": "1.1-subset-rejection", "text": "validator rejects (does not silently ignore) a schema feature outside the subset", "planLine": 2079, "coveredByTest": null },
-    { "id": "1.1-subset-clean", "text": "every exported schema uses ONLY subset keywords (the two-validator discipline, lines 2070-2075)", "planLine": 2079, "coveredByTest": null },
-    { "id": "1.1-trivial-classification", "text": "a Classification with kind:\"trivial\" and a null/partial trivialItem is rejected", "planLine": 2080, "coveredByTest": null }
+    {
+      "id": "1.1-types",
+      "text": "core/types.ts exports TS types AND hand-written JSON Schema objects (no generator, zero deps) for all 17: Config, RouterConfig, Run, Queue, Item, EvidenceRecord, DecisionRecord, AnomalyRecord, QuestionRecord, StaleRedRegistry, Findings, Verdict, Classification, ClassificationCheck, TestVet, ImplementerResult, JournalRecord",
+      "planLine": 2061,
+      "coveredByTest": "types.test.ts:604 'SCHEMAS contains a JSON Schema object for each of the 17 \u00a72 names' + type-only imports of all 17 types"
+    },
+    {
+      "id": "1.1-validate",
+      "text": "validate(schemaName, value) -> {ok, errors[]} implements ONLY the subset type/required/enum/properties/items/additionalProperties (~120 lines)",
+      "planLine": 2065,
+      "coveredByTest": "types.test.ts:616 'validate(schemaName, value) returns {ok, errors[]}' + every assertAccepts/assertRejects"
+    },
+    {
+      "id": "1.1-examples",
+      "text": "each schema accepts its \u00a72 example verbatim",
+      "planLine": 2077,
+      "coveredByTest": "20 accept-verbatim tests (17 schemas; 3 examples each for EvidenceRecord and AnomalyRecord)"
+    },
+    {
+      "id": "1.1-reject-required",
+      "text": "rejects a missing required field",
+      "planLine": 2077,
+      "coveredByTest": "one missing-required rejection in ALL 17 schema describes (incl. nested Queue item id, TestVet antiPatterns)"
+    },
+    {
+      "id": "1.1-reject-enum",
+      "text": "rejects a wrong enum (e.g. item state \"DONE\")",
+      "planLine": 2078,
+      "coveredByTest": "13 enum rejections incl. the pinned item state DONE (types.test.ts:745), run state, stop.kind, failureClass, ladderRung, origin, severity, level"
+    },
+    {
+      "id": "1.1-reject-extra",
+      "text": "rejects an extra property where additionalProperties is false",
+      "planLine": 2078,
+      "coveredByTest": "14 additionalProperties:false rejections (Config/RouterConfig deliberately unpinned \u2014 \u00a72.11 open question, plan line 986)"
+    },
+    {
+      "id": "1.1-subset-rejection",
+      "text": "validator rejects (does not silently ignore) a schema feature outside the subset",
+      "planLine": 2079,
+      "coveredByTest": "3 tests: pattern (top-level), minimum (nested \u2014 recursive policing), oneOf (combinator); each asserts the error names the keyword"
+    },
+    {
+      "id": "1.1-subset-clean",
+      "text": "every exported schema uses ONLY subset keywords (the two-validator discipline, lines 2070-2075)",
+      "planLine": 2079,
+      "coveredByTest": "'every exported schema uses ONLY subset keywords' (recursive walk over SCHEMAS with walker self-test)"
+    },
+    {
+      "id": "1.1-trivial-classification",
+      "text": "a Classification with kind:\"trivial\" and a null/partial trivialItem is rejected",
+      "planLine": 2080,
+      "coveredByTest": "4 tests: trivial+null rejected, trivial+partial rejected, trivial+complete accepted, work+non-null rejected"
+    }
   ]
 }

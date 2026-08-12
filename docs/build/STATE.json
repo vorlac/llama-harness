@@ -67,7 +67,7 @@
       "manifest": true,
       "tier": "phase-gate:discovery-integrity",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "0cf8b82",
       "commitMessage": "conductor: 0.2 wire contract pinned",
       "planLines": [
         1999,
@@ -157,7 +157,7 @@
       "taskId": "1.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 1.1 schemas",
       "planLines": [
@@ -165,14 +165,30 @@
         2084
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 109,
+        "pass": 109,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/types.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: The requested module '../core/types.ts' does not provide an export named 'SCHEMAS' (link-time, names the task-scope module; observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/types.test.ts",
+        "conductor/core/types.ts"
+      ],
+      "revertAssertion": "reverting core/types.ts to its 0.3 form fails all of types.test.ts at link time (missing SCHEMAS/validate exports) \u2014 84 tests; e.g. 'rejects item state \"DONE\"' can only pass against the real Item schema",
+      "attempts": 1,
+      "deviations": [
+        "EvidenceRecord/AnomalyRecord encoded as merged object schemas (subset has no combinator; tests reject oneOf); TS discriminated unions carry the per-kind strictness; noted in file comments"
+      ],
+      "startedAt": "2026-08-12T10:05:00Z",
+      "finishedAt": "2026-08-12T10:13:29Z"
     },
     "1.2": {
       "taskId": "1.2",

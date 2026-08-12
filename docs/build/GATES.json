@@ -150,6 +150,19 @@
       "M7": "PASS all 19 rows mapped",
       "M8": "wire-notes cross-checked against orchestrator's own suite run + binary version check",
       "M9": "n/a"
+    },
+    "1.1": {
+      "at": "2026-08-12T10:13:29Z",
+      "M1": "PASS 109/109 + tsc (orchestrator-observed)",
+      "M2": "PASS 24 -> 109",
+      "M3": "PASS",
+      "M4": "pending post-commit re-derivation",
+      "M5": "PASS",
+      "M6": "PASS (2 declared files + docs/build)",
+      "M7": "PASS all 9 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a",
+      "review": "tier B spec-conformance lens dispatched post-commit (C-011 pragmatics); findings adjudicated before next task's commit"
     }
   },
   "phaseGates": {
