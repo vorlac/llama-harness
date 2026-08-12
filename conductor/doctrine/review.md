@@ -45,6 +45,18 @@ by how much the code annoys you.
   loss, accessibility — is judged on its own merits and is never waved through
   as a minor for the sake of speed.
 
+## Adjudication order — spec before quality
+
+Findings split into two tiers, and they are settled in order. A spec finding asks
+whether the code meets its requirement and behaves correctly; a quality finding
+asks about style, structure, and polish. Spec-conformance is adjudicated BEFORE
+quality — always. While any spec finding from a round is still surviving
+(unresolved), every quality finding raised in that same round is discarded, not
+carried forward: it was judged against code that is about to change under the spec
+fix, so the judgment is stale. Re-derive the quality findings only after the
+surviving spec findings are resolved and the code has settled. This keeps
+reviewers from spending a round polishing lines the next commit rewrites.
+
 ## Shape of a good finding
 
 State the severity, the `file:line`, the concrete problem, and why it matters in

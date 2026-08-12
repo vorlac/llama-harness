@@ -328,3 +328,117 @@ test("8.1-no-todo: no pack contains a placeholder marker or names opencode/Claud
     }
   }
 });
+
+// ===========================================================================
+// 8.1-anchors-review-ordering — review.md must carry the SPEC-BEFORE-QUALITY
+// adjudication ordering (plan §6.1 line 1841, from subagent-driven-development).
+// Spec findings are adjudicated first; quality findings from a round that still
+// has SURVIVING spec findings are discarded and re-derived after the spec fixes.
+// RED now by design: the pack does not yet carry this doctrine.
+// ===========================================================================
+test("8.1-anchors-review-ordering: review.md carries the spec-before-quality adjudication ordering", () => {
+  const review = readPack("review.md");
+  assert.ok(
+    hasWord(review, "spec") && hasWord(review, "quality"),
+    "review.md must name both the 'spec' and 'quality' finding classes (the two adjudication tiers)",
+  );
+  assert.ok(
+    has(review, "surviving"),
+    "review.md must key the rule on 'surviving' spec findings",
+  );
+  assert.ok(
+    has(review, "discarded") || has(review, "re-derived"),
+    "review.md must state that quality findings from a round with surviving spec findings are discarded and re-derived",
+  );
+  assert.ok(
+    has(review, "before"),
+    "review.md must state that spec is adjudicated BEFORE quality",
+  );
+});
+
+// ===========================================================================
+// 8.1-anchors-core-forbidden — core.md must carry the FORBIDDEN
+// SATISFACTION/COMPLETION PHRASES (plan §6.1 line 1837, from
+// verification-before-completion): the enforceable red-flag list of unverified
+// completion claims, distinct from the abstract "records over assertions"
+// principle already present. RED now by design.
+// ===========================================================================
+test("8.1-anchors-core-forbidden: core.md lists the forbidden satisfaction/completion phrases", () => {
+  const core = readPack("core.md");
+  assert.ok(
+    has(core, "should work") && has(core, "looks good"),
+    "core.md must list representative banned unverified-completion phrases 'should work' and 'looks good'",
+  );
+  assert.ok(
+    has(core, "should pass"),
+    "core.md must list the canonical red-flag phrase 'should pass'",
+  );
+  assert.ok(
+    has(core, "forbidden") || has(core, "never claim") || has(core, "do not claim"),
+    "core.md must frame these phrases with a clear ban (forbidden / never claim / do not claim)",
+  );
+});
+
+// ===========================================================================
+// 8.1-anchors-core-ponytail — core.md must carry the ponytail/minimality LITE
+// reminder (plan §6.1 line 1849 — the ponytail row assigns "core.md: lite
+// reminder"): look for a cheaper way, reuse what exists, write the least code
+// that works. RED now by design.
+// ===========================================================================
+test("8.1-anchors-core-ponytail: core.md carries the ponytail/minimality lite reminder", () => {
+  const core = readPack("core.md");
+  assert.ok(
+    has(core, "cheaper"),
+    "core.md must remind to look for a cheaper way before writing new code",
+  );
+  assert.ok(
+    has(core, "reuse"),
+    "core.md must remind to reuse existing code rather than write what already exists",
+  );
+  assert.ok(
+    has(core, "minimal") || has(core, "least"),
+    "core.md must remind to write the least code that works (minimal / least)",
+  );
+});
+
+// ===========================================================================
+// 8.1-anchors-plan — HARDENING: plan.md must carry its §6.1 doctrine
+// (exact-paths, complete-code, no-placeholder). Present today; this anchor
+// guards against silent drift in a future edit.
+// ===========================================================================
+test("8.1-anchors-plan: plan.md carries its §6.1 doctrine (exact paths, complete code, no placeholder)", () => {
+  const plan = readPack("plan.md");
+  assert.ok(
+    has(plan, "exact") && has(plan, "path"),
+    "plan.md must require exact paths for every step",
+  );
+  assert.ok(
+    has(plan, "complete") && has(plan, "code"),
+    "plan.md must require complete code for non-obvious steps",
+  );
+  assert.ok(
+    has(plan, "placeholder"),
+    "plan.md must name placeholders as plan defects",
+  );
+});
+
+// ===========================================================================
+// 8.1-anchors-skeptic — HARDENING: skeptic.md must carry the refutation posture
+// (refute; majority ⌈k/2⌉ survival; default toward refuted). Present today; this
+// anchor guards against silent drift.
+// ===========================================================================
+test("8.1-anchors-skeptic: skeptic.md carries the refutation posture", () => {
+  const skeptic = readPack("skeptic.md");
+  assert.ok(
+    has(skeptic, "refute"),
+    "skeptic.md must state the refutation posture (refute the finding)",
+  );
+  assert.ok(
+    has(skeptic, "majority") || has(skeptic, "k/2") || has(skeptic, "⌈k/2⌉"),
+    "skeptic.md must state the majority (⌈k/2⌉) survival threshold",
+  );
+  assert.ok(
+    has(skeptic, "refuted") && has(skeptic, "default"),
+    "skeptic.md must default toward refuted when uncertain",
+  );
+});
