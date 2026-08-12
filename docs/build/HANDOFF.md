@@ -23,7 +23,10 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## What is parked
 
-- Nothing.
+- Nothing. Deferred obligations for Task 9.1's handlers (from 1.1's lens, GATES
+  taskGates['1.1'].review): (a) derived decisions need scored options (use 1.5's
+  requireTwoOptions); (b) ClassificationCheck correctedKind must be null iff agreed
+  — enforce in the classify handler and cover both with tests there.
 
 ## Standing facts a fresh instance must not re-derive wrong
 

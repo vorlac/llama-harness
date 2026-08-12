@@ -1,6 +1,6 @@
 {
-  "taskId": "1.1",
-  "step": "test-writer dispatched (types.test.ts in tree); 1.2/1.4 test-writers staging in scratchpad",
-  "intendedFiles": ["conductor/tests/types.test.ts", "conductor/core/types.ts"],
-  "startedAt": "2026-08-12T10:05:00Z"
+  "taskId": "1.4",
+  "step": "landing staged purity guard (green-on-land; M4 = mutation probes)",
+  "intendedFiles": ["conductor/tests/purity.test.ts"],
+  "startedAt": "2026-08-12T11:05:00Z"
 }

@@ -11,3 +11,4 @@
 {"ts":"2026-08-12T09:39:02Z","event":"task.committed","taskId":"0.2","detail":"wire contract pinned vs 1.18.15 (self-updated); 24/24 green observed; 2 DRIFTs (format absent, permission surface shape); 4 discoveries recorded; fragment tools.task=false"}
 {"ts":"2026-08-12T09:47:49Z","event":"phase.gate","phase":"0","detail":"Stage1 PASS fresh-worktree; lenses: spec-conformance CONFORMANT, discovery-integrity 2 majors both probe-confirmed and fixed (C-015); verdict PASS after fix round 1"}
 {"ts":"2026-08-12T10:13:29Z","event":"task.committed","taskId":"1.1","detail":"17 schemas + subset validator; red observed missing-subject (SCHEMAS export); 109/109 green; union-merge deviation recorded"}
+{"ts":"2026-08-12T10:19:44Z","event":"task.committed","taskId":"1.2","detail":"shell-parse 63 tests; red observed missing-subject; 172/172 green; 1.1 lens adjudicated (no majors, obligations deferred to 9.1)"}

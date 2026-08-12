@@ -162,7 +162,19 @@
       "M7": "PASS all 9 rows mapped",
       "M8": "n/a",
       "M9": "n/a",
-      "review": "tier B spec-conformance lens dispatched post-commit (C-011 pragmatics); findings adjudicated before next task's commit"
+      "review": "tier B lens returned: NO majors; 2 minors (DecisionRecord score-conditionality -> enforced by 1.5 requireTwoOptions + 9.1 handler; ClassificationCheck correctedKind conditionality -> 9.1 classify handler obligation); 2 nits (JournalRecord extra-prop untested; taint under-constrained per plan's own example). Adjudication: defer-to-named-owners, no schema mutation; obligations recorded in HANDOFF for 9.1."
+    },
+    "1.2": {
+      "at": "2026-08-12T10:19:44Z",
+      "M1": "PASS 172/172 + tsc (orchestrator-observed)",
+      "M2": "PASS 109 -> 172",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS (8 rows mapped, test names carry assertion ids)",
+      "M8": "n/a",
+      "M9": "n/a"
     }
   },
   "phaseGates": {
