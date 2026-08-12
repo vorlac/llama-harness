@@ -370,3 +370,38 @@ and env `NAME=value` — before taking the command word; gates-git reuses that h
 DENIES as unresolvable if the structure can't be cleanly resolved to a command word.
 Verified against the 3 inputs + controls (bare `sudo git push` still deny, `env git push`
 still deny, non-wrapper commands unchanged).
+
+## C-024 (2026-08-12) — Phase 6 milestone gate: evidence/quarantine crash-safety + sandbox (expected-broken mechanism)
+
+Two lenses (residual-risk, crash-recovery/fs-safety) on the out-of-repo quarantine — the
+mechanism §14 flagged as changed-and-never-re-reviewed. ~9 findings; the orchestrator
+reproduced the reproducible ones (clobber-on-restore = real data loss; ../ entry moved a
+file from OUTSIDE the repo). Fixes (test-first, all safe direction):
+- **F1 EXDEV (MAJOR):** the quarantine dir is under $stateHome (home volume); a repo on a
+  different volume (Docker/CI/external drive/tmpfs) makes renameSync throw EXDEV, uncaught,
+  crashing the wave driver on EVERY multi-item wave. FIX: move helper tries renameSync; on
+  EXDEV falls back to copyFileSync + utimesSync(preserve original mtime) + unlinkSync — works
+  cross-volume AND preserves the mtime the freshness invariant needs. Wrap the quarantine
+  call in runVerify's try so any failure heals.
+- **F2 clobber-on-restore (MAJOR, reproduced):** replay overwrote a refilled repo slot (the
+  corrected new file) with the stale quarantined red, old mtime defeating freshness. FIX:
+  restore NEVER overwrites an existing dst — skip + leave the stored file + record a conflict.
+- **F3 sandbox escape via unvalidated ids (MAJOR):** workspaceKey=`../../../../etc` →
+  quarantineDirFor → rmSync(recursive) on /etc/quarantine; tree=`../../tmp/evil` → marker
+  path escapes runDir; excludeTestFiles `../x` moves a file from outside the repo (reproduced).
+  Same assertSafeId gap Phase-4 closed in state.ts. FIX: apply assertSafeId to
+  runId/workspaceKey/tree; reject `..`/absolute in files/excludeTestFiles.
+- **F4 replay heals a LIVE run's quarantine (MAJOR):** replayPendingRestores sweeps ALL
+  manifests assuming any is a crashed orphan; with concurrent worktree runs it restores an
+  ACTIVE run's files back mid-verify (spurious red + broken invariant). FIX: manifest carries
+  {pid,startMs}; replay heals ONLY dead-owner orphans (pidAlive skip); ENOENT source =
+  already-healed (no throw); check repoRoot still exists (skip if gone); never throw out of
+  runVerify; per-entry try.
+- **F5 illegal-red too loose (MAJOR):** legality checked the FULL text + basename match; spec
+  (§2404/2431) says the EXCERPT must name a testScope file. FIX: check only the excerpt
+  (first 300 chars), full-path match, not basename.
+- **F6 recycled-pid marker wedge (minor):** marker stale-break checks only pidAlive; a
+  recycled pid refuses forever. FIX: over-age break using startMs (mirror state.ts staleLockMs).
+- **F7 childEnv git hygiene (minor):** strips only NODE_TEST_CONTEXT; FIX: also strip
+  GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR + set GIT_OPTIONAL_LOCKS=0 (gitio parity).
+- **F8 timeout SIGTERM-trap false-green (nano):** FIX: timeout kill uses SIGKILL (untrappable).
