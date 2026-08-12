@@ -231,10 +231,22 @@
       "M1": "PASS 451/451 + tsc",
       "M2": "PASS 302 -> 451",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit re-derivation (both FSM modules removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (4 files)",
       "M7": "PASS 9 rows",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "3.3": {
+      "at": "2026-08-12T11:52:44Z",
+      "M1": "PASS 464/464 + tsc",
+      "M2": "PASS 451 -> 464",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 5 rows + empty-scope binding",
       "M8": "n/a",
       "M9": "n/a"
     }

@@ -19,3 +19,4 @@
 {"ts":"2026-08-12T11:31:03Z","event":"task.committed","taskId":"2.1","detail":"journal (first adapter); red missing-subject x2; 301/301; G14 re-grepped clean by orchestrator; NODE_ENV dev/prod flag"}
 {"ts":"2026-08-12T11:37:48Z","event":"phase.gate","phase":"2","detail":"PASS after 1 fix round; crash-recovery probe caught torn-line corruption in the write-ahead journal; healed test-first; 302/302"}
 {"ts":"2026-08-12T11:46:53Z","event":"task.committed","taskId":"3.1","detail":"FSMs 149 tests; red missing-subject x2; 451/451; states inline (verify set-equal to types)"}
+{"ts":"2026-08-12T11:52:44Z","event":"task.committed","taskId":"3.3","detail":"scheduler 13 tests; red missing-subject; 464/464; empty-scope binding via explicit predicate"}

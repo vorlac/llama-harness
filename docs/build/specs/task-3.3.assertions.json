@@ -10,31 +10,31 @@
       "id": "3.3-api",
       "text": "nextWave(queue, items, config) -> {parallel: string[], rationale}: dependency-ready AND pairwise scope-disjoint AND <= maxImplementers; deterministic order DAG depth then id; readFanout(stage, config) -> number",
       "planLine": 2263,
-      "coveredByTest": null
+      "coveredByTest": "schedule.test.ts (test names carry 3.3-api)"
     },
     {
       "id": "3.3-diamond",
       "text": "diamond DAG produces correct waves",
       "planLine": 2267,
-      "coveredByTest": null
+      "coveredByTest": "schedule.test.ts (test names carry 3.3-diamond)"
     },
     {
       "id": "3.3-overlap",
       "text": "scope overlap forces serialization; the conservative scopesIntersect bias appears as a test here",
       "planLine": 2267,
-      "coveredByTest": null
+      "coveredByTest": "schedule.test.ts (test names carry 3.3-overlap)"
     },
     {
       "id": "3.3-cap",
       "text": "maxImplementers cap enforced",
       "planLine": 2268,
-      "coveredByTest": null
+      "coveredByTest": "schedule.test.ts (test names carry 3.3-cap)"
     },
     {
       "id": "3.3-unlock",
       "text": "PUBLISHED deps unlock dependents",
       "planLine": 2269,
-      "coveredByTest": null
+      "coveredByTest": "schedule.test.ts (test names carry 3.3-unlock)"
     }
   ],
   "phaseGate1Bindings": {

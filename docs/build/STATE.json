@@ -406,7 +406,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "c61c99d",
       "commitMessage": "conductor: 3.1 FSMs",
       "planLines": [
         2208,
@@ -465,7 +465,7 @@
       "taskId": "3.3",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 3.3 wave scheduler",
       "planLines": [
@@ -473,14 +473,30 @@
         2273
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 464,
+        "pass": 464,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/schedule.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/schedule.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/schedule.test.ts",
+        "conductor/core/schedule.ts"
+      ],
+      "revertAssertion": "removing core/schedule.ts re-fails all 13 scheduler tests; the empty-scope binding test [3.3-empty-scope] only passes against the explicit isDegenerateScope predicate",
+      "attempts": 1,
+      "deviations": [
+        "phaseGate1 binding satisfied via explicit isDegenerateScope (empty OR wildcard-head) forcing serialize, not trusting scopesIntersect"
+      ],
+      "startedAt": "2026-08-12T13:35:00Z",
+      "finishedAt": "2026-08-12T11:52:44Z"
     },
     "4.1": {
       "taskId": "4.1",
