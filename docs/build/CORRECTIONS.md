@@ -220,3 +220,18 @@ output), decision, alternatives considered, blast radius.
 - **G7-documented residuals** (honest-limits-pending.md): backtick substitution, alias
   injection, `sh -c`/`bash -c` wrappers, `$'...'` ANSI-C quoting.
 - **Blast radius:** hardening only; every change is the safe direction; all 279 tests green.
+
+## C-017 (2026-08-12) — Phase 2 crash-recovery gate: journal torn-line heal
+
+- **Finding (crash-recovery lens, orchestrator mechanical probe):** the write-ahead JSONL
+  journal did not heal a torn trailing line. A previous process crashing mid-append
+  (power loss / disk full) leaves a partial record with no newline; the next append
+  concatenated onto it (`{"seq":6,...in{"seq":7,...}`), silently destroying BOTH the torn
+  record and the next one — unacceptable for the component whose job is durable
+  debuggability (§7.4).
+- **Fix (test-first, [2.1-torn-write]):** adapter/journal.ts now checks, on the first
+  append per instance, whether journal.jsonl ends without a newline and prepends one,
+  isolating the torn partial and keeping every subsequent record a clean parseable line.
+  readLastSeq already skipped unparseable lines for seq continuation. 301 -> 302 tests.
+- **Blast radius:** journal durability only; the safe direction; orchestrator re-ran its
+  own crash probe (0 fail).

@@ -120,6 +120,22 @@ function readLastSeq(journalPath: string): number {
   return 0;
 }
 
+// True iff the file exists, is non-empty, and its last byte is not "\n" — the
+// fingerprint of a record left torn by a crash mid-append (power loss / disk
+// full). A prior process may have written a partial line with no terminating
+// newline; the next append must not concatenate onto it (§7.4: a record you
+// can't parse is a record you can't debug with). A missing/unreadable/empty file
+// has nothing to isolate, so it reports false.
+function endsWithoutNewline(journalPath: string): boolean {
+  let buf: Buffer;
+  try {
+    buf = readFileSync(journalPath);
+  } catch {
+    return false;
+  }
+  return buf.length > 0 && buf[buf.length - 1] !== 0x0a; // 0x0a === "\n"
+}
+
 // Shrink an oversized record in place: replace its data with a truncation marker
 // plus as much of the original serialized payload as fits the byte budget. The
 // `truncated` flag lives INSIDE data (never a top-level key, per §7.2).
@@ -156,6 +172,13 @@ export function createJournal(
   const maxBytes = config.retention.maxRunDirBytes;
 
   let seq = readLastSeq(journalPath);
+
+  // On this instance's FIRST file write we verify the trailing newline once: if a
+  // prior process crashed mid-append and left a torn partial line, we prepend a
+  // newline so that partial is terminated on its own (unparseable) line and the
+  // new record stays a complete, parseable line of its own. Checked once — every
+  // append this instance makes thereafter keeps the file newline-terminated.
+  let trailingNewlineVerified = false;
 
   // Env beats config; within each, a per-component level beats the global one.
   function thresholdFor(component: string): LogLevel {
@@ -240,7 +263,12 @@ export function createJournal(
     }
 
     if (writeToFile) {
-      appendFileSync(journalPath, line + "\n");
+      let payload = line + "\n";
+      if (!trailingNewlineVerified) {
+        trailingNewlineVerified = true;
+        if (endsWithoutNewline(journalPath)) payload = "\n" + payload;
+      }
+      appendFileSync(journalPath, payload);
       rotateIfNeeded();
     }
     if (toConsole && consoleFn !== undefined) consoleFn(record);

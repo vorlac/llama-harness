@@ -346,7 +346,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "85e0f6a",
       "commitMessage": "conductor: 2.1 journal",
       "planLines": [
         2163,
@@ -354,8 +354,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 301,
-        "pass": 301,
+        "tests": 302,
+        "pass": 302,
         "fail": 0,
         "skipped": 0,
         "todo": 0
@@ -377,7 +377,8 @@
         "dev/test-vs-prod flag = env.NODE_ENV (prod arm retains+surfaces, never drops, per \u00a77.4); rotation index found via existsSync probe (readdirSync not in the allowed fs set)"
       ],
       "startedAt": "2026-08-12T12:30:00Z",
-      "finishedAt": "2026-08-12T11:31:03Z"
+      "finishedAt": "2026-08-12T11:31:03Z",
+      "note": "+1 test in Phase-2 gate fix (torn-line heal); see phaseGates.2"
     },
     "2.2": {
       "taskId": "2.2",

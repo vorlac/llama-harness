@@ -32,7 +32,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -606,4 +606,75 @@ test("[2.1-rotation] a journal exceeding retention.maxRunDirBytes rotates to jou
   const archived = JSON.parse(firstLine as string) as JournalRecord;
   assert.equal(typeof archived.seq, "number", "archived records keep the §7.2 shape");
   assert.equal(archived.component, "continuation");
+});
+
+// ===========================================================================
+// [2.1-torn-write] crash-recovery: a torn TRAILING partial line (crash mid-append,
+// no terminating newline) must be isolated — the next record must NOT be
+// concatenated onto it. One torn write must not silently destroy the next record
+// too (§7.4: a record you can't parse is a record you can't debug with).
+// ===========================================================================
+
+test("[2.1-torn-write] a torn trailing partial line is isolated; the next record stays its own parseable line (§7.4)", () => {
+  const runDir = freshRunDir();
+  const cfg = makeConfig({ level: "trace" });
+
+  // A prior process wrote some complete records, then crashed mid-append.
+  const first = createJournal(runDir, cfg, DEV_ENV);
+  for (let i = 0; i < 3; i += 1) {
+    first.log("info", "fsm", anyEvent("fsm"), { pass: 1, i }, CORR);
+  }
+  first.flushSync();
+
+  const before = readRecords(runDir);
+  const lastCompleteSeq = before[before.length - 1].seq;
+
+  // Simulate the crash: a partial record with NO terminating newline is left at
+  // the end of the file (power loss / disk full mid-append).
+  const TORN = '{"seq":999,"ts":1,"level":"in';
+  appendFileSync(path.join(runDir, "journal.jsonl"), TORN); // note: no trailing "\n"
+
+  // A fresh journal restarts on the same dir and logs its next record.
+  const second = createJournal(runDir, cfg, DEV_ENV);
+  second.log("warn", "fsm", anyEvent("fsm"), { marker: "post-crash" }, CORR);
+  second.flushSync();
+
+  const lines = readFileSync(path.join(runDir, "journal.jsonl"), "utf8").split("\n");
+
+  // (c) The torn partial is isolated on its own, still-unparseable line — the
+  // writer must not have concatenated the new record onto it.
+  assert.ok(
+    lines.includes(TORN),
+    `the torn partial must survive as its own line, not merge into the next record; saw: ${JSON.stringify(lines)}`,
+  );
+  assert.throws(() => JSON.parse(TORN), "the torn partial is unparseable by construction");
+
+  // (a) The record written after the torn line is one complete, JSON-parseable
+  // line of its own.
+  const parsed = lines
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => {
+      try {
+        return JSON.parse(l) as JournalRecord;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((r): r is JournalRecord => r !== undefined);
+
+  const postCrash = parsed.filter((r) => (r.data as { marker?: unknown }).marker === "post-crash");
+  assert.equal(
+    postCrash.length,
+    1,
+    "the record written after the torn line must be one complete, JSON-parseable line of its own",
+  );
+
+  // (b) Its seq continues past the last COMPLETE record's seq — the torn partial
+  // is skipped for seq purposes, never counted.
+  assert.equal(
+    postCrash[0].seq,
+    lastCompleteSeq + 1,
+    "the new record's seq continues from the last complete record, past the torn partial",
+  );
 });

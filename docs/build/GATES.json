@@ -219,7 +219,7 @@
       "M1": "PASS 301/301 + tsc (orchestrator-observed)",
       "M2": "PASS 279 -> 301",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit: rm both journal subjects in scratch worktree of 85e0f6a -> suite fails missing-subject, exit 1",
       "M5": "PASS (G14 re-grepped by orchestrator: no Bun/shell-tag; Date.now count in core = 0)",
       "M6": "PASS (3 declared files)",
       "M7": "PASS 9 rows mapped",
@@ -281,6 +281,21 @@
       },
       "verdict": "PASS after 2 fix rounds (of 3 allowed)",
       "rejected": "8 confirmed defects across 6 lens contexts incl. 5 majors \u2014 the milestone gate is emphatically not rubber-stamping (catch-credit recorded)"
+    },
+    "2": {
+      "at": "2026-08-12T11:37:48Z",
+      "stage1": "PASS (main tree 302/302 + tsc + M5; single-module phase, fresh-worktree deferred to the milestone gates)",
+      "lenses": {
+        "correctness": "folded into 2.1 task gate (well-covered, 22 tests)",
+        "crash-recovery": "orchestrator-run mechanical probe (torn trailing line + seq continuation across simulated restart)"
+      },
+      "adjudication": {
+        "finding": "crash-recovery: a torn trailing line (partial record from a power-loss/disk-full mid-append) was not healed \u2014 the next append concatenated onto it, corrupting the NEXT record too. Confirmed by orchestrator probe.",
+        "fix": "adapter/journal.ts: on first append per instance, if the file ends without a newline, prepend one so the torn partial is isolated on its own line and the new record stays a clean parseable line. Test-first ([2.1-torn-write]); orchestrator re-ran its own probe: 0 fail.",
+        "verification": "302/302; orchestrator crash-probe passes (torn line isolated, new record clean at seq 6)"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "1 crash-recovery durability gap in the write-ahead journal (catch-credit: the crash-recovery lens found a real defect before it reached production)"
     }
   },
   "rejections": [
@@ -307,6 +322,12 @@
       "gate": "phase-1",
       "what": "5 MAJOR + several minor defects: gitSubcommand false-ALLOW, isGitCommand bypass, globMatch DoS, classifyFailure escape/absolute, isHumanTerritory misses",
       "resolution": "2 fix rounds (11+16 pinning tests), 6 future-task bindings, 4 G7-documented residuals; orchestrator re-verified 26/26 inputs"
+    },
+    {
+      "at": "2026-08-12T11:37:48Z",
+      "gate": "phase-2/crash-recovery",
+      "what": "torn trailing line corrupts the next journal record",
+      "resolution": "first-append newline heal in adapter/journal.ts, test-first ([2.1-torn-write])"
     }
   ]
 }
