@@ -261,6 +261,18 @@
       "M7": "PASS 11 rows",
       "M8": "n/a",
       "M9": "n/a"
+    },
+    "4.2": {
+      "at": "2026-08-12T12:40:06Z",
+      "M1": "PASS 491/491 + tsc",
+      "M2": "PASS 482 -> 491",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS (G14 re-grepped: no Bun/shell-tag)",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 6 rows",
+      "M8": "n/a",
+      "M9": "n/a"
     }
   },
   "phaseGates": {

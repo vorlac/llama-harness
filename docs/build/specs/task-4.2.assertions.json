@@ -1,13 +1,46 @@
 {
   "taskId": "4.2",
-  "planLines": [2305, 2318],
+  "planLines": [
+    2305,
+    2318
+  ],
   "kind": "code (tier B). ORDERING OVERRIDE: built BEFORE 4.1. All functions execFile shell:false with explicit cwd (enables Task 9.6 worktrees).",
   "assertions": [
-    { "id": "4.2-api", "text": "stagedFiles, stagedNameStatus, dirtyFiles, unstagedDrift(paths), indexMtimeMs, worktreeMtimes(paths), headShortSubject, headSha, currentBranch, isRepo — every function takes explicit cwd, execFile shell:false", "planLine": 2307, "coveredByTest": null },
-    { "id": "4.2-nul", "text": "NUL-splitting handles a filename with a space", "planLine": 2314, "coveredByTest": null },
-    { "id": "4.2-zero-commit", "text": "zero-commit repo: headSha null, freshness HEAD term vacuous rather than crashing", "planLine": 2315, "coveredByTest": null },
-    { "id": "4.2-deletion", "text": "staged deletion covered", "planLine": 2316, "coveredByTest": null },
-    { "id": "4.2-dirty", "text": "dirtyFiles distinguishes tracked-modified from untracked (publish's startDirty rule consumes both)", "planLine": 2316, "coveredByTest": null },
-    { "id": "4.2-fixtures", "text": "tests build their own throwaway fixture repos", "planLine": 2314, "coveredByTest": null }
+    {
+      "id": "4.2-api",
+      "text": "stagedFiles, stagedNameStatus, dirtyFiles, unstagedDrift(paths), indexMtimeMs, worktreeMtimes(paths), headShortSubject, headSha, currentBranch, isRepo \u2014 every function takes explicit cwd, execFile shell:false",
+      "planLine": 2307,
+      "coveredByTest": "gitio.test.ts (test names carry 4.2-api)"
+    },
+    {
+      "id": "4.2-nul",
+      "text": "NUL-splitting handles a filename with a space",
+      "planLine": 2314,
+      "coveredByTest": "gitio.test.ts (test names carry 4.2-nul)"
+    },
+    {
+      "id": "4.2-zero-commit",
+      "text": "zero-commit repo: headSha null, freshness HEAD term vacuous rather than crashing",
+      "planLine": 2315,
+      "coveredByTest": "gitio.test.ts (test names carry 4.2-zero-commit)"
+    },
+    {
+      "id": "4.2-deletion",
+      "text": "staged deletion covered",
+      "planLine": 2316,
+      "coveredByTest": "gitio.test.ts (test names carry 4.2-deletion)"
+    },
+    {
+      "id": "4.2-dirty",
+      "text": "dirtyFiles distinguishes tracked-modified from untracked (publish's startDirty rule consumes both)",
+      "planLine": 2316,
+      "coveredByTest": "gitio.test.ts (test names carry 4.2-dirty)"
+    },
+    {
+      "id": "4.2-fixtures",
+      "text": "tests build their own throwaway fixture repos",
+      "planLine": 2314,
+      "coveredByTest": "gitio.test.ts (test names carry 4.2-fixtures)"
+    }
   ]
 }

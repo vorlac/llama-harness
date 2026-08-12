@@ -539,7 +539,7 @@
       "taskId": "4.2",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 4.2 gitio",
       "planLines": [
@@ -547,14 +547,30 @@
         2321
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 491,
+        "pass": 491,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gitio.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/gitio.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gitio.test.ts",
+        "conductor/adapter/gitio.ts"
+      ],
+      "revertAssertion": "removing adapter/gitio.ts re-fails all 9 gitio tests; [4.2-zero-commit] headSha-null only passes against the tryGit exit-128->null mapping",
+      "attempts": 1,
+      "deviations": [
+        "built BEFORE 4.1 (ordering override 2); strips GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR from git env (safety, prevents off-cwd redirect)"
+      ],
+      "startedAt": "2026-08-12T14:30:00Z",
+      "finishedAt": "2026-08-12T12:40:06Z"
     },
     "5.1": {
       "taskId": "5.1",

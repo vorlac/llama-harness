@@ -22,3 +22,4 @@
 {"ts":"2026-08-12T11:52:44Z","event":"task.committed","taskId":"3.3","detail":"scheduler 13 tests; red missing-subject; 464/464; empty-scope binding via explicit predicate"}
 {"ts":"2026-08-12T12:04:27Z","event":"task.committed","taskId":"3.2","detail":"phase legality 15 tests; red missing-subject; 479/479; recommended reorder-invariant via nextWave delegation"}
 {"ts":"2026-08-12T12:22:20Z","event":"phase.gate","phase":"3","detail":"PASS after 1 fix round; 3 lenses; counterexample caught trivial-report work-loss (MAJOR) escalating the completeness lens minor; fixed reportLegal=allSettled + G6 single-source guard; 482/482; 3 future-task bindings"}
+{"ts":"2026-08-12T12:40:06Z","event":"task.committed","taskId":"4.2","detail":"gitio 9 tests; red missing-subject; 491/491; zero-commit headSha-null + worktree gitdir + git-env hardening"}
