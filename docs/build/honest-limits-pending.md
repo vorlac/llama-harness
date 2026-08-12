@@ -53,3 +53,16 @@ are additionally decoded by the tokenizer. Residual: this over-blocks a legitima
 edit-scope write-shape detector remains an enumerated set (redirects incl. `>|`, tee, sed
 -i, mv/cp, rm, perl -pi, dd of=, gawk -i inplace, ex/ed); a sufficiently obscure in-place
 writer not on the list would classify as a read — documented G7 limit, disclosed here.
+
+## M5 stub scan (Task 8.1 gate, C-026)
+
+- The M5 placeholder/stub-MARKER scan (TODO/FIXME/XXX/not implemented/placeholder) is
+  production-source only; under `conductor/tests/` these tokens are allowed because they
+  appear there as test data, as the subject of anti-stub enforcement, and in example
+  strings. Consequence: a stray marker COMMENT with no functional effect inside a test
+  file (e.g. `// TODO: add more cases`) is not caught mechanically by M5. It is caught by
+  the mandatory per-task orchestrator diff read and the phase-gate test-vet lens. An
+  actually unfinished/disabled test is still caught mechanically — test-conductor.sh
+  hard-fails skipped/todo tests and SKIP/TODO TAP directives, and M5's PAT_SKIP/PAT_TRIV/
+  PAT_CATCH remain universal. This is the same detection-over-prevention posture as the
+  gate header's "empty function bodies are eyeballed in the diff read, not regexed."

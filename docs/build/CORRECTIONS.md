@@ -423,3 +423,37 @@ socket/timer leak airtight; 12x flake sweep clean). 3 hang-family findings:
   break (Phase-6 evidence over-age break) MUST surface to treeState.onClear. BINDING for 9.4c
   (the wave driver wires treeState): a stale/over-age marker break fires onClear so a leaked
   marker becomes an env failure, not a silent hang.
+
+## C-026 (2026-08-12) — M5 marker scan scoped to production source (false-positive class)
+
+- **Discovered (Task 8.1 gate):** a full-tree `conductor-gate.sh` scan failed on three
+  COMMITTED test files whose tokens are not unfinished work: `chat-message.test.ts`
+  (a comment naming "the placeholder classification"), `gates-git.test.ts`
+  (`cmd: "git grep TODO"` — test DATA fed to the shell-parser), and
+  `quarantine.test.ts` (an example path `…conductor-quar-outside-XXXX/…` where the
+  `XXX` marker matched 3 of 4 X's). Task 8.1's own `doctrine.test.ts` adds a fourth of
+  the same class — its subject IS "placeholder marker," named five times. The 15.1
+  doc-fidelity test will have the same need.
+- **Root cause:** `PAT_STUB` (TODO/FIXME/XXX/not implemented/placeholder) applied to ALL
+  non-.md files. In TEST files these tokens legitimately appear as (a) test data,
+  (b) the subject of anti-stub enforcement, and (c) example strings — none are the
+  unfinished-*product* markers G4/M5 exist to catch.
+- **Fix (two parts):** (1) the marker scan is now production-source only, using the SAME
+  `*conductor/tests/*` case-split C-013 already applies to the bare word `stub`;
+  (2) `XXX` → `\bXXX\b`, so a standalone `XXX` marker still trips but a longer `XXXX`
+  token does not (a strict precision gain, applied universally).
+- **No coverage lost — the real test-file risk is caught elsewhere.** An UNFINISHED or
+  DISABLED test does not depend on the marker scan: `test-conductor.sh` hard-fails any
+  skipped/todo test or SKIP/TODO TAP directive at any depth (lines 40-42), and M5's
+  `PAT_SKIP`/`PAT_TRIV`/`PAT_CATCH` (skip/todo tests, trivially-true asserts, empty
+  catch) remain UNIVERSAL and still apply to test files. Self-tested both directions:
+  a synthetic production file with `// TODO`/`placeholder`/`stub`/standalone `XXX`
+  still FAILS; a test file carrying only the legit FP tokens PASSES; a test file with
+  `test.skip`/`assert.ok(true)`/empty `catch{}` still FAILS. Full tree: M5 PASS (57).
+- **Residual (disclosed):** a stray marker COMMENT with no functional effect (e.g.
+  `// TODO: more cases`) inside a test file is no longer caught by M5 — it is caught by
+  the mandatory per-task orchestrator diff read and the phase-gate test-vet lens. This
+  matches the gate header's stated posture (idiom-dependent shapes are eyeballed in the
+  diff read, not regexed). Logged to honest-limits-pending.md.
+- **Blast radius:** `scripts/conductor-gate.sh` only; production-source strictness
+  unchanged; committed with a `conductor-build:` infra commit ahead of the 8.1 commit.

@@ -17,7 +17,17 @@ else
 fi
 if [ ${#FILES[@]} -eq 0 ]; then echo "M5: no files to scan"; exit 0; fi
 
-PAT_STUB='TODO|FIXME|XXX|not implemented|placeholder'
+# Placeholder/stub markers name unfinished PRODUCT, so — like the bare word "stub"
+# below — they are scanned in production source only and allowed under conductor/tests/
+# (C-013, C-026). In test files these same tokens appear legitimately as test DATA
+# ("git grep TODO" fed to the shell-parser), as the SUBJECT of anti-stub enforcement
+# (doctrine.test.ts's "placeholder marker"; the 15.1 doc-fidelity test), and in example
+# strings (…conductor-quar-outside-XXXX/…). An UNFINISHED TEST — the real test-file risk
+# — is caught independently and does NOT rely on this scan: test-conductor.sh hard-fails
+# any skipped/todo test or SKIP/TODO TAP directive at any depth, and PAT_SKIP below still
+# applies to tests. XXX is word-bounded so a real `XXX` marker still trips but a longer
+# XXXX random-suffix token does not (C-026).
+PAT_STUB='TODO|FIXME|\bXXX\b|not implemented|placeholder'
 # The bare word "stub" is forbidden in production source but is the plan's own
 # vocabulary for test doubles ("a fake OpenAI-compatible stub server", §8 Task 0.2;
 # httplib stubs, Phase 11) — so it is allowed under conductor/tests/ only (C-013).
@@ -30,11 +40,17 @@ BAD=0
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || continue
   case "$f" in *.md) continue ;; esac   # docs are governed by anchor tests, not M5
-  if grep -nE "$PAT_STUB" "$f"; then echo "M5 FAIL: stub marker in $f"; BAD=1; fi
+  # Marker/stub-word scans: production source only (test files carry these tokens as
+  # data and as the subject of anti-stub enforcement — C-026; unfinished tests are
+  # caught by test-conductor.sh's skip/todo/directive gate, not here).
   case "$f" in
     *conductor/tests/*) ;;
-    *) if grep -inE "$PAT_STUBWORD" "$f"; then echo "M5 FAIL: 'stub' in production source $f"; BAD=1; fi ;;
+    *)
+      if grep -nE "$PAT_STUB" "$f"; then echo "M5 FAIL: stub marker in $f"; BAD=1; fi
+      if grep -inE "$PAT_STUBWORD" "$f"; then echo "M5 FAIL: 'stub' in production source $f"; BAD=1; fi
+      ;;
   esac
+  # Semantic test-defect scans: universal (apply to tests too).
   if grep -nE "$PAT_SKIP" "$f"; then echo "M5 FAIL: skip/todo test in $f"; BAD=1; fi
   if grep -nE "$PAT_TRIV" "$f"; then echo "M5 FAIL: trivially-true assertion in $f"; BAD=1; fi
   if grep -nzE "$PAT_CATCH" "$f" >/dev/null 2>&1; then echo "M5 FAIL: empty catch block in $f"; BAD=1; fi
