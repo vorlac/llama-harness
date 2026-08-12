@@ -1,1 +1,1 @@
-{"taskId":"5.2","step":"staged edit-gate tests moved in; red; implementer next","intendedFiles":["conductor/tests/gates-edit.test.ts","conductor/core/gates-edit.ts"],"startedAt":"2026-08-12T17:20:00Z"}
+{"taskId":"5.3","step":"test-writer dispatched (gate wiring: adapter/tools.ts hookup half + plugin/index.ts hook bodies; fail-closed proof)","intendedFiles":["conductor/tests/gate-wiring.test.ts","conductor/adapter/tools.ts","conductor/plugin/index.ts"],"startedAt":"2026-08-12T17:45:00Z"}
