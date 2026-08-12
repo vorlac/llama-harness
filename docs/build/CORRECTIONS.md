@@ -321,3 +321,38 @@ and gitio command-injection surface all confirmed SOUND. Fixes (test-first):
   .conductor/ state normally lives in the MAIN workspace, not per-worktree), but Task 9.6
   (worktree mode) MUST resolve the real gitdir (git rev-parse --absolute-git-dir, as gitio
   does) or skip the exclude write when root/.git is not a directory. Bound to 9.6.
+
+## C-022 (2026-08-12) — Phase 5 security MILESTONE gate: 4 gate bypasses + 1 spec gap
+
+security/bypass lens found 4 bypasses, ALL re-confirmed by the orchestrator running them
+against the real code; spec-conformance lens returned CONFORMANT row-by-row with 1 minor
+enumeration gap. (The red-team-by-data generator died to an API error; the orchestrator
+generates+executes its own malicious batch post-fix instead.) Fixes, test-first, all in the
+SAFE/deny direction:
+- **MAJOR 1 (git write past decideGit via shell expansion):** `$'git' apply evil.patch`,
+  `$"git" push`, `x=git; $x push` all tokenized to a non-`git` command word (`$git`/`$x`)
+  → isGitCommand false → ALLOWED, but bash runs the git write around the edit gate; the
+  fail-closed flag also read false (fails OPEN). FIX: (a) shellTokens decodes ANSI-C `$'…'`
+  and locale `$"…"` quoting (strip the `$`+quotes) so `$'git'`→`git`→denied; (b) decideGit
+  DENIES any segment whose command-word token still carries an unresolved expansion sigil
+  (backtick, `$'`, `$"`, `${`, `$(`, `$VAR`) — an un-analyzable command word cannot be
+  verified safe, so deny + surface. Closes `$'\xNN…'`, `$x`, `g${e}it`, backtick-command.
+- **MAJOR 2 (`>|` force-redirect not a write shape):** `echo x >| f` → writeShapedPaths []
+  → classified "read" → edit gate skipped AND unregistered session passes the registry
+  gate. FIX: recognize `>|` as a redirect target.
+- **MAJOR 3 (`..` path traversal in the edit gate):** `> src/a/../../.conductor/run.json`
+  with scope `src/a/**` → globMatch matches (`..` literal, `**` swallows) → ALLOWED, writes
+  the handler-only state area; the `.conductor/**` deny doesn't fire (literal path starts
+  `src`). Distinct code path from the Phase-4 state.ts fix. FIX: decideEdit DENIES any edit
+  path containing a `..` segment (a legitimate in-scope path never has one).
+- **MINOR 4 (non-enumerated in-place writers):** `perl -pi`, `dd of=`, `gawk -i inplace`,
+  `ex`/`ed` escape writeShapedPaths. FIX: add the common ones; document arbitrary obscure
+  in-place writers as a G7 limit.
+- **A1 (spec-conformance, minor under-block):** `checkout -f`/`switch -f`/
+  `--discard-changes` aren't in §3.5:1378's enumerated worktree-discard list, so under the
+  non-default `check-only` policy they'd be allowed and discard tracked changes (HEAD-check
+  doesn't catch it). FIX: add `-f`/`--force`/`--discard-changes` to the unconditional deny.
+- **Documented residual (honest-limits-pending.md):** parameter expansion and hex/octal
+  ANSI-C escapes that still slip a command word past static analysis are DENIED by the new
+  unresolvable-command-word rule (fail-safe), so the residual is now over-blocking, not a
+  hole. Backtick/alias remain documented per G7.

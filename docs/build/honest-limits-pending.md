@@ -41,3 +41,15 @@ these residual bypasses remain and are DOCUMENTED, not prevented:
   are bounded by the QUALITY of Task 6.1's runnerRules regex data (specific
   assertionPatterns, anchored unresolvedPatterns). Task 6.1 must ship tight,
   anchored rule data and test against real runner output (RUNNER-DISCOVERY.md).
+
+## Update (Phase 5 gate, C-022)
+
+The git gate now DENIES (fail-safe) any bash command whose command-word token carries an
+unresolved shell-expansion sigil (backtick, `$'`, `$"`, `${`, `$(`, `$VAR`). So the earlier
+"backtick substitution" and "alias injection" bypasses are now closed in the DENY direction
+(they surface a question instead of executing). ANSI-C `$'literal'` and locale `$"literal"`
+are additionally decoded by the tokenizer. Residual: this over-blocks a legitimate
+`$VAR command` in a gated session (it surfaces rather than runs) — acceptable per G7. The
+edit-scope write-shape detector remains an enumerated set (redirects incl. `>|`, tee, sed
+-i, mv/cp, rm, perl -pi, dd of=, gawk -i inplace, ex/ed); a sufficiently obscure in-place
+writer not on the list would classify as a read — documented G7 limit, disclosed here.
