@@ -130,3 +130,43 @@ output), decision, alternatives considered, blast radius.
   justification for conductor's out-of-repo worktrees and quarantine; pytest
   additionally aborts its whole session on duplicate basenames across worktree copies.
 - **Blast radius:** commit order differs from §8's listing (pre-authorized); none on code.
+
+## C-012 (2026-08-12) — opencode self-updated to 1.18.15 mid-build; wire contract pinned against it
+
+- **Observed:** preflight `opencode --version` printed 1.18.10; after Task 0.2's live
+  probing the same command prints **1.18.15** (opencode self-updates on use). The §5
+  contract was verified against 1.18.15 — the binary production will actually run.
+- **Consequences recorded in conductor/adapter/wire-notes.md, load-bearing for later
+  tasks:** (1) prompt-body `format:{json_schema}` DOES NOT EXIST — the fan-out engine
+  (7.1) must use prompt-shaped structured output + independent validation + retry
+  (G5/G9 posture unchanged); requests carry NO schema field, an 11.6 scoping input
+  alongside the streaming finding (§3.1 override: 11.6 shrinks to request-side
+  counter + recorded note). (2) permission adjudication is
+  `POST /session/{id}/permissions/{permissionID}` `{response}` — adapter constants
+  only, core untouched (G11). (3) plugin/index.ts must export ONLY its factory.
+  (4) every directory handed to opencode must be realpath'd (macOS /var vs
+  /private/var turns in-project edits into external_directory asks). (5) plugin-init
+  failure is log-and-continue UNGATED — §3.8's beacon must be loud and out-of-band.
+- **Also:** Task 12.1's generated config must pin opencode auto-update OFF so the
+  verified contract cannot drift under a running session.
+- **Blast radius:** briefs for 5.3, 7.1, 8.2, 10.1, 11.6, 12.1.
+
+## C-013 (2026-08-12) — M5 scope refinements (two)
+
+- The bare word "stub" is the plan's own vocabulary for test doubles (§8 Task 0.2
+  "fake OpenAI-compatible stub server"; Phase 11 "httplib stubs"). M5 now forbids it
+  in production source only (core/adapter/plugin/tools/src), allows it under
+  conductor/tests/. Placeholder-marker patterns (TODO/FIXME/XXX/not implemented/
+  placeholder) still apply everywhere. `.md` files are excluded from M5 entirely —
+  doc content is governed by anchor tests (8.1, 15.1). Both directions self-tested.
+- **Blast radius:** M5 only; gate strictness on production source unchanged.
+
+## C-014 (2026-08-12) — fragment gained tools.task=false (cross-task edit, justified)
+
+- **Plan §5.3 (lines 1792-1798):** "the fragment sets each agent's built-in
+  task/agent tool to 'deny' via the config's tool-permission key (exact key pinned by
+  Task 0.2)". Discovery (iii) pinned it: `agent.<name>.tools: {"task": false}`.
+- **Decision:** added to all seven agent defs in conductor/opencode-fragment.json and
+  asserted by a new fragment.test.ts test (M6 hard-stop justification: this is the
+  plan's own deferred-to-0.2 obligation, not drift).
+- **Blast radius:** fragment consumers (12.1 merge); registry gate remains layer 2.

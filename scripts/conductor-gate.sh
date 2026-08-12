@@ -17,7 +17,11 @@ else
 fi
 if [ ${#FILES[@]} -eq 0 ]; then echo "M5: no files to scan"; exit 0; fi
 
-PAT_STUB='TODO|FIXME|XXX|not implemented|placeholder|stub'
+PAT_STUB='TODO|FIXME|XXX|not implemented|placeholder'
+# The bare word "stub" is forbidden in production source but is the plan's own
+# vocabulary for test doubles ("a fake OpenAI-compatible stub server", §8 Task 0.2;
+# httplib stubs, Phase 11) — so it is allowed under conductor/tests/ only (C-013).
+PAT_STUBWORD='\bstub'
 PAT_SKIP='test\.skip|it\.skip|describe\.skip|t\.skip|\.todo\('
 PAT_TRIV='assert\.ok\(true\)|assert\.equal\(1, ?1\)|expect\(true\)'
 PAT_CATCH='catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}'
@@ -25,7 +29,12 @@ PAT_CATCH='catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}'
 BAD=0
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || continue
+  case "$f" in *.md) continue ;; esac   # docs are governed by anchor tests, not M5
   if grep -nE "$PAT_STUB" "$f"; then echo "M5 FAIL: stub marker in $f"; BAD=1; fi
+  case "$f" in
+    *conductor/tests/*) ;;
+    *) if grep -inE "$PAT_STUBWORD" "$f"; then echo "M5 FAIL: 'stub' in production source $f"; BAD=1; fi ;;
+  esac
   if grep -nE "$PAT_SKIP" "$f"; then echo "M5 FAIL: skip/todo test in $f"; BAD=1; fi
   if grep -nE "$PAT_TRIV" "$f"; then echo "M5 FAIL: trivially-true assertion in $f"; BAD=1; fi
   if grep -nzE "$PAT_CATCH" "$f" >/dev/null 2>&1; then echo "M5 FAIL: empty catch block in $f"; BAD=1; fi

@@ -1,0 +1,17 @@
+{
+  "taskId": "8.1",
+  "planLines": [2517, 2540],
+  "kind": "doc+anchor-test (tier C). WIDEST SAFE FAN-OUT: one agent writes doctrine.test.ts with anchors FIRST, then up to nine agents write one pack each, then ONE commit (prompt §6.2). M4 doc variant: revert a pack, anchor test must fail naming the missing anchor. Subagents read §6.1 port map (1826-1850), §6.3 (1880-1891).",
+  "assertions": [
+    { "id": "8.1-files", "text": "all nine conductor/doctrine/*.md exist, non-empty, <=120 lines each: core, decompose, plan, tdd, test-vet, debug, review, skeptic, receive-review", "planLine": 2519, "coveredByTest": null },
+    { "id": "8.1-mechanism", "text": "every pack naming an enforced behavior names its enforcing mechanism", "planLine": 2520, "coveredByTest": null },
+    { "id": "8.1-anchors-tdd", "text": "tdd.md contains 'NO PRODUCTION CODE WITHOUT A FAILING TEST' and 'delete means delete'", "planLine": 2529, "coveredByTest": null },
+    { "id": "8.1-anchors-debug", "text": "debug.md contains the four phase names and the 3-fix rule", "planLine": 2531, "coveredByTest": null },
+    { "id": "8.1-anchors-review", "text": "review.md contains the severity triad and 'file:line'", "planLine": 2531, "coveredByTest": null },
+    { "id": "8.1-anchors-testvet", "text": "test-vet.md names the five anti-patterns", "planLine": 2532, "coveredByTest": null },
+    { "id": "8.1-anchors-decompose", "text": "decompose.md contains the seven ladder rungs AND the behavioral/non-behavioral rule with its path test, plus 'prefer a new test file per item' guidance", "planLine": 2532, "coveredByTest": null },
+    { "id": "8.1-anchors-core", "text": "core.md states the override budget and that exhaustion stops the run", "planLine": 2535, "coveredByTest": null },
+    { "id": "8.1-anchors-receive", "text": "receive-review.md contains 'verify before implementing' and bans 'You're absolutely right'", "planLine": 2536, "coveredByTest": null },
+    { "id": "8.1-no-todo", "text": "no pack contains TBD/TODO; no pack references opencode, Claude, Cursor, or any client by name", "planLine": 2537, "coveredByTest": null }
+  ]
+}

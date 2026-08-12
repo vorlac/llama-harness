@@ -12,37 +12,44 @@
           "git push *": "deny"
         }
       },
-      "prompt": "{file:${LLAMA_HARNESS_ROOT}/conductor/doctrine/core.md}"
+      "prompt": "{file:${LLAMA_HARNESS_ROOT}/conductor/doctrine/core.md}",
+      "tools": { "task": false }
     },
     "conductor-implementer": {
       "mode": "subagent",
       "description": "Implements one item",
-      "permission": { "question": "ask" }
+      "permission": { "question": "ask" },
+      "tools": { "task": false }
     },
     "conductor-test-writer": {
       "mode": "subagent",
       "description": "Writes one item's failing test",
-      "permission": { "question": "ask" }
+      "permission": { "question": "ask" },
+      "tools": { "task": false }
     },
     "conductor-reviewer": {
       "mode": "subagent",
       "description": "Reviews with one lens",
-      "permission": { "question": "ask", "edit": "deny" }
+      "permission": { "question": "ask", "edit": "deny" },
+      "tools": { "task": false }
     },
     "conductor-skeptic": {
       "mode": "subagent",
       "description": "Refutes one finding",
-      "permission": { "question": "ask", "edit": "deny" }
+      "permission": { "question": "ask", "edit": "deny" },
+      "tools": { "task": false }
     },
     "conductor-planner": {
       "mode": "subagent",
       "description": "Decomposes and plans",
-      "permission": { "question": "ask", "edit": "deny" }
+      "permission": { "question": "ask", "edit": "deny" },
+      "tools": { "task": false }
     },
     "conductor-mechanical": {
       "mode": "subagent",
       "description": "Small schema-bound tasks",
-      "permission": { "question": "ask", "edit": "deny" }
+      "permission": { "question": "ask", "edit": "deny" },
+      "tools": { "task": false }
     }
   }
 }

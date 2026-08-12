@@ -110,6 +110,18 @@
       "M7": "PASS all 7 rows mapped to artifact sections",
       "M8": "PASS artifact 595 lines, verbatim transcripts; orchestrator re-ran node (c) cell \u2014 output matched (3 tests, 1 fail, exit 1)",
       "M9": "n/a"
+    },
+    "0.2": {
+      "at": "2026-08-12T09:39:02Z",
+      "M1": "PASS tests=24 pass=24 fail=0 skipped=0 todo=0 + tsc (observed by orchestrator, not the agent's claim)",
+      "M2": "PASS 7 -> 24 (strictly greater, adds tests)",
+      "M3": "PASS",
+      "M4": "n/a discovery task (no classic red); no-skip tripwire + phase-gate discovery-integrity lens instead",
+      "M5": "PASS after two gate refinements (C-013)",
+      "M6": "PASS; justified cross-task edit: fragment + fragment.test.ts gained tools.task=false (C-014)",
+      "M7": "PASS all 19 rows mapped",
+      "M8": "wire-notes cross-checked against orchestrator's own suite run + binary version check",
+      "M9": "n/a"
     }
   },
   "phaseGates": {},
@@ -119,6 +131,12 @@
       "gate": "M5",
       "what": "fragment.test.ts contained the scan word 'placeholder' (benign: describing the literal ${LLAMA_HARNESS_ROOT} token)",
       "resolution": "reworded comments/messages to 'substitution token'; gate kept strict"
+    },
+    {
+      "at": "2026-08-12T09:39:02Z",
+      "gate": "M5",
+      "what": "bare word 'stub' flagged in wire-contract test + stub-llm-server fixture (the plan's own \u00a78 vocabulary for the fake LLM server)",
+      "resolution": "C-013: 'stub' forbidden in production source only; allowed as test-double name under conductor/tests/; .md files excluded from M5 (doc content is anchor-tested)"
     }
   ]
 }

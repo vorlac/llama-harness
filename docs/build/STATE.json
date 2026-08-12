@@ -66,7 +66,7 @@
       "taskId": "0.2",
       "manifest": true,
       "tier": "phase-gate:discovery-integrity",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 0.2 wire contract pinned",
       "planLines": [
@@ -74,14 +74,40 @@
         2041
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 24,
+        "pass": 24,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "discovery task: green = test passes with RECORDED reality (plan line 2038); no-skip guard asserts the suite ran on this machine; phase-gate discovery-integrity lens audits execution"
+      },
+      "filesTouched": [
+        "conductor/tests/wire-contract.test.ts",
+        "conductor/tests/fixtures/recorder-plugin.ts",
+        "conductor/tests/fixtures/crashing-plugin.ts",
+        "conductor/tests/fixtures/stub-llm-server.ts",
+        "conductor/tests/fixtures/wire-markers.ts",
+        "conductor/adapter/wire-notes.md",
+        "conductor/opencode-fragment.json",
+        "conductor/tests/fragment.test.ts",
+        "scripts/conductor-gate.sh"
+      ],
+      "revertAssertion": "reverting wire-notes.md/fixtures breaks the 17-test wire suite (imports + the 0.2-noskip mainSuiteRan tripwire); reverting the fragment tools key fails 'fragment: every agent denies the built-in task spawn tool'",
+      "attempts": 1,
+      "deviations": [
+        "C-012: binary self-updated 1.18.10 -> 1.18.15 mid-build; contract pinned against 1.18.15",
+        "DRIFT: prompt format:{json_schema} does not exist -> structured output = prompt-shaped + independent validation (scopes 7.1); requests carry NO schema field (scopes 11.6)",
+        "DRIFT: permission reply = POST /session/{id}/permissions/{permissionID} {response}, not client.permission.reply({requestID, reply})",
+        "C-014: fragment + fragment.test.ts gained tools.task=false (plan-mandated cross-task update, \u00a75.3 lines 1792-1798, key pinned by discovery iii)"
+      ],
+      "startedAt": "2026-08-12T09:10:00Z",
+      "finishedAt": "2026-08-12T09:39:02Z"
     },
     "0.3": {
       "taskId": "0.3",
@@ -468,7 +494,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "d02b642",
       "commitMessage": "conductor: 6.2 runner discovery probe",
       "planLines": [
         2443,

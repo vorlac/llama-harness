@@ -1,0 +1,15 @@
+{
+  "taskId": "7.1",
+  "planLines": [2465, 2494],
+  "kind": "code (tier A). Against FAKE SDK (tests/fixtures/fake-sdk.ts) — no opencode, no model. Subagents read §4.1 (1512-1543), §4.2 (1544-1618), §3.5 freeze rules (1334-1427).",
+  "assertions": [
+    { "id": "7.1-api", "text": "createFanout(client, config, journal, registry, treeState) -> dispatch({role, lens?, itemId?, tree?, writeCapable?, prompt, schemaName, priority}) -> Promise<result>; dispatchWave(jobs[]) -> Promise<results[]>", "planLine": 2467, "coveredByTest": null },
+    { "id": "7.1-grouping", "text": "model grouping: mixed-model jobs dispatch AABB not ABAB (asserted on fake's call order); single-model set dispatches in one group with no barrier (G13 identity)", "planLine": 2485, "coveredByTest": null },
+    { "id": "7.1-freeze-hold", "text": "writeCapable job for a tree with live verify marker is HELD (not dispatched, not denied), released when marker clears; a READ job for the same tree dispatches immediately", "planLine": 2487, "coveredByTest": null },
+    { "id": "7.1-registry-first", "text": "session registry entry (sessionID -> {role, itemId, tree}) written BEFORE the first prompt is sent (fake asserts ordering)", "planLine": 2489, "coveredByTest": null },
+    { "id": "7.1-retry", "text": "schema validation on receipt, <=2 re-prompt retries with validation errors appended; retry-then-success; two failures => env-failed result", "planLine": 2490, "coveredByTest": null },
+    { "id": "7.1-watchdog", "text": "per-job watchdog aborts via SDK after parallel.subSessionTimeoutMs", "planLine": 2491, "coveredByTest": null },
+    { "id": "7.1-concurrency", "text": "concurrency <= maxReaders", "planLine": 2472, "coveredByTest": null },
+    { "id": "7.1-cleanup", "text": "registry populated and cleaned; journal events dispatch/hold/complete/retry/abort; results carry {sessionID, value|error, timings}", "planLine": 2491, "coveredByTest": null }
+  ]
+}

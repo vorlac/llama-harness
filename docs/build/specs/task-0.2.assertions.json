@@ -1,26 +1,124 @@
 {
   "taskId": "0.2",
-  "planLines": [1999, 2041],
-  "kind": "discovery/integration (phase-gate lens: discovery-integrity). Green = the test passes with RECORDED reality, not hoped reality. MUST NOT SKIP: opencode 1.18.10 is installed, so a describe.skip firing is itself a failure (orchestrator prompt §8.3).",
+  "planLines": [
+    1999,
+    2041
+  ],
+  "kind": "discovery/integration (phase-gate lens: discovery-integrity). Green = the test passes with RECORDED reality, not hoped reality. MUST NOT SKIP: opencode 1.18.10 is installed, so a describe.skip firing is itself a failure (orchestrator prompt \u00a78.3).",
   "assertions": [
-    { "id": "0.2-noskip", "text": "wire-contract.test.ts is describe.skip-tagged ONLY on a missing opencode binary and explicitly asserts it did NOT skip on this machine (binary present)", "planLine": 2002, "coveredByTest": null },
-    { "id": "0.2-serve", "text": "test starts `opencode serve` headless against a throwaway fixture dir with a config listing a file-path plugin exporting every §5.1 hook as a recorder, plus a test agent", "planLine": 2003, "coveredByTest": null },
-    { "id": "0.2-stub", "text": "a fake OpenAI-compatible stub server (node:http, canned responses) stands in for llama-server; the test is model-free", "planLine": 2007, "coveredByTest": null },
-    { "id": "0.2-plugin-load", "text": "ASSERT: plugin loads from a config-listed absolute file path (else pin the §5.1 symlink fallback in wire-notes)", "planLine": 2009, "coveredByTest": null },
-    { "id": "0.2-deny", "text": "ASSERT: tool.execute.before throw DENIES the call and the error text reaches the transcript", "planLine": 2009, "coveredByTest": null },
-    { "id": "0.2-custom-tool", "text": "ASSERT: custom tool registers and executes", "planLine": 2010, "coveredByTest": null },
-    { "id": "0.2-headers", "text": "ASSERT: chat.headers output reaches the stub as HTTP headers; on failure pin the x_conductor body-field fallback instead", "planLine": 2011, "coveredByTest": null },
-    { "id": "0.2-systransform", "text": "ASSERT: experimental.chat.system.transform content reaches the stub's request body", "planLine": 2011, "coveredByTest": null },
-    { "id": "0.2-idle", "text": "ASSERT: session.idle fires after the reply", "planLine": 2012, "coveredByTest": null },
-    { "id": "0.2-format", "text": "ASSERT: format:{type:json_schema} produces the schema'd body field llama-server expects; RECORD WHICH (response_format vs json_schema)", "planLine": 2013, "coveredByTest": null },
-    { "id": "0.2-model-override", "text": "ASSERT: model override in the prompt body reaches the stub", "planLine": 2014, "coveredByTest": null },
-    { "id": "0.2-fileref", "text": "ASSERT: {file:...} prompt refs resolve for absolute paths, or record the serve.py-inlines fallback", "planLine": 2015, "coveredByTest": null },
-    { "id": "0.2-perm-ask-hook", "text": "ASSERT: the typed permission.ask hook is NOT dispatched at 1.18.10 (so an upstream fix is noticed)", "planLine": 2016, "coveredByTest": null },
-    { "id": "0.2-perm-bus", "text": "ASSERT: permission.asked bus event fires and client.permission.reply({requestID, reply}) adjudicates an agent-level \"ask\" permission (the §3.6 inline-claim mechanism)", "planLine": 2017, "coveredByTest": null },
-    { "id": "0.2-disc-streaming", "text": "DISCOVERY (i): does session.prompt issue a streaming or non-streaming provider request (stub body `stream` field)? Scopes Task 11.6 (§4.4) — recorded, not assumed", "planLine": 2023, "coveredByTest": null },
-    { "id": "0.2-disc-init-failure", "text": "DISCOVERY (ii): plugin that throws in its factory — does opencode refuse the session or log-and-continue ungated? Determines §3.8 liveness-beacon loudness", "planLine": 2027, "coveredByTest": null },
-    { "id": "0.2-disc-tool-disable", "text": "DISCOVERY (iii): exact config key denying an agent the built-in task/agent-spawn tool, asserted by attempting a spawn from a restricted agent", "planLine": 2030, "coveredByTest": null },
-    { "id": "0.2-disc-parentid", "text": "DISCOVERY (iv): session parentID accepted on create? do plugin-created sessions' tool calls carry a distinguishable id shape?", "planLine": 2033, "coveredByTest": null },
-    { "id": "0.2-wire-notes", "text": "conductor/adapter/wire-notes.md carries WIRE_CONTRACT_VERIFIED: <date> <finding> for EVERY checked point, including failures and the fallback chosen", "planLine": 2035, "coveredByTest": null }
+    {
+      "id": "0.2-noskip",
+      "text": "wire-contract.test.ts is describe.skip-tagged ONLY on a missing opencode binary and explicitly asserts it did NOT skip on this machine (binary present)",
+      "planLine": 2002,
+      "coveredByTest": "wire-contract.test.ts:877 '0.2-noskip' \u2014 skip flag coupled to binary absence; mainSuiteRan tripwire outside the describe (orchestrator-read)"
+    },
+    {
+      "id": "0.2-serve",
+      "text": "test starts `opencode serve` headless against a throwaway fixture dir with a config listing a file-path plugin exporting every \u00a75.1 hook as a recorder, plus a test agent",
+      "planLine": 2003,
+      "coveredByTest": "suite beforeEach: headless serve vs mkdtemp fixture, OPENCODE_CONFIG+XDG_CONFIG_HOME+OPENCODE_TEST_HOME hermetic"
+    },
+    {
+      "id": "0.2-stub",
+      "text": "a fake OpenAI-compatible stub server (node:http, canned responses) stands in for llama-server; the test is model-free",
+      "planLine": 2007,
+      "coveredByTest": "fixtures/stub-llm-server.ts: in-process node:http OpenAI-compatible SSE stub; asserts assigned port != 8080"
+    },
+    {
+      "id": "0.2-plugin-load",
+      "text": "ASSERT: plugin loads from a config-listed absolute file path (else pin the \u00a75.1 symlink fallback in wire-notes)",
+      "planLine": 2009,
+      "coveredByTest": "VERIFIED-AS-SPEC: abs file path loads (file:// in GET /config); symlink fallback unneeded; NEW constraint: plugin module may export ONLY plugin functions"
+    },
+    {
+      "id": "0.2-deny",
+      "text": "ASSERT: tool.execute.before throw DENIES the call and the error text reaches the transcript",
+      "planLine": 2009,
+      "coveredByTest": "VERIFIED-AS-SPEC: throw in tool.execute.before -> tool part status error, thrown text in transcript + tool result"
+    },
+    {
+      "id": "0.2-custom-tool",
+      "text": "ASSERT: custom tool registers and executes",
+      "planLine": 2010,
+      "coveredByTest": "VERIFIED-AS-SPEC: conductor_probe registers (/experimental/tool/ids), executes, output in transcript"
+    },
+    {
+      "id": "0.2-headers",
+      "text": "ASSERT: chat.headers output reaches the stub as HTTP headers; on failure pin the x_conductor body-field fallback instead",
+      "planLine": 2011,
+      "coveredByTest": "VERIFIED-AS-SPEC: header arrives verbatim; x_conductor body fallback ALSO proven live via chat.params options"
+    },
+    {
+      "id": "0.2-systransform",
+      "text": "ASSERT: experimental.chat.system.transform content reaches the stub's request body",
+      "planLine": 2011,
+      "coveredByTest": "VERIFIED-AS-SPEC: pushed string arrives as own system message in provider body"
+    },
+    {
+      "id": "0.2-idle",
+      "text": "ASSERT: session.idle fires after the reply",
+      "planLine": 2012,
+      "coveredByTest": "VERIFIED-AS-SPEC: session.idle with sessionID after reply"
+    },
+    {
+      "id": "0.2-format",
+      "text": "ASSERT: format:{type:json_schema} produces the schema'd body field llama-server expects; RECORD WHICH (response_format vs json_schema)",
+      "planLine": 2013,
+      "coveredByTest": "DRIFT: format silently accepted, produces NEITHER response_format NOR json_schema (answer: neither); absence pinned as tripwire; structured output must be prompt-shaped + validated"
+    },
+    {
+      "id": "0.2-model-override",
+      "text": "ASSERT: model override in the prompt body reaches the stub",
+      "planLine": 2014,
+      "coveredByTest": "VERIFIED-AS-SPEC: stub saw model stub-model-b; assistant echoed it"
+    },
+    {
+      "id": "0.2-fileref",
+      "text": "ASSERT: {file:...} prompt refs resolve for absolute paths, or record the serve.py-inlines fallback",
+      "planLine": 2015,
+      "coveredByTest": "VERIFIED-AS-SPEC: absolute {file:...} resolves, REPLACES default system prompt; caution: dangling brace-ref anywhere in config = hard ConfigInvalidError"
+    },
+    {
+      "id": "0.2-perm-ask-hook",
+      "text": "ASSERT: the typed permission.ask hook is NOT dispatched at 1.18.10 (so an upstream fix is noticed)",
+      "planLine": 2016,
+      "coveredByTest": "VERIFIED-AS-SPEC: 0 dispatches across two full permission flows, count asserted"
+    },
+    {
+      "id": "0.2-perm-bus",
+      "text": "ASSERT: permission.asked bus event fires and client.permission.reply({requestID, reply}) adjudicates an agent-level \"ask\" permission (the \u00a73.6 inline-claim mechanism)",
+      "planLine": 2017,
+      "coveredByTest": "VERIFIED-WITH-FALLBACK(shape): permission.asked fires (1.18.10 SDK types stale); reply = POST /session/{id}/permissions/{permissionID} {response:once|always|reject}; once ran the edit, reject blocked it"
+    },
+    {
+      "id": "0.2-disc-streaming",
+      "text": "DISCOVERY (i): does session.prompt issue a streaming or non-streaming provider request (stub body `stream` field)? Scopes Task 11.6 (\u00a74.4) \u2014 recorded, not assumed",
+      "planLine": 2023,
+      "coveredByTest": "RECORDED: streaming (stream:true + stream_options.include_usage, SSE) -> router response observation must parse SSE; scopes 11.6"
+    },
+    {
+      "id": "0.2-disc-init-failure",
+      "text": "DISCOVERY (ii): plugin that throws in its factory \u2014 does opencode refuse the session or log-and-continue ungated? Determines \u00a73.8 liveness-beacon loudness",
+      "planLine": 2027,
+      "coveredByTest": "RECORDED: log-and-continue UNGATED (one ERROR log line, no API-visible signal) -> \u00a73.8 beacon must be loud/out-of-band"
+    },
+    {
+      "id": "0.2-disc-tool-disable",
+      "text": "DISCOVERY (iii): exact config key denying an agent the built-in task/agent-spawn tool, asserted by attempting a spawn from a restricted agent",
+      "planLine": 2030,
+      "coveredByTest": "RECORDED: agent.<name>.tools:{task:false}; forced call -> invalid tool; control run spawns real child; now enforced in fragment + test"
+    },
+    {
+      "id": "0.2-disc-parentid",
+      "text": "DISCOVERY (iv): session parentID accepted on create? do plugin-created sessions' tool calls carry a distinguishable id shape?",
+      "planLine": 2033,
+      "coveredByTest": "RECORDED: parentID accepted on create; ses_* shape identical, callIDs provider-minted -> registry gate keys on own registry only"
+    },
+    {
+      "id": "0.2-wire-notes",
+      "text": "conductor/adapter/wire-notes.md carries WIRE_CONTRACT_VERIFIED: <date> <finding> for EVERY checked point, including failures and the fallback chosen",
+      "planLine": 2035,
+      "coveredByTest": "conductor/adapter/wire-notes.md: one WIRE_CONTRACT_VERIFIED line per point, DRIFT section, discoveries marked (orchestrator-read in full)"
+    }
   ]
 }

@@ -14,9 +14,12 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## What is in flight
 
-- Nothing. DONE: 0.1, 0.3 (scaffold: tsconfig/package.json+lock, smoke+fragment tests
-  7/7, types.ts seed, opencode-fragment.json verbatim §5.3). Next: **0.2** wire
-  contract (MUST NOT skip), then Phase 1. Assertion files pre-written through 5.3.
+- Nothing. DONE: 0.1, 0.3, 0.2 (wire contract pinned vs 1.18.15 — READ
+  conductor/adapter/wire-notes.md before briefing 5.3/7.1/8.2/10.1/11.6/12.1; key
+  DRIFTs: no format:{json_schema} anywhere; permission reply is POST
+  /session/{id}/permissions/{permissionID}; plugin exports factory ONLY; realpath
+  all dirs; init-failure = silent ungate), and 6.2 early (runner probe: node+pytest
+  collect in-repo worktrees). Phase 0 phase-gate pending, then Phase 1.
 
 ## What is parked
 
@@ -40,7 +43,8 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## Next actions
 
-1. Task 0.2 (wire contract, plan 1999–2041) — must NOT skip; opencode 1.18.10
-   installed. Its 4 discoveries scope 5.3, 8.2, 10.1, 11.3, 11.6, 12.1.
-2. Phase 0 phase-gate (Stage 1 fresh-worktree + discovery-integrity lens on 0.2).
-3. Then Phase 1 (1.1 first; safe pairs {1.1,1.2,1.4} and {1.3,1.5} per prompt §6.2).
+1. Phase 0 phase-gate: Stage 1 fresh-worktree (needs npm install in conductor/),
+   Stage 2 discovery-integrity + spec-conformance lenses.
+2. Phase 1 (1.1 first; safe pairs {1.1,1.2,1.4} and {1.3,1.5} per prompt §6.2).
+3. Branch B (C++ router worktree) unblocks after 1.1 (schemas): 11.6 scope is now
+   pinned by 0.2 (streaming + no schema field -> request-side counter + note).

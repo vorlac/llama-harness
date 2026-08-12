@@ -150,3 +150,20 @@ test("fragment: reviewer, skeptic, planner, and mechanical each deny edit", () =
     );
   }
 });
+
+// §5.3 (plan lines 1792-1798): sub-agent spawning is disabled for EVERY conductor
+// agent at the config layer; the exact key was pinned by Task 0.2's discovery (iii):
+// agent.<name>.tools.task === false (the built-in spawn tool's id is "task").
+test("fragment: every agent denies the built-in task spawn tool (0.2 discovery iii)", () => {
+  const fragment = readFragment();
+  for (const name of ALL_AGENT_NAMES) {
+    const entry = agentEntry(fragment, name);
+    const tools = entry["tools"];
+    assertIsRecord(tools, `fragment.agent["${name}"].tools`);
+    assert.equal(
+      tools["task"],
+      false,
+      `fragment.agent["${name}"].tools.task must be false`,
+    );
+  }
+});

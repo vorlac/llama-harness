@@ -1,0 +1,14 @@
+{
+  "taskId": "8.2",
+  "planLines": [2542, 2557],
+  "kind": "code (tier B). Depends on 0.2 (system.transform pin), 3.2 (legalTools), 8.1 (packs). Subagents read §6.4 (1892-1906), §4.1 (1512-1543), §4.4 headers (1636-1698), §3.8 (1478-1495).",
+  "assertions": [
+    { "id": "8.2-api", "text": "buildSystemAppend(registryEntry, run, items, questions, packs) -> string[] (role pack + <=30-line state block with RECOMMENDED next tool from gates-phase + count of other legal tools, open questions, blocked/deferred counts, overrides remaining); paramsForRole(role); headersFor(registryEntry, job?)", "planLine": 2544, "coveredByTest": null },
+    { "id": "8.2-role-packs", "text": "orchestrator gets core.md + state block; implementer gets tdd.md + its item block", "planLine": 2550, "coveredByTest": null },
+    { "id": "8.2-30-lines", "text": "state block stays <=30 lines with 40 items (summarization asserted)", "planLine": 2551, "coveredByTest": null },
+    { "id": "8.2-recommended", "text": "recommended-tool line matches legalTools(...).recommended for three run states AND names conductor_setup on an unconfigured repo", "planLine": 2552, "coveredByTest": null },
+    { "id": "8.2-one-recommendation", "text": "two-item wave: block names ONE recommendation, reports others as a count — never contradictory instructions", "planLine": 2553, "coveredByTest": null },
+    { "id": "8.2-headers", "text": "header set per role (§4.4 tags)", "planLine": 2555, "coveredByTest": null },
+    { "id": "8.2-missing-pack", "text": "missing pack file at init throws AND the throw is journaled AND liveness beacon NOT written (so §3.8's absence signal is real)", "planLine": 2555, "coveredByTest": null }
+  ]
+}
