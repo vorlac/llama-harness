@@ -1,1 +1,0 @@
-{"taskId":"7.2","step":"staged router-client test moved in; red; implementer next","intendedFiles":["conductor/tests/router-client.test.ts","conductor/adapter/router-client.ts"],"startedAt":"2026-08-12T21:55:00Z"}

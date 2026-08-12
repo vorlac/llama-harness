@@ -804,7 +804,7 @@
       "manifest": true,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "c3e1983",
       "commitMessage": "conductor: 7.1 fanout engine",
       "planLines": [
         2465,
@@ -841,7 +841,7 @@
       "taskId": "7.2",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 7.2 router client + failover",
       "planLines": [
@@ -849,14 +849,30 @@
         2514
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 813,
+        "pass": 813,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/router-client.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/router-client.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/router-client.test.ts",
+        "conductor/adapter/router-client.ts"
+      ],
+      "revertAssertion": "removing router-client.ts re-fails all 12 tests; [7.2-second-failover] zero-network short-circuit + [7.2-cases] bounded-timeout no-throw only pass against the real fail-soft client",
+      "attempts": 1,
+      "deviations": [
+        "health endpoint /conductor/health (plan names only /conductor/metrics; test path-agnostic)"
+      ],
+      "startedAt": "2026-08-12T21:55:00Z",
+      "finishedAt": "2026-08-12T21:45:08Z"
     },
     "8.1": {
       "taskId": "8.1",

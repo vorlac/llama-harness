@@ -405,13 +405,25 @@
       "M1": "PASS 801/801 node + tsc + bun leg",
       "M2": "PASS 791 -> 801 (+10)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (fanout removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (3 files incl fake-sdk fixture)",
       "M7": "PASS 8 rows",
       "M8": "n/a",
       "M9": "PASS bun leg",
       "orchestratorReverify": "no-format binding honored (only comments mention format), registry.set before prompt, G14 clean"
+    },
+    "7.2": {
+      "at": "2026-08-12T21:45:08Z",
+      "M1": "PASS 813/813 node + tsc + bun leg",
+      "M2": "PASS 801 -> 813 (+12)",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS (G14 clean)",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 4 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg"
     }
   },
   "phaseGates": {

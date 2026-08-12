@@ -1,11 +1,34 @@
 {
   "taskId": "7.2",
-  "planLines": [2495, 2511],
-  "kind": "code (tier B). Stub node:http server tests. Subagents read §4.4 (1636-1698).",
+  "planLines": [
+    2495,
+    2511
+  ],
+  "kind": "code (tier B). Stub node:http server tests. Subagents read \u00a74.4 (1636-1698).",
   "assertions": [
-    { "id": "7.2-api", "text": "routerHealthy(routerCfg) -> Promise<boolean>; fetchMetricsSummary -> Promise<summary|null> strictly fail-soft (never throws, null on any failure, journals at debug); resolveBaseUrl(routerCfg, upstreamCfg, failoverState) -> url", "planLine": 2497, "coveredByTest": null },
-    { "id": "7.2-cases", "text": "healthy 200; 404; connection refused; hang past 2s internal timeout — each yields false/null without throwing", "planLine": 2506, "coveredByTest": null },
-    { "id": "7.2-failover", "text": "after a refused request resolveBaseUrl returns upstream and KEEPS returning it for the session; run metrics marked partial; journals router.failover", "planLine": 2508, "coveredByTest": null },
-    { "id": "7.2-second-failover", "text": "a second failover disables probing entirely", "planLine": 2510, "coveredByTest": null }
+    {
+      "id": "7.2-api",
+      "text": "routerHealthy(routerCfg) -> Promise<boolean>; fetchMetricsSummary -> Promise<summary|null> strictly fail-soft (never throws, null on any failure, journals at debug); resolveBaseUrl(routerCfg, upstreamCfg, failoverState) -> url",
+      "planLine": 2497,
+      "coveredByTest": "router-client.test.ts (names carry 7.2-api)"
+    },
+    {
+      "id": "7.2-cases",
+      "text": "healthy 200; 404; connection refused; hang past 2s internal timeout \u2014 each yields false/null without throwing",
+      "planLine": 2506,
+      "coveredByTest": "router-client.test.ts (names carry 7.2-cases)"
+    },
+    {
+      "id": "7.2-failover",
+      "text": "after a refused request resolveBaseUrl returns upstream and KEEPS returning it for the session; run metrics marked partial; journals router.failover",
+      "planLine": 2508,
+      "coveredByTest": "router-client.test.ts (names carry 7.2-failover)"
+    },
+    {
+      "id": "7.2-second-failover",
+      "text": "a second failover disables probing entirely",
+      "planLine": 2510,
+      "coveredByTest": "router-client.test.ts (names carry 7.2-second-failover)"
+    }
   ]
 }
