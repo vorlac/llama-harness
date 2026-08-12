@@ -319,6 +319,18 @@ describe("scopesIntersect", () => {
       b: ["src/x.ts"],
       expected: true,
     },
+    {
+      name: "[S-1] case-insensitive filesystem (darwin): Src/** intersects src/** — a false positive only serializes, but MISSING a real dir collision lets two writers corrupt the same dir -> TRUE",
+      a: ["Src/**"],
+      b: ["src/**"],
+      expected: true,
+    },
+    {
+      name: "[S-1 control] case-folding must not merge distinct dirs: Src/** vs docs/** -> FALSE",
+      a: ["Src/**"],
+      b: ["docs/**"],
+      expected: false,
+    },
   ];
   for (const c of intersectCases) {
     test(`[1.2-intersect] ${c.name}`, () => {
@@ -330,4 +342,93 @@ describe("scopesIntersect", () => {
       );
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// [F1] globMatch consecutive-** liveness (DoS). A run of ** must collapse to a
+// single ** (and matchSegments must be memoized) so a degenerate LLM-emitted
+// glob cannot wedge the edit-scope gate, which runs globMatch on EVERY check.
+// **/** matches exactly what ** matches, so the collapse is semantics-neutral;
+// the bug is exponential C(stars+segments, stars) backtracking, so the failing
+// assertion is a wall-clock bound and the collapse cases pin that semantics
+// survive.
+// ---------------------------------------------------------------------------
+describe("[F1] globMatch consecutive-** liveness", () => {
+  test("[1.2-glob-dos] a degenerate all-** pattern returns false without exponential backtracking", () => {
+    const pattern = Array.from({ length: 14 }, () => "**").join("/") + "/zz";
+    const deepPath = Array.from({ length: 18 }, () => "a").join("/");
+    const startNs = process.hrtime.bigint();
+    const result = globMatch(pattern, deepPath);
+    const elapsedMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+    assert.equal(result, false, "the trailing literal 'zz' cannot match any 'a' segment");
+    assert.ok(
+      elapsedMs < 1000,
+      `globMatch must not backtrack exponentially on a run of ** (took ${elapsedMs.toFixed(1)}ms)`,
+    );
+  });
+
+  test("[1.2-glob-dos] the prescribed degenerate pattern still returns false", () => {
+    assert.equal(
+      globMatch("**/**/**/**/**/**/**/**/**/**/**/**/zz", "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"),
+      false,
+    );
+  });
+
+  test("[1.2-glob-dos] collapsing a ** run preserves matching semantics", () => {
+    assert.equal(globMatch("**/**/x.ts", "a/b/x.ts"), true);
+    assert.equal(globMatch("src/**/**", "src/a/b"), true);
+    assert.equal(globMatch("src/**/**", "src"), true);
+    assert.equal(globMatch("**/**/*.ts", "c.ts"), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [F2] gitSubcommand must FAIL SAFE on an unrecognized value-taking global.
+// The old skip-one-token logic surfaced the flag's VALUE as the subcommand; an
+// adversary who picks an allow-listed value ("log") hides the real write verb
+// ("apply") from the Task 5.1 gate. Return the unrecognized flag itself so the
+// gate default-denies (it is on no allow-list).
+// ---------------------------------------------------------------------------
+describe("[F2] gitSubcommand fails safe on an unrecognized global option", () => {
+  test("[1.2-git] an unrecognized value-taking global does NOT surface its value as the subcommand", () => {
+    const sub = gitSubcommand(["git", "--namespace", "log", "apply"]);
+    assert.notEqual(sub, "log", "must not surface an allow-listed value as the subcommand");
+    assert.equal(sub, "--namespace", "an unrecognized global option is returned verbatim (deny-forcing)");
+  });
+
+  test("[1.2-git] a second unrecognized global (--work-tree) is also deny-forcing", () => {
+    const sub = gitSubcommand(["git", "--work-tree", "status", "push"]);
+    assert.notEqual(sub, "status");
+    assert.equal(sub, "--work-tree");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [F3] git detection must see through leading env-assignments, one wrapper
+// (env/command/sudo/builtin/exec), and an absolute/relative path (basename
+// resolution). Otherwise `A=b git push`, `env git push`, `sudo git push`, and
+// `/usr/bin/git push` all evade the git gate entirely. isGitCommand and
+// gitSubcommand share one command-word finder so they agree.
+// ---------------------------------------------------------------------------
+describe("[F3] git detection sees through env-assignments, wrappers, and paths", () => {
+  type GitDetectCase = { name: string; seg: string[]; sub: string };
+  const detectCases: GitDetectCase[] = [
+    { name: "leading NAME=value env-assignment", seg: ["A=b", "git", "push"], sub: "push" },
+    { name: "env wrapper", seg: ["env", "git", "push"], sub: "push" },
+    { name: "command wrapper", seg: ["command", "git", "apply", "x"], sub: "apply" },
+    { name: "sudo wrapper", seg: ["sudo", "git", "push"], sub: "push" },
+    { name: "absolute git path resolves by basename", seg: ["/usr/bin/git", "push"], sub: "push" },
+  ];
+  for (const c of detectCases) {
+    test(`[1.2-git] isGitCommand + subcommand through ${c.name}`, () => {
+      assert.equal(isGitCommand(c.seg), true, `${c.name} must read as a git command`);
+      assert.equal(gitSubcommand(c.seg), c.sub, `${c.name} must expose the real subcommand`);
+    });
+  }
+
+  test("[1.2-git] false-positive guards still hold after the widening", () => {
+    assert.equal(isGitCommand(["echo", "git", "status"]), false, "git not in command position");
+    assert.equal(isGitCommand(["cat", "tools/git/helper.txt"]), false, "no substring matching");
+    assert.equal(gitSubcommand(["git", "log", "--grep", "git"]), "log", "message word unchanged");
+  });
 });

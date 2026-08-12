@@ -80,6 +80,13 @@ const HUMAN_PATTERNS: readonly RegExp[] = [
   /\bpay(?:ing)?\s+for\b/i,
   /\bpaid\s+(?:tier|plan|service|account|subscription)\b/i,
   /\bsubscription\b/i,
+  // -- recurring paid price: a currency amount charged per month, or a monthly
+  //    billing cadence named alongside a plan/tier/subscription. A measurable
+  //    quota ("requests per second") never mentions money or a month, so it
+  //    stays machine territory.
+  /\$\s?\d[\d,]*(?:\.\d+)?\s*(?:\/\s*|\s+per\s+)month\b/i,
+  /(?:\/\s*month|\bper\s+month\b|\bmonthly\b)[\s\S]*\b(?:plan|tier|subscription)\b/i,
+  /\b(?:plan|tier|subscription)\b[\s\S]*(?:\/\s*month|\bper\s+month\b|\bmonthly\b)/i,
   // -- irreversible / publish / delete. The destructive verb must open its
   //    clause or follow a non-path character AND be followed by whitespace and
   //    a word, so "delete" inside a file path (src/delete-user.ts) never
@@ -90,6 +97,8 @@ const HUMAN_PATTERNS: readonly RegExp[] = [
   /\birreversible\b/i,
   /\bcannot\s+be\s+undone\b/i,
   /\bforce[-\s]push\b/i,
+  /\bpush\s+(?:--force|-f)\b/i,
+  /\bforce-with-lease\b/i,
   // -- secrets / credentials. The bare-word forms bound both sides (so
   //    "secretary" never fires); the uppercase run catches env-style names
   //    like AWS_SECRET_ACCESS_KEY, where underscores defeat \b.

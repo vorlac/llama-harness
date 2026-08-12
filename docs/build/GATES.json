@@ -193,7 +193,7 @@
       "M1": "PASS 228/228 + tsc (orchestrator-observed)",
       "M2": "PASS 176 -> 228",
       "M3": "PASS",
-      "M4": "PASS post-commit: rm all three modules in scratch worktree of 29c7e03 -> each suite fails missing-subject (1/1/1)",
+      "M4": "PASS post-commit: rm all three modules in scratch worktree of 29c7e03 -> each suite fails missing-subject (1/1/1) | DONE",
       "M5": "PASS",
       "M6": "PASS",
       "M7": "PASS 9 rows mapped (test names carry ids)",
@@ -206,7 +206,7 @@
       "M1": "PASS 252/252 + tsc (orchestrator-observed)",
       "M2": "PASS 228 -> 252",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit: rm decide.ts in scratch worktree of bbc0f85 -> suite fails missing-subject, exit 1",
       "M5": "PASS",
       "M6": "PASS",
       "M7": "PASS 4 rows mapped",
@@ -231,6 +231,44 @@
       ],
       "verdict": "PASS after fix round 1 of 3",
       "rejected": "2 majors (gate credit: the phase gate is not rubber-stamping)"
+    },
+    "1": {
+      "at": "2026-08-12T11:08:48Z",
+      "stage1": "PASS: fresh worktree of bbc0f85, own npm install, 252/252 + tsc + M5(20 files) from scratch",
+      "lenses": {
+        "spec-conformance(1.1)": "CONFORMANT (no majors; 2 minors -> 9.1 obligations; 2 nits)",
+        "spec-conformance(1.3)": "FINDINGS: 1 minor (normalizeSpecifier interior-.. anti-conservative) \u2014 corroborated by counterexample F-1",
+        "correctness x2": "FINDINGS: gitSubcommand value-flag false-ALLOW (MAJOR), classifyFailure absolute/nested-path misclassify (MAJOR), zero-budget env (minor), quoted-operator over-split (minor, safe), nits",
+        "boundary-cases x2": "FINDINGS: globMatch exponential DoS (MAJOR), classifyFailure ESM absolute-path (MAJOR), zero-budget env, tuple-items divergence, empty-scope, missing-verdict overturn, tokenizer git-bypass",
+        "counterexample x2": "FINDINGS: gitSubcommand false-ALLOW (MAJOR), isGitCommand env/wrapper/backtick bypass (MAJOR), isHumanTerritory money/secret/irreversible misses (MAJOR), freshness NaN fail-open (minor), classifyFailure text-only causality (minor)"
+      },
+      "adjudication": {
+        "fixed_in_place_round1": [
+          "F-1 classifyFailure interior-.. escape -> error",
+          "S-1 scopesIntersect case-insensitive (pure-safe)",
+          "H-1/H-2 isHumanTerritory push --force/-f + $N/month",
+          "E-1 zero-budget env guard (used>0 && used>=max)"
+        ],
+        "fixed_in_place_round2": [
+          "F1 globMatch exponential -> collapse ** + memoize (130s->0.1ms)",
+          "F2 gitSubcommand fail-safe on unrecognized globals (closes false-ALLOW)",
+          "F3 isGitCommand skips env-assign/env/command/sudo/exec wrappers + basename resolve",
+          "F4 verifyFreshFor non-finite timestamp -> stale (fail-safe)",
+          "F5 scanKeywords rejects tuple-form items (2020-12 divergence)"
+        ],
+        "bound_to_future_tasks": {
+          "5.1": "deny matrix over FULL tokens not single subcommand (branch -D must deny); red-team-by-data includes value-flag/env-prefix spellings",
+          "5.2": "writeShapedPaths wrapper-aware; no reliance on possibly-undefined evidence fields",
+          "6.1": "evidence.ts validates per-kind required fields; relativizes absolute cwd-prefixes before classifyFailure (ESM); tight anchored runnerRules tested vs RUNNER-DISCOVERY.md",
+          "9.1": "derived-decision scored-options enforcement; ClassificationCheck correctedKind==null iff agreed",
+          "9.5a": "under-delivered skeptic panel: re-run or count missing verdicts as UPHOLDS (never silent-drop a major)",
+          "3.3": "nextWave treats empty/degenerate scope conservatively (serialize)"
+        },
+        "documented_g7": "honest-limits-pending.md: backtick substitution, alias injection, sh -c/bash -c wrappers, $'...' ANSI-C quoting \u2014 detection gaps disclosed, not prevented",
+        "verification": "orchestrator re-ran all 26 lens malicious inputs against the fixed modules: 26/26 corrected (probe transcript). Full suite 279/279 in 6.9s."
+      },
+      "verdict": "PASS after 2 fix rounds (of 3 allowed)",
+      "rejected": "8 confirmed defects across 6 lens contexts incl. 5 majors \u2014 the milestone gate is emphatically not rubber-stamping (catch-credit recorded)"
     }
   },
   "rejections": [
@@ -251,6 +289,12 @@
       "gate": "phase-0/discovery-integrity",
       "what": "describe({skip}) suites evade skipped-count rejection; 7 unasserted wire-notes claims",
       "resolution": "C-015: directive scan added to test-conductor.sh; wire-notes [observed] tagging"
+    },
+    {
+      "at": "2026-08-12T11:08:48Z",
+      "gate": "phase-1",
+      "what": "5 MAJOR + several minor defects: gitSubcommand false-ALLOW, isGitCommand bypass, globMatch DoS, classifyFailure escape/absolute, isHumanTerritory misses",
+      "resolution": "2 fix rounds (11+16 pinning tests), 6 future-task bindings, 4 G7-documented residuals; orchestrator re-verified 26/26 inputs"
     }
   ]
 }

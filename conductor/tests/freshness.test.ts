@@ -305,11 +305,78 @@ const classifyRows: ClassifyRow[] = [
     rules: goRules,
     expected: "missing-subject",
   },
+  {
+    name: "[F-1] node Cannot find module '../src/../secrets/leak.ts' with src/** in scope => error (interior .. escapes the fileScope: the specifier resolves to secrets/leak.ts, OUTSIDE src/**)",
+    stderr: "Cannot find module '../src/../secrets/leak.ts'",
+    stdout: "",
+    exitCode: 1,
+    fileScope: ["src/**"],
+    rules: nodeRules,
+    expected: "error",
+  },
+  {
+    name: "[F-1] node Cannot find module 'src/../lib/x.ts' with src/** in scope => error (interior .. collapses to lib/x.ts, OUTSIDE src/**)",
+    stderr: "Cannot find module 'src/../lib/x.ts'",
+    stdout: "",
+    exitCode: 1,
+    fileScope: ["src/**"],
+    rules: nodeRules,
+    expected: "error",
+  },
+  {
+    name: "[F-1 control] node Cannot find module '../src/slugify.ts' with src/** in scope => missing-subject (a plain leading ../ still resolves inside scope — must stay green)",
+    stderr: "Cannot find module '../src/slugify.ts'",
+    stdout: "",
+    exitCode: 1,
+    fileScope: ["src/**"],
+    rules: nodeRules,
+    expected: "missing-subject",
+  },
 ];
 
 for (const row of classifyRows) {
   test(`[1.3-classify-table] ${row.name}`, () => {
     const got = classifyFailure(row.stderr, row.stdout, row.exitCode, row.fileScope, row.rules);
     assert.equal(got, row.expected, `classifyFailure verdict for: ${row.name}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// [F4] non-finite timestamps must FAIL SAFE (stale). A NaN/undefined startedMs,
+// any NaN staged mtime, or a NaN index mtime when the index term applies makes
+// the numeric `startedMs < Math.max(...)` comparison false — which would read a
+// stale record as FRESH. verifyFreshFor must reject any non-finite timestamp up
+// front. §2.6 is a proof of freshness, so an unknowable timestamp is stale.
+// ---------------------------------------------------------------------------
+interface NonFiniteRow {
+  name: string;
+  record: VerifyRecordFixture;
+  inputs: FreshnessInputsFixture;
+}
+
+const nonFiniteRows: NonFiniteRow[] = [
+  {
+    name: "[1.3-fresh-finite] a NaN staged mtime reads STALE (Math.max(...NaN) can never prove freshness)",
+    record: { startedMs: 1000, head: "h" },
+    inputs: { stagedMtimes: [5000, NaN], indexMtimeMs: 0, hasStagedDeletion: false, currentHead: "h", noGit: true },
+  },
+  {
+    name: "[1.3-fresh-finite] a NaN startedMs reads STALE (an unknown start instant cannot dominate any edit)",
+    record: { startedMs: NaN, head: "h" },
+    inputs: { stagedMtimes: [5000], indexMtimeMs: 0, hasStagedDeletion: false, currentHead: "h", noGit: true },
+  },
+  {
+    name: "[1.3-fresh-finite] a NaN index mtime under a staged deletion reads STALE (the index term applies and is unknowable)",
+    record: { startedMs: 9000, head: "h" },
+    inputs: { stagedMtimes: [1000], indexMtimeMs: NaN, hasStagedDeletion: true, currentHead: "h", noGit: true },
+  },
+];
+
+for (const row of nonFiniteRows) {
+  test(row.name, () => {
+    const res = verifyFreshFor(row.record, row.inputs);
+    assert.equal(res.fresh, false, `non-finite timestamp must read stale: ${row.name}`);
+    assert.equal(typeof res.why, "string", `why must be a string for: ${row.name}`);
+    assert.ok(res.why.length > 0, `a stale verdict must explain itself for: ${row.name}`);
   });
 }

@@ -53,6 +53,19 @@ export function verifyFreshFor(
   record: FreshnessRecord,
   inputs: FreshnessInputs,
 ): FreshnessVerdict {
+  // Fail-safe: freshness is a PROOF that no edit landed after the verify. A
+  // non-finite timestamp makes the numeric `startedMs < Math.max(...)`
+  // comparison false (Math.max(...NaN) is NaN; every `< NaN` is false), which
+  // would let a stale record read fresh. Any non-finite input we cannot reason
+  // about is treated as stale up front — the index term only when it applies.
+  if (
+    !Number.isFinite(record.startedMs) ||
+    inputs.stagedMtimes.some((m) => !Number.isFinite(m)) ||
+    (inputs.hasStagedDeletion && !Number.isFinite(inputs.indexMtimeMs))
+  ) {
+    return { fresh: false, why: "non-finite timestamp: treated as stale (fail-safe)" };
+  }
+
   const reasons: string[] = [];
 
   // Condition 1. With no surviving staged file mtimes and no staged deletion
@@ -117,7 +130,27 @@ function normalizeSpecifier(raw: string, dotsAsSeparators: boolean): string {
       break;
     }
   }
-  return spec;
+  // Collapse interior ".." (and no-op "." / empty) segments, resolving each
+  // ".." against its predecessor. A ".." with no in-root predecessor to consume
+  // escapes the root and survives as a leading ".." — the result then matches
+  // no in-repo fileScope, so an escaping specifier ("../src/../secrets/x.ts" ->
+  // "secrets/x.ts"; "src/../../x.ts" -> "../x.ts") classifies as "error", never
+  // missing-subject. Without this, "**" would swallow a literal ".." segment.
+  const segments: string[] = [];
+  for (const seg of spec.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      const top = segments[segments.length - 1];
+      if (segments.length > 0 && top !== "..") {
+        segments.pop();
+      } else {
+        segments.push("..");
+      }
+    } else {
+      segments.push(seg);
+    }
+  }
+  return segments.join("/");
 }
 
 /**

@@ -104,6 +104,13 @@ describe("isHumanTerritory", () => {
     // irreversible / publish / delete -> true
     ["delete the production data", true],
     ["Should I publish this package to the public npm registry?", true],
+    // irreversible force-push (flag spellings) -> true (H-1)
+    ["Is it OK to push --force to origin/main?", true],
+    ["Can I git push -f to overwrite the shared branch after the bad merge?", true],
+    // paid recurring price -> true (H-2)
+    ["Should we use the $20/month plan for the API?", true],
+    // benign per-second throughput question -> false (control: not paid, no month)
+    ["how many requests per second can we handle?", false],
     // secrets / credentials -> true
     ["Which value should go in the AWS_SECRET_ACCESS_KEY credential?", true],
     // "delete" inside a file path is not a delete action -> false

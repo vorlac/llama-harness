@@ -87,9 +87,11 @@ const FUTILE_RE_PROMPT_LIMIT = 3;
  * Decide whether the run must stop, and with which §2.9 kind:
  *  - noop: futileRePrompts reached 3 (§3.7's rule verbatim) — fires even
  *    with open items: a wedged loop must end loudly, not burn tokens;
- *  - env: the override budget is exhausted (overridesUsed >=
- *    workflow.maxOverridesPerRun, §2.1) — also fires with open items: a gate
- *    that needs overriding this often makes every gate advisory;
+ *  - env: the override budget is exhausted — at least one override was USED
+ *    and the count reached workflow.maxOverridesPerRun (§2.1) — also fires with
+ *    open items: a gate that needs overriding this often makes every gate
+ *    advisory. Exhaustion means overrides were consumed up to the cap; a zero
+ *    cap at rest (none used) is not exhaustion and never env-stops at START;
  *  - blocked: no open item remains and blocked items remain;
  *  - surfaced: no open and no blocked item remains and human-territory
  *    questions are pending. Deferred items are settled, never actionable —
@@ -112,7 +114,10 @@ export function shouldTerminate(
     return { stop: true, kind: "noop" };
   }
 
-  if (counters.overridesUsed >= config.workflow.maxOverridesPerRun) {
+  if (
+    counters.overridesUsed > 0 &&
+    counters.overridesUsed >= config.workflow.maxOverridesPerRun
+  ) {
     return { stop: true, kind: "env" };
   }
 

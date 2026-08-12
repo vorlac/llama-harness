@@ -197,6 +197,26 @@ test("[1.3-stops] interrupt is NEVER computed by shouldTerminate for any input (
   assert.equal(combos, 4 * 4 * summaries.length, "the sweep must cover the full grid");
 });
 
+test("[1.3-stops][E-1] a zero override budget at rest (max=0, used=0) does NOT env-stop before any override is used, while open work remains => no stop", () => {
+  const res = shouldTerminate(
+    executingRun(),
+    counters({ overridesUsed: 0 }),
+    { open: 5, blocked: 0, deferred: 0, surfacedQuestions: 0 },
+    { workflow: { maxOverridesPerRun: 0 } },
+  );
+  assert.deepEqual(res, { stop: false });
+});
+
+test("[1.3-stops][E-1] with a zero override budget and no open work, the run resolves via the OTHER stop rules, never env (max=0, used=0, blocked>0 => blocked)", () => {
+  const res = shouldTerminate(
+    executingRun(),
+    counters({ overridesUsed: 0 }),
+    { open: 0, blocked: 1, deferred: 0, surfacedQuestions: 0 },
+    { workflow: { maxOverridesPerRun: 0 } },
+  );
+  assert.deepEqual(res, { stop: true, kind: "blocked" });
+});
+
 // ---------------------------------------------------------------------------
 // isTerminal(run) — §2.3's SINGLE definition, referenced everywhere:
 // terminal iff state ∈ {ANSWERED, REPORTED, TRIVIAL_DONE} OR stop !== null.

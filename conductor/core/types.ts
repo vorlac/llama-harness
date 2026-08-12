@@ -1256,9 +1256,12 @@ function scanKeywords(schema: unknown, path: string, errors: string[]): void {
       }
     } else if (keyword === "items") {
       if (Array.isArray(sub)) {
-        for (let i = 0; i < sub.length; i += 1) {
-          scanKeywords(sub[i], `${path}.items[${i}]`, errors);
-        }
+        // Tuple-form items is 2020-12 prefixItems, which the router's full
+        // validator (Task 11.6) implements and this subset does not — accepting
+        // it here would let the two validators disagree about the same payload.
+        errors.push(
+          `${path}.items: items as a tuple array is outside the subset (2020-12 uses prefixItems)`,
+        );
       } else {
         scanKeywords(sub, `${path}.items`, errors);
       }

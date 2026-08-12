@@ -1197,3 +1197,49 @@ describe("validator subset discipline", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// [F5] tuple-form `items` (an array of schemas) divergence.
+// The subset validator must REJECT array-form `items`: JSON Schema 2020-12 (the
+// router's full validator, Task 11.6) replaced tuple `items` with `prefixItems`,
+// so a schema carrying tuple `items` would be read differently by the two
+// validators. No shipped schema uses it; the subset must catch any future one.
+// ---------------------------------------------------------------------------
+describe("[F5] tuple-form items is outside the subset", () => {
+  test('rejects `items` as a tuple array (2020-12 uses prefixItems) naming the divergence', () => {
+    // ["x"] satisfies both the tuple's first schema and type:"array", so a
+    // silently-accepting subset validator would return ok:true — only explicit
+    // tuple-items rejection can fail this value.
+    withTemporarySchema(
+      "TaskOneOne-F5-TupleItems",
+      { type: "array", items: [{ type: "string" }] },
+      () => {
+        const result = validate("TaskOneOne-F5-TupleItems", ["x"]);
+        assert.equal(result.ok, false, "tuple-form items must be rejected, not silently accepted");
+        assert.equal(result.errors.length > 0, true, "the rejection must carry an error");
+        assert.match(
+          result.errors.join("\n"),
+          /tuple|prefixItems/,
+          "the error must name the tuple/prefixItems divergence",
+        );
+      },
+    );
+  });
+
+  test("every shipped schema stays subset-clean under the tuple-items rejection", () => {
+    // No shipped schema uses tuple-form items, so tightening scanKeywords must
+    // not newly reject any of the 17 SCHEMAS. validate() runs scanKeywords first,
+    // so any subset/tuple error would surface here.
+    for (const name of SCHEMA_NAMES) {
+      const result = validate(name, undefined);
+      const subsetErrors = result.errors.filter((e) =>
+        /outside the (validator )?subset|tuple|prefixItems/.test(e),
+      );
+      assert.deepEqual(
+        subsetErrors,
+        [],
+        `${name} must remain subset-clean: ${subsetErrors.join("; ")}`,
+      );
+    }
+  });
+});

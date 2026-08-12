@@ -131,25 +131,62 @@ export function splitOnOperators(tokens: string[]): string[][] {
   return segments;
 }
 
+// Leading command wrappers that pass their tail through to another command:
+// `env git push`, `command git push`, `sudo git push`, `builtin`, `exec`. A
+// single one is unwrapped so the git gate sees the git invocation behind it.
+const GIT_WRAPPERS = ["env", "command", "sudo", "builtin", "exec"];
+
+// A shell env-assignment token in command-prefix position (`NAME=value`).
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+// The basename of a command word: the part after the last "/", so
+// `/usr/bin/git` and `./git` both resolve to `git`.
+function commandBasename(word: string): string {
+  const slash = word.lastIndexOf("/");
+  return slash === -1 ? word : word.slice(slash + 1);
+}
+
 /**
- * True when the segment invokes git: the token in COMMAND POSITION is exactly
- * "git". Token equality, never substring matching — `echo git status` and
- * `cat tools/git/helper.txt` are not git commands.
+ * The index of the git command word in a segment, or null when the segment
+ * does not invoke git. Skips leading `NAME=value` env-assignment tokens, then
+ * unwraps a single leading wrapper (`env`/`command`/`sudo`/`builtin`/`exec`),
+ * then resolves the command word by BASENAME. Shared by isGitCommand and
+ * gitSubcommand so detection and subcommand extraction never disagree — token
+ * equality on the basename, never substring matching, so `echo git status` and
+ * `cat tools/git/helper.txt` are still not git commands.
+ */
+function gitCommandWordIndex(seg: string[]): number | null {
+  let i = 0;
+  while (i < seg.length && ENV_ASSIGNMENT.test(seg[i])) i += 1;
+  if (i < seg.length && GIT_WRAPPERS.includes(seg[i])) i += 1;
+  if (i < seg.length && commandBasename(seg[i]) === "git") return i;
+  return null;
+}
+
+/**
+ * True when the segment invokes git in COMMAND POSITION, seeing through leading
+ * env-assignments, one wrapper, and an absolute/relative path (basename). Never
+ * substring matching — `echo git status` and `cat tools/git/helper.txt` are not
+ * git commands.
  */
 export function isGitCommand(seg: string[]): boolean {
-  return seg.length > 0 && seg[0] === "git";
+  return gitCommandWordIndex(seg) !== null;
 }
 
 /**
  * The git subcommand of a segment, or null when there is none (bare `git`)
  * or the segment is not a git command. Skips the value-taking global options
- * `-c k=v`, `-C dir`, `--git-dir <dir>`, and the inline `--git-dir=<dir>`;
- * any other leading `-`/`--` flag is skipped without a value. The first
- * non-option token wins (`git stash push -m drop` parses as `stash`).
+ * `-c k=v`, `-C dir`, `--git-dir <dir>`, and the inline `--git-dir=<dir>`. Any
+ * OTHER leading `-`/`--` flag FAILS SAFE: it is returned verbatim as the
+ * subcommand, a deny-forcing token that is on no allow-list, so the Task 5.1
+ * gate default-denies rather than trusting the flag's value (which git may
+ * itself treat as the real subcommand). The first non-option token wins
+ * (`git stash push -m drop` parses as `stash`).
  */
 export function gitSubcommand(seg: string[]): string | null {
-  if (!isGitCommand(seg)) return null;
-  let i = 1;
+  const gitIndex = gitCommandWordIndex(seg);
+  if (gitIndex === null) return null;
+  let i = gitIndex + 1;
   while (i < seg.length) {
     const token = seg[i];
     if (token === "-c" || token === "-C" || token === "--git-dir") {
@@ -157,7 +194,7 @@ export function gitSubcommand(seg: string[]): string | null {
     } else if (token.startsWith("--git-dir=")) {
       i += 1;
     } else if (token.startsWith("-")) {
-      i += 1; // unrecognized global flag: skip the flag token itself
+      return token; // unrecognized global option: fail safe (deny-forcing)
     } else {
       return token;
     }
@@ -249,22 +286,53 @@ function segMatch(pat: string, text: string): boolean {
   return p === pat.length;
 }
 
+// Collapse a run of consecutive `**` pattern segments into a single `**`.
+// `**/**` matches exactly what `**` matches (both span zero or more whole
+// segments), so the collapse is semantically idempotent — but it removes the
+// exponential C(stars+segments, stars) backtracking a run of `**` would
+// otherwise force in matchSegments. globMatch runs on every edit-scope gate
+// check, so one degenerate glob must not be able to wedge the run.
+function collapseDoubleStars(segs: string[]): string[] {
+  const out: string[] = [];
+  for (const seg of segs) {
+    if (seg === "**" && out.length > 0 && out[out.length - 1] === "**") continue;
+    out.push(seg);
+  }
+  return out;
+}
+
 // Segment-list matcher. A `**` segment matches ZERO or more whole path
 // segments, so `src/**` matches `src` itself and `**/*.ts` matches `c.ts`.
+// Memoized on (pi, ti): the verdict for a state is a pure function of it, so
+// caching every visited state bounds the whole match at O(pattern * path)
+// even when several `**` are separated by literals.
 function matchSegments(
   pSegs: string[],
   pi: number,
   tSegs: string[],
   ti: number,
+  memo: Int8Array,
+  width: number,
 ): boolean {
-  if (pi === pSegs.length) return ti === tSegs.length;
-  if (pSegs[pi] === "**") {
-    if (matchSegments(pSegs, pi + 1, tSegs, ti)) return true;
-    return ti < tSegs.length && matchSegments(pSegs, pi, tSegs, ti + 1);
+  const key = pi * width + ti;
+  const cached = memo[key];
+  if (cached !== 0) return cached === 1;
+  let result: boolean;
+  if (pi === pSegs.length) {
+    result = ti === tSegs.length;
+  } else if (pSegs[pi] === "**") {
+    result =
+      matchSegments(pSegs, pi + 1, tSegs, ti, memo, width) ||
+      (ti < tSegs.length && matchSegments(pSegs, pi, tSegs, ti + 1, memo, width));
+  } else if (ti === tSegs.length) {
+    result = false;
+  } else if (!segMatch(pSegs[pi], tSegs[ti])) {
+    result = false;
+  } else {
+    result = matchSegments(pSegs, pi + 1, tSegs, ti + 1, memo, width);
   }
-  if (ti === tSegs.length) return false;
-  if (!segMatch(pSegs[pi], tSegs[ti])) return false;
-  return matchSegments(pSegs, pi + 1, tSegs, ti + 1);
+  memo[key] = result ? 1 : 2;
+  return result;
 }
 
 /**
@@ -274,8 +342,11 @@ function matchSegments(
  */
 export function globMatch(pattern: string, path: string): boolean {
   const target = splitPath(path);
+  const width = target.length + 1;
   for (const expanded of expandBraces(pattern)) {
-    if (matchSegments(splitPath(expanded), 0, target, 0)) return true;
+    const pSegs = collapseDoubleStars(splitPath(expanded));
+    const memo = new Int8Array((pSegs.length + 1) * width);
+    if (matchSegments(pSegs, 0, target, 0, memo, width)) return true;
   }
   return false;
 }
@@ -301,11 +372,14 @@ function literalHead(glob: string): string[] {
 
 // Segment-wise prefix overlap: true when one head is a path prefix of the
 // other (an empty head prefixes everything). Segment-wise, not string-wise,
-// so `src` does not overlap `src2/...`.
+// so `src` does not overlap `src2/...`. Segments compare case-INSENSITIVELY:
+// on a case-insensitive filesystem (darwin) `Src/**` and `src/**` name the
+// same real directory, and per plan lines 2091-2093 an over-approximation only
+// serializes work — never corrupts it — so folding case is pure-safe.
 function headsOverlap(a: string[], b: string[]): boolean {
   const n = a.length < b.length ? a.length : b.length;
   for (let i = 0; i < n; i++) {
-    if (a[i] !== b[i]) return false;
+    if (a[i].toLowerCase() !== b[i].toLowerCase()) return false;
   }
   return true;
 }

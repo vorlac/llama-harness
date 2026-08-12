@@ -190,3 +190,33 @@ output), decision, alternatives considered, blast radius.
   (mandates value-importing `tool({...})`): the plan's own tension; Task 5.3 must
   resolve it explicitly when authoring the production plugin.
 - **Blast radius:** gate script (stricter only); wire-notes wording; no code.
+
+## C-016 (2026-08-12) — Phase 1 adversarial gate: 2 fix rounds, 6 future-task bindings
+
+- **Gate outcome:** 6 independent lens contexts (spec-conformance ×2, correctness ×2,
+  boundary-cases ×2, counterexample ×2) found 8 confirmed defects incl. 5 majors. Two
+  bounded fix rounds (plan §7.2 cap is 3) resolved every in-scope defect; orchestrator
+  re-ran all 26 lens malicious inputs against the fixed modules (26/26 corrected).
+- **Fixed in committed Phase-1 code** (freshness/shell-parse/decide/stops/types), all
+  test-first, +27 pinning tests (252 -> 279): classifyFailure interior-`..` escape;
+  scopesIntersect case-insensitive heads (pure-safe over-approx); isHumanTerritory
+  `push --force`/`-f`/`$N/month`; zero-budget env guard; **globMatch exponential
+  backtracking (MAJOR DoS — 130s -> 0.1ms via `**`-collapse + memoization, hot path on
+  every gate check)**; **gitSubcommand fail-safe on unrecognized global flags (MAJOR
+  false-ALLOW: `git --namespace log apply` returned allow-listed `log`)**; **isGitCommand
+  skips env-assignment/env/command/sudo/exec wrappers + basename-resolves path git
+  (MAJOR false-negative)**; verifyFreshFor non-finite-timestamp fail-safe; scanKeywords
+  rejects tuple-form `items` (JSON-Schema-2020-12 divergence with the router validator).
+- **Justification for editing earlier-task files (M6):** confirmed security/liveness
+  findings from the milestone gate; every change added tests and preserved all existing
+  assertions (git numstat: additions only, zero deletions on test files).
+- **Bound to future tasks** (assertion ledgers carry phaseGate1Bindings): 5.1 (full-token
+  deny matrix; `branch -D` must deny; env/value-flag red-team spellings), 5.2
+  (wrapper-aware writeShapedPaths), 6.1 (per-kind evidence validation; absolute-path
+  relativization before classifyFailure — this repo is ESM and emits absolute
+  module-not-found; tight anchored runnerRules), 9.1 (derived-decision scoring;
+  ClassificationCheck correctedKind), 9.5a (under-delivered skeptic panel must not
+  silent-drop a major), 3.3 (empty-scope conservative serialize).
+- **G7-documented residuals** (honest-limits-pending.md): backtick substitution, alias
+  injection, `sh -c`/`bash -c` wrappers, `$'...'` ANSI-C quoting.
+- **Blast radius:** hardening only; every change is the safe direction; all 279 tests green.

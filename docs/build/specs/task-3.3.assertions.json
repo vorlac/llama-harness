@@ -1,12 +1,44 @@
 {
   "taskId": "3.3",
-  "planLines": [2261, 2273],
-  "kind": "code (tier B). Depends on 1.1 (types) + 1.2 (scopesIntersect). Subagents read §4.2 (1544-1618).",
+  "planLines": [
+    2261,
+    2273
+  ],
+  "kind": "code (tier B). Depends on 1.1 (types) + 1.2 (scopesIntersect). Subagents read \u00a74.2 (1544-1618).",
   "assertions": [
-    { "id": "3.3-api", "text": "nextWave(queue, items, config) -> {parallel: string[], rationale}: dependency-ready AND pairwise scope-disjoint AND <= maxImplementers; deterministic order DAG depth then id; readFanout(stage, config) -> number", "planLine": 2263, "coveredByTest": null },
-    { "id": "3.3-diamond", "text": "diamond DAG produces correct waves", "planLine": 2267, "coveredByTest": null },
-    { "id": "3.3-overlap", "text": "scope overlap forces serialization; the conservative scopesIntersect bias appears as a test here", "planLine": 2267, "coveredByTest": null },
-    { "id": "3.3-cap", "text": "maxImplementers cap enforced", "planLine": 2268, "coveredByTest": null },
-    { "id": "3.3-unlock", "text": "PUBLISHED deps unlock dependents", "planLine": 2269, "coveredByTest": null }
-  ]
+    {
+      "id": "3.3-api",
+      "text": "nextWave(queue, items, config) -> {parallel: string[], rationale}: dependency-ready AND pairwise scope-disjoint AND <= maxImplementers; deterministic order DAG depth then id; readFanout(stage, config) -> number",
+      "planLine": 2263,
+      "coveredByTest": null
+    },
+    {
+      "id": "3.3-diamond",
+      "text": "diamond DAG produces correct waves",
+      "planLine": 2267,
+      "coveredByTest": null
+    },
+    {
+      "id": "3.3-overlap",
+      "text": "scope overlap forces serialization; the conservative scopesIntersect bias appears as a test here",
+      "planLine": 2267,
+      "coveredByTest": null
+    },
+    {
+      "id": "3.3-cap",
+      "text": "maxImplementers cap enforced",
+      "planLine": 2268,
+      "coveredByTest": null
+    },
+    {
+      "id": "3.3-unlock",
+      "text": "PUBLISHED deps unlock dependents",
+      "planLine": 2269,
+      "coveredByTest": null
+    }
+  ],
+  "phaseGate1Bindings": {
+    "source": "Phase 1 adversarial gate (scopesIntersect empty-input)",
+    "note": "scopesIntersect([], X) returns false (empty scope reads as disjoint -> would join every wave). Harm is contained (an empty-scope item has no files to conflict on, and the edit-scope gate denies all its edits), and the plan's DECOMPOSED gate already REQUIRES non-empty fileScope per item (plan line 1104), so an empty-scope item never reaches the scheduler. The wave scheduler (nextWave) MUST still treat an empty/degenerate scope conservatively (serialize, never parallelize) as defense-in-depth; assert it."
+  }
 }

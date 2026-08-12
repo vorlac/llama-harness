@@ -309,7 +309,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "bbc0f85",
       "commitMessage": "conductor: 1.5 decision helpers",
       "planLines": [
         2144,

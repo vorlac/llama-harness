@@ -1,0 +1,15 @@
+{
+  "taskId": "9.5a",
+  "planLines": [
+    2652,
+    2666
+  ],
+  "kind": "code (tier A) \u2014 created early to carry a Phase-1 gate binding; full assertion rows authored when Phase 9 is reached.",
+  "assertions": [],
+  "phaseGate1Bindings": {
+    "source": "Phase 1 adversarial gate (verdict.findingSurvives)",
+    "MUST": [
+      "findingSurvives(verdicts, k) counts k = skepticsPerFinding as the denominator, so a MISSING verdict (a skeptic that timed out via subSessionTimeoutMs) counts as an overturn. The item-review handler MUST NOT feed an under-delivered panel straight to findingSurvives: on fewer than k returned verdicts it must either re-dispatch the missing skeptics, or count the missing ones as UPHOLDS (conservative \u2014 keep the finding). A real major must never be dropped because a skeptic session crashed."
+    ]
+  }
+}

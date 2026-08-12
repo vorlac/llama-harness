@@ -1,18 +1,84 @@
 {
   "taskId": "6.1",
-  "planLines": [2396, 2441],
-  "kind": "code (tier A; residual-risk lens at phase gate — the out-of-repo quarantine lifecycle is one of the plan's four expected-broken mechanisms, prompt §8.2: extra red-step scrutiny + witness files). Includes adapter/quarantine.ts (prompt §3.3). Subagents read §2.1 itemTest rules (478-635), §2.6.1 (817-851), §4.2 (1544-1618), §4.3 (1619-1635).",
+  "planLines": [
+    2396,
+    2441
+  ],
+  "kind": "code (tier A; residual-risk lens at phase gate \u2014 the out-of-repo quarantine lifecycle is one of the plan's four expected-broken mechanisms, prompt \u00a78.2: extra red-step scrutiny + witness files). Includes adapter/quarantine.ts (prompt \u00a73.3). Subagents read \u00a72.1 itemTest rules (478-635), \u00a72.6.1 (817-851), \u00a74.2 (1544-1618), \u00a74.3 (1619-1635).",
   "assertions": [
-    { "id": "6.1-runtest", "text": "runTest derives command from scope's itemTest template (§2.1 substitutions {files} {dirs} {name}); zero-test guard: a targeted run that executed no tests is neither red nor pass — falls back", "planLine": 2398, "coveredByTest": null },
-    { "id": "6.1-fallback", "text": "no template (or guard fired) => full scope command under §4.2 quarantine, record marked targeted:false; illegal-red rule: failure excerpt must name a testScope file", "planLine": 2402, "coveredByTest": null },
-    { "id": "6.1-classify", "text": "classification via core.classifyFailure with item fileScope; per-runner unresolved-specifier extraction rules are DATA (table), not code; end-to-end: import of not-yet-existing module inside fileScope => missing-subject legal red; outside => error", "planLine": 2405, "coveredByTest": null },
-    { "id": "6.1-runverify-order", "text": "runVerify: quarantine FIRST, then start-stamp, then HEAD/branch record, then run; build-before-test per scope; timeout kills; runs in cwd", "planLine": 2412, "coveredByTest": null },
-    { "id": "6.1-quarantine-out", "text": "excludeTestFiles moved to <stateHome>/conductor/<workspaceKey>/quarantine/<runId>/ OUTSIDE the repo before start-stamp; restored after; quarantined red file provably not executed (witness file)", "planLine": 2415, "coveredByTest": null },
-    { "id": "6.1-crash-manifest", "text": "manifest replays pending restores after a mid-verify kill (next run heals)", "planLine": 2418, "coveredByTest": null },
-    { "id": "6.1-mtime", "text": "quarantined file's mtime survives the round-trip (rename, not copy — else every quarantine invalidates freshness)", "planLine": 2439, "coveredByTest": null },
-    { "id": "6.1-marker", "text": "verify-running-<treeKey>.json {pid,startMs} created/removed; second runVerify against LIVE marker for same tree returns refusal record; stale marker (dead pid) broken with anomaly", "planLine": 2418, "coveredByTest": null },
-    { "id": "6.1-witness", "text": "build-fail => test provably not run (witness file); start-stamp <= a mid-run mtime", "planLine": 2426, "coveredByTest": null },
-    { "id": "6.1-template-name", "text": "itemTest substitution for BOTH {files} and {name} incl. basename-alternation: tests/parser_test.go => parser_test", "planLine": 2429, "coveredByTest": null },
-    { "id": "6.1-ledger", "text": "both runTest and runVerify append to evidence.jsonl and journal", "planLine": 2422, "coveredByTest": null }
-  ]
+    {
+      "id": "6.1-runtest",
+      "text": "runTest derives command from scope's itemTest template (\u00a72.1 substitutions {files} {dirs} {name}); zero-test guard: a targeted run that executed no tests is neither red nor pass \u2014 falls back",
+      "planLine": 2398,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-fallback",
+      "text": "no template (or guard fired) => full scope command under \u00a74.2 quarantine, record marked targeted:false; illegal-red rule: failure excerpt must name a testScope file",
+      "planLine": 2402,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-classify",
+      "text": "classification via core.classifyFailure with item fileScope; per-runner unresolved-specifier extraction rules are DATA (table), not code; end-to-end: import of not-yet-existing module inside fileScope => missing-subject legal red; outside => error",
+      "planLine": 2405,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-runverify-order",
+      "text": "runVerify: quarantine FIRST, then start-stamp, then HEAD/branch record, then run; build-before-test per scope; timeout kills; runs in cwd",
+      "planLine": 2412,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-quarantine-out",
+      "text": "excludeTestFiles moved to <stateHome>/conductor/<workspaceKey>/quarantine/<runId>/ OUTSIDE the repo before start-stamp; restored after; quarantined red file provably not executed (witness file)",
+      "planLine": 2415,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-crash-manifest",
+      "text": "manifest replays pending restores after a mid-verify kill (next run heals)",
+      "planLine": 2418,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-mtime",
+      "text": "quarantined file's mtime survives the round-trip (rename, not copy \u2014 else every quarantine invalidates freshness)",
+      "planLine": 2439,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-marker",
+      "text": "verify-running-<treeKey>.json {pid,startMs} created/removed; second runVerify against LIVE marker for same tree returns refusal record; stale marker (dead pid) broken with anomaly",
+      "planLine": 2418,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-witness",
+      "text": "build-fail => test provably not run (witness file); start-stamp <= a mid-run mtime",
+      "planLine": 2426,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-template-name",
+      "text": "itemTest substitution for BOTH {files} and {name} incl. basename-alternation: tests/parser_test.go => parser_test",
+      "planLine": 2429,
+      "coveredByTest": null
+    },
+    {
+      "id": "6.1-ledger",
+      "text": "both runTest and runVerify append to evidence.jsonl and journal",
+      "planLine": 2422,
+      "coveredByTest": null
+    }
+  ],
+  "phaseGate1Bindings": {
+    "source": "Phase 1 adversarial gate (freshness/evidence chain)",
+    "MUST": [
+      "adapter/evidence.ts MUST validate per-kind required fields when it WRITES/READS an EvidenceRecord (the \u00a72 merged-union schema deliberately requires only the shared fields; a verify record missing startedMs/head/green/scopes must be rejected, not silently treated as fresh). This closes the Finding-4/5 chain from the Phase 1 gate.",
+      "runnerRules (the classifyFailure DATA) MUST ship tight, anchored regexes tested against real runner output (conductor/docs/RUNNER-DISCOVERY.md) so an unrelated crash containing an assertion token, or an in-scope missing-module line beside an unrelated error, is not mis-binned. classifyFailure's text-only causality is a known Phase-1 limitation the rule-data quality bounds.",
+      "adapter/evidence.ts MUST relativize absolute cwd-prefixed paths in captured stderr BEFORE calling core.classifyFailure. Real Node v26 ESM emits `Cannot find module '/abs/.../src/x.ts' imported from /abs/.../tests/x.test.mjs` (absolute), and this repo itself is ESM \u2014 an absolute specifier never matches a repo-relative fileScope glob, so a legal greenfield red would misclassify as `error` (illegal) and the item would die. 6.1 knows the cwd; strip it. TEST with a real ESM fixture emitting absolute paths, not only the CJS `../src/x.ts` shape."
+    ]
+  }
 }

@@ -1,16 +1,71 @@
 {
   "taskId": "5.2",
-  "planLines": [2351, 2374],
-  "kind": "code (tier A; phase-gate red-team-by-data >=15 write-shapes). Subagents read §3.5 (1334-1427).",
+  "planLines": [
+    2351,
+    2374
+  ],
+  "kind": "code (tier A; phase-gate red-team-by-data >=15 write-shapes). Subagents read \u00a73.5 (1334-1427).",
   "assertions": [
-    { "id": "5.2-api", "text": "decideEdit({sessionRole, registered, fileScope, testScope, path, verifyInFlightTree, sessionTree, inlineClaimScope}) -> decision; writeShapedPaths(command) -> string[]; decideSession({registered, role, toolName, toolClass}) -> decision incl. unconditional sub-agent-spawn deny", "planLine": 2353, "coveredByTest": null },
-    { "id": "5.2-orchestrator", "text": "orchestrator denied on src, allowed with matching inline claim", "planLine": 2360, "coveredByTest": null },
-    { "id": "5.2-implementer", "text": "implementer allowed in fileScope, denied out with the scope named", "planLine": 2361, "coveredByTest": null },
-    { "id": "5.2-test-writer", "text": "test-writer allowed ONLY inside testScope, denied on fileScope source paths with the testScope named", "planLine": 2362, "coveredByTest": null },
-    { "id": "5.2-readonly-roles", "text": "reviewer/skeptic/planner denied everywhere", "planLine": 2363, "coveredByTest": null },
-    { "id": "5.2-unregistered", "text": "unregistered session: read allowed, edit denied, conductor_* denied, spawn denied — and spawn denied from a REGISTERED implementer too", "planLine": 2363, "coveredByTest": null },
-    { "id": "5.2-normalization", "text": ".conductor/** denied for anyone AFTER tree-relative normalization: worktree path .../I2/src/a.ts from I2 implementer normalizes to src/a.ts ALLOWED; .../I2/.conductor/... denied", "planLine": 2366, "coveredByTest": null },
-    { "id": "5.2-freeze", "text": "freeze denies EVERY edit in a tree with live verify — incl. test-writer inside its own testScope (the disputed case) — while the same edit in a different tree is allowed", "planLine": 2369, "coveredByTest": null },
-    { "id": "5.2-write-shapes", "text": "writeShapedPaths matrix: redirects, tee, sed -i, mv/cp destinations, rm targets; reads NEVER match (cat, grep counterexamples)", "planLine": 2355, "coveredByTest": null }
-  ]
+    {
+      "id": "5.2-api",
+      "text": "decideEdit({sessionRole, registered, fileScope, testScope, path, verifyInFlightTree, sessionTree, inlineClaimScope}) -> decision; writeShapedPaths(command) -> string[]; decideSession({registered, role, toolName, toolClass}) -> decision incl. unconditional sub-agent-spawn deny",
+      "planLine": 2353,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-orchestrator",
+      "text": "orchestrator denied on src, allowed with matching inline claim",
+      "planLine": 2360,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-implementer",
+      "text": "implementer allowed in fileScope, denied out with the scope named",
+      "planLine": 2361,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-test-writer",
+      "text": "test-writer allowed ONLY inside testScope, denied on fileScope source paths with the testScope named",
+      "planLine": 2362,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-readonly-roles",
+      "text": "reviewer/skeptic/planner denied everywhere",
+      "planLine": 2363,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-unregistered",
+      "text": "unregistered session: read allowed, edit denied, conductor_* denied, spawn denied \u2014 and spawn denied from a REGISTERED implementer too",
+      "planLine": 2363,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-normalization",
+      "text": ".conductor/** denied for anyone AFTER tree-relative normalization: worktree path .../I2/src/a.ts from I2 implementer normalizes to src/a.ts ALLOWED; .../I2/.conductor/... denied",
+      "planLine": 2366,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-freeze",
+      "text": "freeze denies EVERY edit in a tree with live verify \u2014 incl. test-writer inside its own testScope (the disputed case) \u2014 while the same edit in a different tree is allowed",
+      "planLine": 2369,
+      "coveredByTest": null
+    },
+    {
+      "id": "5.2-write-shapes",
+      "text": "writeShapedPaths matrix: redirects, tee, sed -i, mv/cp destinations, rm targets; reads NEVER match (cat, grep counterexamples)",
+      "planLine": 2355,
+      "coveredByTest": null
+    }
+  ],
+  "phaseGate1Bindings": {
+    "source": "Phase 1 adversarial gate",
+    "MUST": [
+      "writeShapedPaths must extract write targets from the same hardened segment analysis (env-prefix/wrapper aware), so `env sh -c '...'` and redirect/tee/sed -i/mv/cp/rm shapes behind a wrapper are still caught.",
+      "The freeze + edit-scope gate must not rely on any freshness/evidence field that a per-kind-incomplete record could leave undefined; when reading evidence, prefer explicit presence checks."
+    ]
+  }
 }
