@@ -1,0 +1,1 @@
+{"taskId":"6.1","step":"test-writer dispatched (evidence engine + quarantine.ts; one of the 4 expected-broken mechanisms)","intendedFiles":["conductor/tests/evidence.test.ts","conductor/adapter/evidence.ts","conductor/adapter/quarantine.ts"],"startedAt":"2026-08-12T19:40:00Z"}
