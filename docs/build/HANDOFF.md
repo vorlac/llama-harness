@@ -19,23 +19,25 @@ Updated: 2026-08-12 (Phases 0-7 complete + gated; Phase 8 underway — 8.1 commi
     security MILESTONE (8 bypasses, C-022/C-023). **P6** evidence+quarantine MILESTONE (9
     crash-safety holes, C-024). **P7** fan-out concurrency (watchdog-armed-too-late MAJOR,
     C-025; F2 binding → 9.4c).
-- **Phase 8 (doctrine) in flight:** **8.1 doctrine packs COMMITTED** — 9 client-agnostic
-  packs (core/decompose/plan/tdd/test-vet/debug/review/skeptic/receive-review) + the
-  doctrine.test.ts anchor test (10 anchors, verbatim-pinned). Observed red (10/10 ENOENT)
-  and green (826/826) myself; read every pack myself. M4 (doc variant) pending post-commit,
-  backfill sha + M4 next docs/build touch.
+- **Phase 8 (doctrine) — 8.1 + 8.2 COMMITTED.** 8.1: 9 client-agnostic packs
+  (core/decompose/plan/tdd/test-vet/debug/review/skeptic/receive-review) + doctrine.test.ts
+  (10 verbatim-pinned anchors), M4 PASS (00cdcd7). 8.2: `adapter/inject.ts` (buildSystemAppend
+  / paramsForRole / headersFor / loadPacks / initPlugin), 837/837. A per-task adversarial
+  review caught a MAJOR pre-commit (false "terminal" claim injected every request on a stalled
+  EXECUTING wave → now renders legalTools.why) + an empty-pack fail-closed hardening (C-027).
+  8.2 M4 pending post-commit, backfill sha + M4 next docs/build touch.
 
 ## What is next (immediate)
 
-1. **Backfill 8.1**: run M4 from the 8.1 commit (revert one pack in a scratch worktree →
-   anchor test must fail naming the missing anchor), then record 8.1 commitSha + M4 result
-   in STATE/GATES.
-2. **Task 8.2 injection** — `conductor/adapter/inject.ts`: buildSystemAppend / paramsForRole
-   / headersFor (plan 2542-2557). Depends 0.2 (system.transform wire), 3.2 (legalTools), 8.1
-   (packs). Carries the 8.2 assertions.
-3. **Phase 8 gate** (doc-fidelity lens: packs faithful to §6.1 port map, no invented rules).
-4. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
+1. **Backfill 8.2**: run M4 from the 8.2 commit (remove inject.ts in a scratch worktree →
+   inject.test.ts missing-subject red), then record 8.2 commitSha + M4 in STATE/GATES.
+2. **Phase 8 gate** (doc-fidelity lens: packs faithful to §6.1 port map, no invented rules;
+   inject.ts renders the authoritative legalTools verdict, never a self-computed claim).
+3. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
    Carries 9.1/9.4a/9.4c/9.5a/9.5b/9.6 bindings below. Then 10.1, 12, 13, 14, 15.
+- Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,
+  overridesRemaining}; init-failure logs via the injected logError seam (§7.1 stderr), never a
+  journal event (closed vocab has no init event — widening it is STOP-AND-PARK).
 
 ## Branch B (C++ router 11.1-11.8) — UNBLOCKED, parallel
 

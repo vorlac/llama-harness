@@ -457,3 +457,41 @@ socket/timer leak airtight; 12x flake sweep clean). 3 hang-family findings:
   diff read, not regexed). Logged to honest-limits-pending.md.
 - **Blast radius:** `scripts/conductor-gate.sh` only; production-source strictness
   unchanged; committed with a `conductor-build:` infra commit ahead of the 8.1 commit.
+
+## C-027 (2026-08-12) — Task 8.2 pre-commit adversarial review: 2 defects in inject.ts
+
+An orchestrator-run adversarial review workflow (3 lenses — spec-conformance, edge/
+counterexample, invariants — each finding skeptic-verified) over the freshly-implemented
+`conductor/adapter/inject.ts`, BEFORE its commit, surfaced two real defects (1 refuted).
+Both were re-derived by the orchestrator, then fixed test-first (new failing tests added,
+red observed, implementer fixed, full-suite green re-observed — 837/837).
+
+- **MAJOR — false terminality in the injected state block.** `renderStateBlock` hardcoded
+  `"Recommended next tool: none (the run is terminal — nothing to advance)."` for EVERY
+  `legalTools(...).recommended === null`. But `legalTools` returns null in several
+  NON-terminal states too — a stalled EXECUTING wave (gates-phase.ts:318-320, e.g. the
+  only actionable item waits on a blocked dependency), the INTAKE non-work branch (245-250),
+  and the default branch (323-326) — each with 4-5 legal meta tools. So the block, re-stated
+  into the system prompt every request (G9), asserted a FALSE "terminal / nothing to advance"
+  claim mid-run, directly contradicting the "Other legal tools available now: N" line beneath
+  it and risking the orchestrator concluding the run was finished. FIX: render the
+  authoritative `verdict.why` (which legalTools already computes and which correctly
+  distinguishes a genuine "Terminal run: …" from a stalled "EXECUTING: no item is
+  schedulable this wave …") instead of any self-computed terminality. Test
+  `8.2-null-recommendation` pins it across a stalled non-terminal case and a real terminal
+  (REPORTED) case.
+- **Fail-closed hardening — empty pack accepted.** `loadPacks` treated a present-but-empty
+  (0-byte / whitespace-only) pack as a successful read, so `initPlugin` wrote the §3.8
+  liveness beacon for effectively-absent doctrine — the exact "looks entirely normal and
+  enforces nothing" failure mode §3.8 exists to make visible. Spec-literal-conformant (§6.4
+  names only a *missing* file), but against §3.8's intent. FIX: `loadPacks` now throws a
+  fail-closed error naming any pack whose `content.trim().length === 0`, so an empty pack
+  fails exactly like a missing one and the beacon is never written. Test `8.2-empty-pack`.
+- **Refuted (1):** the third finding did not survive skeptic verification and was dropped.
+- **Process note:** this is the ultracode adversarial-review pattern applied per-task. The
+  implementer's own "GATE PASS" was on the TARGETED test glob; the major was invisible to
+  the original 9 tests (none exercised a null-recommendation-but-non-terminal state). Caught
+  pre-commit by the review + the orchestrator's mandatory full-suite green + diff read.
+- **Blast radius:** `conductor/adapter/inject.ts` + two new tests in `inject.test.ts`; both
+  ride in the `conductor: 8.2 injection` commit. Ledger rows 8.2-null-recommendation /
+  8.2-empty-pack added to task-8.2.assertions.json.

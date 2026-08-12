@@ -923,7 +923,7 @@
       "taskId": "8.2",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 8.2 injection",
       "planLines": [
@@ -931,14 +931,32 @@
         2560
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 837,
+        "pass": 837,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/inject.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND file:///.../conductor/adapter/inject.ts (observed by orchestrator before inject.ts existed). Two later review-driven assertions (8.2-null-recommendation, 8.2-empty-pack) each independently observed red 10/11+11/11-fail against the un-fixed inject.ts."
+      },
+      "filesTouched": [
+        "conductor/tests/inject.test.ts",
+        "conductor/adapter/inject.ts"
+      ],
+      "revertAssertion": "removing inject.ts re-fails all 11 tests (missing-subject); reverting FIX #1 alone re-reds 8.2-null-recommendation (block renders legalTools.why, not a hardcoded 'terminal'); reverting FIX #2 alone re-reds 8.2-empty-pack (empty pack must fail-closed before the beacon)",
+      "attempts": 1,
+      "deviations": [
+        "buildSystemAppend gained a trailing ctx object {repoConfigured, taintCount, overridesRemaining}: the §6.4 ledger arg list omits the scalars legalTools + the state block need. Helper-signature extension only; §2 schema untouched.",
+        "init-failure channel is the injected logError seam (§7.1 stderr / client.app.log), NOT a journal event: the closed vocabulary (journal-events.ts) has no init event and widening it is a STOP-AND-PARK closed-vocab change, correctly avoided.",
+        "C-027 pre-commit adversarial review: MAJOR false-terminality in the null-recommendation block (fixed to render legalTools.why) + fail-closed empty-pack hardening in loadPacks. Both fixed test-first inside this task; rows 8.2-null-recommendation/8.2-empty-pack added to the ledger."
+      ],
+      "startedAt": "2026-08-12T23:45:00Z",
+      "finishedAt": "2026-08-13T00:15:00Z"
     },
     "9.1": {
       "taskId": "9.1",
