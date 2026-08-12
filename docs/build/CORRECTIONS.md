@@ -356,3 +356,17 @@ SAFE/deny direction:
   ANSI-C escapes that still slip a command word past static analysis are DENIED by the new
   unresolvable-command-word rule (fail-safe), so the residual is now over-blocking, not a
   hole. Backtick/alias remain documented per G7.
+
+## C-023 (2026-08-12) — Phase 5 gate fix round 2: wrapper-with-flags git bypass
+
+Orchestrator re-attack of the C-022 fixes (all 6 confirmed holding) surfaced 3 NEW residuals
+of the same wrapper class: `sudo -u bob git push`, `env -i git push`, `command -p git commit`
+all ALLOW — the Phase-1 wrapper unwrap skips only a BARE wrapper word (`sudo git`), not the
+wrapper's own flags/values, so the command word reads as `-u`/`-i`/`-p` instead of `git` and
+isGitCommand returns false. FIX (fail-safe): the wrapper-unwrap (shell-parse.ts
+gitCommandWordIndex) skips a recognized wrapper's leading option tokens — `-flag`,
+`--flag`, a known value-taking flag's value (sudo -u/-g/-C/-h/-p/-r/-t/-U; env -u/-C/-S),
+and env `NAME=value` — before taking the command word; gates-git reuses that helper and
+DENIES as unresolvable if the structure can't be cleanly resolved to a command word.
+Verified against the 3 inputs + controls (bare `sudo git push` still deny, `env git push`
+still deny, non-wrapper commands unchanged).
