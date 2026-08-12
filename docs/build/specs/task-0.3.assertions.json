@@ -1,18 +1,56 @@
 {
   "taskId": "0.3",
-  "planLines": [2042, 2056],
+  "planLines": [
+    2042,
+    2056
+  ],
   "kind": "code (tier C); red = missing-subject (tests import files that do not exist yet)",
   "assertions": [
-    { "id": "0.3-tree", "text": "The §1.1 conductor tree exists: conductor/{plugin,core,adapter,doctrine,tools,docs,tests/fixtures} dirs as needed", "planLine": 2044, "coveredByTest": null },
-    { "id": "0.3-tsconfig", "text": "conductor/tsconfig.json exists with erasableSyntaxOnly, allowImportingTsExtensions, noEmit, strict", "planLine": 2045, "coveredByTest": null },
-    { "id": "0.3-smoke", "text": "conductor/tests/smoke.test.ts passes and imports a trivial export from conductor/core/types.ts, proving .ts imports run under node --test type-stripping", "planLine": 2046, "coveredByTest": null },
-    { "id": "0.3-fragment", "text": "conductor/opencode-fragment.json exists with the §5.3 block (plan lines 1754-1780) verbatim", "planLine": 2048, "coveredByTest": null },
-    { "id": "0.3-fragment-test", "text": "a test asserts the fragment parses as JSON and contains exactly the seven agent definitions: conductor-orchestrator, conductor-implementer, conductor-test-writer, conductor-reviewer, conductor-skeptic, conductor-planner, conductor-mechanical", "planLine": 2049, "coveredByTest": null },
-    { "id": "0.3-green", "text": "canonical gate green: bash scripts/test-conductor.sh (tests>0, fail=0, skipped=0, todo=0) including the tsc --noEmit leg", "planLine": 2051, "coveredByTest": null },
-    { "id": "0.3-tooling", "text": "prompt §3.4 closure: conductor/package.json with devDependencies ONLY (typescript, @opencode-ai/plugin); conductor/node_modules/ gitignored; tsc leg active in scripts/test-conductor.sh", "planLine": 2051, "coveredByTest": null }
+    {
+      "id": "0.3-tree",
+      "text": "The \u00a71.1 conductor tree exists: conductor/{plugin,core,adapter,doctrine,tools,docs,tests/fixtures} dirs as needed",
+      "planLine": 2044,
+      "coveredByTest": "mechanical: dirs exist on disk (plugin/core/adapter/doctrine/tools/docs/tests/fixtures); git tracks files as they land"
+    },
+    {
+      "id": "0.3-tsconfig",
+      "text": "conductor/tsconfig.json exists with erasableSyntaxOnly, allowImportingTsExtensions, noEmit, strict",
+      "planLine": 2045,
+      "coveredByTest": "mechanical + M3: tsc -p conductor/tsconfig.json --noEmit runs in every gate pass"
+    },
+    {
+      "id": "0.3-smoke",
+      "text": "conductor/tests/smoke.test.ts passes and imports a trivial export from conductor/core/types.ts, proving .ts imports run under node --test type-stripping",
+      "planLine": 2046,
+      "coveredByTest": "smoke.test.ts: 'smoke: CONDUCTOR_NAME imported from ../core/types.ts equals \"conductor\"'"
+    },
+    {
+      "id": "0.3-fragment",
+      "text": "conductor/opencode-fragment.json exists with the \u00a75.3 block (plan lines 1754-1780) verbatim",
+      "planLine": 2048,
+      "coveredByTest": "fragment.test.ts: plugin single-entry test + orchestrator permission test + subagent-mode test + edit-deny test (exact-value pins to \u00a75.3)"
+    },
+    {
+      "id": "0.3-fragment-test",
+      "text": "a test asserts the fragment parses as JSON and contains exactly the seven agent definitions: conductor-orchestrator, conductor-implementer, conductor-test-writer, conductor-reviewer, conductor-skeptic, conductor-planner, conductor-mechanical",
+      "planLine": 2049,
+      "coveredByTest": "fragment.test.ts: 'parses as strict JSON with exactly the top-level keys plugin and agent' + 'agent object has exactly the seven conductor agent definitions'"
+    },
+    {
+      "id": "0.3-green",
+      "text": "canonical gate green: bash scripts/test-conductor.sh (tests>0, fail=0, skipped=0, todo=0) including the tsc --noEmit leg",
+      "planLine": 2051,
+      "coveredByTest": "observed by orchestrator: TAP tests=7 pass=7 fail=0 skipped=0 todo=0; typecheck OK; GATE PASS"
+    },
+    {
+      "id": "0.3-tooling",
+      "text": "prompt \u00a73.4 closure: conductor/package.json with devDependencies ONLY (typescript, @opencode-ai/plugin); conductor/node_modules/ gitignored; tsc leg active in scripts/test-conductor.sh",
+      "planLine": 2051,
+      "coveredByTest": "conductor/package.json devDeps only (typescript 5.9.3, @opencode-ai/plugin 1.18.10, @types/node 26.2.0) + type:module; conductor/node_modules/ gitignored; tsc leg active"
+    }
   ],
   "deviations": [
-    "Plan's smoke test says 'asserting 1 === 1' — that exact shape is rejected by gate M5 (trivially-true assertion). The smoke test instead asserts on the value of the imported types.ts export, which preserves the task's stated purpose (prove .ts imports execute) without a vacuous assertion. Recorded as C-010.",
+    "Plan's smoke test says 'asserting 1 === 1' \u2014 that exact shape is rejected by gate M5 (trivially-true assertion). The smoke test instead asserts on the value of the imported types.ts export, which preserves the task's stated purpose (prove .ts imports execute) without a vacuous assertion. Recorded as C-010.",
     "scripts/test-conductor.sh already exists (authored at preflight, C-005) and is stronger than the plan's two-line version; 0.3 records canonicalTestCmd in STATE.json instead of re-creating it."
   ]
 }

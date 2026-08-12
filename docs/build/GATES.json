@@ -2,25 +2,111 @@
   "selfTests": [
     {
       "at": "2026-08-12T08:46:14Z",
-      "trigger": "pre-0.1 (orchestrator prompt §7.3)",
+      "trigger": "pre-0.1 (orchestrator prompt \u00a77.3)",
       "cases": [
-        { "id": "S1", "case": "passing suite", "expect": "exit 0", "observed": "exit 0, tests=1 pass=1", "verdict": "OK" },
-        { "id": "S2", "case": "failing suite", "expect": "nonzero", "observed": "exit 1, fail=1 rejected", "verdict": "OK" },
-        { "id": "S3", "case": "skip present", "expect": "nonzero", "observed": "exit 1, skipped=1 rejected despite node exit 0", "verdict": "OK" },
-        { "id": "S4", "case": "todo present", "expect": "nonzero", "observed": "exit 1, todo=1 rejected despite node exit 0", "verdict": "OK" },
-        { "id": "S5", "case": "zero-match glob", "expect": "nonzero", "observed": "exit 1, tests=0 rejected despite node exit 0", "verdict": "OK" },
-        { "id": "S6", "case": "directory arg", "expect": "converted to glob, exit 0", "observed": "exit 0, 1 test ran", "verdict": "OK" },
-        { "id": "S7", "case": "M5 TODO marker", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
-        { "id": "S8", "case": "M5 test.skip", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
-        { "id": "S9", "case": "M5 assert.ok(true)", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
-        { "id": "S10", "case": "M5 empty catch", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
-        { "id": "S11", "case": "M5 clean file", "expect": "exit 0", "observed": "exit 0", "verdict": "OK" }
+        {
+          "id": "S1",
+          "case": "passing suite",
+          "expect": "exit 0",
+          "observed": "exit 0, tests=1 pass=1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S2",
+          "case": "failing suite",
+          "expect": "nonzero",
+          "observed": "exit 1, fail=1 rejected",
+          "verdict": "OK"
+        },
+        {
+          "id": "S3",
+          "case": "skip present",
+          "expect": "nonzero",
+          "observed": "exit 1, skipped=1 rejected despite node exit 0",
+          "verdict": "OK"
+        },
+        {
+          "id": "S4",
+          "case": "todo present",
+          "expect": "nonzero",
+          "observed": "exit 1, todo=1 rejected despite node exit 0",
+          "verdict": "OK"
+        },
+        {
+          "id": "S5",
+          "case": "zero-match glob",
+          "expect": "nonzero",
+          "observed": "exit 1, tests=0 rejected despite node exit 0",
+          "verdict": "OK"
+        },
+        {
+          "id": "S6",
+          "case": "directory arg",
+          "expect": "converted to glob, exit 0",
+          "observed": "exit 0, 1 test ran",
+          "verdict": "OK"
+        },
+        {
+          "id": "S7",
+          "case": "M5 TODO marker",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S8",
+          "case": "M5 test.skip",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S9",
+          "case": "M5 assert.ok(true)",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S10",
+          "case": "M5 empty catch",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S11",
+          "case": "M5 clean file",
+          "expect": "exit 0",
+          "observed": "exit 0",
+          "verdict": "OK"
+        }
       ],
       "result": "11/11 OK. node --test traps re-verified same day: directory positional = bogus failing test (exit 1, MODULE_NOT_FOUND as test failure); zero-match glob = exit 0; quoted glob + TAP reporter = parseable counts.",
       "rerunDue": "Phase 5, 9, 13 boundaries"
     }
   ],
-  "taskGates": {},
+  "taskGates": {
+    "0.3": {
+      "at": "2026-08-12T09:03:09Z",
+      "M1": "PASS tests=7 pass=7 fail=0 skipped=0 todo=0",
+      "M2": "PASS first TS task: 0 -> 7 passes (strictly greater, adds tests)",
+      "M3": "PASS tsc --noEmit clean",
+      "M4": "pending post-commit re-derivation (recorded next touch)",
+      "M5": "PASS after 1 rejection (see rejections)",
+      "M6": "PASS scope = intendedFiles + docs/build/*",
+      "M7": "PASS all 7 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a (bun leg starts at 2.2)"
+    }
+  },
   "phaseGates": {},
-  "rejections": []
+  "rejections": [
+    {
+      "at": "2026-08-12T09:03:09Z",
+      "gate": "M5",
+      "what": "fragment.test.ts contained the scan word 'placeholder' (benign: describing the literal ${LLAMA_HARNESS_ROOT} token)",
+      "resolution": "reworded comments/messages to 'substitution token'; gate kept strict"
+    }
+  ]
 }

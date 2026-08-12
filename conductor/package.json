@@ -1,0 +1,11 @@
+{
+  "name": "conductor",
+  "private": true,
+  "type": "module",
+  "description": "TDD-enforcing orchestration harness for opencode + llama.cpp. Zero runtime dependencies (G1): everything below is types/dev tooling only.",
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.10",
+    "@types/node": "^26",
+    "typescript": "^5.9"
+  }
+}

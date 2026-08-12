@@ -1,0 +1,17 @@
+{
+  "taskId": "4.1",
+  "planLines": [2276, 2304],
+  "kind": "code (tier B). ORDERING OVERRIDE: built AFTER 4.2 (needs real gitio reads, G4 forbids stubbing them). Includes adapter/questions.ts (prompt §3.3). Subagents read §2.11 (979-1026), §3.8 (1478-1495), §3.9 (1496-1509), §2.3 (671-712).",
+  "assertions": [
+    { "id": "4.1-lifecycle", "text": "createRun captures startHead/startBranch/startDirty + active §2.11 stale-red entries into excludedStaleRed, prunes per retention; loadRun/saveRun/currentRun/archiveRun", "planLine": 2278, "coveredByTest": null },
+    { "id": "4.1-dispositions", "text": "item CRUD incl. setBlocked/clearBlocked/setDeferred/setDebugging; round-trip; itemsSummary computes from them", "planLine": 2280, "coveredByTest": null },
+    { "id": "4.1-questions", "text": "question ledger via adapter/questions.ts: append + answer clears every item that named the question", "planLine": 2282, "coveredByTest": null },
+    { "id": "4.1-stale-red", "text": "workspace stale-red registry read/add/remove", "planLine": 2283, "coveredByTest": null },
+    { "id": "4.1-evidence-append", "text": "state.ts exposes raw ledger append but a test asserts no other adapter imports it (evidence.ts is THE writer)", "planLine": 2283, "coveredByTest": null },
+    { "id": "4.1-atomic", "text": "atomic tmp+rename (pid-suffixed); write interrupted by injected throw leaves old file intact; BOM-tolerant reads", "planLine": 2285, "coveredByTest": null },
+    { "id": "4.1-exclude", "text": ".git/info/exclude registration idempotent, SKIPPED in no-git mode (§3.9)", "planLine": 2292, "coveredByTest": null },
+    { "id": "4.1-retention", "text": "retention prunes to keepRuns oldest-first, never touches the live run", "planLine": 2295, "coveredByTest": null },
+    { "id": "4.1-beacon", "text": "liveness beacon written at init (§3.8); halt detection", "planLine": 2285, "coveredByTest": null },
+    { "id": "4.1-lock", "text": "advisory lockfile {pid,startMs}: LIVE foreign lock => read-only flag + loud journal warning; dead-pid/over-age lock broken with anomaly record and single-writer claimed (mirrors Task 6.1 marker rule)", "planLine": 2297, "coveredByTest": null }
+  ]
+}

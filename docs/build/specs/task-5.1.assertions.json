@@ -1,0 +1,14 @@
+{
+  "taskId": "5.1",
+  "planLines": [2324, 2349],
+  "kind": "code (tier A: 2 lenses + skeptics on majors; phase-gate red-team-by-data >=20 deny spellings). Subagents read §3.5 (1334-1427) — the git deny matrix is normative; NEVER paraphrase it.",
+  "assertions": [
+    { "id": "5.1-api", "text": "decideGit(command, sessionRole, gitMode, runActive, branchPolicy) -> {action: allow|deny, reason?}; DEFAULT-DENY for any subcommand not in the read-only allow-list or an explicit row", "planLine": 2326, "coveredByTest": null },
+    { "id": "5.1-matrix", "text": "the FULL §3.5 matrix as a table, one test per row", "planLine": 2330, "coveredByTest": null },
+    { "id": "5.1-false-positives", "text": "verbatim guards: git add src/config.ts deny naming conductor_publish; git log --grep config allow; git stash push -m drop deny; git stash list allow; git commit -m \"fix reset logic\" deny-with-publish-reason (not destructive-verb false positive); echo hi && git reset --hard deny (every segment scanned); newline-separated compound deny; +refspec/:refspec push denies; restore --staged allow vs restore --staged --worktree deny", "planLine": 2331, "coveredByTest": null },
+    { "id": "5.1-new-denies", "text": "one test each: git apply patch.diff deny (most important row); worktree add deny; update-ref, symbolic-ref, sparse-checkout set, submodule update, bisect start, gc --prune=now, reflog expire, fetch, remote set-url, tag -d v1, config user.email x all deny", "planLine": 2338, "coveredByTest": null },
+    { "id": "5.1-allows", "text": "git blame, shortlog, describe, cat-file -p HEAD, rev-list --count HEAD, worktree list, config --get user.name all allow", "planLine": 2342, "coveredByTest": null },
+    { "id": "5.1-default-deny", "text": "invented subcommand git frobnicate denies by default with reason naming the subcommand", "planLine": 2344, "coveredByTest": null },
+    { "id": "5.1-branch-policy", "text": "git switch feature: deny under branchPolicy pin with run active; allow under check-only; allow under pin with no active run", "planLine": 2346, "coveredByTest": null }
+  ]
+}

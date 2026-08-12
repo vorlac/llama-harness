@@ -1,0 +1,48 @@
+{
+  "plugin": ["${LLAMA_HARNESS_ROOT}/conductor/plugin/index.ts"],
+  "agent": {
+    "conductor-orchestrator": {
+      "mode": "primary",
+      "description": "Coordinates the conductor workflow; does not edit source",
+      "permission": {
+        "edit": "ask",
+        "bash": {
+          "*": "allow",
+          "git commit *": "deny",
+          "git push *": "deny"
+        }
+      },
+      "prompt": "{file:${LLAMA_HARNESS_ROOT}/conductor/doctrine/core.md}"
+    },
+    "conductor-implementer": {
+      "mode": "subagent",
+      "description": "Implements one item",
+      "permission": { "question": "ask" }
+    },
+    "conductor-test-writer": {
+      "mode": "subagent",
+      "description": "Writes one item's failing test",
+      "permission": { "question": "ask" }
+    },
+    "conductor-reviewer": {
+      "mode": "subagent",
+      "description": "Reviews with one lens",
+      "permission": { "question": "ask", "edit": "deny" }
+    },
+    "conductor-skeptic": {
+      "mode": "subagent",
+      "description": "Refutes one finding",
+      "permission": { "question": "ask", "edit": "deny" }
+    },
+    "conductor-planner": {
+      "mode": "subagent",
+      "description": "Decomposes and plans",
+      "permission": { "question": "ask", "edit": "deny" }
+    },
+    "conductor-mechanical": {
+      "mode": "subagent",
+      "description": "Small schema-bound tasks",
+      "permission": { "question": "ask", "edit": "deny" }
+    }
+  }
+}

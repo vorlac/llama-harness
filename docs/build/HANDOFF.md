@@ -14,9 +14,9 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## What is in flight
 
-- Nothing. DONE: 0.1 (DECISIONS.md, verified against plan + spot-checked quotes).
-  Next task: **0.3** (scaffold, plan 2042–2056), then 0.2 (ordering override 1).
-  Assertions files pre-written for 0.2, 0.3, 1.1–1.5 under docs/build/specs/.
+- Nothing. DONE: 0.1, 0.3 (scaffold: tsconfig/package.json+lock, smoke+fragment tests
+  7/7, types.ts seed, opencode-fragment.json verbatim §5.3). Next: **0.2** wire
+  contract (MUST NOT skip), then Phase 1. Assertion files pre-written through 5.3.
 
 ## What is parked
 
@@ -40,8 +40,7 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## Next actions
 
-1. Task 0.3 (scaffold, plan 2042–2056) — includes package.json/tsc closure (prompt
-   §3.4). NOTE C-010: smoke test asserts on the imported export value, never a literal
-   1===1 (M5 rejects trivially-true assertions).
-2. Task 0.2 (wire contract, plan 1999–2041) — must NOT skip; opencode 1.18.10 installed.
+1. Task 0.2 (wire contract, plan 1999–2041) — must NOT skip; opencode 1.18.10
+   installed. Its 4 discoveries scope 5.3, 8.2, 10.1, 11.3, 11.6, 12.1.
+2. Phase 0 phase-gate (Stage 1 fresh-worktree + discovery-integrity lens on 0.2).
 3. Then Phase 1 (1.1 first; safe pairs {1.1,1.2,1.4} and {1.3,1.5} per prompt §6.2).

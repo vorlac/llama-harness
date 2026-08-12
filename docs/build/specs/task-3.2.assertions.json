@@ -1,0 +1,19 @@
+{
+  "taskId": "3.2",
+  "planLines": [2234, 2260],
+  "kind": "code (tier B). Subagents read §3.4 (1303-1333), §3.2 (1064-1159), §4.2 (1544-1618).",
+  "assertions": [
+    { "id": "3.2-api", "text": "legalTools(run, items, questions, repoConfigured) -> {legal: Map<toolName, argsHint>, recommended: {tool,args}|null, why}; single source for gate + injection + continuation", "planLine": 2236, "coveredByTest": null },
+    { "id": "3.2-status-everywhere", "text": "conductor_status legal in EVERY state including terminal", "planLine": 2244, "coveredByTest": null },
+    { "id": "3.2-always-tools", "text": "conductor_decide/surface/defer legal in every non-terminal state; conductor_answer legal whenever an open question exists, terminal runs included", "planLine": 2245, "coveredByTest": null },
+    { "id": "3.2-intake", "text": "UNCLASSIFIED INTAKE => only conductor_classify; INTAKE with classification work => conductor_decompose recommended", "planLine": 2247, "coveredByTest": null },
+    { "id": "3.2-dispatch", "text": "PLAN_REVIEWED => conductor_dispatch_wave recommended (performs PLAN_REVIEWED->EXECUTING on first call)", "planLine": 2248, "coveredByTest": null },
+    { "id": "3.2-two-item-wave", "text": "a two-item wave yields a legal SET containing both items' next tools and exactly ONE recommended, deterministic under item reordering", "planLine": 2250, "coveredByTest": null },
+    { "id": "3.2-item-stage", "text": "EXECUTING with I1 at TEST_VETTED => conductor_mark_green{I1} legal, conductor_publish{I1} illegal", "planLine": 2252, "coveredByTest": null },
+    { "id": "3.2-blocked", "text": "a blocked item contributes NO tools to the legal set", "planLine": 2254, "coveredByTest": null },
+    { "id": "3.2-nonbehavioral", "text": "non-behavioral PENDING item offers conductor_mark_green, not conductor_submit_test", "planLine": 2255, "coveredByTest": null },
+    { "id": "3.2-trivial", "text": "EXECUTING flagged trivial legalizes the item tools and conductor_report", "planLine": 2256, "coveredByTest": null },
+    { "id": "3.2-unconfigured", "text": "repoConfigured false => ONLY conductor_setup and conductor_status", "planLine": 2241, "coveredByTest": null },
+    { "id": "3.2-terminal", "text": "isTerminal run => status (+ answer when questions open) and nothing else", "planLine": 2257, "coveredByTest": null }
+  ]
+}

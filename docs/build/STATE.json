@@ -39,7 +39,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "cf90018",
       "commitMessage": "conductor: 0.1 standing decisions",
       "planLines": [
         1978,
@@ -87,7 +87,7 @@
       "taskId": "0.3",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 0.3 scaffold",
       "planLines": [
@@ -95,14 +95,37 @@
         2056
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 7,
+        "pass": 7,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/types.ts (smoke); ENOENT conductor/opencode-fragment.json (6 fragment tests); observed by orchestrator pre-implementation"
+      },
+      "filesTouched": [
+        "conductor/tsconfig.json",
+        "conductor/package.json",
+        "conductor/package-lock.json",
+        ".gitignore",
+        "conductor/tests/smoke.test.ts",
+        "conductor/tests/fragment.test.ts",
+        "conductor/core/types.ts",
+        "conductor/opencode-fragment.json"
+      ],
+      "revertAssertion": "smoke.test.ts 'CONDUCTOR_NAME imported from ../core/types.ts equals \"conductor\"' fails ERR_MODULE_NOT_FOUND if core/types.ts is reverted; all 6 fragment.test.ts tests fail ENOENT if opencode-fragment.json is reverted",
+      "attempts": 1,
+      "deviations": [
+        "C-010 (no 1===1 assertion; @types/node third devDep)",
+        "type:module added to package.json for import.meta under nodenext"
+      ],
+      "startedAt": "2026-08-12T09:00:00Z",
+      "finishedAt": "2026-08-12T09:03:09Z"
     },
     "1.1": {
       "taskId": "1.1",

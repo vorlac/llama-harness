@@ -7,6 +7,9 @@ out/
 # the conductor build-state directory is durable state, not a build tree
 !docs/build/
 
+# conductor dev tooling (G1: types/dev only, never runtime)
+conductor/node_modules/
+
 __pycache__/
 *.pyc
 

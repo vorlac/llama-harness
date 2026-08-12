@@ -6,3 +6,4 @@
 {"ts":"2026-08-12T08:46:14Z","event":"manifest.extracted","detail":"52 commit strings extracted from plan (55 grep hits - 3 prose at lines 1968/2202/2303); STATE.json written with 54 rows"}
 {"ts":"2026-08-12T08:48:00Z","event":"gate.selftest","detail":"11/11 OK pre-0.1 (GATES.json); test-conductor.sh + conductor-gate.sh proven to catch: fail, skip, todo, zero-match, TODO marker, test.skip, trivial assert, empty catch"}
 {"ts":"2026-08-12T08:55:13Z","event":"task.committed","taskId":"0.1","detail":"DECISIONS.md a-g verified against plan 1980-1996; spot-checked §0.3/§1.2 quotes; M5 clean; M6 scope ok"}
+{"ts":"2026-08-12T09:03:09Z","event":"task.committed","taskId":"0.3","detail":"red observed missing-subject (7 fail) -> green 7/7 + tsc; M5 rejected then reworded placeholder wording; type:module fix; fragment verbatim §5.3"}

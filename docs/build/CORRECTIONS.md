@@ -99,3 +99,19 @@ output), decision, alternatives considered, blast radius.
   Editing THIS repo's .gitignore is in scope (prompt §3.4 itself orders a
   conductor/node_modules/ entry); G10 forbids editing TARGET repos' .gitignore only.
 - **Blast radius:** none beyond making docs/build trackable.
+
+## C-010 (2026-08-12) — Task 0.3 smoke test asserts a real value, not `1 === 1`
+
+- **Plan (line 2046):** "one trivial `conductor/tests/smoke.test.ts` asserting `1 === 1`
+  plus importing a trivial `conductor/core/types.ts` export".
+- **Conflict:** gate M5 (and the plan's own G4 anti-stub law it mechanizes) rejects
+  trivially-true assertions of exactly that shape.
+- **Decision:** the smoke test asserts the imported export's VALUE
+  (`CONDUCTOR_NAME === "conductor"`), preserving the task's stated purpose — proving
+  .ts imports execute under node --test — without a vacuous assertion. The import is
+  the meat; the literal comparison was never the point.
+- **Also:** conductor/package.json gained `@types/node` as a third devDependency beyond
+  prompt §3.4's two (typescript, @opencode-ai/plugin): tsc cannot resolve `node:test`
+  et al. without it, and the M3 leg would fail on every test file. Still
+  devDependencies-only; G1 (zero runtime deps) untouched.
+- **Blast radius:** none beyond the smoke test's assertion text and one dev dependency.
