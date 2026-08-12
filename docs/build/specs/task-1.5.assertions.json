@@ -1,0 +1,11 @@
+{
+  "taskId": "1.5",
+  "planLines": [2144, 2160],
+  "kind": "code (tier B). Subagents read §6.2 (1851-1879) and §2.7 (852-874).",
+  "assertions": [
+    { "id": "1.5-score", "text": "scoreOptions(options[]) -> {winner, tie}: sums §2.7 score keys; strictly greater total wins; equal totals tie (winner null or tie:true per interface)", "planLine": 2146, "coveredByTest": null },
+    { "id": "1.5-territory", "text": "isHumanTerritory(question) -> boolean: conservative classifier for taste/aesthetics, money/paid services, irreversible/publish/delete, secrets/credentials", "planLine": 2148, "coveredByTest": null },
+    { "id": "1.5-territory-table", "text": "truth table >=10 cases, both polarities, incl. 'delete' inside a file path [false] vs 'delete the production data' [true]", "planLine": 2154, "coveredByTest": null },
+    { "id": "1.5-two-options", "text": "requireTwoOptions(record): kind:\"derived\" needs >=2 options with scores (Task 9.1's rejection rule)", "planLine": 2151, "coveredByTest": null }
+  ]
+}

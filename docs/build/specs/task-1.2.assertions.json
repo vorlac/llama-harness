@@ -1,0 +1,15 @@
+{
+  "taskId": "1.2",
+  "planLines": [2085, 2099],
+  "kind": "code (tier C)",
+  "assertions": [
+    { "id": "1.2-tokens", "text": "shellTokens(command) -> string[] is quote-aware; operator runs ;&|<>() and newlines emit as standalone tokens", "planLine": 2087, "coveredByTest": null },
+    { "id": "1.2-glued", "text": "glued metachars split: 'a.cpp;git' tokenizes into a.cpp / ; / git", "planLine": 2095, "coveredByTest": null },
+    { "id": "1.2-quoted", "text": "quoted spaces preserved as one token", "planLine": 2095, "coveredByTest": null },
+    { "id": "1.2-newline", "text": "newline acts as a command separator", "planLine": 2095, "coveredByTest": null },
+    { "id": "1.2-split", "text": "splitOnOperators(tokens) -> string[][]", "planLine": 2088, "coveredByTest": null },
+    { "id": "1.2-git", "text": "isGitCommand(seg) and gitSubcommand(seg) skip global options -c k=v, -C dir, --git-dir=", "planLine": 2089, "coveredByTest": null },
+    { "id": "1.2-glob", "text": "globMatch supports **, *, {a,b}; dir/** matches dir itself; truth table includes the src vs src2/a.ts boundary case", "planLine": 2090, "coveredByTest": null },
+    { "id": "1.2-intersect", "text": "scopesIntersect(globsA, globsB) conservative: any literal-prefix overlap of non-wildcard heads -> true; over- and under-cases with the conservative bias asserted", "planLine": 2091, "coveredByTest": null }
+  ]
+}

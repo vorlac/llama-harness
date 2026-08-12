@@ -30,14 +30,15 @@
       "4.2 before 4.1",
       "2.2 after 4.1",
       "12.1 split into 12.1-core + 12.1-G5"
-    ]
+    ],
+    "convention.commitSha": "A row's commitSha is backfilled by the next STATE.json touch (the row's own commit cannot know its sha); git log --grep on commitMessage is authoritative meanwhile."
   },
   "tasks": {
     "0.1": {
       "taskId": "0.1",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 0.1 standing decisions",
       "planLines": [
@@ -46,13 +47,20 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "doc-only task; the plan enumerates no test for 0.1 (tier C mechanical)"
+      },
+      "filesTouched": [
+        "conductor/DECISIONS.md"
+      ],
+      "revertAssertion": "no test by plan design; acceptance-level check instead: conductor/DECISIONS.md exists, non-empty, contains headings (a)-(g) with Options/Why sections (verify-acceptance.sh will assert this)",
+      "attempts": 1,
       "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "startedAt": "2026-08-12T08:55:00Z",
+      "finishedAt": "2026-08-12T08:55:12Z"
     },
     "0.2": {
       "taskId": "0.2",

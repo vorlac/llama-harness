@@ -1,0 +1,11 @@
+{
+  "taskId": "1.4",
+  "planLines": [2130, 2143],
+  "kind": "guard (tier C). Gate M4 uses the MUTATION variant: inject `import fs from \"node:fs\"` into a core file -> guard must fail; inject a legal core sibling import -> guard must pass (not over-broad).",
+  "assertions": [
+    { "id": "1.4-core-imports", "text": "purity.test.ts reads every file under conductor/core/ and asserts imports name only ./....ts core siblings", "planLine": 2132, "coveredByTest": null },
+    { "id": "1.4-core-forbidden", "text": "core source contains none of: node:fs, node:child_process, Bun, fetch(, process.env, Date.now (core takes nowMs as input)", "planLine": 2134, "coveredByTest": null },
+    { "id": "1.4-adapter-guard", "text": "G14 guard: every file under conductor/adapter/ and conductor/plugin/ references none of Bun, the $` shell tag, Bun.spawn, bun: imports", "planLine": 2136, "coveredByTest": null },
+    { "id": "1.4-subprocess", "text": "subprocess use in adapters goes through node:child_process", "planLine": 2141, "coveredByTest": null }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "taskId": "0.1",
+  "planLines": [
+    1978,
+    1998
+  ],
+  "kind": "doc-only (tier C; no test enumerated by the plan; coverage = document anchors, checked by orchestrator grep + read)",
+  "assertions": [
+    {
+      "id": "0.1-a",
+      "text": "DECISIONS.md records decision (a): name = conductor",
+      "planLine": 1981,
+      "coveredByTest": "doc-anchor: ## (a) The system is named \"conductor\""
+    },
+    {
+      "id": "0.1-b",
+      "text": "(b) enforcement substrate = TS plugin (all gates) + C++ router (wall-clock/metrics) + serve.py wiring, per \u00a70.3",
+      "planLine": 1982,
+      "coveredByTest": "doc-anchor: ## (b) Enforcement substrate: TS plugin (all gates) + C++ router (wall-clock/metrics) + serve.py wiring"
+    },
+    {
+      "id": "0.1-c",
+      "text": "(c) gates hard-deny with the BUDGETED conductor_override hatch (\u00a73.6); alternatives recorded: uncapped hatch, no hatch, human-approved hatch",
+      "planLine": 1983,
+      "coveredByTest": "doc-anchor: ## (c) Gates hard-deny, with the budgeted `conductor_override` hatch"
+    },
+    {
+      "id": "0.1-d",
+      "text": "(d) one model for every role (G13, qwen3.6-27b); alternatives recorded: role-tiered routing (rejected: 4-6 weight reloads per item per review round under --models-max 1, confounds POC quality delta with model size), two-tier judge/worker (rejected: same confound, smaller saving)",
+      "planLine": 1985,
+      "coveredByTest": "doc-anchor: ## (d) One model for every role"
+    },
+    {
+      "id": "0.1-e",
+      "text": "(e) stock myprogram/src/main.cpp REPLACED by router targets (unmodified llama.cpp simple-chat example; zero project value; git history preserves it)",
+      "planLine": 1988,
+      "coveredByTest": "doc-anchor: ## (e) The stock example target `myprogram`/`src/main.cpp` is replaced by the router targets"
+    },
+    {
+      "id": "0.1-f",
+      "text": "(f) plugin tests run under Node type-stripping with one Bun smoke test (G14); alternatives recorded: all-Bun tests (rejected: no node --test ergonomics, pure core gains nothing), Node-only (rejected: production runtime never exercised until Phase 13)",
+      "planLine": 1991,
+      "coveredByTest": "doc-anchor: ## (f) Plugin tests run under Node type-stripping, with one Bun smoke test"
+    },
+    {
+      "id": "0.1-g",
+      "text": "(g) .conductor/ state excluded via .git/info/exclude in targets; quarantine and worktrees live OUTSIDE the repo (\u00a71.2); alternative in-repo with runner-exclusion flags rejected as per-runner and per-version fragile",
+      "planLine": 1994,
+      "coveredByTest": "doc-anchor: ## (g) `.conductor/` state excluded via `.git/info/exclude`; quarantine and worktrees live OUTSIDE the repo"
+    },
+    {
+      "id": "0.1-shape",
+      "text": "Each decision is written in the \u00a76.2 record shape in prose: what was decided, \u22652 real options with why the winner won (ladder-5 criteria where relevant)",
+      "planLine": 1981,
+      "coveredByTest": "doc-anchor: document-wide: preamble states \u00a76.2 protocol; every section has Decision/Options/Why with >=2 options"
+    }
+  ]
+}

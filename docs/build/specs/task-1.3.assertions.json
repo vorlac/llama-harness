@@ -1,0 +1,16 @@
+{
+  "taskId": "1.3",
+  "planLines": [2100, 2129],
+  "kind": "code (tier B). One of the four mechanisms the plan flags as likely-broken is §2.6.1 missing-subject — extra red-step scrutiny (orchestrator prompt §8.2). Subagents read §2.6.1 (817-851), §2.9 (888-918), §3.7 (1456-1477), §3.9 (1496-1509).",
+  "assertions": [
+    { "id": "1.3-fresh-api", "text": "verifyFreshFor(record, {stagedMtimes, indexMtimeMs, hasStagedDeletion, currentHead, noGit}) -> {fresh, why}; §2.6's TWO conditions; startedMs === ref counts fresh; HEAD term skipped when noGit", "planLine": 2103, "coveredByTest": null },
+    { "id": "1.3-fresh-boundary", "text": "freshness boundary truth table incl. equality case", "planLine": 2117, "coveredByTest": null },
+    { "id": "1.3-fresh-deletion", "text": "staged-deletion term covered", "planLine": 2118, "coveredByTest": null },
+    { "id": "1.3-fresh-head", "text": "HEAD mismatch fails freshness while every mtime term passes (branch-switch case)", "planLine": 2118, "coveredByTest": null },
+    { "id": "1.3-fresh-nogit", "text": "noGit skips the HEAD term", "planLine": 2119, "coveredByTest": null },
+    { "id": "1.3-classify-table", "text": "classifyFailure truth table with AT LEAST: node Cannot-find-module '../src/slugify.ts' with src/** IN fileScope => missing-subject; same OUT of scope => error; Cannot find module 'lodash' => error; SyntaxError in test file => error; pytest ModuleNotFoundError for item's package => missing-subject; Go build failure naming item's package => missing-subject; plain assertion => assertion", "planLine": 2119, "coveredByTest": null },
+    { "id": "1.3-stops", "text": "shouldTerminate covers every computed stop kind: noop at futileRePrompts==3 (the single wedge detector, identical to §3.7), blocked/surfaced/deferred derived from itemsSummary counts, env on override-budget exhaustion; interrupt is never computed here", "planLine": 2109, "coveredByTest": null },
+    { "id": "1.3-terminal", "text": "isTerminal: terminal state OR stop !== null; EXECUTING-with-stop is terminal", "planLine": 2114, "coveredByTest": null },
+    { "id": "1.3-verdict", "text": "findingSurvives: k=2 -> 0 upholds dies, 1 (tie) survives, 2 survives; k=3 majority cases", "planLine": 2115, "coveredByTest": null }
+  ]
+}

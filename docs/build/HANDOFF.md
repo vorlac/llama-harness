@@ -14,8 +14,9 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## What is in flight
 
-- Nothing. Next task: **0.1** (DECISIONS.md, plan lines 1978–1998, tier C), then 0.3,
-  then 0.2 (ordering override 1).
+- Nothing. DONE: 0.1 (DECISIONS.md, verified against plan + spot-checked quotes).
+  Next task: **0.3** (scaffold, plan 2042–2056), then 0.2 (ordering override 1).
+  Assertions files pre-written for 0.2, 0.3, 1.1–1.5 under docs/build/specs/.
 
 ## What is parked
 
@@ -39,8 +40,8 @@ Updated: 2026-08-12T08:46Z (scaffold commit)
 
 ## Next actions
 
-1. Task 0.1: read plan 1978–1998, write conductor/DECISIONS.md (decisions a–g with
-   alternatives, §6.2 record shape in prose), M5+M6 gate, commit
-   `conductor: 0.1 standing decisions` + STATE row in same commit.
-2. Task 0.3 (scaffold, plan 2042–2056) — includes package.json/tsc closure (prompt §3.4).
-3. Task 0.2 (wire contract, plan 1999–2041) — must NOT skip; opencode 1.18.10 installed.
+1. Task 0.3 (scaffold, plan 2042–2056) — includes package.json/tsc closure (prompt
+   §3.4). NOTE C-010: smoke test asserts on the imported export value, never a literal
+   1===1 (M5 rejects trivially-true assertions).
+2. Task 0.2 (wire contract, plan 1999–2041) — must NOT skip; opencode 1.18.10 installed.
+3. Then Phase 1 (1.1 first; safe pairs {1.1,1.2,1.4} and {1.3,1.5} per prompt §6.2).

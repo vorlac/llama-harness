@@ -5,3 +5,4 @@
 {"ts":"2026-08-12T08:45:00Z","event":"preflight.bun","detail":"brew install bun -> 1.3.14 (C-002); G14 leg ACTIVE"}
 {"ts":"2026-08-12T08:46:14Z","event":"manifest.extracted","detail":"52 commit strings extracted from plan (55 grep hits - 3 prose at lines 1968/2202/2303); STATE.json written with 54 rows"}
 {"ts":"2026-08-12T08:48:00Z","event":"gate.selftest","detail":"11/11 OK pre-0.1 (GATES.json); test-conductor.sh + conductor-gate.sh proven to catch: fail, skip, todo, zero-match, TODO marker, test.skip, trivial assert, empty catch"}
+{"ts":"2026-08-12T08:55:13Z","event":"task.committed","taskId":"0.1","detail":"DECISIONS.md a-g verified against plan 1980-1996; spot-checked §0.3/§1.2 quotes; M5 clean; M6 scope ok"}
