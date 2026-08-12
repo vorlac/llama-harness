@@ -317,7 +317,7 @@
       "M1": "PASS 691/691 node + tsc + bun leg",
       "M2": "PASS 642 -> 691 (+49)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (gates-edit removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (2 files)",
       "M7": "PASS 9 rows + binding",
@@ -325,6 +325,19 @@
       "M9": "PASS bun leg",
       "orchestratorReverify": "12/12 security cases re-run: unconditional spawn deny (registered+unregistered), unregistered read-allow/write-deny/conductor-deny, freeze strict (test-writer denied in own testScope), different-tree no-freeze, reviewer-deny, implementer scope, wrapper-aware env-sh-c write extraction",
       "review": "tier A \u2014 folds into Phase 5 MILESTONE gate (red-team-by-data >=15 write-shapes)"
+    },
+    "5.3": {
+      "at": "2026-08-12T17:03:01Z",
+      "M1": "PASS 703/703 node + tsc + bun leg",
+      "M2": "PASS 691 -> 703 (+12)",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS (3 files)",
+      "M7": "PASS 7 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "fail-closed proof re-run directly: crashed git-rule-checker -> git commit DENIED (throw), ls ALLOWED, both journaled gate-crash (2)"
     }
   },
   "phaseGates": {

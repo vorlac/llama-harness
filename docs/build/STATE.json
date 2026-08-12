@@ -654,7 +654,7 @@
       "manifest": true,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "cc0ed55",
       "commitMessage": "conductor: 5.2 edit + session gates",
       "planLines": [
         2351,
@@ -692,7 +692,7 @@
       "taskId": "5.3",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 5.3 gate wiring",
       "planLines": [
@@ -700,14 +700,32 @@
         2393
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 703,
+        "pass": 703,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gate-wiring.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/tools.ts + plugin/index.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gate-wiring.test.ts",
+        "conductor/adapter/tools.ts",
+        "conductor/plugin/index.ts"
+      ],
+      "revertAssertion": "removing tools.ts/index.ts re-fails all 12 wiring tests; [5.3-fail-closed] only passes against the up-front guardedness flag (crash a git command -> deny; crash ls -> allow). Orchestrator independently re-ran the fail-closed/open proof: git commit BLOCKED, ls ALLOWED, 2 gate-crash logged.",
+      "attempts": 1,
+      "deviations": [
+        "tool() imported as a runtime value from @opencode-ai/plugin (sanctioned: the dev-dep opencode loads at runtime; the recorder-plugin fixture already relies on it); types via import type. G1 spirit preserved (adapter composes only pure cores).",
+        "plugin hook uses an empty registry + pin/runActive defaults as construction-safe placeholders replaced by later phases (5.4/9.x)"
+      ],
+      "startedAt": "2026-08-12T17:45:00Z",
+      "finishedAt": "2026-08-12T17:03:01Z"
     },
     "6.1": {
       "taskId": "6.1",

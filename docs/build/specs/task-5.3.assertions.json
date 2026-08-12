@@ -1,14 +1,52 @@
 {
   "taskId": "5.3",
-  "planLines": [2375, 2391],
-  "kind": "code (tier A). Files: adapter/tools.ts (gate hookup half) + plugin/index.ts (hook bodies). Depends on 0.2 (wire contract), 4.1, 5.1, 5.2. Subagents read §3.4 (1303-1333) for the exact tool inventory and §7.4 (1956-1965).",
+  "planLines": [
+    2375,
+    2391
+  ],
+  "kind": "code (tier A). Files: adapter/tools.ts (gate hookup half) + plugin/index.ts (hook bodies). Depends on 0.2 (wire contract), 4.1, 5.1, 5.2. Subagents read \u00a73.4 (1303-1333) for the exact tool inventory and \u00a77.4 (1956-1965).",
   "assertions": [
-    { "id": "5.3-direct-drive", "text": "tests drive exported hook functions directly with synthetic inputs + fixture session registry (no opencode)", "planLine": 2380, "coveredByTest": null },
-    { "id": "5.3-git-deny", "text": "bash git deny throws with the core's reason; edit deny throws", "planLine": 2381, "coveredByTest": null },
-    { "id": "5.3-registry-first", "text": "registry gate runs FIRST: unregistered session's edit denied by the registry rule, not a scope rule, and the reason says so", "planLine": 2382, "coveredByTest": null },
-    { "id": "5.3-spawn", "text": "a spawn attempt throws in every session", "planLine": 2384, "coveredByTest": null },
-    { "id": "5.3-fail-closed", "text": "injected crash in decideGit during a git command still throws (fail-closed) and journals gate-crash; same crash during ls allows and journals", "planLine": 2384, "coveredByTest": null },
-    { "id": "5.3-journal-law", "text": "every deny journals its input snapshot (§7.4; test greps the journal)", "planLine": 2386, "coveredByTest": null },
-    { "id": "5.3-tool-inventory", "text": "plugin tool hook registers exactly the §3.4 tool names, asserted against the inventory", "planLine": 2387, "coveredByTest": null }
+    {
+      "id": "5.3-direct-drive",
+      "text": "tests drive exported hook functions directly with synthetic inputs + fixture session registry (no opencode)",
+      "planLine": 2380,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-direct-drive); orchestrator-reverified fail-closed"
+    },
+    {
+      "id": "5.3-git-deny",
+      "text": "bash git deny throws with the core's reason; edit deny throws",
+      "planLine": 2381,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-git-deny); orchestrator-reverified fail-closed"
+    },
+    {
+      "id": "5.3-registry-first",
+      "text": "registry gate runs FIRST: unregistered session's edit denied by the registry rule, not a scope rule, and the reason says so",
+      "planLine": 2382,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-registry-first); orchestrator-reverified fail-closed"
+    },
+    {
+      "id": "5.3-spawn",
+      "text": "a spawn attempt throws in every session",
+      "planLine": 2384,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-spawn); orchestrator-reverified fail-closed"
+    },
+    {
+      "id": "5.3-fail-closed",
+      "text": "injected crash in decideGit during a git command still throws (fail-closed) and journals gate-crash; same crash during ls allows and journals",
+      "planLine": 2384,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-fail-closed); orchestrator-reverified fail-closed"
+    },
+    {
+      "id": "5.3-journal-law",
+      "text": "every deny journals its input snapshot (\u00a77.4; test greps the journal)",
+      "planLine": 2386,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-journal-law); orchestrator-reverified fail-closed"
+    },
+    {
+      "id": "5.3-tool-inventory",
+      "text": "plugin tool hook registers exactly the \u00a73.4 tool names, asserted against the inventory",
+      "planLine": 2387,
+      "coveredByTest": "gate-wiring.test.ts (names carry 5.3-tool-inventory); orchestrator-reverified fail-closed"
+    }
   ]
 }
