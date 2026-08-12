@@ -1,0 +1,7 @@
+{"ts":"2026-08-12T08:40:00Z","event":"build.launched","detail":"orchestrator prompt received; first run; docs/build created"}
+{"ts":"2026-08-12T08:42:00Z","event":"preflight.probes","detail":"all §2.1 rows verified; login shell zsh not fish (C-004); llama-server 10298 runs; qwen3.6-27b + ornith-9b present; port 8080 free; 431Gi free"}
+{"ts":"2026-08-12T08:43:00Z","event":"preflight.testtrap","detail":"node 26.7.0: dir positional = bogus failing test exit 1; zero-match glob = exit 0; quoted glob TAP OK (C-005)"}
+{"ts":"2026-08-12T08:44:00Z","event":"preflight.pytest","detail":"pip install --user pytest -> 8.4.2 for /usr/bin/python3 (C-003)"}
+{"ts":"2026-08-12T08:45:00Z","event":"preflight.bun","detail":"brew install bun -> 1.3.14 (C-002); G14 leg ACTIVE"}
+{"ts":"2026-08-12T08:46:14Z","event":"manifest.extracted","detail":"52 commit strings extracted from plan (55 grep hits - 3 prose at lines 1968/2202/2303); STATE.json written with 54 rows"}
+{"ts":"2026-08-12T08:48:00Z","event":"gate.selftest","detail":"11/11 OK pre-0.1 (GATES.json); test-conductor.sh + conductor-gate.sh proven to catch: fail, skip, todo, zero-match, TODO marker, test.skip, trivial assert, empty catch"}

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Conductor build: canonical test gate (M1 + M3). Authored and owned by the build
+# orchestrator; subagents must never edit this file.
+#
+# NEVER invoke `node --test` directly for a gate decision. On node v26.7.0:
+#   - a directory positional is resolved as a module -> a bogus "failing test"
+#     (MODULE_NOT_FOUND) that looks exactly like a legitimate red;
+#   - a glob matching zero files exits 0 -> a vacuous green.
+# Both behaviors re-verified 2026-08-12; transcript in docs/build/GATES.json.
+#
+# This wrapper parses the TAP trailer and fails unless:
+#   tests > 0, fail == 0, cancelled == 0, skipped == 0, todo == 0.
+# The skipped/todo rejection closes the "turn a hard test into a skip" erosion route.
+# Once conductor/tsconfig.json exists (Task 0.3), it also typechecks (M3).
+set -u
+
+GLOB="${1:-conductor/tests/**/*.test.ts}"
+# Convert a directory arg into a glob so node never sees a directory positional.
+if [ -d "$GLOB" ]; then
+  GLOB="${GLOB%/}/**/*.test.ts"
+fi
+
+OUT="$(node --test --test-reporter=tap "$GLOB" 2>&1)"
+EC=$?
+
+count() { printf '%s\n' "$OUT" | awk -v k="$1" '$1=="#" && $2==k {v=$3} END{print v+0}'; }
+TESTS=$(count tests); PASS=$(count pass); FAIL=$(count fail)
+CANC=$(count cancelled); SKIP=$(count skipped); TODO=$(count todo)
+
+echo "TAP: tests=$TESTS pass=$PASS fail=$FAIL cancelled=$CANC skipped=$SKIP todo=$TODO (node exit=$EC)"
+
+BAD=0
+[ "$TESTS" -eq 0 ] && { echo "GATE FAIL: zero tests ran (wrong glob or empty suite)"; BAD=1; }
+[ "$FAIL" -gt 0 ] && { echo "GATE FAIL: $FAIL test(s) failing"; BAD=1; }
+[ "$CANC" -gt 0 ] && { echo "GATE FAIL: $CANC test(s) cancelled"; BAD=1; }
+[ "$SKIP" -gt 0 ] && { echo "GATE FAIL: $SKIP test(s) skipped (skips forbidden, G4)"; BAD=1; }
+[ "$TODO" -gt 0 ] && { echo "GATE FAIL: $TODO todo test(s) (todos forbidden, G4)"; BAD=1; }
+if [ "$EC" -ne 0 ] && [ "$BAD" -eq 0 ]; then
+  echo "GATE FAIL: node exited $EC despite clean TAP counts (investigate)"; BAD=1
+fi
+
+if [ "$BAD" -ne 0 ]; then
+  echo "---- failure excerpt (non-ok lines) ----"
+  printf '%s\n' "$OUT" | grep -vE '^ok ' | tail -60
+  exit 1
+fi
+
+# M3 typecheck leg (active from Task 0.3 onward).
+TSC=conductor/node_modules/.bin/tsc
+if [ -f conductor/tsconfig.json ]; then
+  if [ ! -x "$TSC" ]; then
+    echo "GATE FAIL: conductor/tsconfig.json exists but tsc is not installed (npm install in conductor/)"
+    exit 1
+  fi
+  if ! "$TSC" -p conductor/tsconfig.json --noEmit; then
+    echo "GATE FAIL: typecheck (tsc --noEmit)"
+    exit 1
+  fi
+  echo "typecheck: OK"
+fi
+
+echo "GATE PASS"
+exit 0

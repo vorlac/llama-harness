@@ -4,6 +4,8 @@
 # CMake trees, plus where hostinfo.py drops its on-demand membench build
 build/
 out/
+# the conductor build-state directory is durable state, not a build tree
+!docs/build/
 
 __pycache__/
 *.pyc

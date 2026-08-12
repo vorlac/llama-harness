@@ -1,0 +1,26 @@
+{
+  "selfTests": [
+    {
+      "at": "2026-08-12T08:46:14Z",
+      "trigger": "pre-0.1 (orchestrator prompt §7.3)",
+      "cases": [
+        { "id": "S1", "case": "passing suite", "expect": "exit 0", "observed": "exit 0, tests=1 pass=1", "verdict": "OK" },
+        { "id": "S2", "case": "failing suite", "expect": "nonzero", "observed": "exit 1, fail=1 rejected", "verdict": "OK" },
+        { "id": "S3", "case": "skip present", "expect": "nonzero", "observed": "exit 1, skipped=1 rejected despite node exit 0", "verdict": "OK" },
+        { "id": "S4", "case": "todo present", "expect": "nonzero", "observed": "exit 1, todo=1 rejected despite node exit 0", "verdict": "OK" },
+        { "id": "S5", "case": "zero-match glob", "expect": "nonzero", "observed": "exit 1, tests=0 rejected despite node exit 0", "verdict": "OK" },
+        { "id": "S6", "case": "directory arg", "expect": "converted to glob, exit 0", "observed": "exit 0, 1 test ran", "verdict": "OK" },
+        { "id": "S7", "case": "M5 TODO marker", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
+        { "id": "S8", "case": "M5 test.skip", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
+        { "id": "S9", "case": "M5 assert.ok(true)", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
+        { "id": "S10", "case": "M5 empty catch", "expect": "nonzero", "observed": "exit 1", "verdict": "OK" },
+        { "id": "S11", "case": "M5 clean file", "expect": "exit 0", "observed": "exit 0", "verdict": "OK" }
+      ],
+      "result": "11/11 OK. node --test traps re-verified same day: directory positional = bogus failing test (exit 1, MODULE_NOT_FOUND as test failure); zero-match glob = exit 0; quoted glob + TAP reporter = parseable counts.",
+      "rerunDue": "Phase 5, 9, 13 boundaries"
+    }
+  ],
+  "taskGates": {},
+  "phaseGates": {},
+  "rejections": []
+}
