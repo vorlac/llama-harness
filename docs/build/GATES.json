@@ -267,10 +267,22 @@
       "M1": "PASS 491/491 + tsc",
       "M2": "PASS 482 -> 491",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (gitio removed -> missing-subject)",
       "M5": "PASS (G14 re-grepped: no Bun/shell-tag)",
       "M6": "PASS (2 files)",
       "M7": "PASS 6 rows",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "4.1": {
+      "at": "2026-08-12T13:21:05Z",
+      "M1": "PASS 509/509 + tsc",
+      "M2": "PASS 491 -> 509",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS (G14+G6 re-verified by orchestrator: appendLedgerLineRaw only in state.ts; no Bun/shell-tag)",
+      "M6": "PASS (4 files)",
+      "M7": "PASS 10 rows",
       "M8": "n/a",
       "M9": "n/a"
     }

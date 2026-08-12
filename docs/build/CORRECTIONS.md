@@ -272,3 +272,19 @@ output), decision, alternatives considered, blast radius.
   contradicting its own recommended:null).
 - **Blast radius:** gates-phase legal-set for trivial report (stricter/safer); one test
   tightened; one guard test added. All the safe direction.
+
+## C-019 (2026-08-12) — Task 4.1: stale-lock break routed to the journal, not an AnomalyRecord
+
+- **Plan (line 2299-2300):** "a dead pid or over-age lock is broken with an anomaly record".
+- **Conflict:** §2.8 AnomalyRecord kinds are a CLOSED vocabulary {override, gate-crash,
+  disengage} — no lock kind — and anomalies.jsonl is RUN-scoped, while a stale-lock break
+  happens at workspace-open BEFORE any run exists.
+- **Decision (DERIVE-AND-RECORD; routing choice, not a vocabulary change so not
+  STOP-AND-PARK):** the break is journaled as a `warn state lock.stale-break` record
+  (carrying brokenPid + reason dead-pid|over-age) — the anomaly TRACE — rather than an
+  AnomalyRecord in a run file. A LIVE foreign lock journals `warn state lock.contended`,
+  leaves the lock intact, and sets readOnly=true (createRun then throws). isAlive treats
+  any non-ESRCH error (incl. EPERM) as alive, so a lock is never stolen without proof of
+  death. Pinned by state.test.ts:668/682.
+- **Blast radius:** none on the schema; the §2.8 vocabulary is untouched. If a lock-kind
+  anomaly is ever wanted, it is a separate §2.8 change (STOP-AND-PARK) — not done here.

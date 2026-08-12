@@ -518,7 +518,7 @@
       "taskId": "4.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 4.1 state store",
       "planLines": [
@@ -526,21 +526,42 @@
         2304
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 509,
+        "pass": 509,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/state.ts + adapter/questions.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/state.test.ts",
+        "conductor/tests/questions.test.ts",
+        "conductor/adapter/state.ts",
+        "conductor/adapter/questions.ts"
+      ],
+      "revertAssertion": "removing state.ts re-fails all 16 state tests; [4.1-atomic] injected-throw-leaves-old-file only passes against the tmp+rename+rmSync-on-catch writer; [4.1-lock] stale-break only passes against isAlive ESRCH + over-age logic",
+      "attempts": 1,
+      "deviations": [
+        "C-019 stale-break routed to journal (not AnomalyRecord)",
+        "beacon shape {pid,startMs,version,sessionID} per \u00a73.8 over \u00a71.2's 3-field comment",
+        "staleLockMs default 24h injectable",
+        "injected DI clock (now) + pid for deterministic lock/beacon/sinceMs"
+      ],
+      "startedAt": "2026-08-12T14:55:00Z",
+      "finishedAt": "2026-08-12T13:21:05Z"
     },
     "4.2": {
       "taskId": "4.2",
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "37ddab7",
       "commitMessage": "conductor: 4.2 gitio",
       "planLines": [
         2305,
