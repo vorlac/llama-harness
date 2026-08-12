@@ -64,5 +64,23 @@ if [ -f conductor/tsconfig.json ]; then
   echo "typecheck: OK"
 fi
 
+# M9 bun leg (active from Task 2.2 onward): the dual-runtime smoke (G14) must pass
+# under Bun as well as Node. Runs ONLY the single bun-smoke file, not the whole suite
+# (only that file is authored to be runtime-agnostic). bun 1.3.14 was installed at
+# preflight (C-002), so this leg is ACTIVE; a loud SKIP only if bun ever disappears.
+BUN_SMOKE=conductor/tests/bun-smoke.test.ts
+if [ -f "$BUN_SMOKE" ]; then
+  if command -v bun >/dev/null 2>&1; then
+    if ! bun test "$BUN_SMOKE" >/tmp/bun-smoke.out 2>&1; then
+      echo "GATE FAIL: bun leg (bun test $BUN_SMOKE) — G14 dual-runtime divergence"
+      tail -30 /tmp/bun-smoke.out
+      exit 1
+    fi
+    echo "bun leg: OK ($(grep -Eo '[0-9]+ pass' /tmp/bun-smoke.out | head -1))"
+  else
+    echo "GATE WARN: bun absent — bun-smoke leg SKIPPED (loud notice; bun was installed at preflight, so this is a regression to investigate)"
+  fi
+fi
+
 echo "GATE PASS"
 exit 0

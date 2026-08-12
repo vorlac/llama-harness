@@ -1,1 +1,1 @@
-{"taskId":"4.1","step":"test-writer dispatched (state store + questions.ts; big adapter, crash-safety)","intendedFiles":["conductor/tests/state.test.ts","conductor/adapter/state.ts","conductor/adapter/questions.ts"],"startedAt":"2026-08-12T14:55:00Z"}
+{"taskId":"2.2","step":"bun-smoke author dispatched; orchestrator added bun leg to test-conductor.sh (ordering override: 2.2 lands right after 4.1)","intendedFiles":["conductor/tests/bun-smoke.test.ts","scripts/test-conductor.sh"],"startedAt":"2026-08-12T15:40:00Z"}
