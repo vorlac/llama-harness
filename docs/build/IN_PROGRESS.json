@@ -1,1 +1,0 @@
-{"taskId":"3.3","step":"staged scheduler test moved in; red; implementer next","intendedFiles":["conductor/tests/schedule.test.ts","conductor/core/schedule.ts"],"startedAt":"2026-08-12T13:35:00Z"}

@@ -444,7 +444,7 @@
       "taskId": "3.2",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 3.2 phase legality",
       "planLines": [
@@ -452,21 +452,37 @@
         2260
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 479,
+        "pass": 479,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-phase.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-phase.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gates-phase.test.ts",
+        "conductor/core/gates-phase.ts"
+      ],
+      "revertAssertion": "removing core/gates-phase.ts re-fails all 15 legality tests; [3.2-two-item-wave] reorder-determinism only passes against the nextWave-delegated derivation",
+      "attempts": 1,
+      "deviations": [
+        "conductor_report also legalized when ALL items settled (not only trivial) \u2014 \u00a73.2 'no terminal path writes nothing'; adds report to a lone-blocked legal set (test only asserts the 6 per-item tools absent, so passes). To confirm at Phase-3 gate."
+      ],
+      "startedAt": "2026-08-12T13:50:00Z",
+      "finishedAt": "2026-08-12T12:04:27Z"
     },
     "3.3": {
       "taskId": "3.3",
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "680c6d9",
       "commitMessage": "conductor: 3.3 wave scheduler",
       "planLines": [
         2261,

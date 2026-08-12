@@ -243,10 +243,22 @@
       "M1": "PASS 464/464 + tsc",
       "M2": "PASS 451 -> 464",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (schedule removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS",
       "M7": "PASS 5 rows + empty-scope binding",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "3.2": {
+      "at": "2026-08-12T12:04:27Z",
+      "M1": "PASS 479/479 + tsc",
+      "M2": "PASS 464 -> 479",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 11 rows",
       "M8": "n/a",
       "M9": "n/a"
     }
