@@ -616,7 +616,7 @@
       "manifest": true,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "0f2a282",
       "commitMessage": "conductor: 5.1 git policy",
       "planLines": [
         2324,
@@ -653,7 +653,7 @@
       "taskId": "5.2",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 5.2 edit + session gates",
       "planLines": [
@@ -661,14 +661,32 @@
         2374
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 691,
+        "pass": 691,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-edit.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-edit.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gates-edit.test.ts",
+        "conductor/core/gates-edit.ts"
+      ],
+      "revertAssertion": "removing core/gates-edit.ts re-fails all 49 edit-gate tests; [5.2-freeze] test-writer-denied-in-own-testScope and [5.2-unregistered] spawn-denied-from-registered only pass against freeze-before-role + unconditional-spawn-first. Orchestrator re-ran 12 security cases: 12/12 correct.",
+      "attempts": 1,
+      "deviations": [
+        "freeze/.conductor/role ordering (both denies; no test distinguishes)",
+        "decideEdit doesn't re-adjudicate registered (decideSession owns it, \u00a73.5:1344)",
+        "paths outside sessionTree left non-normalized -> fail-safe via role deny"
+      ],
+      "startedAt": "2026-08-12T17:20:00Z",
+      "finishedAt": "2026-08-12T16:24:06Z"
     },
     "5.3": {
       "taskId": "5.3",

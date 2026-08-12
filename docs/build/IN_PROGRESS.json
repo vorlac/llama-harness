@@ -1,1 +1,1 @@
-{"taskId":"5.1","step":"staged git-policy tests moved in; red; implementer next (carries phaseGate1Bindings)","intendedFiles":["conductor/tests/gates-git.test.ts","conductor/core/gates-git.ts"],"startedAt":"2026-08-12T16:50:00Z"}
+{"taskId":"5.2","step":"staged edit-gate tests moved in; red; implementer next","intendedFiles":["conductor/tests/gates-edit.test.ts","conductor/core/gates-edit.ts"],"startedAt":"2026-08-12T17:20:00Z"}

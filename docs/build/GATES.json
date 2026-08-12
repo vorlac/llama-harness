@@ -303,7 +303,7 @@
       "M1": "PASS 642/642 node + tsc + bun leg",
       "M2": "PASS 522 -> 642 (+120)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (gates-git removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (2 files)",
       "M7": "PASS 7 rows + phaseGate1Bindings encoded",
@@ -311,6 +311,20 @@
       "M9": "PASS bun leg",
       "orchestratorReverify": "18/18 security-critical deny/allow cases re-run directly: branch -D deny, apply deny, env/A=b/path/value-flag git push deny, per-segment scan, two-word discrimination, false-positive guards, default-deny, branch-policy matrix \u2014 all correct",
       "review": "tier A \u2014 folds into the Phase 5 MILESTONE gate (security/bypass + red-team-by-data >=20 deny spellings)"
+    },
+    "5.2": {
+      "at": "2026-08-12T16:24:06Z",
+      "M1": "PASS 691/691 node + tsc + bun leg",
+      "M2": "PASS 642 -> 691 (+49)",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 9 rows + binding",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "12/12 security cases re-run: unconditional spawn deny (registered+unregistered), unregistered read-allow/write-deny/conductor-deny, freeze strict (test-writer denied in own testScope), different-tree no-freeze, reviewer-deny, implementer scope, wrapper-aware env-sh-c write extraction",
+      "review": "tier A \u2014 folds into Phase 5 MILESTONE gate (red-team-by-data >=15 write-shapes)"
     }
   },
   "phaseGates": {
