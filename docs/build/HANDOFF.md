@@ -31,7 +31,8 @@ Updated: 2026-08-12 (Phases 0-3 complete + gated; Phase 4 underway)
 
 ## What is parked / unblocked
 
-- **Branch B (C++ router, 11.1–11.7) is UNBLOCKED** (needs 1.1 schemas ✓ + 0.2 streaming
+- **Branch B (C++ router, 11.1–11.7) is UNBLOCKED** — ready-to-execute scaffold
+  plan (CMake surgery + submodule-in-worktree gotcha) in docs/build/branch-b-plan.md. (needs 1.1 schemas ✓ + 0.2 streaming
   ✓) and should run in its own $TMPDIR git worktree parallel to the spine (prompt §6.2 —
   treating it as "eleventh" wastes days). 11.1 Step 1 = scaffold (CMakeLists router
   targets + vcpkg.json ports cpp-httplib/nlohmann-json/json-schema-validator/doctest +
