@@ -1,0 +1,15 @@
+{
+  "taskId": "9.5b",
+  "planLines": [
+    2667,
+    2686
+  ],
+  "kind": "code \u2014 created early to carry a Phase-3 gate binding; full rows authored when the phase is reached.",
+  "assertions": [],
+  "phaseGate3Bindings": {
+    "source": "Phase 3 adversarial gate",
+    "MUST": [
+      "conductor_report handler MUST enforce the \u00a73.2 line 1142 precondition \u2014 every item PUBLISHED, blocked, or deferred \u2014 as a NON-VERIFY presence check (NOT via the closing re-verify, which is defeated by the \u00a74.2 foreign-red-set excluding non-PUBLISHED-below-GREEN items). Applies to trivial report-lite too. Defense-in-depth behind the gates-phase legal-set fix (C-018)."
+    ]
+  }
+}

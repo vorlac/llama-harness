@@ -255,7 +255,7 @@
       "M1": "PASS 479/479 + tsc",
       "M2": "PASS 464 -> 479",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (gates-phase removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS",
       "M7": "PASS 11 rows",
@@ -332,6 +332,29 @@
       },
       "verdict": "PASS after 1 fix round",
       "rejected": "1 crash-recovery durability gap in the write-ahead journal (catch-credit: the crash-recovery lens found a real defect before it reached production)"
+    },
+    "3": {
+      "at": "2026-08-12T12:22:20Z",
+      "stage1": "PASS fresh worktree of bd35785, own npm install, 479/479 + tsc + M5(31 files)",
+      "lenses": {
+        "state-machine-completeness": "FINDINGS: PLAN_REVIEWED->EXECUTING livelock (major, ->9.4c binding), trivial-report (minor), deferred-not-frozen (low, plan-faithful)",
+        "correctness": "SOUND, no majors; minor dep-readiness legal-set inconsistency (->5.3/9.4a), informational single-source (->fixed with guard test)",
+        "counterexample": "FINDINGS: trivial-report MAJOR (loses work, handler backstop defeated by foreign-red-set exclusion); everything else SOUND (no red-skip to GREEN, no scope-overlap corruption, publish only at REVIEWED, dispatch only at PLAN_REVIEWED)"
+      },
+      "adjudication": {
+        "fixed_in_place": [
+          "trivial-report hole: reportLegal = allSettled (drop trivial ||); [3.2-trivial] test tightened to safe contract + settled positive case; orchestrator re-ran the exact malicious input: report denied for trivial+PENDING, allowed for trivial+PUBLISHED",
+          "G6 single-source guard: conductor/tests/single-source.test.ts asserts RUN_STATES/ITEM_STATES set-equal to SCHEMAS.Run/Item.properties.state.enum (by-construction now)"
+        ],
+        "bound_to_future_tasks": {
+          "9.4c": "dispatch_wave supplies PLAN_REVIEWED->EXECUTING context (survivingMajors:0 if planReviewRounds<max else round>=max) \u2014 satisfiable-by-construction",
+          "9.5b": "report handler enforces all-settled as a NON-VERIFY precondition (verify is defeated by foreign-red-set exclusion)",
+          "9.4a/5.3": "decide + make gate/handler consistent on dependency-readiness for direct per-item stage-tool calls"
+        },
+        "verification": "482/482; orchestrator re-ran the counterexample's exact malicious input (2/2 corrected)"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "1 MAJOR (trivial-report work-loss) + G6 latent-risk hardened; catch-credit: 3 lenses, the counterexample lens escalated what the completeness lens under-rated"
     }
   },
   "rejections": [
@@ -364,6 +387,12 @@
       "gate": "phase-2/crash-recovery",
       "what": "torn trailing line corrupts the next journal record",
       "resolution": "first-append newline heal in adapter/journal.ts, test-first ([2.1-torn-write])"
+    },
+    {
+      "at": "2026-08-12T12:22:20Z",
+      "gate": "phase-3",
+      "what": "trivial run could conductor_report with an unsettled item (closes run, loses work; handler re-verify defeated by foreign-red-set exclusion)",
+      "resolution": "reportLegal=allSettled at the gate + 9.5b handler-precondition binding; G6 single-source guard added"
     }
   ]
 }

@@ -235,3 +235,40 @@ output), decision, alternatives considered, blast radius.
   readLastSeq already skipped unparseable lines for seq continuation. 301 -> 302 tests.
 - **Blast radius:** journal durability only; the safe direction; orchestrator re-ran its
   own crash probe (0 fail).
+
+## C-018 (2026-08-12) — Phase 3 gate: trivial-report hole + G6 single-source guard
+
+- **Finding (MAJOR, counterexample lens; corroborated by state-machine lens as minor):**
+  gates-phase `reportLegal = trivial || allSettled` made conductor_report LEGAL for a
+  trivial EXECUTING run with an UNSETTLED (PENDING) item. Since the phase-order gate
+  enforces on the legal set (G9), it would permit conductor_report → EXECUTING→TRIVIAL_DONE
+  (terminal) with the item never tested/implemented/published — the run closes claiming
+  done, work lost. The handler's closing re-verify does NOT save it: the §4.2 foreign-red-
+  set EXCLUDES every non-PUBLISHED item below GREEN, so the unsettled item's own red test
+  is excluded and the verify passes vacuously.
+- **Plan contradiction resolved (DERIVE-AND-RECORD, §8.1 — a legality derivation, not a
+  schema/vocabulary/G change):** line 2256 ("EXECUTING flagged trivial legalizes ...
+  conductor_report") vs line 1142 ("conductor_report requires every item to be PUBLISHED,
+  blocked, or deferred") + §3.2/§3.3 ("the item FSM is NEVER skipped; trivial compresses
+  fan-out width, not process"). Decision: report is REACHABLE in trivial EXECUTING but
+  LEGAL only when all items are settled (same precondition as work runs). Fix:
+  `reportLegal = allSettled` (drop the `trivial ||`). Honors both plan lines under the
+  safe interpretation of 2256.
+- **Test change (sanctioned, M6-justified by the confirmed MAJOR):** [3.2-trivial]
+  rewritten — item stage tool still legal in trivial EXECUTING; report NOT legal with a
+  PENDING item; report legal once the item is settled (PUBLISHED). Additive negative case.
+- **G6 single-source guard (both correctness lenses, informational):** RUN_STATES /
+  ITEM_STATES in fsm-run/fsm-item.ts are parallel copies of types.ts RunState/ItemState —
+  set-equal today but "single source" held by CONVENTION, not construction. New
+  conductor/tests/single-source.test.ts asserts the copies are set-equal, converting it to
+  by-construction (a future divergence fails the test).
+- **Bound to future tasks:** 9.4c (PLAN_REVIEWED->EXECUTING context — dispatch_wave must
+  supply survivingMajors:0 when planReviewRounds<max, else round>=max; the gate is
+  satisfiable-by-construction since you only reach PLAN_REVIEWED by satisfying the exit
+  condition); 9.5b (report handler enforces all-settled as a non-verify precondition,
+  defense-in-depth); 5.3/9.4a (decide + make consistent whether direct per-item stage-tool
+  calls enforce dependency-readiness — legalTools currently offers a stage tool for a
+  dependency-unready item, matching the plan's "first-class for recovery" intent but
+  contradicting its own recommended:null).
+- **Blast radius:** gates-phase legal-set for trivial report (stricter/safer); one test
+  tightened; one guard test added. All the safe direction.

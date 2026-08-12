@@ -321,11 +321,14 @@ test("[3.2-nonbehavioral] a non-behavioral PENDING item offers conductor_mark_gr
 });
 
 // ===========================================================================
-// [3.2-trivial] EXECUTING flagged trivial legalizes the item tools AND
-// conductor_report (report-lite: EXECUTING->TRIVIAL_DONE).
+// [3.2-trivial] EXECUTING flagged trivial legalizes the item's stage tool while
+// the item is unsettled — but conductor_report is NOT legal until EVERY item is
+// settled (§3.2 line 1142; the report precondition is all-settled for trivial
+// AND work runs alike — a trivial run may not report over unfinished work,
+// C-018).
 // ===========================================================================
 
-test("[3.2-trivial] an EXECUTING run flagged trivial legalizes the item's stage tool and conductor_report", () => {
+test("[3.2-trivial] a trivial EXECUTING run with an unsettled item legalizes its stage tool but NOT conductor_report", () => {
   const result = legalTools(
     run({ state: "EXECUTING", classification: { kind: "trivial" } }),
     [item({ id: "T1", state: "PENDING", behavioral: true })],
@@ -333,11 +336,45 @@ test("[3.2-trivial] an EXECUTING run flagged trivial legalizes the item's stage 
     true,
   );
 
-  // The synthesized item's stage tool is legal...
+  // The trivial item's stage tool is legal and recommended...
   assert.ok(result.legal.has(T.submitTest), "the trivial item's stage tool conductor_submit_test is legal");
   assert.deepEqual(result.legal.get(T.submitTest)?.itemIds, ["T1"], "conductor_submit_test targets T1");
-  // ...and conductor_report is legalized alongside it (the trivial terminal path).
-  assert.ok(result.legal.has(T.report), "conductor_report is legal in a trivial EXECUTING run");
+  assert.deepEqual(
+    result.recommended,
+    { tool: T.submitTest, args: { itemId: "T1" } },
+    "the trivial item's next stage tool is recommended while it is unsettled",
+  );
+  // ...but conductor_report is NOT legal while the sole item is still PENDING:
+  // the work is not done, so the report-lite close is not yet due (§3.2).
+  assert.equal(
+    result.legal.has(T.report),
+    false,
+    "conductor_report is NOT legal in a trivial run while an item is unsettled",
+  );
+});
+
+// ===========================================================================
+// [3.2-trivial-report-settled] once the trivial run's sole item is PUBLISHED,
+// every item is settled => conductor_report IS legal (the report-lite terminal
+// path, EXECUTING->TRIVIAL_DONE, now that the work is done).
+// ===========================================================================
+
+test("[3.2-trivial-report-settled] a trivial EXECUTING run whose sole item is PUBLISHED legalizes conductor_report", () => {
+  const result = legalTools(
+    run({ state: "EXECUTING", classification: { kind: "trivial" } }),
+    [item({ id: "T1", state: "PUBLISHED", behavioral: true })],
+    [],
+    true,
+  );
+
+  // The published item exposes no stage tool, and with every item settled the
+  // report-lite close becomes legal — and is the recommendation.
+  assert.ok(result.legal.has(T.report), "conductor_report IS legal once every item is settled");
+  assert.deepEqual(
+    result.recommended,
+    { tool: T.report, args: {} },
+    "conductor_report is recommended once every item is settled",
+  );
 });
 
 // ===========================================================================

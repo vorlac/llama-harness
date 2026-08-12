@@ -1,0 +1,15 @@
+{
+  "taskId": "9.4a",
+  "planLines": [
+    2612,
+    2624
+  ],
+  "kind": "code \u2014 created early to carry a Phase-3 gate binding; full rows authored when the phase is reached.",
+  "assertions": [],
+  "phaseGate3Bindings": {
+    "source": "Phase 3 adversarial gate",
+    "MUST": [
+      "Decide + implement: do direct per-item stage-tool calls (conductor_submit_test etc., called outside the wave driver for recovery) enforce dependency-readiness (deps PUBLISHED)? legalTools offers a stage tool for a dependency-unready item (matching \u00a73.4's 'first-class orchestrator-callable for recovery' intent) while its own recommended is null. Make the gate/handler consistent: either enforce deps-published on direct calls, or document the recovery bypass explicitly. (Phase 3 correctness lens.)"
+    ]
+  }
+}

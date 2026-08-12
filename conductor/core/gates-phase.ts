@@ -280,12 +280,15 @@ export function legalTools(
         if (tool !== null) addStageTool(legal, tool, it.id);
       }
 
-      // conductor_report is legalized for a trivial run (its report-lite terminal
-      // path, EXECUTING->TRIVIAL_DONE) and for any run whose every item is settled
-      // (§3.4's report precondition — the full/stop close path).
+      // conductor_report is legalized ONLY when EVERY item is settled (PUBLISHED,
+      // blocked, or deferred) — the §3.2 report precondition (line 1142), which
+      // holds for trivial AND work runs alike. A trivial run closes report-lite
+      // (EXECUTING->TRIVIAL_DONE), but only once the work is done: report is NOT
+      // legal over an unsettled item merely because the run is trivial (C-018 —
+      // the safe reading of the plan's 2256-vs-1142 contradiction).
       const trivial = run.classification !== null && run.classification.kind === "trivial";
       const allSettled = items.length > 0 && items.every(isSettled);
-      const reportLegal = trivial || allSettled;
+      const reportLegal = allSettled;
       if (reportLegal) legal.set(REPORT, {});
 
       // recommended: the §4.2 wave-order-first item's next stage tool. nextWave

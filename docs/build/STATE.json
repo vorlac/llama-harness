@@ -414,8 +414,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 451,
-        "pass": 451,
+        "tests": 482,
+        "pass": 482,
         "fail": 0,
         "skipped": 0,
         "todo": 0
@@ -445,7 +445,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "bd35785",
       "commitMessage": "conductor: 3.2 phase legality",
       "planLines": [
         2234,
@@ -453,8 +453,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 479,
-        "pass": 479,
+        "tests": 482,
+        "pass": 482,
         "fail": 0,
         "skipped": 0,
         "todo": 0
@@ -490,8 +490,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 464,
-        "pass": 464,
+        "tests": 482,
+        "pass": 482,
         "fail": 0,
         "skipped": 0,
         "todo": 0

@@ -1,0 +1,15 @@
+{
+  "taskId": "9.4c",
+  "planLines": [
+    2640,
+    2651
+  ],
+  "kind": "code \u2014 created early to carry a Phase-3 gate binding; full rows authored when the phase is reached.",
+  "assertions": [],
+  "phaseGate3Bindings": {
+    "source": "Phase 3 adversarial gate",
+    "MUST": [
+      "conductor_dispatch_wave performs PLAN_REVIEWED->EXECUTING, which legalRunTransition gates on survivingMajors===0 || round>=max. dispatch_wave fires from PERSISTED state (Run has planReviewRounds, NOT survivingMajors). It MUST supply satisfying context: if planReviewRounds < planReviewMaxRounds the review exited CLEAN (survivingMajors was 0) -> pass survivingMajors:0; else pass {round:planReviewRounds, max:planReviewMaxRounds} (cap exit). The gate is satisfiable-by-construction because you only reach PLAN_REVIEWED by satisfying the exit condition (\u00a73.2 line 1125). Without this, a clean plan-review livelocks entry to EXECUTING."
+    ]
+  }
+}
