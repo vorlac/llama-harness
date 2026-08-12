@@ -399,6 +399,19 @@
       "M9": "PASS bun leg",
       "orchestratorReverify": "quarantine round-trip re-run: file moved OUT of repo, quarantine dir outside repo, mtime survived (rename not copy), restored; G6 (only evidence.ts imports appendLedgerLineRaw) + G14 re-checked",
       "review": "tier A + one of the 4 expected-broken mechanisms -> folds into Phase 6 milestone gate (crash-recovery + filesystem-safety + residual-risk lenses; stray-write scan)"
+    },
+    "7.1": {
+      "at": "2026-08-12T21:39:53Z",
+      "M1": "PASS 801/801 node + tsc + bun leg",
+      "M2": "PASS 791 -> 801 (+10)",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS (3 files incl fake-sdk fixture)",
+      "M7": "PASS 8 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "no-format binding honored (only comments mention format), registry.set before prompt, G14 clean"
     }
   },
   "phaseGates": {

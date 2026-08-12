@@ -1,1 +1,1 @@
-{"taskId":"7.1","step":"safe pair {7.1,7.2} test-writers dispatched to staging","intendedFiles":["conductor/tests/fanout.test.ts","conductor/adapter/fanout.ts","conductor/tests/fixtures/fake-sdk.ts"],"startedAt":"2026-08-12T21:15:00Z"}
+{"taskId":"7.2","step":"staged router-client test moved in; red; implementer next","intendedFiles":["conductor/tests/router-client.test.ts","conductor/adapter/router-client.ts"],"startedAt":"2026-08-12T21:55:00Z"}

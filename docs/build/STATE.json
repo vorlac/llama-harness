@@ -803,7 +803,7 @@
       "taskId": "7.1",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 7.1 fanout engine",
       "planLines": [
@@ -811,14 +811,31 @@
         2494
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 801,
+        "pass": 801,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/fanout.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/fanout.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/fanout.test.ts",
+        "conductor/tests/fixtures/fake-sdk.ts",
+        "conductor/adapter/fanout.ts"
+      ],
+      "revertAssertion": "removing fanout.ts re-fails all 10 fanout tests; [7.1-grouping] AABB + [7.1-freeze-hold] + [7.1-retry] no-format validate-retry only pass against the real engine. Orchestrator verified: no format field on prompt body (binding), registry.set(241) before prompt(273), G14 clean.",
+      "attempts": 1,
+      "deviations": [
+        "optional trailing runId='' param (createFanout is a fixed 5-arg call site but Corr.runId is mandatory)"
+      ],
+      "startedAt": "2026-08-12T21:15:00Z",
+      "finishedAt": "2026-08-12T21:39:53Z"
     },
     "7.2": {
       "taskId": "7.2",
