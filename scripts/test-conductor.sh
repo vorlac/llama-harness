@@ -26,8 +26,12 @@ EC=$?
 count() { printf '%s\n' "$OUT" | awk -v k="$1" '$1=="#" && $2==k {v=$3} END{print v+0}'; }
 TESTS=$(count tests); PASS=$(count pass); FAIL=$(count fail)
 CANC=$(count cancelled); SKIP=$(count skipped); TODO=$(count todo)
+# describe-level skips are invisible to the trailer counts on node 26.7.0: a skipped
+# SUITE reports "# suites 1" with "# skipped 0" (phase-0 gate finding, C-015). Catch
+# every SKIP/TODO directive on TAP point lines instead, at any subtest depth.
+DIRECTIVES=$(printf '%s\n' "$OUT" | grep -cE '^[[:space:]]*(not )?ok [0-9]+.*# (SKIP|TODO)' || true)
 
-echo "TAP: tests=$TESTS pass=$PASS fail=$FAIL cancelled=$CANC skipped=$SKIP todo=$TODO (node exit=$EC)"
+echo "TAP: tests=$TESTS pass=$PASS fail=$FAIL cancelled=$CANC skipped=$SKIP todo=$TODO skipdirectives=$DIRECTIVES (node exit=$EC)"
 
 BAD=0
 [ "$TESTS" -eq 0 ] && { echo "GATE FAIL: zero tests ran (wrong glob or empty suite)"; BAD=1; }
@@ -35,6 +39,7 @@ BAD=0
 [ "$CANC" -gt 0 ] && { echo "GATE FAIL: $CANC test(s) cancelled"; BAD=1; }
 [ "$SKIP" -gt 0 ] && { echo "GATE FAIL: $SKIP test(s) skipped (skips forbidden, G4)"; BAD=1; }
 [ "$TODO" -gt 0 ] && { echo "GATE FAIL: $TODO todo test(s) (todos forbidden, G4)"; BAD=1; }
+[ "$DIRECTIVES" -gt 0 ] && { echo "GATE FAIL: $DIRECTIVES SKIP/TODO directive(s) in TAP output (describe-level skips evade the trailer counts, C-015)"; BAD=1; }
 if [ "$EC" -ne 0 ] && [ "$BAD" -eq 0 ]; then
   echo "GATE FAIL: node exited $EC despite clean TAP counts (investigate)"; BAD=1
 fi

@@ -170,3 +170,23 @@ output), decision, alternatives considered, blast radius.
   asserted by a new fragment.test.ts test (M6 hard-stop justification: this is the
   plan's own deferred-to-0.2 obligation, not drift).
 - **Blast radius:** fragment consumers (12.1 merge); registry gate remains layer 2.
+
+## C-015 (2026-08-12) — Phase 0 gate findings: skip-directive hole + wire-notes honesty
+
+- **Finding 1 (major, discovery-integrity lens; reproduced by orchestrator before
+  fixing):** on node 26.7.0, `describe(..., {skip})` reports as a skipped SUITE —
+  TAP trailer shows `# skipped 0` — so test-conductor.sh's count-based skip rejection
+  never fired for describe-level skips. A suite wrapped in an unconditional
+  describe-skip would sail through green. Fix: the gate now rejects ANY
+  `ok N ... # SKIP|# TODO` directive at any subtest depth (self-tests S12-S14).
+  On an opencode-less machine the wire suite now FAILS the gate loudly instead of
+  passing vacuously — correct for this build.
+- **Finding 2 (major):** seven wire-notes sub-claims were presented under "every line
+  is asserted" with no asserting test. Fixed by tagging each **[observed]**, an honest
+  header defining the tag, and an Assertion-coverage notes section for the minor
+  tightness gaps. The G6 record now distinguishes suite-pinned reality from
+  probing-transcript observations.
+- **Also carried:** spec-conformance nit — G1 ("types-only dev dependency") vs §5.1
+  (mandates value-importing `tool({...})`): the plan's own tension; Task 5.3 must
+  resolve it explicitly when authoring the production plugin.
+- **Blast radius:** gate script (stricter only); wire-notes wording; no code.

@@ -84,6 +84,34 @@
       ],
       "result": "11/11 OK. node --test traps re-verified same day: directory positional = bogus failing test (exit 1, MODULE_NOT_FOUND as test failure); zero-match glob = exit 0; quoted glob + TAP reporter = parseable counts.",
       "rerunDue": "Phase 5, 9, 13 boundaries"
+    },
+    {
+      "at": "2026-08-12T09:47:49Z",
+      "trigger": "phase-0 gate fix (C-015)",
+      "cases": [
+        {
+          "id": "S12",
+          "case": "describe-level skip hiding a failing test",
+          "expect": "nonzero",
+          "observed": "exit 1, skipdirectives=1 rejected (was GATE PASS before fix \u2014 hole reproduced by orchestrator first)",
+          "verdict": "OK"
+        },
+        {
+          "id": "S13",
+          "case": "it-level skip (regression check)",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S14",
+          "case": "clean pass (regression check)",
+          "expect": "exit 0",
+          "observed": "exit 0",
+          "verdict": "OK"
+        }
+      ],
+      "result": "3/3 OK; TAP now rejects any SKIP/TODO directive at any subtest depth"
     }
   ],
   "taskGates": {
@@ -124,7 +152,24 @@
       "M9": "n/a"
     }
   },
-  "phaseGates": {},
+  "phaseGates": {
+    "0": {
+      "at": "2026-08-12T09:47:49Z",
+      "stage1": "PASS: fresh worktree of 0cf8b82, own npm install, full gate green from scratch (24/24 incl. live wire suite + tsc + M5)",
+      "lenses": {
+        "spec-conformance": "CONFORMANT; 3 nits (empty dirs untracked until files land; plan's authoring date in marker template; G1-vs-\u00a75.1 tool() import tension -> resolve explicitly at 5.3)",
+        "discovery-integrity": "FINDINGS: 2 majors + 4 minors + 2 nits; core discovery verified REAL (live suite re-run by lens; non-tautological chains; DRIFTs pinned as tripwires)"
+      },
+      "adjudication": [
+        "MAJOR 1 (gate hole: describe-level skips invisible to TAP trailer counts) \u2014 mechanically CONFIRMED by orchestrator reproduction; fixed in test-conductor.sh (SKIP/TODO directive scan); self-tested S12-S14",
+        "MAJOR 2 (7 wire-notes sub-claims under an 'every line is asserted' header with no asserting test) \u2014 CONFIRMED by inspection; fixed by [observed] tags + honest header + Assertion-coverage notes section",
+        "minors 3-8 (assertion tightness: fileref replace-vs-append, 'always' unexercised, payload fields, file:// shape, laziness, full tool list) \u2014 recorded in wire-notes coverage notes, non-blocking",
+        "nits recorded; no skeptic round needed (both majors probe-confirmed, plan \u00a77.2 ladder step 2)"
+      ],
+      "verdict": "PASS after fix round 1 of 3",
+      "rejected": "2 majors (gate credit: the phase gate is not rubber-stamping)"
+    }
+  },
   "rejections": [
     {
       "at": "2026-08-12T09:03:09Z",
@@ -137,6 +182,12 @@
       "gate": "M5",
       "what": "bare word 'stub' flagged in wire-contract test + stub-llm-server fixture (the plan's own \u00a78 vocabulary for the fake LLM server)",
       "resolution": "C-013: 'stub' forbidden in production source only; allowed as test-double name under conductor/tests/; .md files excluded from M5 (doc content is anchor-tested)"
+    },
+    {
+      "at": "2026-08-12T09:47:49Z",
+      "gate": "phase-0/discovery-integrity",
+      "what": "describe({skip}) suites evade skipped-count rejection; 7 unasserted wire-notes claims",
+      "resolution": "C-015: directive scan added to test-conductor.sh; wire-notes [observed] tagging"
     }
   ]
 }
