@@ -279,12 +279,24 @@
       "M1": "PASS 509/509 + tsc",
       "M2": "PASS 491 -> 509",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (state.ts+questions.ts removed -> missing-subject)",
       "M5": "PASS (G14+G6 re-verified by orchestrator: appendLedgerLineRaw only in state.ts; no Bun/shell-tag)",
       "M6": "PASS (4 files)",
       "M7": "PASS 10 rows",
       "M8": "n/a",
       "M9": "n/a"
+    },
+    "2.2": {
+      "at": "2026-08-12T13:41:09Z",
+      "M1": "PASS 517/517 node + tsc",
+      "M2": "PASS 509 -> 517",
+      "M3": "PASS",
+      "M4": "n/a (proof task)",
+      "M5": "PASS",
+      "M6": "PASS (bun-smoke.test.ts + test-conductor.sh orchestrator-owned)",
+      "M7": "n/a (mirrors 4.1/2.1 rows)",
+      "M8": "n/a",
+      "M9": "PASS \u2014 bun leg green (8/8), orchestrator re-ran `bun test` directly (8 pass); NO divergence node vs bun"
     }
   },
   "phaseGates": {

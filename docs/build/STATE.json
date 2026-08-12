@@ -384,7 +384,7 @@
       "taskId": "2.2",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 2.2 bun runtime smoke",
       "planLines": [
@@ -392,14 +392,32 @@
         2205
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 517,
+        "pass": 517,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "proof task (dual-runtime smoke of existing modules): no missing-subject red; green = recorded reality that state/journal/gitio behave identically under node AND bun (like a discovery task). bun leg is M9, orchestrator-run."
+      },
+      "filesTouched": [
+        "conductor/tests/bun-smoke.test.ts",
+        "scripts/test-conductor.sh"
+      ],
+      "revertAssertion": "removing bun-smoke.test.ts drops the bun leg (test-conductor.sh guards on its existence); the 8 dual-runtime assertions (atomic-throw, lock stale-break, journal ordering+torn-heal, gitio execFile) fail under bun if the adapters ever diverge by runtime",
+      "attempts": 1,
+      "deviations": [
+        "ordering override 3: 2.2 committed immediately after 4.1 (not in Phase 2)",
+        "G14 leg ACTIVE (bun 1.3.14) \u2014 the preflight-uncertain acceptance row (\u00a72.5/C-002) is now a real green, NOT SKIPPED_UNMET",
+        "no cross-runtime divergence: no adapter change, no wire-notes stamp needed"
+      ],
+      "startedAt": "2026-08-12T15:40:00Z",
+      "finishedAt": "2026-08-12T13:41:09Z"
     },
     "3.1": {
       "taskId": "3.1",
@@ -519,7 +537,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "db408ba",
       "commitMessage": "conductor: 4.1 state store",
       "planLines": [
         2276,
