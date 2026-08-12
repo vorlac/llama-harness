@@ -626,3 +626,53 @@ test("8.2-empty-pack: a present-but-empty pack is rejected — loadPacks/initPlu
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ===========================================================================
+// [8.2-debug-pack] §4.1: the implementer pack is "tdd.md (+debug.md in DEBUG)".
+// DEBUG posture is keyed on the ACTIVE ITEM's `debugging` flag: an implementer
+// whose active item is debugging gets BOTH tdd.md (primary, append[0]) and
+// debug.md (before the trailing state block); a non-debug implementer gets
+// tdd.md only; and debug.md is the IMPLEMENTER's pack — no other role receives
+// it from a debugging item. (GateItem.debugging is added next; under node --test
+// type-stripping the fixture sets it now, so "append includes debug.md" is the red.)
+// ===========================================================================
+
+test("8.2-debug-pack: an implementer on a DEBUG-posture item gets tdd.md + debug.md; non-debug and non-implementer sessions do not", () => {
+  // Implementer, active item in DEBUG posture -> BOTH packs.
+  const debugItems = [
+    item({ id: "I2", state: "GREEN", behavioral: true, fileScope: ["src/b.ts"], debugging: true }),
+  ];
+  const impl: SessionRegistryEntry = { role: "implementer", itemId: "I2" };
+  const append = buildSystemAppend(impl, run({ state: "EXECUTING" }), debugItems, [], PACKS, ctx());
+
+  assert.ok(append.includes(PACKS["tdd.md"]), "the implementer still gets tdd.md");
+  assert.ok(append.includes(PACKS["debug.md"]), "a DEBUG-posture item's implementer ALSO gets debug.md");
+  assert.equal(append[0], PACKS["tdd.md"], "tdd.md remains the primary pack (append[0])");
+  assert.ok(
+    append.indexOf(PACKS["debug.md"]) < append.length - 1,
+    "debug.md precedes the trailing state block",
+  );
+
+  // Implementer, same shape WITHOUT debug posture -> tdd.md only.
+  const plainItems = [
+    item({ id: "I3", state: "GREEN", behavioral: true, fileScope: ["src/c.ts"] }),
+  ];
+  const plain = buildSystemAppend(
+    { role: "implementer", itemId: "I3" },
+    run({ state: "EXECUTING" }),
+    plainItems,
+    [],
+    PACKS,
+    ctx(),
+  );
+  assert.ok(plain.includes(PACKS["tdd.md"]), "a non-debug implementer gets tdd.md");
+  assert.ok(!plain.includes(PACKS["debug.md"]), "a non-debug implementer does NOT get debug.md");
+
+  // Guard: debug.md is the IMPLEMENTER's DEBUG pack — a non-implementer session on
+  // a debugging active item still receives no debug.md.
+  const orchAppend = buildSystemAppend(ORCH, run({ state: "EXECUTING" }), debugItems, [], PACKS, ctx());
+  assert.ok(
+    !orchAppend.includes(PACKS["debug.md"]),
+    "a non-implementer (orchestrator) session never receives debug.md",
+  );
+});

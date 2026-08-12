@@ -65,7 +65,12 @@ const ROLE_PRIORITY: Record<string, string> = {
 };
 
 // The nine doctrine packs §6.4 loads once at init (the seven role packs plus
-// debug.md and receive-review.md, referenced by DEBUG posture and review receipt).
+// debug.md and receive-review.md). debug.md IS delivered by buildSystemAppend on an
+// implementer's DEBUG posture (§4.1). receive-review.md is loaded and cached here but
+// its delivery vector is NOT yet wired — that is a Phase 9 deferred binding: the
+// review-receipt / fix-round routing will thread a "receiving-review" signal that
+// appends receive-review.md, so it is cached now to keep init fail-closed over the
+// complete pack set.
 const REQUIRED_PACKS: readonly string[] = [
   "core.md",
   "decompose.md",
@@ -163,7 +168,17 @@ export function buildSystemAppend(
   packs: Record<string, string>,
   ctx: InjectCtx,
 ): string[] {
-  const packFiles = ROLE_PACKS[registryEntry.role] ?? ["core.md"];
+  const packFiles = [...(ROLE_PACKS[registryEntry.role] ?? ["core.md"])];
+  // §4.1: an implementer whose ACTIVE item is in DEBUG posture also receives
+  // debug.md as a secondary pack (tdd.md stays the primary, append[0]). Guard it
+  // tightly — non-implementer roles, a missing/unknown itemId, or a non-debugging
+  // item get nothing extra — and never duplicate debug.md if it is already listed.
+  if (registryEntry.role === "implementer" && registryEntry.itemId !== undefined) {
+    const activeItem = items.find((it) => it.id === registryEntry.itemId);
+    if (activeItem?.debugging === true && !packFiles.includes("debug.md")) {
+      packFiles.push("debug.md");
+    }
+  }
   const append: string[] = [];
   for (const file of packFiles) {
     const content = packs[file];

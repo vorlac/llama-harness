@@ -70,6 +70,10 @@ export interface GateItem {
   fileScope: string[];
   blocked: { reason: string } | null;
   deferred: { reason: string } | null;
+  // §3.3 DEBUG-posture annotation (gate-subset view). Optional and ignored by
+  // legalTools — it does not veto or select any stage tool; it is read only by the
+  // injection layer to deliver debug.md to an implementer whose item is in DEBUG.
+  debugging?: boolean;
 }
 
 // §2.11 question, gate subset: an unanswered question (answeredIso === null) is
