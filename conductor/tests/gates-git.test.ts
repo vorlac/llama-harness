@@ -461,6 +461,71 @@ describe("[5.1-git-detection] env/wrapper/path spellings of git writes are detec
 });
 
 // ===========================================================================
+// [5.1-wrapper-flags] a wrapper WITH ITS OWN FLAGS must not hide a git write.
+// The Phase-1 unwrap only skipped a BARE wrapper word, so `sudo -u bob git push`
+// read its command word as `-u`/`bob` — isGitCommand returned false and the write
+// was ALLOWED. The fix skips the wrapper's own options (and a value-taking flag's
+// value) before taking the command word, so the git invocation behind the flags is
+// detected. Crucially the command word must be found CORRECTLY, not blanket-denied:
+// `sudo -u bob git status` still ALLOWS (status is read-only) — proving the fix
+// identifies `git status`, not that every wrapped command denies.
+// ===========================================================================
+
+describe("[5.1-wrapper-flags] a wrapper with its own flags never hides a git write", () => {
+  const denies: Array<{ name: string; cmd: string }> = [
+    { name: "sudo -u bob git push (value-flag -u consumes bob)", cmd: "sudo -u bob git push" },
+    { name: "env -i git push (non-value flag -i)", cmd: "env -i git push" },
+    { name: "command -p git commit -m x (command flag -p)", cmd: "command -p git commit -m x" },
+    { name: "sudo -u bob git apply patch.diff (write-around-gate behind flags)", cmd: "sudo -u bob git apply patch.diff" },
+    { name: "env FOO=bar git push (env NAME=value assignment then git)", cmd: "env FOO=bar git push" },
+    { name: "sudo --user=bob git rm x (self-contained --flag=value)", cmd: "sudo --user=bob git rm x" },
+  ];
+  for (const row of denies) {
+    test(`${row.name} denies`, () => {
+      expectDeny(row.cmd);
+    });
+  }
+
+  // The proof the command word is found CORRECTLY (not blanket-denied): a
+  // read-only git command behind a flagged wrapper still ALLOWS, exactly as it
+  // would bare. If the fix merely denied everything behind a flagged wrapper,
+  // these would wrongly deny.
+  test("sudo -u bob git status ALLOWS (read-only git found behind the wrapper's flags — not blanket-denied)", () => {
+    expectAllow("sudo -u bob git status");
+  });
+
+  test("env -i git log ALLOWS (read-only git behind an env flag)", () => {
+    expectAllow("env -i git log");
+  });
+
+  test("sudo -u bob ls ALLOWS (a non-git command behind a flagged wrapper is not gated as git)", () => {
+    expectAllow("sudo -u bob ls");
+  });
+
+  // Fail-safe: a wrapper whose own options consume the whole segment leaves the
+  // real command word unknowable statically — DENY rather than treat as non-git.
+  test("sudo -u bob (wrapper + options, no command word left) denies fail-safe", () => {
+    const d = expectDeny("sudo -u bob");
+    assert.match(d.reason ?? "", /unresolvable|expansion/i);
+  });
+
+  // Controls that MUST stay correct after the widening: the BARE-wrapper denies
+  // and the env-assignment/path spellings are unchanged.
+  test("control: bare sudo git push still denies", () => {
+    expectDeny("sudo git push");
+  });
+  test("control: bare env git push still denies", () => {
+    expectDeny("env git push");
+  });
+  test("control: A=b git push still denies", () => {
+    expectDeny("A=b git push");
+  });
+  test("control: /usr/bin/git push still denies", () => {
+    expectDeny("/usr/bin/git push");
+  });
+});
+
+// ===========================================================================
 // Non-git guards: a substring "git" that is NOT in command position must NOT be
 // gated as git (proving the "NEVER substring regex" rule the OTHER direction —
 // no false DENY), and per-segment scanning must let an allowed read through in a
@@ -486,5 +551,69 @@ describe("[5.1-non-git-guards] substring `git` off command position never false-
 
   test("git log && git push DENIES (per-segment: an allowed read does not rescue a later write)", () => {
     expectDeny("git log && git push");
+  });
+});
+
+// ===========================================================================
+// [5.1-unresolvable-command-word] a command word whose real value is produced
+// by shell expansion the static parser cannot evaluate — an ANSI-C `$'…'`
+// escape residual (`$'\x67it'` → git only after the shell decodes it), a
+// variable (`$x`), a backtick command substitution, or a `${…}` brace splice
+// glued into the word — smuggles a git write past command-word detection. Every
+// such segment DENIES fail-safe, with the reason naming the unresolvable
+// expansion. The sigil must be checked in COMMAND POSITION only: `echo $HOME`
+// carries the sigil in an operand, not the command word, so it still allows.
+// ===========================================================================
+
+describe("[5.1-unresolvable-command-word] shell expansion in command position denies fail-safe", () => {
+  const denies: Array<{ name: string; cmd: string }> = [
+    { name: "ANSI-C escape residual: $'\\x67it' push", cmd: "$'\\x67it' push" },
+    { name: "variable in command position: x=git; $x push", cmd: "x=git; $x push" },
+    { name: "backtick command substitution: `git push`", cmd: "`git push`" },
+    { name: "brace splice glued into the word: g${e}it push", cmd: "g${e}it push" },
+  ];
+  for (const row of denies) {
+    test(`${row.name} denies, reason names the unresolvable expansion`, () => {
+      const d = expectDeny(row.cmd);
+      assert.match(
+        d.reason ?? "",
+        /unresolvable|expansion/i,
+        `${row.cmd}: the reason names the unresolvable command-word expansion`,
+      );
+    });
+  }
+
+  test("control: echo $HOME ALLOWS (the sigil is in an operand, not the command word)", () => {
+    expectAllow("echo $HOME");
+  });
+
+  test("control: git status ALLOWS (a clean command word carries no expansion)", () => {
+    expectAllow("git status");
+  });
+});
+
+// ===========================================================================
+// [5.1-checkout-switch-discard] `-f`/`--force`/`--discard-changes` on
+// checkout/switch discard tracked working-tree changes — UNCONDITIONAL denies
+// like `switch -C`/`checkout -B`. They must ignore branchPolicy entirely and
+// deny even under the most permissive posture (check-only, no active run).
+// ===========================================================================
+
+describe("[5.1-checkout-switch-discard] force/discard-changes forms deny unconditionally", () => {
+  const discards: Array<{ name: string; cmd: string }> = [
+    { name: "checkout -f", cmd: "git checkout -f" },
+    { name: "checkout --force", cmd: "git checkout --force" },
+    { name: "switch -f", cmd: "git switch -f main" },
+    { name: "switch --force", cmd: "git switch --force main" },
+    { name: "switch --discard-changes", cmd: "git switch --discard-changes main" },
+  ];
+  for (const row of discards) {
+    test(`git ${row.name} denies UNCONDITIONALLY (check-only + no active run)`, () => {
+      expectDeny(row.cmd, { branchPolicy: "check-only", runActive: false });
+    });
+  }
+
+  test("control: git switch feature (no discard flag) still ALLOWS under check-only", () => {
+    expectAllow("git switch feature", { branchPolicy: "check-only", runActive: false });
   });
 });

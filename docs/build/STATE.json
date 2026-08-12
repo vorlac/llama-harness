@@ -1455,7 +1455,7 @@
       "manifest": false,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "1176178",
       "commitMessage": "conductor: 5.4 chat.message hook",
       "planLines": null,
       "canonicalTestCmd": "bash scripts/test-conductor.sh",

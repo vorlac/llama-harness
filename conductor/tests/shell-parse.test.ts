@@ -432,3 +432,79 @@ describe("[F3] git detection sees through env-assignments, wrappers, and paths",
     assert.equal(gitSubcommand(["git", "log", "--grep", "git"]), "log", "message word unchanged");
   });
 });
+
+// ---------------------------------------------------------------------------
+// [F4] git detection sees through a wrapper's OWN OPTIONS, not just a bare
+// wrapper word. `sudo -u bob git push` must read as a git command with subcommand
+// `push` — the Phase-1 unwrap skipped only the bare wrapper word, so the command
+// word was read as `-u`/`bob` and the git write escaped the gate. The unwrap now
+// skips the wrapper's leading options (and a value-taking flag's value): sudo
+// -u/-g/-C/…, env -u/-C/-S and NAME=value assignments; `command` takes no value
+// flags; `env -i` is a NON-value flag and must not eat its neighbour. A wrapper
+// that consumes the whole segment (no command word left), or a second wrapper the
+// unwrap lands on, is unresolvable — isGitCommand is false there and the gate
+// fails safe on it separately.
+// ---------------------------------------------------------------------------
+describe("[F4] git detection sees through a wrapper's own options", () => {
+  type Case = { name: string; seg: string[]; sub: string };
+  const cases: Case[] = [
+    { name: "sudo -u bob git push (value-flag -u consumes bob)", seg: ["sudo", "-u", "bob", "git", "push"], sub: "push" },
+    { name: "sudo -g grp git commit (value-flag -g)", seg: ["sudo", "-g", "grp", "git", "commit"], sub: "commit" },
+    { name: "env -i git push (non-value flag -i)", seg: ["env", "-i", "git", "push"], sub: "push" },
+    { name: "command -p git apply x (command flag, no value)", seg: ["command", "-p", "git", "apply", "x"], sub: "apply" },
+    { name: "env FOO=bar git push (env NAME=value assignment)", seg: ["env", "FOO=bar", "git", "push"], sub: "push" },
+    { name: "sudo --user=bob git push (self-contained --flag=value)", seg: ["sudo", "--user=bob", "git", "push"], sub: "push" },
+  ];
+  for (const c of cases) {
+    test(`[1.2-git] ${c.name}`, () => {
+      assert.equal(isGitCommand(c.seg), true, `${c.name} must read as a git command`);
+      assert.equal(gitSubcommand(c.seg), c.sub, `${c.name} must expose the real subcommand`);
+    });
+  }
+
+  test("[1.2-git] a non-git command behind a flagged wrapper is not a git command", () => {
+    assert.equal(isGitCommand(["sudo", "-u", "bob", "ls"]), false);
+    assert.equal(gitSubcommand(["sudo", "-u", "bob", "ls"]), null);
+  });
+
+  test("[1.2-git] bare-wrapper detection is unchanged (still sees through bare sudo/env)", () => {
+    assert.equal(isGitCommand(["sudo", "git", "push"]), true);
+    assert.equal(gitSubcommand(["sudo", "git", "push"]), "push");
+    assert.equal(isGitCommand(["env", "git", "push"]), true);
+  });
+
+  test("[1.2-git] a wrapper whose options consume the segment leaves no git command word", () => {
+    // `sudo -u bob` with nothing after: the command word is unresolvable, so this
+    // is not a git command (the git gate fails safe on it separately).
+    assert.equal(isGitCommand(["sudo", "-u", "bob"]), false);
+    assert.equal(gitSubcommand(["sudo", "-u", "bob"]), null);
+  });
+
+  test("[1.2-git] only ONE wrapper level is unwrapped (sudo env git reads as `env`, not git)", () => {
+    // A second wrapper the unwrap lands on is treated conservatively: one unwrap
+    // only, so the command word is `env` — not a git command here.
+    assert.equal(isGitCommand(["sudo", "env", "git", "push"]), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [F-ansic] ANSI-C `$'…'` and locale `$"…"` quoting. A `$` immediately before a
+// quote opens a quoted span whose inner literal glues to the current token, the
+// `$` and the quotes stripped — so `$'git'` resolves to the command word `git`
+// and a git write can no longer glue the `$` on (`$git`) to dodge command-word
+// detection. A bare `$` + word (`$HOME`, a variable, NOT a quote) is untouched.
+// ---------------------------------------------------------------------------
+describe("[F-ansic] $'…' / $\"…\" quoting resolves to the inner command word", () => {
+  test("[1.2-ansic] $'git' push -> git / push (ANSI-C quotes stripped, $ consumed)", () => {
+    assert.deepEqual(shellTokens("$'git' push"), ["git", "push"]);
+  });
+
+  test('[1.2-ansic] $"git" status -> git / status (locale quotes stripped, $ consumed)', () => {
+    assert.deepEqual(shellTokens('$"git" status'), ["git", "status"]);
+  });
+
+  test("[1.2-ansic] a bare $ + word ($HOME, not a quote) is unchanged", () => {
+    assert.deepEqual(shellTokens("$HOME"), ["$HOME"]);
+    assert.deepEqual(shellTokens("echo $HOME"), ["echo", "$HOME"]);
+  });
+});

@@ -112,6 +112,41 @@
         }
       ],
       "result": "3/3 OK; TAP now rejects any SKIP/TODO directive at any subtest depth"
+    },
+    {
+      "at": "2026-08-12T19:40:06Z",
+      "trigger": "phase-5 milestone (\u00a77.3 re-run)",
+      "cases": [
+        {
+          "id": "MS1",
+          "case": "failing test",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "MS2",
+          "case": "hidden describe-skip",
+          "expect": "nonzero",
+          "observed": "exit 1 (directive scan)",
+          "verdict": "OK"
+        },
+        {
+          "id": "MS3",
+          "case": "zero-match glob",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "MS4",
+          "case": "TODO marker (M5)",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        }
+      ],
+      "result": "4/4 OK at the phase-5 boundary; the gate still catches cheating"
     }
   ],
   "taskGates": {
@@ -344,7 +379,7 @@
       "M1": "PASS 703/703 node + tsc + bun leg (orchestrator's own run; worker stalled post-completion on a flaky wire-contract spawn)",
       "M2": "PASS 703 -> 703 (5.4 added 7 tests but 5.3's +12 already counted; net unchanged from HEAD? no \u2014 chat-message +7 over 703 pre-5.3... recomputed: full green)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (chat-message removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (3 files incl justified journal-events vocab add, diff read by orchestrator)",
       "M7": "PASS 6 rows",
@@ -468,6 +503,33 @@
       },
       "verdict": "PASS after 1 fix round",
       "rejected": "2 majors (answerQuestion wedge, path-traversal escape) + 3 minors; catch-credit: crash-recovery lens found an unrecoverable wedge a same-author suite would never surface"
+    },
+    "5": {
+      "at": "2026-08-12T19:40:06Z",
+      "milestone": true,
+      "stage1": "PASS fresh worktree of 1176178, own npm install, 710/710 node + tsc + bun leg; \u00a77.3 gate self-test re-run 4/4 (still catches fail/hidden-skip/zero-glob/TODO)",
+      "lenses": {
+        "security/bypass": "FINDINGS: 4 confirmed bypasses (ANSI-C/param-expansion git write; >| force-redirect; .. path traversal; non-enumerated in-place writers) \u2014 ALL re-run + confirmed by orchestrator",
+        "spec-conformance": "CONFORMANT row-by-row (\u00a73.5 matrix fully + faithfully encoded); 1 minor under-block advisory (checkout -f/switch --discard-changes not enumerated)",
+        "red-team-by-data": "generator died to API error; orchestrator generated + executed its OWN 33-input battery across 2 attack passes instead"
+      },
+      "adjudication": {
+        "fix_round_1_C022": [
+          "shellTokens decode $'...'/$\"...\"",
+          "decideGit deny unresolvable command word (backtick/$'/$\"/${/$(/$VAR/backslash)",
+          "writeShapedPaths recognize >| force-redirect",
+          "writeShapedPaths add perl -pi/dd of=/gawk -i inplace/ex/ed",
+          "decideEdit deny any path with a .. segment",
+          "decideCheckout/decideSwitch deny -f/--force/--discard-changes unconditionally"
+        ],
+        "fix_round_2_C023": [
+          "wrapper-with-flags: skipWrapperOptions in shell-parse (sudo -u/-g/... value flags, env NAME=value) + shared commandWordLocation reused by gates-git; fail-safe deny on unresolvable wrapper structure"
+        ],
+        "orchestrator_reattack": "2 passes, 33 malicious inputs total. Pass 1 found 3 residuals (wrapper-with-flags) that fix-round-1 tests missed -> fix round 2. Pass 2: 0 residual holes. Wrapped read-only git still ALLOWED (correct extraction, not blanket deny).",
+        "documented_g7": "honest-limits-pending.md updated: backtick/alias now DENY (fail-safe); residual obscure in-place writers + second-wrapper over-approx documented"
+      },
+      "verdict": "PASS after 2 fix rounds (of 3 allowed)",
+      "rejected": "4 security bypasses + 1 spec under-block + 3 orchestrator-found wrapper residuals = 8 real holes closed; the milestone security gate is emphatically load-bearing"
     }
   },
   "rejections": [
@@ -512,6 +574,12 @@
       "gate": "phase-4",
       "what": "answerQuestion answer-first wedge (MAJOR); unvalidated-id path traversal (MAJOR-latent); questions tmp symlink-follow; lock TOCTOU; createRun orphan dir",
       "resolution": "5 fixes test-first (522>517); 9.6 binding for worktree exclude"
+    },
+    {
+      "at": "2026-08-12T19:40:06Z",
+      "gate": "phase-5-milestone",
+      "what": "8 security holes: shell-expansion git bypass, wrapper-with-flags bypass x3, >| redirect, .. traversal, in-place writers, checkout -f",
+      "resolution": "2 fix rounds, 763/763; orchestrator re-attacked twice, 0 residuals"
     }
   ]
 }

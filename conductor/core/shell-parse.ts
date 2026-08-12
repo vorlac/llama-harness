@@ -61,6 +61,14 @@ export function shellTokens(command: string): string[] {
         }
       }
       i += 1; // step past the closing quote
+    } else if (ch === "$" && (command[i + 1] === "'" || command[i + 1] === '"')) {
+      // ANSI-C `$'…'` and locale `$"…"` quoting: a `$` immediately before a
+      // quote opens a quoted span. Consume the `$`, then let the next loop turn
+      // parse the quote exactly like a bare `'`/`"` — the inner literal glues to
+      // the current token with the `$` and quotes stripped, so `$'git'` → `git`.
+      // (Inner escape decoding like `$'\x67'` is deliberately NOT done here; the
+      // literal residual is caught downstream as an unresolvable command word.)
+      i += 1;
     } else if (ch === "\\") {
       // Backslash outside quotes: the next character is literal.
       hasCurrent = true;
@@ -136,6 +144,20 @@ export function splitOnOperators(tokens: string[]): string[][] {
 // single one is unwrapped so the git gate sees the git invocation behind it.
 const GIT_WRAPPERS = ["env", "command", "sudo", "builtin", "exec"];
 
+// The value-taking options of each wrapper: a BARE `-x` of one of these forms
+// consumes the FOLLOWING token as its value, so the command word is the token
+// AFTER the value (`sudo -u bob git …` → `git`, not `bob`). A self-contained
+// `--flag=value` glues its value on and needs no extra skip. `command`/`builtin`/
+// `exec` take no value flags. Kept per-wrapper so `env -i` (a NON-value flag)
+// does not eat its neighbour while `sudo -u bob` correctly does.
+const WRAPPER_VALUE_FLAGS: Record<string, readonly string[]> = {
+  sudo: ["-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U"],
+  env: ["-u", "-C", "-S"],
+  command: [],
+  builtin: [],
+  exec: [],
+};
+
 // A shell env-assignment token in command-prefix position (`NAME=value`).
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
@@ -146,21 +168,81 @@ function commandBasename(word: string): string {
   return slash === -1 ? word : word.slice(slash + 1);
 }
 
+// Skip ONE recognized wrapper's OWN leading options, starting just past the
+// wrapper word. Skips: any `-`/`--` flag; a bare value-taking flag's following
+// value token; and (for `env`) leading `NAME=value` assignment tokens. Returns
+// the index of the first plain (non-flag, non-assignment) token — the command
+// word — or seg.length when the wrapper's options consumed the whole segment.
+function skipWrapperOptions(seg: string[], start: number, wrapper: string): number {
+  const valueFlags = WRAPPER_VALUE_FLAGS[wrapper] ?? [];
+  let i = start;
+  while (i < seg.length) {
+    const token = seg[i];
+    if (wrapper === "env" && ENV_ASSIGNMENT.test(token)) {
+      // `env`'s own `NAME=value` assignments precede the command word.
+      i += 1;
+      continue;
+    }
+    if (token.startsWith("-")) {
+      i += 1;
+      // A bare known value-taking flag (`-u bob`) also consumes its value token;
+      // a self-contained `--flag=value` does not.
+      if (!token.includes("=") && valueFlags.includes(token)) i += 1;
+      continue;
+    }
+    break; // the first plain token is the command word
+  }
+  return i;
+}
+
+/**
+ * Locate the command word of a segment. Skips leading `NAME=value` env-assignment
+ * prefixes, then unwraps AT MOST ONE leading wrapper (`env`/`command`/`sudo`/
+ * `builtin`/`exec`) TOGETHER WITH the wrapper's own options (and, for `env`, its
+ * `NAME=value` assignments) before pointing at the command word. Shared by
+ * isGitCommand/gitSubcommand and the git gate so detection and the fail-safe
+ * agree. Returns:
+ *   - { index }                 the command-word index (resolve by basename at the
+ *                               call site — token equality, never substring).
+ *   - { index: null,            an empty/prefix-only segment with NO wrapper: no
+ *       unresolvable: false }   command word and nothing to fail safe on.
+ *   - { index: null,            a wrapper WAS unwrapped but its options consumed the
+ *       unresolvable: true }    whole segment (ran out / only flags remain), OR the
+ *                               token the unwrap landed on is ITSELF another recognized
+ *                               wrapper (only one level is unwrapped). The real command
+ *                               is decided by the wrapper at runtime — callers MUST
+ *                               fail safe (deny).
+ */
+export function commandWordLocation(
+  seg: string[],
+): { index: number | null; unresolvable: boolean } {
+  let i = 0;
+  while (i < seg.length && ENV_ASSIGNMENT.test(seg[i])) i += 1;
+  if (i < seg.length && GIT_WRAPPERS.includes(seg[i])) {
+    const wrapper = seg[i];
+    i = skipWrapperOptions(seg, i + 1, wrapper);
+    if (i >= seg.length) return { index: null, unresolvable: true };
+    // Only ONE wrapper level is unwrapped: a command word that is itself another
+    // recognized wrapper (`sudo env git …`) is unresolvable — fail safe.
+    if (GIT_WRAPPERS.includes(seg[i])) return { index: null, unresolvable: true };
+    return { index: i, unresolvable: false };
+  }
+  return i < seg.length ? { index: i, unresolvable: false } : { index: null, unresolvable: false };
+}
+
 /**
  * The index of the git command word in a segment, or null when the segment
- * does not invoke git. Skips leading `NAME=value` env-assignment tokens, then
- * unwraps a single leading wrapper (`env`/`command`/`sudo`/`builtin`/`exec`),
- * then resolves the command word by BASENAME. Shared by isGitCommand and
- * gitSubcommand so detection and subcommand extraction never disagree — token
- * equality on the basename, never substring matching, so `echo git status` and
+ * does not invoke git. Sees through leading `NAME=value` env-assignment tokens
+ * and one wrapper together with its options (shared commandWordLocation), then
+ * resolves the command word by BASENAME. Shared by isGitCommand and gitSubcommand
+ * so detection and subcommand extraction never disagree — token equality on the
+ * basename, never substring matching, so `echo git status` and
  * `cat tools/git/helper.txt` are still not git commands.
  */
 function gitCommandWordIndex(seg: string[]): number | null {
-  let i = 0;
-  while (i < seg.length && ENV_ASSIGNMENT.test(seg[i])) i += 1;
-  if (i < seg.length && GIT_WRAPPERS.includes(seg[i])) i += 1;
-  if (i < seg.length && commandBasename(seg[i]) === "git") return i;
-  return null;
+  const { index } = commandWordLocation(seg);
+  if (index === null) return null;
+  return commandBasename(seg[index]) === "git" ? index : null;
 }
 
 /**

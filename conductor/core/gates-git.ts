@@ -29,6 +29,7 @@ import {
   splitOnOperators,
   isGitCommand,
   gitSubcommand,
+  commandWordLocation,
 } from "./shell-parse.ts";
 
 // ---------------------------------------------------------------------------
@@ -288,6 +289,15 @@ function decideCheckout(
       "git checkout -B force-creates/resets a branch — unconditional deny (force-create form)",
     );
   }
+  if (
+    operands.includes("-f") ||
+    operands.includes("--force") ||
+    operands.includes("--discard-changes")
+  ) {
+    return deny(
+      "git checkout -f/--force/--discard-changes discards working-tree changes — unconditional deny (worktree-discarding form)",
+    );
+  }
   // `checkout -b <br>` creates-and-moves: branch movement, policy-gated.
   if (operands.includes("-b")) return movement(runActive, branchPolicy);
 
@@ -314,6 +324,15 @@ function decideSwitch(
   if (operands.includes("-C") || operands.includes("--force-create")) {
     return deny(
       "git switch -C force-creates a branch — unconditional deny (force-create form)",
+    );
+  }
+  if (
+    operands.includes("-f") ||
+    operands.includes("--force") ||
+    operands.includes("--discard-changes")
+  ) {
+    return deny(
+      "git switch -f/--force/--discard-changes discards working-tree changes — unconditional deny (worktree-discarding form)",
     );
   }
   return movement(runActive, branchPolicy); // `switch <br>` is branch movement
@@ -387,6 +406,48 @@ function decideGitSegment(
 }
 
 // ---------------------------------------------------------------------------
+// Unresolvable command word (fail-safe deny). After the §1.2 splitter resolves
+// the ordinary quoting spellings, a residual command word can still be one whose
+// real value is produced by shell expansion the static parser cannot evaluate:
+// an ANSI-C escape residual (`$'\x67it'` → the literal `\x67it`, which a real
+// shell decodes to `git`), a variable (`$x`), a backtick command substitution,
+// or a `${…}`/`$(…)` splice glued into the word. Detection resolves the command
+// word by token equality, so such a word reads as "not git" and would let a git
+// write straight through. These deny the whole command fail-safe.
+// ---------------------------------------------------------------------------
+
+// True when a command-word token still carries an unresolved shell-expansion
+// sigil: a backtick, a `$` opening a `$'…'`/`$"…"` span or a `${…}`/`$(…)`
+// splice or a `$VAR` reference, or a backslash escape a real shell would decode
+// (§1.2 keeps the `$'\x67it'` residual as the literal `\x67it`). The command
+// that word names is knowable only at shell runtime — deny fail-safe.
+function hasUnresolvedExpansion(word: string): boolean {
+  for (let i = 0; i < word.length; i += 1) {
+    const ch = word[i];
+    if (ch === "`" || ch === "\\") return true;
+    if (ch === "$") {
+      const next = i + 1 < word.length ? word[i + 1] : "";
+      if (
+        next === "'" ||
+        next === '"' ||
+        next === "{" ||
+        next === "(" ||
+        next === "_" ||
+        (next >= "A" && next <= "Z") ||
+        (next >= "a" && next <= "z") ||
+        (next >= "0" && next <= "9")
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+const UNRESOLVABLE_REASON =
+  "unresolvable command word (shell expansion in command position); use conductor_surface if the command is genuinely needed";
+
+// ---------------------------------------------------------------------------
 // The gate entry point.
 //
 // git policy is role- and mode-uniform for model sessions: the publish/commit
@@ -406,6 +467,17 @@ export function decideGit(
   void gitMode;
   const segments = splitOnOperators(shellTokens(command));
   for (const seg of segments) {
+    const loc = commandWordLocation(seg);
+    // Fail-safe: a wrapper (sudo/env/…) whose own options consumed the segment —
+    // or a second wrapper level the unwrap landed on — leaves the real command
+    // word unknowable to the static parser. The wrapper resolves it at runtime and
+    // it could be a git write (`sudo -u bob git push`), so DENY rather than treat
+    // the segment as non-git (the C-022 unresolvable-command-word posture).
+    if (loc.unresolvable) return deny(UNRESOLVABLE_REASON);
+    // Fail-safe: a command word computed by unresolvable shell expansion denies
+    // the whole command — it could resolve to a git write detection cannot see.
+    const word = loc.index === null ? null : seg[loc.index];
+    if (word !== null && hasUnresolvedExpansion(word)) return deny(UNRESOLVABLE_REASON);
     if (!isGitCommand(seg)) continue; // non-git segments never deny
     const decision = decideGitSegment(seg, runActive, branchPolicy);
     if (decision.action === "deny") return decision; // any denied git segment denies the whole command

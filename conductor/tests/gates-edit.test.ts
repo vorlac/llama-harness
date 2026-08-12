@@ -472,3 +472,96 @@ for (const { cmd, target, note } of WRAPPER_SHAPES) {
 test("[5.2-write-shapes:binding] a pure read behind a wrapper still yields NO write targets", () => {
   assert.deepEqual(writeShapedPaths(`env sh -c "cat file.ts"`), [], "a wrapped read never matches");
 });
+
+// ===========================================================================
+// [5.2-write-shapes:force-redirect] `>|` (and `&>|`) is bash's force-overwrite
+// redirect — its following token is a write target, exactly like `>`. Missing it
+// classified the command as a read and skipped the edit + registry gates.
+// ===========================================================================
+
+test("[5.2-write-shapes] >| force-redirect surfaces its write target", () => {
+  const paths = writeShapedPaths("echo x >| out.ts");
+  assert.ok(paths.includes("out.ts"), `>| target must be a write shape; got ${JSON.stringify(paths)}`);
+});
+
+test("[5.2-write-shapes] a plain > redirect is unchanged by the >| addition", () => {
+  assert.deepEqual(writeShapedPaths("echo x > out.ts"), ["out.ts"]);
+});
+
+// ===========================================================================
+// [5.2-write-shapes:in-place-writers] common non-enumerated in-place writers —
+// `perl -pi`/`perl -i`, `dd … of=FILE`, `gawk/awk -i inplace … FILE`, and the
+// `ex`/`ed` line editors — write their file operands. (Arbitrary obscure in-place
+// writers remain a documented G7 limit; this closes the common ones.)
+// ===========================================================================
+
+const IN_PLACE_WRITERS: ReadonlyArray<{ cmd: string; target: string; note: string }> = [
+  { cmd: "perl -pi -e 's/a/b/g' file.ts", target: "file.ts", note: "perl -pi -e in-place" },
+  { cmd: "perl -i.bak -pe 's/x/y/' src/app.ts", target: "src/app.ts", note: "perl -i.bak in-place" },
+  { cmd: "dd if=/dev/zero of=out.img bs=1M count=1", target: "out.img", note: "dd of= target" },
+  { cmd: "gawk -i inplace '{print}' data.txt", target: "data.txt", note: "gawk -i inplace target" },
+  { cmd: "awk -i inplace '{print}' notes.txt", target: "notes.txt", note: "awk -i inplace target" },
+  { cmd: "ex out.txt", target: "out.txt", note: "ex file operand" },
+  { cmd: "ed notes.txt", target: "notes.txt", note: "ed file operand" },
+];
+
+for (const { cmd, target, note } of IN_PLACE_WRITERS) {
+  test(`[5.2-write-shapes] in-place writer surfaces the ${note}: ${cmd}`, () => {
+    const paths = writeShapedPaths(cmd);
+    assert.ok(paths.includes(target), `${note}: expected write target ${target} in ${JSON.stringify(paths)}`);
+  });
+}
+
+test("[5.2-write-shapes] the in-place-writer additions leave pure reads as reads (no targets)", () => {
+  assert.deepEqual(writeShapedPaths("cat file.ts"), [], "cat is a read");
+  assert.deepEqual(writeShapedPaths("grep foo file.ts"), [], "grep is a read");
+});
+
+// ===========================================================================
+// [5.2-path-traversal] a normalized edit path containing a `..` segment is
+// denied BEFORE scope matching. normalizeUnderTree does not collapse `..`, and
+// globMatch treats `..` as a literal segment a `**` swallows — so a scope like
+// `src/a/**` would otherwise MATCH (and ALLOW) a path that resolves into the
+// `.conductor` state area, a sibling item, or clean out of the repo. A
+// legitimate in-scope edit path never carries a `..`.
+// ===========================================================================
+
+const TRAVERSALS: ReadonlyArray<{ path: string; fileScope: string[]; note: string }> = [
+  {
+    path: "/wt/src/a/../../.conductor/run.json",
+    fileScope: ["src/a/**"],
+    note: "escape into the .conductor state area (src/a/** would otherwise swallow it)",
+  },
+  {
+    path: "/wt/src/a/../itemB/x.ts",
+    fileScope: ["src/a/**"],
+    note: "cross-item escape into a sibling scope",
+  },
+  {
+    path: "/wt/src/module/../../../../etc/passwd",
+    fileScope: ["src/**"],
+    note: "out-of-repo escape (src/** would otherwise swallow it)",
+  },
+];
+
+for (const { path, fileScope, note } of TRAVERSALS) {
+  test(`[5.2-path-traversal] a '..' segment is denied before scope matching (${note})`, () => {
+    const d = decideEdit(
+      editInput({ sessionRole: "implementer", fileScope, sessionTree: "/wt", path }),
+    );
+    const reason = denyReason(d, `traversal: ${note}`);
+    assert.match(reason, /traversal|\.\./, "the reason names the path traversal");
+  });
+}
+
+test("[5.2-path-traversal] a normal in-scope path without '..' is unchanged (allow)", () => {
+  const d = decideEdit(
+    editInput({
+      sessionRole: "implementer",
+      fileScope: ["src/a/**"],
+      sessionTree: "/wt",
+      path: "/wt/src/a/x.ts",
+    }),
+  );
+  assertAllow(d, "normal in-scope path, no traversal");
+});
