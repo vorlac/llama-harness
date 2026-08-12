@@ -37,7 +37,15 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
@@ -149,4 +157,94 @@ test("[4.1-questions] answerQuestion records the answer AND clears every item th
   assert.equal(answered.length, 1, "answering coalesces to a single ledger record for the question");
   assert.equal(answered[0].answer, "collect and report all", "the persisted record carries the answer");
   assert.notEqual(answered[0].answeredIso, null, "the persisted record carries answeredIso");
+});
+
+// ---------------------------------------------------------------------------
+// F1 (MAJOR): answerQuestion is two-phase — it MUST clear the blocked items BEFORE
+// it marks the question answered. answeredIso is the gate key that makes
+// conductor_answer legal; if the question were marked answered FIRST and a crash hit
+// before the clear, an item would be wedged blocked on an already-answered question
+// with no legal tool left to finish the clear (§2.11 line 998 forbids hand-editing to
+// resume). Clearing first + marking last makes a retry idempotent.
+// ---------------------------------------------------------------------------
+
+test("[4.1-questions] F1: answerQuestion clears items BEFORE marking answered — a crash between leaves the question OPEN and a retry completes it idempotently", () => {
+  const runDir = mkRunDir();
+
+  const blocking = appendQuestion(runDir, baseQuestion({ question: "blocking?", blocksItems: ["I2"] }), NOW); // Q-0001
+  writeItem(
+    runDir,
+    makeItem("I2", { state: "RED", blocked: { reason: "needs answer", sinceMs: NOW, questionId: blocking.id, stage: "RED" } }),
+  );
+
+  // Simulate a crash AFTER the items are cleared and BEFORE the question is marked
+  // answered: the injected hook fires between the two phases and throws.
+  assert.throws(
+    () =>
+      answerQuestion(runDir, blocking.id, "collect and report all", NOW, {
+        onAfterItemsBeforeMark: () => {
+          throw new Error("boom: crash between clearing items and marking answered");
+        },
+      }),
+    /boom/,
+    "the injected mid-commit throw propagates",
+  );
+
+  // (a) the item was cleared BEFORE the (failed) mark — the clear is already durable.
+  assert.equal(readItem(runDir, "I2").blocked, null, "the blocked item is cleared before the question is marked answered");
+  // (b) the question is STILL OPEN — no answered gate key was written on the partial commit.
+  const afterCrash = readQuestions(runDir).find((q) => q.id === blocking.id);
+  assert.equal(afterCrash?.answeredIso, null, "a crash before the mark leaves the question OPEN (answeredIso stays null)");
+  assert.equal(afterCrash?.answer, null, "the answer is not persisted on the partial commit");
+
+  // (c) a retry completes the answer idempotently: the already-cleared item is skipped
+  // by the item.blocked guard (cleared nothing), and the question is now answered.
+  const res = answerQuestion(runDir, blocking.id, "collect and report all", NOW);
+  assert.deepEqual(res.clearedItemIds, [], "the retry re-clears nothing (the item was already unblocked) — idempotent");
+  assert.equal(res.question.answer, "collect and report all", "the retry records the answer on the returned record");
+  assert.notEqual(res.question.answeredIso, null, "the retry stamps answeredIso");
+  const finalQ = readQuestions(runDir).find((q) => q.id === blocking.id);
+  assert.notEqual(finalQ?.answeredIso, null, "the question is answered on disk after the retry");
+  assert.equal(finalQ?.answer, "collect and report all", "the answered record persists the answer");
+  assert.equal(readItem(runDir, "I2").blocked, null, "the item remains unblocked after the retry");
+});
+
+// ---------------------------------------------------------------------------
+// F3 (minor): the atomic writer must not follow a pre-planted symlink at its temp
+// path. The OLD writer used a PREDICTABLE temp name (questions.jsonl.<pid>.<counter>.tmp)
+// and a plain writeFileSync, so a symlink planted at that name would be written
+// THROUGH — clobbering a target outside the sandbox. The fix gives the temp a random
+// suffix AND creates it with {flag:"wx"} (exclusive create) so a pre-existing entry
+// makes the write fail rather than follow.
+// ---------------------------------------------------------------------------
+
+test("[4.1-questions] F3: the atomic writer does not follow a pre-planted symlink at its temp path (random suffix + exclusive create)", () => {
+  const runDir = mkRunDir();
+  const victim = path.join(runDir, "victim.txt");
+  const ORIGINAL = "SECRET-DO-NOT-OVERWRITE\n";
+  writeFileSync(victim, ORIGINAL);
+
+  // Pre-plant a symlink at EVERY temp name the old predictable scheme could produce for
+  // the next write (the module-global counter is provably far below this bound — the
+  // whole file executes well under a dozen atomic writes before this test), each
+  // pointing at the victim. The old writer would writeFileSync through the matching one
+  // and truncate the victim; the fix never uses a predictable name and never writes
+  // through a pre-existing entry.
+  for (let n = 0; n < 256; n += 1) {
+    symlinkSync(victim, path.join(runDir, `questions.jsonl.${process.pid}.${n}.tmp`));
+  }
+
+  const q = appendQuestion(runDir, baseQuestion({ question: "safe write?" }), NOW);
+  assert.equal(q.id, "Q-0001", "the write still succeeds to the real ledger");
+
+  assert.equal(
+    readFileSync(victim, "utf8"),
+    ORIGINAL,
+    "a pre-planted symlink at the temp path is NOT followed — the victim is byte-for-byte untouched",
+  );
+  assert.deepEqual(
+    readQuestions(runDir).map((r) => r.id),
+    ["Q-0001"],
+    "the ledger lands as a real file at its true path",
+  );
 });

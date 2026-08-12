@@ -1,0 +1,15 @@
+{
+  "taskId": "9.6",
+  "planLines": [
+    2700,
+    2728
+  ],
+  "kind": "code (tier A) \u2014 created early to carry a Phase-4 gate binding.",
+  "assertions": [],
+  "phaseGate4Bindings": {
+    "source": "Phase 4 filesystem-safety lens",
+    "MUST": [
+      "registerConductorExclude (adapter/state.ts) does mkdirSync(root/.git/info) \u2014 throws ENOTDIR in a LINKED worktree where root/.git is a FILE. Worktree mode MUST resolve the real gitdir (git rev-parse --absolute-git-dir) or skip the exclude when root/.git is not a directory. (C-021)"
+    ]
+  }
+}

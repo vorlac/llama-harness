@@ -385,7 +385,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "06818b3",
       "commitMessage": "conductor: 2.2 bun runtime smoke",
       "planLines": [
         2179,
@@ -393,8 +393,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 517,
-        "pass": 517,
+        "tests": 522,
+        "pass": 522,
         "fail": 0,
         "skipped": 0,
         "todo": 0
@@ -545,8 +545,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 509,
-        "pass": 509,
+        "tests": 522,
+        "pass": 522,
         "fail": 0,
         "skipped": 0,
         "todo": 0
@@ -587,8 +587,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 491,
-        "pass": 491,
+        "tests": 522,
+        "pass": 522,
         "fail": 0,
         "skipped": 0,
         "todo": 0

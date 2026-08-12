@@ -64,6 +64,9 @@ export interface OpenOptions {
   now?: () => number;
   pid?: number; // defaults to process.pid; names the temp files and the lock owner
   staleLockMs?: number; // over-age lock threshold; defaults to 24h
+  // Test seam (F4): fires AFTER the fresh-claim null-read and BEFORE the exclusive-create
+  // write, so a test can plant a racing lock in the TOCTOU window. Undefined in production.
+  onBeforeFreshLockWrite?: () => void;
 }
 
 // .conductor/state/run.lock — the advisory single-writer lock.
@@ -89,7 +92,7 @@ export interface CreateRunInput {
 export interface StateStore {
   readonly readOnly: boolean;
   readonly root: string;
-  createRun(input: CreateRunInput): Run;
+  createRun(input: CreateRunInput, opts?: { onAfterRunJson?: () => void }): Run;
   loadRun(runId: string): Run;
   saveRun(run: Run): void;
   currentRun(): Run | null;
@@ -172,6 +175,34 @@ export function appendLedgerLineRaw(filePath: string, record: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
+// Path-id trust boundary (F2)
+// ---------------------------------------------------------------------------
+
+// Guard every id (runId / itemId) that is composed into a .conductor/ path. ids
+// originate in model-driven decomposition, so the store is the trust boundary: an id
+// carrying "/", "\", or a ".." segment would let path.join collapse the ".." and escape
+// .conductor/. Real ids are simple slugs (r-20260807-a1b2, I1, Q-0001), so we reject
+// anything that is not a conservative slug — empty, a path separator, a bare "." / "..",
+// a leading "..", or a character outside [A-Za-z0-9._-] — with a clear error naming the
+// offending id. Returns the id unchanged so it composes inline in a path builder.
+const SAFE_ID = /^[A-Za-z0-9._-]+$/;
+export function assertSafeId(id: string, kind: string): string {
+  if (typeof id !== "string" || id.length === 0) {
+    throw new Error(`state: refusing an empty ${kind} — unsafe path id`);
+  }
+  if (id.includes("/") || id.includes("\\")) {
+    throw new Error(`state: refusing ${kind} "${id}" — a path separator would escape .conductor/`);
+  }
+  if (id === "." || id === ".." || id.startsWith("..")) {
+    throw new Error(`state: refusing ${kind} "${id}" — a dot-dot segment would escape .conductor/`);
+  }
+  if (!SAFE_ID.test(id)) {
+    throw new Error(`state: refusing ${kind} "${id}" — not a conservative slug (allowed: A-Za-z0-9 . _ -)`);
+  }
+  return id;
+}
+
+// ---------------------------------------------------------------------------
 // .git/info/exclude registration (§1.2 / §3.9)
 // ---------------------------------------------------------------------------
 
@@ -220,11 +251,14 @@ export function openWorkspace(opts: OpenOptions): StateStore {
 
   let readOnly = false;
 
-  const runDirOf = (runId: string): string => path.join(runsDir, runId);
+  // Every builder validates the ids it composes (F2). runJsonPath/itemsDirOf/
+  // questionsPath route through runDirOf, so guarding runId there covers them all;
+  // itemJsonPath additionally guards the itemId.
+  const runDirOf = (runId: string): string => path.join(runsDir, assertSafeId(runId, "runId"));
   const runJsonPath = (runId: string): string => path.join(runDirOf(runId), "run.json");
   const itemsDirOf = (runId: string): string => path.join(runDirOf(runId), "items");
   const itemJsonPath = (runId: string, itemId: string): string =>
-    path.join(itemsDirOf(runId), `${itemId}.json`);
+    path.join(itemsDirOf(runId), `${assertSafeId(itemId, "itemId")}.json`);
   const questionsPath = (runId: string): string =>
     path.join(runDirOf(runId), "questions.jsonl");
 
@@ -263,21 +297,23 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     }
   }
 
-  function acquireLock(): boolean {
-    const startMs = now();
-    const existing = readExistingLock();
-    if (existing === null || existing.pid === pid) {
-      writeFileAtomicSync(lockPath, JSON.stringify({ pid, startMs }));
-      journal.log("info", "state", "lock.acquired", { pid, startMs }, corr);
-      return false;
-    }
+  // Claim the lock by overwriting whatever is there with our own record. Used for the
+  // idempotent re-open of our OWN lock and for the deliberate stale-break rewrite —
+  // NOT for the fresh claim, which must be exclusive-create to close the TOCTOU race.
+  function claimLock(startMs: number): false {
+    writeFileAtomicSync(lockPath, JSON.stringify({ pid, startMs }));
+    journal.log("info", "state", "lock.acquired", { pid, startMs }, corr);
+    return false;
+  }
+
+  // Decide the outcome against a foreign lock we can see: a dead pid or an over-age lock
+  // is stale (broken + claimed — an opencode crash must never wedge a workspace); a live,
+  // young foreign lock is a second session (drop to read-only, leave the lock intact,
+  // never stolen — §4.1). Returns readOnly.
+  function decideForeign(existing: LockRecord, startMs: number): boolean {
     const alive = isAlive(existing.pid);
     const overAge = startMs - existing.startMs > staleLockMs;
     if (!alive || overAge) {
-      // A dead pid or an over-age lock is stale — an opencode crash must never
-      // wedge a workspace, so we break it and claim the single-writer lock. The
-      // break is journaled as lock.stale-break (the anomaly trace) carrying the
-      // broken owner's pid.
       journal.log(
         "warn",
         "state",
@@ -285,12 +321,10 @@ export function openWorkspace(opts: OpenOptions): StateStore {
         { brokenPid: existing.pid, brokenStartMs: existing.startMs, reason: alive ? "over-age" : "dead-pid" },
         corr,
       );
+      // The stale-break REWRITE intentionally replaces a stale lock — overwrite (NOT wx).
       writeFileAtomicSync(lockPath, JSON.stringify({ pid, startMs }));
       return false;
     }
-    // A LIVE foreign lock (a second opencode session on this workspace): drop to
-    // read-only conductor, journal a LOUD warning, and leave the lock intact —
-    // never stolen (§4.1 second-session rule).
     journal.log(
       "warn",
       "state",
@@ -299,6 +333,33 @@ export function openWorkspace(opts: OpenOptions): StateStore {
       corr,
     );
     return true;
+  }
+
+  function acquireLock(): boolean {
+    const startMs = now();
+    const existing = readExistingLock();
+    if (existing !== null && existing.pid === pid) {
+      // Re-acquiring our OWN lock (an idempotent re-open): overwrite in place.
+      return claimLock(startMs);
+    }
+    if (existing === null) {
+      // FRESH claim: exclusive-create (F4) so two cold starts that both saw no lock
+      // cannot both become writers. The seam lets a test plant a racing lock in the
+      // window between the null-read above and this write.
+      if (opts.onBeforeFreshLockWrite !== undefined) opts.onBeforeFreshLockWrite();
+      try {
+        writeFileSync(lockPath, JSON.stringify({ pid, startMs }), { flag: "wx" });
+        journal.log("info", "state", "lock.acquired", { pid, startMs }, corr);
+        return false;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        // Someone raced us to create the lock. Re-read and decide against it.
+        const raced = readExistingLock();
+        if (raced === null || raced.pid === pid) return claimLock(startMs);
+        return decideForeign(raced, startMs);
+      }
+    }
+    return decideForeign(existing, startMs);
   }
 
   // --- stale-red registry (§2.11) -----------------------------------------
@@ -421,7 +482,7 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     }
   }
 
-  function createRun(input: CreateRunInput): Run {
+  function createRun(input: CreateRunInput, opts?: { onAfterRunJson?: () => void }): Run {
     if (readOnly) {
       throw new Error(
         "state: this conductor is read-only (a live foreign lock holds the workspace); cannot create a run",
@@ -456,8 +517,14 @@ export function openWorkspace(opts: OpenOptions): StateStore {
       stop: null,
       counters: { idleRePrompts: 0, futileRePrompts: 0, overridesUsed: 0 },
     };
-    mkdirSync(itemsDirOf(runId), { recursive: true });
+    // Write run.json FIRST, then the items/ dir (F5). A crash after mkdir(items) but
+    // before run.json would leave an orphan run dir with no run.json — and pruneRuns
+    // skips any dir lacking a readable run.json, so it could never be reclaimed. Writing
+    // run.json first means any dir a crash leaves behind carries a run.json and is prunable.
     saveRun(run);
+    // Test seam: a throw here simulates a crash AFTER run.json and BEFORE items/ is created.
+    if (opts?.onAfterRunJson !== undefined) opts.onAfterRunJson();
+    mkdirSync(itemsDirOf(runId), { recursive: true });
     setCurrentRun(runId);
     pruneRuns(runId);
     return run;

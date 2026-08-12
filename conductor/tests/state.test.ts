@@ -682,3 +682,131 @@ test("[4.1-lock] a STALE lock (over-age) is broken even though its pid is alive"
   assert.ok(calls.some((c) => c.component === "state" && c.event === "lock.stale-break"), "the over-age break is recorded as lock.stale-break");
   assert.equal(readLock(repo).pid, process.pid + 7, "single-writer claimed after breaking the over-age lock");
 });
+
+// ---------------------------------------------------------------------------
+// F2 (MAJOR-latent): ids flow from model-driven decomposition, so the store is the
+// trust boundary. Every path builder that composes a runId/itemId into a .conductor/
+// path must reject an id containing "/", "\", or a ".." segment — otherwise path.join
+// collapses the ".." and the write/read escapes .conductor/. A poisoned current-run.json
+// pointer must be refused rather than read outside the sandbox.
+// ---------------------------------------------------------------------------
+
+test("[4.1-path-safety] F2: id path builders reject traversal ids so no read or write escapes .conductor/", () => {
+  const repo = initRepo();
+  commit(repo, "f.ts", "x\n", "seed");
+  const store = openWorkspace(freshOpts(repo));
+  const run = store.createRun({ prompt: "p", sessionID: "ses", classification });
+
+  // The exact filesystem location the traversal itemId "../../../../tmp/pwned" resolves
+  // to from <runId>/items/ — it must never be created.
+  const escapeTarget = path.join(repo, "tmp", "pwned.json");
+  assert.equal(existsSync(escapeTarget), false, "precondition: the escape target does not exist");
+
+  // saveItem with a traversal itemId throws and writes nothing outside the run's items/ dir.
+  assert.throws(
+    () => store.saveItem(run.runId, makeItem("../../../../tmp/pwned")),
+    /unsafe|refus|escape|separator|slug|dot/i,
+    "saveItem rejects an itemId that would escape the run's items/ dir",
+  );
+  assert.equal(existsSync(escapeTarget), false, "the rejected saveItem wrote nothing outside .conductor/");
+
+  // loadRun with a traversal runId throws with a SAFETY error (not a bare ENOENT).
+  assert.throws(
+    () => store.loadRun("../../etc/foo"),
+    /unsafe|refus|escape|separator|slug|dot/i,
+    "loadRun rejects a runId containing path separators",
+  );
+
+  // A poisoned current-run.json pointer must NOT let currentRun read outside .conductor/.
+  writeFileSync(path.join(stateDir(repo), "current-run.json"), JSON.stringify({ runId: "../../.." }));
+  assert.throws(
+    () => store.currentRun(),
+    /unsafe|refus|escape|separator|slug|dot/i,
+    "currentRun refuses a poisoned pointer rather than reading outside .conductor/",
+  );
+
+  // Regression: real ids still round-trip.
+  store.saveItem(run.runId, makeItem("I1"));
+  assert.equal(store.loadItem(run.runId, "I1").id, "I1", "a normal itemId (I1) still round-trips");
+  assert.equal(store.loadRun(run.runId).runId, run.runId, "a normal runId (r-<hex>) still loads");
+});
+
+// ---------------------------------------------------------------------------
+// F5 (minor): createRun must write run.json BEFORE creating the items/ dir. A crash
+// after mkdir(items) but before run.json would leave an orphan run dir with NO run.json
+// — and pruneRuns skips any dir without a readable run.json, so it would never be
+// reclaimed. Writing run.json first means any dir a crash leaves behind is prunable.
+// ---------------------------------------------------------------------------
+
+test("[4.1-lifecycle] F5: createRun writes run.json BEFORE items/, so a crash between them leaves a prunable dir, not an unreclaimable orphan", () => {
+  const repo = initRepo();
+  commit(repo, "f.ts", "x\n", "seed");
+  const store = openWorkspace(freshOpts(repo));
+
+  // Simulate a crash AFTER run.json is written and BEFORE items/ is created.
+  assert.throws(
+    () =>
+      store.createRun(
+        { prompt: "p", sessionID: "ses", classification },
+        {
+          onAfterRunJson: () => {
+            throw new Error("boom: crash after run.json, before items/");
+          },
+        },
+      ),
+    /boom/,
+    "the injected crash between the two writes propagates",
+  );
+
+  // The half-created run dir HAS run.json (so pruneRuns can order and reclaim it) and
+  // does NOT yet have items/ — proving run.json is written first.
+  const runsDir = path.join(repo, ".conductor", "runs");
+  const dirs = readdirSync(runsDir);
+  assert.equal(dirs.length, 1, "the interrupted createRun left exactly one run dir");
+  const orphan = dirs[0];
+  assert.ok(
+    existsSync(path.join(runsDir, orphan, "run.json")),
+    "run.json exists in the crashed dir — it is written BEFORE items/, so the dir is prunable",
+  );
+  assert.equal(
+    existsSync(path.join(runsDir, orphan, "items")),
+    false,
+    "items/ was NOT created before the crash — proving the run.json-then-items order",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// F4 (minor): fresh-claim TOCTOU. Two cold starts can both readExistingLock() === null
+// and both write, both becoming writers. The fresh claim must use exclusive create so a
+// lock that appeared between the null-read and the write is detected as contention. The
+// seam plants a LIVE foreign lock in exactly that window; the loser must fall to
+// read-only and leave the racer's lock intact.
+// ---------------------------------------------------------------------------
+
+test("[4.1-lock] F4: a fresh claim that loses a TOCTOU race to a live foreign writer is detected as contention, not a double-writer", () => {
+  const repo = initRepo();
+  commit(repo, "f.ts", "x\n", "seed");
+  const { sink, calls } = makeJournal();
+  const foreignPid = process.pid; // alive: this test process
+
+  // At open, NO lock exists (readExistingLock === null). The injected seam fires AFTER
+  // that null-read and BEFORE the exclusive-create write, planting a live foreign lock —
+  // the cold-start race two writers would hit. Exclusive create must then EEXIST, re-read,
+  // and see the live foreign writer => read-only.
+  const store = openWorkspace(
+    freshOpts(repo, {
+      pid: process.pid + 1,
+      journal: sink,
+      onBeforeFreshLockWrite: () => {
+        preWriteLock(repo, { pid: foreignPid, startMs: START_MS });
+      },
+    }),
+  );
+
+  assert.equal(store.readOnly, true, "losing the fresh-claim race to a live writer forces read-only (no double-writer)");
+  assert.equal(readLock(repo).pid, foreignPid, "the racer's live lock is left intact — not overwritten by the loser");
+  assert.ok(
+    calls.some((c) => c.level === "warn" && c.component === "state" && c.event === "lock.contended"),
+    "the lost race is journaled as contention",
+  );
+});

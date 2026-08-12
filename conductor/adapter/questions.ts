@@ -11,6 +11,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 
 import { validate } from "../core/types.ts";
 import type { Item, QuestionOrigin, QuestionRecord } from "../core/types.ts";
@@ -29,18 +30,20 @@ export interface AnswerResult {
   clearedItemIds: string[];
 }
 
-// Monotonic within this process so the temp file used by writeAtomic never
-// collides with a still-open sibling. Combined with the pid it is unique on disk.
-let tmpCounter = 0;
-
 // The crash-safe write questions.ts owns for itself: a pid-suffixed same-dir temp,
 // fully written, then renamed over the target (an interrupted write leaves the old
-// file intact rather than a half-written one).
+// file intact rather than a half-written one). The temp name carries a random suffix
+// (unpredictable, so a pre-planted symlink cannot sit at it) and is created with
+// {flag:"wx"} (exclusive create), so a pre-existing entry at the temp path makes the
+// write FAIL rather than get followed through to whatever it points at (F3).
 function writeAtomic(filePath: string, data: string): void {
   const dir = path.dirname(filePath);
   mkdirSync(dir, { recursive: true });
-  const tmpPath = path.join(dir, `${path.basename(filePath)}.${process.pid}.${tmpCounter++}.tmp`);
-  writeFileSync(tmpPath, data);
+  const tmpPath = path.join(
+    dir,
+    `${path.basename(filePath)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+  );
+  writeFileSync(tmpPath, data, { flag: "wx" });
   renameSync(tmpPath, filePath);
 }
 
@@ -124,6 +127,7 @@ export function answerQuestion(
   questionId: string,
   answer: string,
   nowMs?: number,
+  opts?: { onAfterItemsBeforeMark?: () => void },
 ): AnswerResult {
   const records = readRecords(runDir);
   const index = records.findIndex((record) => record.id === questionId);
@@ -137,10 +141,14 @@ export function answerQuestion(
     answer,
   };
   assertValidQuestion(answered);
-  const nextRecords = records.slice();
-  nextRecords[index] = answered;
-  writeRecords(runDir, nextRecords);
 
+  // Two-phase, clear-FIRST (F1). answeredIso is the gate key that makes conductor_answer
+  // legal, so it must be written LAST: if the question were marked answered before the
+  // items were cleared, a crash in between would wedge an item blocked on an
+  // already-answered question — no legal tool could finish the clear (§2.11 forbids
+  // hand-editing to resume). Clearing first makes a retry idempotent: still-blocked items
+  // are cleared, already-cleared items are skipped by the `item.blocked !== null` guard,
+  // and the question is marked answered only once every named item is clear.
   const clearedItemIds: string[] = [];
   const itemsDir = path.join(runDir, "items");
   if (existsSync(itemsDir)) {
@@ -160,5 +168,15 @@ export function answerQuestion(
     }
   }
   clearedItemIds.sort();
+
+  // Test seam: a throw here simulates a crash AFTER every item is cleared and BEFORE the
+  // question is marked answered, so the question is verifiably left OPEN for the retry.
+  if (opts?.onAfterItemsBeforeMark !== undefined) opts.onAfterItemsBeforeMark();
+
+  // Mark the question answered LAST (write questions.jsonl).
+  const nextRecords = records.slice();
+  nextRecords[index] = answered;
+  writeRecords(runDir, nextRecords);
+
   return { question: answered, clearedItemIds };
 }

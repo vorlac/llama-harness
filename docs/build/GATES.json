@@ -391,6 +391,30 @@
       },
       "verdict": "PASS after 1 fix round",
       "rejected": "1 MAJOR (trivial-report work-loss) + G6 latent-risk hardened; catch-credit: 3 lenses, the counterexample lens escalated what the completeness lens under-rated"
+    },
+    "4": {
+      "at": "2026-08-12T14:09:59Z",
+      "stage1": "PASS fresh worktree of 06818b3, own npm install, 517/517 node + tsc + bun leg(8) + M5",
+      "strayWriteScan": "CLEAN: no files created outside throwaway fixtures; ~/.conductor 0->0; no stray .conductor/ in the repo tree",
+      "lenses": {
+        "crash-recovery": "FINDINGS: F1 answerQuestion order MAJOR (answer-first wedge, no legal recovery tool); F4 lock TOCTOU minor; F5 orphan-dir minor. Atomic write, dead-pid/over-age lock, retention pruning, no-git all SOUND.",
+        "filesystem-safety": "FINDINGS: F2 path-traversal via unvalidated ids MAJOR-latent; F3 questions.ts predictable-tmp symlink-follow minor. Deletion, lock, .git/info/exclude (G10), gitio command-injection all SOUND."
+      },
+      "adjudication": {
+        "fixed_in_place": [
+          "F1 answerQuestion clears items FIRST then marks answered (idempotent mid-crash retry; question stays open)",
+          "F2 assertSafeId in every state.ts path builder (rejects ../ and separators; orchestrator re-verified the exact ../../../../tmp/pwned input rejected + valid ids accepted)",
+          "F3 questions.ts randomBytes(6) tmp + flag wx (no symlink-follow)",
+          "F4 lock fresh-claim exclusive-create (flag wx), EEXIST->contention, seam-tested deterministically",
+          "F5 createRun writes run.json before items dir (orphan prunable)"
+        ],
+        "bound_to_future": {
+          "9.6": "registerConductorExclude must resolve real gitdir / skip when root/.git is a file (linked-worktree ENOTDIR; C-021)"
+        },
+        "verification": "522/522 node + bun(8); orchestrator re-ran F2 (traversal rejected, valid ids ok) + confirmed the F1 test asserts item-cleared-before-mark + question-open-after-crash + idempotent-retry with a complete fixture"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "2 majors (answerQuestion wedge, path-traversal escape) + 3 minors; catch-credit: crash-recovery lens found an unrecoverable wedge a same-author suite would never surface"
     }
   },
   "rejections": [
@@ -429,6 +453,12 @@
       "gate": "phase-3",
       "what": "trivial run could conductor_report with an unsettled item (closes run, loses work; handler re-verify defeated by foreign-red-set exclusion)",
       "resolution": "reportLegal=allSettled at the gate + 9.5b handler-precondition binding; G6 single-source guard added"
+    },
+    {
+      "at": "2026-08-12T14:09:59Z",
+      "gate": "phase-4",
+      "what": "answerQuestion answer-first wedge (MAJOR); unvalidated-id path traversal (MAJOR-latent); questions tmp symlink-follow; lock TOCTOU; createRun orphan dir",
+      "resolution": "5 fixes test-first (522>517); 9.6 binding for worktree exclude"
     }
   ]
 }

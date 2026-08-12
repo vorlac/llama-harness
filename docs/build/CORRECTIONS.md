@@ -288,3 +288,36 @@ output), decision, alternatives considered, blast radius.
   death. Pinned by state.test.ts:668/682.
 - **Blast radius:** none on the schema; the §2.8 vocabulary is untouched. If a lock-kind
   anomaly is ever wanted, it is a separate §2.8 change (STOP-AND-PARK) — not done here.
+
+## C-020 (2026-08-12) — Phase 4 gate: state/questions crash-safety + sandbox hardening
+
+Two adversarial lenses (crash-recovery, filesystem-safety) found 2 majors + 3 minors.
+Atomic-write primitive, dead-pid/over-age lock, retention pruning, .git/info/exclude (G10),
+and gitio command-injection surface all confirmed SOUND. Fixes (test-first):
+- **F1 (MAJOR, crash-recovery):** answerQuestion was ordered answer-first then clear-items.
+  A crash between leaves an item blocked on an ANSWERED question, and since answeredIso is
+  the gate key for conductor_answer (gates-phase hasOpenQuestion), NO legal tool can finish
+  the clear → permanent wedge, violating §2.11 line 998 ("resumes without hand-editing
+  state"). FIX: clear items FIRST, mark the question answered LAST; a mid-crash retry is
+  idempotent (already-cleared items skipped; question still open so conductor_answer legal).
+- **F2 (MAJOR-latent, filesystem):** state.ts path builders never validated runId/itemId, so
+  saveItem(runId,{id:"../../tmp/x"}) escapes .conductor/ (path.join collapses ..). Not
+  reachable at HEAD (no live callers) but the adapter is the trust boundary and ids flow
+  from model-driven decomposition. FIX: assertSafeId (reject empty, path separators, .., and
+  anything not a simple slug) in every path builder.
+- **F3 (minor):** questions.ts writeAtomic used a predictable tmp name (pid.counter) →
+  symlink-follow write outside sandbox. FIX: mirror state.ts (randomBytes suffix + flag "wx").
+- **F4 (minor):** lock fresh-claim TOCTOU (two cold starts both write). FIX: exclusive-create
+  (flag "wx") on the fresh claim, EEXIST → re-read as contention. Best-effort; if a clean
+  deterministic test isn't feasible, documented in honest-limits-pending.md instead.
+- **F5 (minor):** createRun left an orphan empty run dir on mid-create crash (never pruned,
+  no run.json). FIX: write run.json BEFORE the items dir so any orphan is prunable. (Not a
+  wedge; below the bar, folded in since the round is open.)
+
+## C-021 (2026-08-12) — binding: registerConductorExclude vs a linked worktree (Task 9.6)
+
+- registerConductorExclude does mkdirSync(root/.git/info); in a LINKED worktree root/.git is
+  a FILE, so this throws ENOTDIR at openWorkspace init. Not a Phase-4 sandbox escape (and the
+  .conductor/ state normally lives in the MAIN workspace, not per-worktree), but Task 9.6
+  (worktree mode) MUST resolve the real gitdir (git rev-parse --absolute-git-dir, as gitio
+  does) or skip the exclude write when root/.git is not a directory. Bound to 9.6.
