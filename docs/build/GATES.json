@@ -92,12 +92,24 @@
       "M1": "PASS tests=7 pass=7 fail=0 skipped=0 todo=0",
       "M2": "PASS first TS task: 0 -> 7 passes (strictly greater, adds tests)",
       "M3": "PASS tsc --noEmit clean",
-      "M4": "pending post-commit re-derivation (recorded next touch)",
+      "M4": "PASS post-commit re-derivation: scratch worktree at da2dab2, both new impl files removed -> 7/7 fail missing-subject naming task-scope paths, exit 1",
       "M5": "PASS after 1 rejection (see rejections)",
       "M6": "PASS scope = intendedFiles + docs/build/*",
       "M7": "PASS all 7 rows mapped",
       "M8": "n/a",
       "M9": "n/a (bun leg starts at 2.2)"
+    },
+    "6.2": {
+      "at": "2026-08-12T09:13:04Z",
+      "M1": "PASS suite unchanged 7/7 (doc-only task)",
+      "M2": "PASS pass-count 7 -> 7 (no tests added)",
+      "M3": "PASS (bundled in M1 run)",
+      "M4": "n/a (live probe; M8 instead)",
+      "M5": "n/a (markdown artifact)",
+      "M6": "PASS targeted add: RUNNER-DISCOVERY.md + docs/build only; 0.2 WIP (tests/fixtures) explicitly excluded",
+      "M7": "PASS all 7 rows mapped to artifact sections",
+      "M8": "PASS artifact 595 lines, verbatim transcripts; orchestrator re-ran node (c) cell \u2014 output matched (3 tests, 1 fail, exit 1)",
+      "M9": "n/a"
     }
   },
   "phaseGates": {},

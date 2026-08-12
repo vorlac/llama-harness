@@ -1,0 +1,18 @@
+{
+  "taskId": "6.1",
+  "planLines": [2396, 2441],
+  "kind": "code (tier A; residual-risk lens at phase gate — the out-of-repo quarantine lifecycle is one of the plan's four expected-broken mechanisms, prompt §8.2: extra red-step scrutiny + witness files). Includes adapter/quarantine.ts (prompt §3.3). Subagents read §2.1 itemTest rules (478-635), §2.6.1 (817-851), §4.2 (1544-1618), §4.3 (1619-1635).",
+  "assertions": [
+    { "id": "6.1-runtest", "text": "runTest derives command from scope's itemTest template (§2.1 substitutions {files} {dirs} {name}); zero-test guard: a targeted run that executed no tests is neither red nor pass — falls back", "planLine": 2398, "coveredByTest": null },
+    { "id": "6.1-fallback", "text": "no template (or guard fired) => full scope command under §4.2 quarantine, record marked targeted:false; illegal-red rule: failure excerpt must name a testScope file", "planLine": 2402, "coveredByTest": null },
+    { "id": "6.1-classify", "text": "classification via core.classifyFailure with item fileScope; per-runner unresolved-specifier extraction rules are DATA (table), not code; end-to-end: import of not-yet-existing module inside fileScope => missing-subject legal red; outside => error", "planLine": 2405, "coveredByTest": null },
+    { "id": "6.1-runverify-order", "text": "runVerify: quarantine FIRST, then start-stamp, then HEAD/branch record, then run; build-before-test per scope; timeout kills; runs in cwd", "planLine": 2412, "coveredByTest": null },
+    { "id": "6.1-quarantine-out", "text": "excludeTestFiles moved to <stateHome>/conductor/<workspaceKey>/quarantine/<runId>/ OUTSIDE the repo before start-stamp; restored after; quarantined red file provably not executed (witness file)", "planLine": 2415, "coveredByTest": null },
+    { "id": "6.1-crash-manifest", "text": "manifest replays pending restores after a mid-verify kill (next run heals)", "planLine": 2418, "coveredByTest": null },
+    { "id": "6.1-mtime", "text": "quarantined file's mtime survives the round-trip (rename, not copy — else every quarantine invalidates freshness)", "planLine": 2439, "coveredByTest": null },
+    { "id": "6.1-marker", "text": "verify-running-<treeKey>.json {pid,startMs} created/removed; second runVerify against LIVE marker for same tree returns refusal record; stale marker (dead pid) broken with anomaly", "planLine": 2418, "coveredByTest": null },
+    { "id": "6.1-witness", "text": "build-fail => test provably not run (witness file); start-stamp <= a mid-run mtime", "planLine": 2426, "coveredByTest": null },
+    { "id": "6.1-template-name", "text": "itemTest substitution for BOTH {files} and {name} incl. basename-alternation: tests/parser_test.go => parser_test", "planLine": 2429, "coveredByTest": null },
+    { "id": "6.1-ledger", "text": "both runTest and runVerify append to evidence.jsonl and journal", "planLine": 2422, "coveredByTest": null }
+  ]
+}

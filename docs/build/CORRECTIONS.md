@@ -115,3 +115,18 @@ output), decision, alternatives considered, blast radius.
   et al. without it, and the M3 leg would fail on every test file. Still
   devDependencies-only; G1 (zero runtime deps) untouched.
 - **Blast radius:** none beyond the smoke test's assertion text and one dev dependency.
+
+## C-011 (2026-08-12) — gate sequencing + one out-of-order commit
+
+- **M4 sequencing (standing procedure):** M4's red re-derivation requires the task
+  commit to exist (`git worktree add --detach <taskCommit>`), while §7.1 nominally runs
+  the gate pre-commit. Procedure adopted: M1/M2/M3/M5/M6/M7 run pre-commit; the commit
+  lands; M4 runs immediately after FROM the commit; its result is recorded in
+  GATES.json on the next docs/build touch. An M4 failure halts the build for a fix
+  commit. (Applied to 0.3: M4 PASS.)
+- **Task 6.2 committed early** (after 0.3, before Phase 1) as free early parallel work,
+  pre-authorized by orchestrator prompt §6.2. Probe findings of note: node --test and
+  pytest COLLECT in-repo git-worktree copies (whole-tree runs go red) — the measured
+  justification for conductor's out-of-repo worktrees and quarantine; pytest
+  additionally aborts its whole session on duplicate basenames across worktree copies.
+- **Blast radius:** commit order differs from §8's listing (pre-authorized); none on code.

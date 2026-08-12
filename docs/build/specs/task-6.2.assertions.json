@@ -1,0 +1,52 @@
+{
+  "taskId": "6.2",
+  "planLines": [
+    2443,
+    2459
+  ],
+  "kind": "live/manual probe (tier B; M8 live-artifact integrity applies: verbatim commands + raw output; orchestrator re-runs at least one command and diffs). Free early parallel work per orchestrator prompt \u00a76.2.",
+  "assertions": [
+    {
+      "id": "6.2-node-a",
+      "text": "node --test on a fixture project with a failing test at .conductor/runs/x/quarantine/: collected or not, RECORDED with exact command + output",
+      "planLine": 2450,
+      "coveredByTest": "artifact \u00a71 probe (a): NOT COLLECTED + targeted sanity run proving the file fails when executed"
+    },
+    {
+      "id": "6.2-node-b",
+      "text": "same failing test at the out-of-repo quarantine path: recorded NOT collected",
+      "planLine": 2453,
+      "coveredByTest": "artifact \u00a71 probe (b): NOT COLLECTED"
+    },
+    {
+      "id": "6.2-node-c",
+      "text": "git worktree inside the fixture repo: does the main tree's node --test collect the worktree's copies? recorded",
+      "planLine": 2453,
+      "coveredByTest": "artifact \u00a71 probe (c): COLLECTED (3 tests, wt_fail red) \u2014 HONEST-LIMITS citation; independently re-run by orchestrator (M8)"
+    },
+    {
+      "id": "6.2-pytest",
+      "text": "the same three probes (a/b/c) for pytest (via /usr/bin/python3 -m pytest, 8.4.2)",
+      "planLine": 2450,
+      "coveredByTest": "artifact \u00a72 probes a/b/c: NOT/NOT/COLLECTED (+ duplicate-basename session interrupt, exit 2)"
+    },
+    {
+      "id": "6.2-go",
+      "text": "the same three probes for go test ./... (go 1.26.5)",
+      "planLine": 2450,
+      "coveredByTest": "artifact \u00a73 probes a/b/c: NOT (module-internal, explicit path executes)/NOT/NOT (nested-module skip)"
+    },
+    {
+      "id": "6.2-ctest",
+      "text": "the same three probes for ctest (4.4.2)",
+      "planLine": 2450,
+      "coveredByTest": "artifact \u00a74 probes a/b/c: NOT/NOT/NOT (registration-based discovery; worktree self-configure sanity-proved)"
+    },
+    {
+      "id": "6.2-doc",
+      "text": "conductor/docs/RUNNER-DISCOVERY.md records versions and exact commands with raw output; any runner collecting in-repo dot-directories is flagged as a future HONEST-LIMITS citation",
+      "planLine": 2455,
+      "coveredByTest": "artifact: versions from probe output, exact commands+cwd, verbatim outputs with exit codes, summary table, HONEST-LIMITS citations section"
+    }
+  ]
+}

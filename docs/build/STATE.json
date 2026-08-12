@@ -88,7 +88,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "da2dab2",
       "commitMessage": "conductor: 0.3 scaffold",
       "planLines": [
         2042,
@@ -467,7 +467,7 @@
       "taskId": "6.2",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 6.2 runner discovery probe",
       "planLines": [
@@ -476,13 +476,22 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "live probe task: no red step; M8 live-artifact integrity applies instead"
+      },
+      "filesTouched": [
+        "conductor/docs/RUNNER-DISCOVERY.md"
+      ],
+      "revertAssertion": "M8 artifact: verify-acceptance checks RUNNER-DISCOVERY.md exists, >20 lines, contains command transcripts; orchestrator independently re-ran the node (c) cell and matched the recorded output (3 tests, wt_fail red, whole-tree exit 1)",
+      "attempts": 1,
+      "deviations": [
+        "committed out of \u00a78 order as free early parallel work (orchestrator prompt \u00a76.2); C-011"
+      ],
+      "startedAt": "2026-08-12T09:12:00Z",
+      "finishedAt": "2026-08-12T09:13:04Z"
     },
     "7.1": {
       "taskId": "7.1",
