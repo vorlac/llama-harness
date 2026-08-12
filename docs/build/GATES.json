@@ -297,6 +297,20 @@
       "M7": "n/a (mirrors 4.1/2.1 rows)",
       "M8": "n/a",
       "M9": "PASS \u2014 bun leg green (8/8), orchestrator re-ran `bun test` directly (8 pass); NO divergence node vs bun"
+    },
+    "5.1": {
+      "at": "2026-08-12T16:14:17Z",
+      "M1": "PASS 642/642 node + tsc + bun leg",
+      "M2": "PASS 522 -> 642 (+120)",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 7 rows + phaseGate1Bindings encoded",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "18/18 security-critical deny/allow cases re-run directly: branch -D deny, apply deny, env/A=b/path/value-flag git push deny, per-segment scan, two-word discrimination, false-positive guards, default-deny, branch-policy matrix \u2014 all correct",
+      "review": "tier A \u2014 folds into the Phase 5 MILESTONE gate (security/bypass + red-team-by-data >=20 deny spellings)"
     }
   },
   "phaseGates": {

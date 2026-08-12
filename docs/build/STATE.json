@@ -615,7 +615,7 @@
       "taskId": "5.1",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 5.1 git policy",
       "planLines": [
@@ -623,14 +623,31 @@
         2350
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 642,
+        "pass": 642,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-git.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-git.ts (observed by orchestrator; first impl attempt died to a machine-sleep env error before creating any file \u2014 clean recovery, no partial work)"
+      },
+      "filesTouched": [
+        "conductor/tests/gates-git.test.ts",
+        "conductor/core/gates-git.ts"
+      ],
+      "revertAssertion": "removing core/gates-git.ts re-fails all 120 git-policy tests; [5.1-phasegate] 'git branch -D x -> deny' only passes against the operand-scanning decideBranch (keying on gitSubcommand alone would ALLOW it). Orchestrator independently re-ran 18 security-critical cases: 18/18 correct.",
+      "attempts": 2,
+      "deviations": [
+        "sessionRole/gitMode void'd (git policy role/mode-uniform per \u00a73.5:1373; publish handler runs git via execFile, never reaching this gate)",
+        "bare git remote/reflog/stash-show/tag default-denied (not on the exhaustive allow-list; spec-faithful \u2014 a missing allow only surfaces a question)"
+      ],
+      "startedAt": "2026-08-12T16:50:00Z",
+      "finishedAt": "2026-08-12T16:14:17Z"
     },
     "5.2": {
       "taskId": "5.2",
