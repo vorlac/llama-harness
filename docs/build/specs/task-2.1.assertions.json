@@ -1,16 +1,64 @@
 {
   "taskId": "2.1",
-  "planLines": [2163, 2178],
-  "kind": "code (tier B). Subagents read §7.1 (1909-1929) and §7.2 (1930-1945).",
+  "planLines": [
+    2163,
+    2178
+  ],
+  "kind": "code (tier B). Subagents read \u00a77.1 (1909-1929) and \u00a77.2 (1930-1945).",
   "assertions": [
-    { "id": "2.1-vocab", "text": "core/journal-events.ts: closed event-name vocabulary per component + level defaults", "planLine": 2165, "coveredByTest": null },
-    { "id": "2.1-api", "text": "adapter/journal.ts: createJournal(runDir, config, env) -> {log(level, component, event, data, corr), flushSync()}; JSONL append with seq/ts/correlation", "planLine": 2166, "coveredByTest": null },
-    { "id": "2.1-levels", "text": "level filtering matrix per §7.1; error/warn ALWAYS written", "planLine": 2173, "coveredByTest": null },
-    { "id": "2.1-env", "text": "env override parsing (CONDUCTOR_LOG=fanout:trace,...) beats config", "planLine": 2168, "coveredByTest": null },
-    { "id": "2.1-unknown-event", "text": "unknown event name THROWS in dev/test (asserted) and warns in prod", "planLine": 2174, "coveredByTest": null },
-    { "id": "2.1-seq", "text": "seq monotonic across two journal instances on the same dir (re-read last seq)", "planLine": 2175, "coveredByTest": null },
-    { "id": "2.1-console", "text": "console sink via injected consoleFn (tests capture)", "planLine": 2169, "coveredByTest": null },
-    { "id": "2.1-truncation", "text": "atomic append: single appendFileSync per record; records <= 32 KiB, larger data truncated with truncated:true", "planLine": 2169, "coveredByTest": null },
-    { "id": "2.1-rotation", "text": "rotation at retention.maxRunDirBytes", "planLine": 2176, "coveredByTest": null }
+    {
+      "id": "2.1-vocab",
+      "text": "core/journal-events.ts: closed event-name vocabulary per component + level defaults",
+      "planLine": 2165,
+      "coveredByTest": "journal.test.ts [2.1-vocab] EVENTS/isKnownEvent/level defaults"
+    },
+    {
+      "id": "2.1-api",
+      "text": "adapter/journal.ts: createJournal(runDir, config, env) -> {log(level, component, event, data, corr), flushSync()}; JSONL append with seq/ts/correlation",
+      "planLine": 2166,
+      "coveredByTest": "[2.1-api] createJournal shape + correlation triple"
+    },
+    {
+      "id": "2.1-levels",
+      "text": "level filtering matrix per \u00a77.1; error/warn ALWAYS written",
+      "planLine": 2173,
+      "coveredByTest": "[2.1-levels] 5-row filter matrix (error/warn always)"
+    },
+    {
+      "id": "2.1-env",
+      "text": "env override parsing (CONDUCTOR_LOG=fanout:trace,...) beats config",
+      "planLine": 2168,
+      "coveredByTest": "[2.1-env] CONDUCTOR_LOG per-component + bare override"
+    },
+    {
+      "id": "2.1-unknown-event",
+      "text": "unknown event name THROWS in dev/test (asserted) and warns in prod",
+      "planLine": 2174,
+      "coveredByTest": "[2.1-unknown-event] dev throws / prod retains+surfaces"
+    },
+    {
+      "id": "2.1-seq",
+      "text": "seq monotonic across two journal instances on the same dir (re-read last seq)",
+      "planLine": 2175,
+      "coveredByTest": "[2.1-seq] monotonic + continues across restart"
+    },
+    {
+      "id": "2.1-console",
+      "text": "console sink via injected consoleFn (tests capture)",
+      "planLine": 2169,
+      "coveredByTest": "[2.1-console] injected consoleFn >= warn"
+    },
+    {
+      "id": "2.1-truncation",
+      "text": "atomic append: single appendFileSync per record; records <= 32 KiB, larger data truncated with truncated:true",
+      "planLine": 2169,
+      "coveredByTest": "[2.1-truncation] 32KiB truncated:true inside data"
+    },
+    {
+      "id": "2.1-rotation",
+      "text": "rotation at retention.maxRunDirBytes",
+      "planLine": 2176,
+      "coveredByTest": "[2.1-rotation] rotates to journal.1.jsonl.gz"
+    }
   ]
 }

@@ -16,3 +16,4 @@
 {"ts":"2026-08-12T10:26:42Z","event":"task.committed","taskId":"1.3","detail":"freshness/stops/verdict 52 tests; red observed missing-subject x3; 228/228; conservative multi-specifier + terminal-guard deviations recorded"}
 {"ts":"2026-08-12T10:30:38Z","event":"task.committed","taskId":"1.5","detail":"decide helpers 24 tests; red observed; 252/252 green; Phase 1 tasks complete"}
 {"ts":"2026-08-12T11:08:48Z","event":"phase.gate","phase":"1","detail":"PASS after 2 fix rounds; 5 majors caught+fixed (gitSubcommand false-allow, isGitCommand bypass, globMatch DoS, classifyFailure escape/absolute, isHumanTerritory misses); 26/26 re-verified; 6 future-task bindings; 279/279"}
+{"ts":"2026-08-12T11:31:03Z","event":"task.committed","taskId":"2.1","detail":"journal (first adapter); red missing-subject x2; 301/301; G14 re-grepped clean by orchestrator; NODE_ENV dev/prod flag"}

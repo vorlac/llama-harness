@@ -345,7 +345,7 @@
       "taskId": "2.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 2.1 journal",
       "planLines": [
@@ -353,14 +353,31 @@
         2178
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 301,
+        "pass": 301,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/journal.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/journal-events.ts + adapter/journal.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/journal.test.ts",
+        "conductor/core/journal-events.ts",
+        "conductor/adapter/journal.ts"
+      ],
+      "revertAssertion": "removing either journal subject re-fails all 22 journal tests at link time; e.g. '[2.1-seq] seq monotonic, second journal continues from last seq' only passes against the real re-read-last-seq adapter",
+      "attempts": 1,
+      "deviations": [
+        "dev/test-vs-prod flag = env.NODE_ENV (prod arm retains+surfaces, never drops, per \u00a77.4); rotation index found via existsSync probe (readdirSync not in the allowed fs set)"
+      ],
+      "startedAt": "2026-08-12T12:30:00Z",
+      "finishedAt": "2026-08-12T11:31:03Z"
     },
     "2.2": {
       "taskId": "2.2",

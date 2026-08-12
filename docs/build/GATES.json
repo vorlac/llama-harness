@@ -213,6 +213,18 @@
       "M8": "n/a",
       "M9": "n/a",
       "review": "tier B lens folded into the Phase 1 gate panel (correctness/boundary/counterexample lenses cover core/ cumulatively)"
+    },
+    "2.1": {
+      "at": "2026-08-12T11:31:03Z",
+      "M1": "PASS 301/301 + tsc (orchestrator-observed)",
+      "M2": "PASS 279 -> 301",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS (G14 re-grepped by orchestrator: no Bun/shell-tag; Date.now count in core = 0)",
+      "M6": "PASS (3 declared files)",
+      "M7": "PASS 9 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a (bun leg still deferred to 2.2)"
     }
   },
   "phaseGates": {
