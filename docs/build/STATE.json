@@ -878,7 +878,7 @@
       "taskId": "8.1",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 8.1 doctrine packs",
       "planLines": [
@@ -886,14 +886,38 @@
         2541
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 826,
+        "pass": 826,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/doctrine.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "tests=10 pass=0 fail=10; all nine packs ENOENT via readPack() before any pack written (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/doctrine.test.ts",
+        "conductor/doctrine/core.md",
+        "conductor/doctrine/decompose.md",
+        "conductor/doctrine/plan.md",
+        "conductor/doctrine/tdd.md",
+        "conductor/doctrine/test-vet.md",
+        "conductor/doctrine/debug.md",
+        "conductor/doctrine/review.md",
+        "conductor/doctrine/skeptic.md",
+        "conductor/doctrine/receive-review.md"
+      ],
+      "revertAssertion": "reverting any one pack makes doctrine.test.ts fail naming that pack's missing anchor(s): e.g. removing tdd.md fails 8.1-files (ENOENT), 8.1-mechanism ('the handler runs the test'), and 8.1-anchors-tdd ('NO PRODUCTION CODE WITHOUT A FAILING TEST' / 'delete means delete'); the soft/hasWord matchers pin the exact anchor words, not mere file presence",
+      "attempts": 1,
+      "deviations": [
+        "M5 gate refinement (C-026) required first: the marker scan is now production-scoped so doctrine.test.ts's legitimate 'placeholder marker' subject (and the 15.1 doc-fidelity test's like need) do not false-trip M5; landed as conductor-build infra commit df7f49f ahead of this task"
+      ],
+      "startedAt": "2026-08-12T23:05:00Z",
+      "finishedAt": "2026-08-12T23:25:00Z"
     },
     "8.2": {
       "taskId": "8.2",
