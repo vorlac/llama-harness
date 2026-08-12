@@ -693,7 +693,7 @@
       "manifest": true,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "3f794d6",
       "commitMessage": "conductor: 5.3 gate wiring",
       "planLines": [
         2375,
@@ -1454,19 +1454,37 @@
       "taskId": "5.4",
       "manifest": false,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 5.4 chat.message hook",
       "planLines": null,
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null,
+      "tap": {
+        "tests": 703,
+        "pass": 703,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/chat-message.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/chat-message.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/chat-message.test.ts",
+        "conductor/adapter/chat-message.ts",
+        "conductor/core/journal-events.ts"
+      ],
+      "revertAssertion": "removing adapter/chat-message.ts re-fails all 7 chat-message tests; [5.4-midrun] (route a prompt into a live run, journal user.midrun-prompt) only passes against the currentRun/isTerminal branch + the vocab addition",
+      "attempts": 1,
+      "deviations": [
+        "ADDED user.midrun-prompt to core/journal-events.ts 'state' vocabulary (justified cross-task M6 edit: plan line 1074 mandates the event; 2.1's vocab predated this task)",
+        "implementer worker STALLED post-completion during its own verification (flaky wire-contract test spawning opencode); work was complete + 7/7 green; orchestrator verified full suite green independently and kept it"
+      ],
+      "startedAt": "2026-08-12T18:10:00Z",
+      "finishedAt": "2026-08-12T17:21:24Z",
       "note": "Added per orchestrator prompt \u00a73.3 (unassigned chat.message hook; plan \u00a73.2 lines 1064-1159, \u00a73.5 lines 1334-1427). Own red->green->commit before Phase 9."
     },
     "12.1-G5": {

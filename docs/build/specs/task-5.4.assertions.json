@@ -1,14 +1,44 @@
 {
   "taskId": "5.4",
   "planLines": null,
-  "planRefs": "§3.2 lines 1066-1075 (run creation on chat.message), §3.5 lines 1344-1347 (orchestrator registry entry via chat.message), §2.3 isTerminal, §2.11 stale-red registry. Task added by orchestrator prompt §3.3 (specified, never assigned). Commit: conductor: 5.4 chat.message hook",
-  "kind": "code (tier A). File: adapter/ (hook body callable directly in tests, no opencode needed — same pattern as 5.3). Depends on 4.1 (state store), 4.2 (gitio), 1.3 (isTerminal).",
+  "planRefs": "\u00a73.2 lines 1066-1075 (run creation on chat.message), \u00a73.5 lines 1344-1347 (orchestrator registry entry via chat.message), \u00a72.3 isTerminal, \u00a72.11 stale-red registry. Task added by orchestrator prompt \u00a73.3 (specified, never assigned). Commit: conductor: 5.4 chat.message hook",
+  "kind": "code (tier A). File: adapter/ (hook body callable directly in tests, no opencode needed \u2014 same pattern as 5.3). Depends on 4.1 (state store), 4.2 (gitio), 1.3 (isTerminal).",
   "assertions": [
-    { "id": "5.4-create", "text": "a user prompt arriving while no run is live (none, or isTerminal(currentRun)) creates runs/<runId>/run.json in state INTAKE and points current-run.json at it", "planLine": 1066, "coveredByTest": null },
-    { "id": "5.4-start-facts", "text": "run creation captures startHead, startBranch, startDirty (already-dirty paths) and excludedStaleRed (the §2.11 entries in force) in one place", "planLine": 1069, "coveredByTest": null },
-    { "id": "5.4-stale-report", "text": "the handler's first response to the user reports the stale-red exclusions ('N test files from earlier runs are still red and are excluded from verification')", "planLine": 1071, "coveredByTest": null },
-    { "id": "5.4-midrun", "text": "a prompt arriving DURING a live run is routed into it as orchestrator context (journaled user.midrun-prompt) and NEVER starts a new run", "planLine": 1073, "coveredByTest": null },
-    { "id": "5.4-registry", "text": "the orchestrator session's registry entry (sessionID -> {role: orchestrator, ...}) is written by this hook (§3.5: fan-out writes sub-session entries; chat.message writes the orchestrator's)", "planLine": 1344, "coveredByTest": null },
-    { "id": "5.4-nogit", "text": "run creation in a no-git workspace (§3.9): startHead/startBranch null-safe via gitio's isRepo/headSha-null path, no crash", "planLine": 1069, "coveredByTest": null }
+    {
+      "id": "5.4-create",
+      "text": "a user prompt arriving while no run is live (none, or isTerminal(currentRun)) creates runs/<runId>/run.json in state INTAKE and points current-run.json at it",
+      "planLine": 1066,
+      "coveredByTest": "chat-message.test.ts (names carry 5.4-create)"
+    },
+    {
+      "id": "5.4-start-facts",
+      "text": "run creation captures startHead, startBranch, startDirty (already-dirty paths) and excludedStaleRed (the \u00a72.11 entries in force) in one place",
+      "planLine": 1069,
+      "coveredByTest": "chat-message.test.ts (names carry 5.4-start-facts)"
+    },
+    {
+      "id": "5.4-stale-report",
+      "text": "the handler's first response to the user reports the stale-red exclusions ('N test files from earlier runs are still red and are excluded from verification')",
+      "planLine": 1071,
+      "coveredByTest": "chat-message.test.ts (names carry 5.4-stale-report)"
+    },
+    {
+      "id": "5.4-midrun",
+      "text": "a prompt arriving DURING a live run is routed into it as orchestrator context (journaled user.midrun-prompt) and NEVER starts a new run",
+      "planLine": 1073,
+      "coveredByTest": "chat-message.test.ts (names carry 5.4-midrun)"
+    },
+    {
+      "id": "5.4-registry",
+      "text": "the orchestrator session's registry entry (sessionID -> {role: orchestrator, ...}) is written by this hook (\u00a73.5: fan-out writes sub-session entries; chat.message writes the orchestrator's)",
+      "planLine": 1344,
+      "coveredByTest": "chat-message.test.ts (names carry 5.4-registry)"
+    },
+    {
+      "id": "5.4-nogit",
+      "text": "run creation in a no-git workspace (\u00a73.9): startHead/startBranch null-safe via gitio's isRepo/headSha-null path, no crash",
+      "planLine": 1069,
+      "coveredByTest": "chat-message.test.ts (names carry 5.4-nogit)"
+    }
   ]
 }

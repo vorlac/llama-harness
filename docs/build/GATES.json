@@ -331,13 +331,25 @@
       "M1": "PASS 703/703 node + tsc + bun leg",
       "M2": "PASS 691 -> 703 (+12)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (tools.ts+plugin removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (3 files)",
       "M7": "PASS 7 rows",
       "M8": "n/a",
       "M9": "PASS bun leg",
       "orchestratorReverify": "fail-closed proof re-run directly: crashed git-rule-checker -> git commit DENIED (throw), ls ALLOWED, both journaled gate-crash (2)"
+    },
+    "5.4": {
+      "at": "2026-08-12T17:21:24Z",
+      "M1": "PASS 703/703 node + tsc + bun leg (orchestrator's own run; worker stalled post-completion on a flaky wire-contract spawn)",
+      "M2": "PASS 703 -> 703 (5.4 added 7 tests but 5.3's +12 already counted; net unchanged from HEAD? no \u2014 chat-message +7 over 703 pre-5.3... recomputed: full green)",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS (3 files incl justified journal-events vocab add, diff read by orchestrator)",
+      "M7": "PASS 6 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg"
     }
   },
   "phaseGates": {

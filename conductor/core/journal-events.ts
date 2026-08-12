@@ -52,8 +52,9 @@ export const EVENTS: Record<Component, readonly string[]> = {
   inject: ["system-append"],
   // §4.4 router-facing client: request/response tagging and failover.
   "router-client": ["request", "response", "failover", "retry"],
-  // §2.3 / §4.1 state store: run creation, lock lifecycle, item mutations.
-  state: ["run.created", "lock.acquired", "lock.released", "lock.stale-break", "item.updated"],
+  // §2.3 / §4.1 state store: run creation, lock lifecycle, item mutations, and the
+  // §3.2 chat.message route of a prompt arriving during a live run (plan line 1074).
+  state: ["run.created", "lock.acquired", "lock.released", "lock.stale-break", "item.updated", "user.midrun-prompt"],
 };
 
 // True iff `event` is listed under a KNOWN `component`. An unknown component or
