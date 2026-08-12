@@ -731,7 +731,7 @@
       "taskId": "6.1",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 6.1 evidence engine",
       "planLines": [
@@ -739,14 +739,35 @@
         2442
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 781,
+        "pass": 781,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/evidence.ts + adapter/quarantine.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/evidence.test.ts",
+        "conductor/tests/quarantine.test.ts",
+        "conductor/adapter/evidence.ts",
+        "conductor/adapter/quarantine.ts"
+      ],
+      "revertAssertion": "removing evidence.ts/quarantine.ts re-fails all 18 tests; [6.1-quarantine] mtime-survives + [6.1-classify-e2e] ESM-absolute-path-relativize only pass against rename+relativize logic. Orchestrator re-verified quarantine round-trip: moved OUT, mtime survived (1717200000000==), restored.",
+      "attempts": 1,
+      "deviations": [
+        "buildCommand on a VerifyConfig superset (core Config scope schema is frozen additionalProperties:false)",
+        "stale-marker break surfaced on VerifyOutcome (staleMarkerBroken) not a journal anomaly (\u00a77.4 evidence vocab is red/green/verify only; anomaly kinds lack marker-break) \u2014 same posture as C-019",
+        "strips NODE_TEST_CONTEXT in the child env (nested node --test would else mis-report a fail as pass) \u2014 env-hygiene like gitio's GIT_DIR strip",
+        "longest-prefix-first relativization for /var vs /private/var symlink"
+      ],
+      "startedAt": "2026-08-12T19:40:00Z",
+      "finishedAt": "2026-08-12T20:30:45Z"
     },
     "6.2": {
       "taskId": "6.2",
