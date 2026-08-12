@@ -24,12 +24,17 @@ Updated: 2026-08-12 (Phases 0-3 complete + gated; Phase 4 underway)
 
 ## What is in flight
 
-- **Task 4.1** (adapter/state.ts + adapter/questions.ts — the state store; big, crash-safety
-  critical: atomic tmp+rename, advisory lockfile with dead-pid healing, retention pruning,
-  liveness beacon, .git/info/exclude, disposition setters, itemsSummary). 4.2 gitio is
-  COMMITTED (37ddab7). After 4.1: 2.2 bun smoke (`conductor: 2.2 bun runtime smoke` — the
-  deferred G14 dual-runtime proof of state+journal; bun 1.3.14 installed, leg ACTIVE),
-  then the Phase 4 gate (crash-recovery + filesystem-safety lenses; stray-write scan).
+- **Phase 4 DONE + gated** (4.2 gitio, 4.1 state store, 2.2 bun smoke). Gate found 2 majors:
+  answerQuestion answer-first WEDGE (crash left an item blocked on an answered question with
+  no legal recovery tool → reversed: clear items first, mark answered last) and unvalidated-id
+  PATH-TRAVERSAL escape (→ assertSafeId in every path builder). +3 minors. C-020/C-021. The
+  G14 bun leg is ACTIVE and green (the preflight-uncertain acceptance row is now a real green).
+- **Phase 5 (gates MILESTONE) in flight**: safe pair {5.1 git policy, 5.2 edit+session
+  gates} test-writers dispatched to staging. Then 5.3 gate wiring (plugin), 5.4 chat.message
+  hook (prompt §3.3 unassigned task). 5.1/5.2 CARRY the phaseGate1Bindings — `git branch -D`
+  MUST deny (false-ALLOW trap), full-token deny matrix (not single gitSubcommand), env/wrapper
+  git detection, wrapper-aware writeShapedPaths. Milestone gate: security/bypass +
+  red-team-by-data (≥20 deny spellings for 5.1, ≥15 write-shapes for 5.2).
 
 ## What is parked / unblocked
 
