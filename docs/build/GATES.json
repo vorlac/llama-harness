@@ -443,7 +443,7 @@
       "M1": "PASS 837/837 node + tsc + bun leg (orchestrator-run full suite)",
       "M2": "PASS 826 -> 837 (+11: 9 inject assertions + G9 + 2 review-driven corrections)",
       "M3": "PASS",
-      "M4": "pending post-commit (remove inject.ts -> missing-subject); backfilled next docs/build touch",
+      "M4": "PASS post-commit from 29a5011 (scratch worktree): remove inject.ts -> inject.test.ts red with ERR_MODULE_NOT_FOUND (missing-subject), tests=1 fail=1.",
       "M5": "PASS (changeset 2 files + full tree 58 files both clean)",
       "M6": "PASS (inject.ts imported by inject.test.ts:81)",
       "M7": "PASS 9 rows (7 §6.4 assertions + 2 review-driven: null-recommendation, empty-pack)",
