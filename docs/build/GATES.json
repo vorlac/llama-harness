@@ -193,13 +193,26 @@
       "M1": "PASS 228/228 + tsc (orchestrator-observed)",
       "M2": "PASS 176 -> 228",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit: rm all three modules in scratch worktree of 29c7e03 -> each suite fails missing-subject (1/1/1)",
       "M5": "PASS",
       "M6": "PASS",
       "M7": "PASS 9 rows mapped (test names carry ids)",
       "M8": "n/a",
       "M9": "n/a",
       "review": "tier B lens dispatched post-commit"
+    },
+    "1.5": {
+      "at": "2026-08-12T10:30:38Z",
+      "M1": "PASS 252/252 + tsc (orchestrator-observed)",
+      "M2": "PASS 228 -> 252",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 4 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a",
+      "review": "tier B lens folded into the Phase 1 gate panel (correctness/boundary/counterexample lenses cover core/ cumulatively)"
     }
   },
   "phaseGates": {

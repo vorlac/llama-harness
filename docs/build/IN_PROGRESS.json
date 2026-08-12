@@ -1,6 +1,0 @@
-{
-  "taskId": "1.5",
-  "step": "moving staged decide tests in; red observation; implementer next",
-  "intendedFiles": ["conductor/tests/decide.test.ts", "conductor/core/decide.ts"],
-  "startedAt": "2026-08-12T11:45:00Z"
-}

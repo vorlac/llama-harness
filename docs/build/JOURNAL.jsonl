@@ -14,3 +14,4 @@
 {"ts":"2026-08-12T10:19:44Z","event":"task.committed","taskId":"1.2","detail":"shell-parse 63 tests; red observed missing-subject; 172/172 green; 1.1 lens adjudicated (no majors, obligations deferred to 9.1)"}
 {"ts":"2026-08-12T10:20:34Z","event":"task.committed","taskId":"1.4","detail":"purity+G14 guards green-on-land 176/176; mutation probes A/B/C all confirmed by orchestrator"}
 {"ts":"2026-08-12T10:26:42Z","event":"task.committed","taskId":"1.3","detail":"freshness/stops/verdict 52 tests; red observed missing-subject x3; 228/228; conservative multi-specifier + terminal-guard deviations recorded"}
+{"ts":"2026-08-12T10:30:38Z","event":"task.committed","taskId":"1.5","detail":"decide helpers 24 tests; red observed; 252/252 green; Phase 1 tasks complete"}
