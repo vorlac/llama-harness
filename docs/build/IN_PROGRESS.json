@@ -1,0 +1,1 @@
+{"taskId":"phase-7-gate-fix","step":"fan-out watchdog covers create (F1) + heldUnsubs ordering (F3), test-first","intendedFiles":["conductor/adapter/fanout.ts","conductor/tests/fanout.test.ts","conductor/tests/fixtures/fake-sdk.ts"],"startedAt":"2026-08-12T22:40:00Z"}

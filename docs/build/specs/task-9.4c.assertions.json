@@ -11,5 +11,11 @@
     "MUST": [
       "conductor_dispatch_wave performs PLAN_REVIEWED->EXECUTING, which legalRunTransition gates on survivingMajors===0 || round>=max. dispatch_wave fires from PERSISTED state (Run has planReviewRounds, NOT survivingMajors). It MUST supply satisfying context: if planReviewRounds < planReviewMaxRounds the review exited CLEAN (survivingMajors was 0) -> pass survivingMajors:0; else pass {round:planReviewRounds, max:planReviewMaxRounds} (cap exit). The gate is satisfiable-by-construction because you only reach PLAN_REVIEWED by satisfying the exit condition (\u00a73.2 line 1125). Without this, a clean plan-review livelocks entry to EXECUTING."
     ]
+  },
+  "phaseGate7Bindings": {
+    "source": "Phase 7 concurrency lens",
+    "MUST": [
+      "The wave driver wires the fan-out engine's TreeState. A held write-capable job releases only on treeState.onClear; if a verify marker is leaked/stale and never clears, the held job hangs the wave silently. The driver MUST ensure a stale/over-age marker break (evidence.ts over-age break, C-024 F6) surfaces to treeState.onClear (or otherwise env-fails the held job), so a leaked marker becomes an env failure, not a hang. (C-025 F2)"
+    ]
   }
 }

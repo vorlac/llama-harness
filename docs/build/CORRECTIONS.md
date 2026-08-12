@@ -405,3 +405,21 @@ file from OUTSIDE the repo). Fixes (test-first, all safe direction):
 - **F7 childEnv git hygiene (minor):** strips only NODE_TEST_CONTEXT; FIX: also strip
   GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR + set GIT_OPTIONAL_LOCKS=0 (gitio parity).
 - **F8 timeout SIGTERM-trap false-green (nano):** FIX: timeout kill uses SIGKILL (untrappable).
+
+## C-025 (2026-08-12) — Phase 7 gate (concurrency): fan-out watchdog coverage
+
+Concurrency lens: fan-out core races SOUND (cap, barrier, watchdog-vs-completion double-resolve,
+registry retry window, freeze-hold double-dispatch all airtight; router-client double-resolve +
+socket/timer leak airtight; 12x flake sweep clean). 3 hang-family findings:
+- **F1 (MAJOR):** the per-job watchdog is armed AFTER `await client.session.create()`, so a hung
+  create is unbounded → the whole wave hangs with no backstop, defeating the §2474 per-sub-session
+  wall-clock cap. FIX: arm the job timeout BEFORE session.create so create+prompt are both bounded;
+  on fire, abort (if a session exists) and env-fail the job.
+- **F3 (LOW):** hold() subscribes onClear then sets heldUnsubs — a synchronous-notify TreeState
+  would strand the held job. FIX: set heldUnsubs before/atomically with subscribe.
+- **F2 (MINOR, bound to 9.4c):** a held write-capable job has no backstop if its tree's verify
+  marker NEVER clears (leaked/stale marker) → silent wave hang. The fan-out hold path is
+  deliberately timer-free (§4.2 "no timers, no polling"); the backstop is that a stale-marker
+  break (Phase-6 evidence over-age break) MUST surface to treeState.onClear. BINDING for 9.4c
+  (the wave driver wires treeState): a stale/over-age marker break fires onClear so a leaked
+  marker becomes an env failure, not a silent hang.
