@@ -391,7 +391,7 @@
       "M1": "PASS 781/781 node + tsc + bun leg",
       "M2": "PASS 763 -> 781 (+18)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (evidence.ts+quarantine.ts removed -> missing-subject)",
       "M5": "PASS",
       "M6": "PASS (4 files)",
       "M7": "PASS 11 rows + 3 bindings",
@@ -544,6 +544,31 @@
       },
       "verdict": "PASS after 2 fix rounds (of 3 allowed)",
       "rejected": "4 security bypasses + 1 spec under-block + 3 orchestrator-found wrapper residuals = 8 real holes closed; the milestone security gate is emphatically load-bearing"
+    },
+    "6": {
+      "at": "2026-08-12T21:05:39Z",
+      "milestone": true,
+      "stage1": "PASS fresh worktree of 6727e37, own npm install, 781/781 + tsc + bun leg; stray-write scan CLEAN (repo file count unchanged, ~/.local/state/conductor + ~/.conductor 0->0, no orphan quarantine dirs)",
+      "lenses": {
+        "residual-risk(quarantine)": "FINDINGS: EXDEV cross-fs MAJOR, clobber-on-restore MAJOR, stale/gone repoRoot, concurrent-replay race, ..-traversal, restored-flag vestigial, ENOTDIR-in-finally, refusal-skips-heal",
+        "crash-recovery+fs-safety": "FINDINGS: sandbox escape via unvalidated workspaceKey/tree/excludeTestFiles MAJOR (rmSync recursive on /etc), live-run replay MAJOR, illegal-red too loose MAJOR, recycled-pid wedge, childEnv git hygiene, SIGTERM-trap false-green"
+      },
+      "adjudication": {
+        "fixed_C024": [
+          "F1 EXDEV -> copy+utimes(preserve mtime)+unlink fallback + heal-in-try",
+          "F2 no-clobber restore (skip existing dst, keep stored, conflict)",
+          "F3 assertSafeId on runId/workspaceKey/tree + reject ../absolute in files/excludeTestFiles",
+          "F4 manifest {pid,startMs}; replay heals only dead-owner orphans; ENOENT=peer-healed; vanished-repoRoot skip; never throws out of runVerify",
+          "F5 illegal-red uses excerpt-only + full-path match",
+          "F6 over-age marker break (startMs, staleMarkerMs default 24h)",
+          "F7 childEnv strips GIT_* + GIT_OPTIONAL_LOCKS=0",
+          "F8 timeout SIGKILL"
+        ],
+        "test_adjustments": "2 legitimate fidelity fixes (added pid:deadPid() so [6.1-q-replay]/[6.1-heal] simulate a CRASHED run, not a live one \u2014 F4 correctly refuses to heal a live owner); orchestrator confirmed no assertion deleted",
+        "orchestrator_reverify": "re-ran F1/F2/F3/F4 reproductions against patched code: 0 residual (clobber kept V2, ../ + traversing key rejected, live-owner not healed, EXDEV fallback moves + preserves mtime)"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "9 crash/data-loss/sandbox holes in the expected-broken quarantine mechanism (2 lenses); milestone review found the design bind (rename vs out-of-volume) the last revision never reconciled"
     }
   },
   "rejections": [
@@ -594,6 +619,12 @@
       "gate": "phase-5-milestone",
       "what": "8 security holes: shell-expansion git bypass, wrapper-with-flags bypass x3, >| redirect, .. traversal, in-place writers, checkout -f",
       "resolution": "2 fix rounds, 763/763; orchestrator re-attacked twice, 0 residuals"
+    },
+    {
+      "at": "2026-08-12T21:05:39Z",
+      "gate": "phase-6-milestone",
+      "what": "quarantine: EXDEV cross-fs crash, clobber-on-restore data loss, sandbox escape via unvalidated ids (rmSync recursive outside), live-run replay, illegal-red too loose, + 4 minor",
+      "resolution": "1 fix round (C-024), 791/791; orchestrator re-verified 0 residual"
     }
   ]
 }

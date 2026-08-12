@@ -76,6 +76,7 @@ import {
   validateEvidenceRecord,
   detectRunner,
   RUNNER_PROFILES,
+  childEnv,
 } from "../adapter/evidence.ts";
 import type { ScopeSpec, VerifyConfig, VerifyOutcome, RunTestResult } from "../adapter/evidence.ts";
 
@@ -997,12 +998,16 @@ test("[6.1-heal] a mid-verify kill's orphaned quarantine is healed on the next r
   writeFileSync(foreignAbs, "throw new Error('foreign red');\n");
   utimesSync(foreignAbs, FIXED_MTIME_S, FIXED_MTIME_S);
 
+  // A crashed run's pid is DEAD: replay heals only NON-live owners (F4). Stamp a dead
+  // pid so this is a faithful orphan (a live pid would be an in-flight verify whose files
+  // must NOT be stolen back mid-run).
   quarantineFiles({
     repoRoot: repo,
     files: ["tests/foreign.suite.js"],
     stateHome,
     workspaceKey: "wkey",
     runId: "r-crashed",
+    pid: deadPid(),
   });
   assert.equal(existsSync(foreignAbs), false, "precondition: the crashed run left the foreign red quarantined");
 
@@ -1034,5 +1039,216 @@ test("[6.1-heal] a mid-verify kill's orphaned quarantine is healed on the next r
     Math.floor(statSync(foreignAbs).mtimeMs / 1000),
     FIXED_MTIME_S,
     "the healed file's mtime survives (rename) so freshness is not invalidated",
+  );
+});
+
+// ===========================================================================
+// Crash-safety + sandbox hardening (F3, F5, F6, F7, F8)
+// ===========================================================================
+
+// --- F5: the illegal-red legality check reads ONLY the bounded excerpt, and
+//         matches a testScope file by FULL relative path (not basename) ---------
+
+test("[6.1-illegal-red-excerpt] legality reads ONLY the <=300-char excerpt and matches the FULL testScope path", () => {
+  const repo = committedRepo();
+
+  function fallbackRed(stderr: string): RunTestResult {
+    const runDir = freshRunDir();
+    const journal = makeJournal(runDir);
+    const scope: ScopeSpec = {
+      name: "unit",
+      command: [process.execPath, "-e", `process.stderr.write(${JSON.stringify(stderr)}); process.exit(1);`],
+      timeoutMs: 600000,
+      // deliberately NO itemTest -> the no-template fallback path (targeted:false)
+    };
+    return runTest(runDir, "I1", {
+      scope,
+      testFiles: ["tests/mine.test.ts"],
+      cwd: repo,
+      fileScope: ["src/**"],
+      journal,
+    });
+  }
+
+  // The item's OWN test PASSED; an UNRELATED suite failed with the assertion at the
+  // HEAD of the output, and the item's testScope file is named only DEEP in the tail
+  // (past the 300-char excerpt bound). A full-text/basename check would call this a
+  // legal red (its name appears somewhere); the correct rule reads ONLY the excerpt,
+  // which names no testScope file -> ILLEGAL.
+  const head =
+    "AssertionError [ERR_ASSERTION]: an UNRELATED suite failed in tests/other_unrelated.test.ts. " +
+    "x".repeat(320) +
+    " ... tail: tests/mine.test.ts ... ok (passed)\n";
+  const deep = fallbackRed(head);
+  assert.ok(head.indexOf("tests/mine.test.ts") > 300, "precondition: the item's file is named only PAST the excerpt bound");
+  if (deep.record.kind !== "red") throw new Error("expected a red");
+  assert.equal(deep.record.failureClass, "assertion", "the head is assertion-shaped -> legal class");
+  assert.ok(deep.record.failureExcerpt.length <= 300, "the excerpt is bounded to <=300 chars");
+  assert.equal(
+    deep.record.failureExcerpt.includes("tests/mine.test.ts"),
+    false,
+    "the bounded excerpt does NOT name the item's testScope file",
+  );
+  assert.equal(
+    deep.namesTestScopeFile,
+    false,
+    "namesTestScopeFile is computed from the EXCERPT only — a deep tail mention does not count (F5)",
+  );
+  assert.equal(
+    deep.legalRed,
+    false,
+    "an unrelated suite failure whose excerpt names no testScope file is an ILLEGAL red (§2.1, plan 2431)",
+  );
+
+  // A genuine red whose EXCERPT (the head) DOES name the item's testScope file, by its
+  // full relative path, is a LEGAL red.
+  const genuine = fallbackRed("AssertionError [ERR_ASSERTION]: expected 1 to equal 2 in tests/mine.test.ts\n");
+  assert.equal(genuine.namesTestScopeFile, true, "the excerpt names the item's testScope file by full path");
+  assert.equal(genuine.legalRed, true, "a red whose excerpt names a testScope file is LEGAL (F5)");
+});
+
+// --- F3: runVerify rejects a sandbox-escaping tree key ------------------------
+
+test("[6.1-marker-tree-safeid] runVerify rejects a traversing tree key (markerPathOf trust boundary)", () => {
+  const runDir = freshRunDir();
+  const repo = committedRepo();
+  const stateHome = freshStateHome();
+  const journal = makeJournal(runDir);
+  const cfg = verifyConfig([process.execPath, "-e", "process.exit(0)"]);
+
+  assert.throws(
+    () =>
+      runVerify(runDir, "I1", cfg, "src/x.ts", {
+        cwd: repo,
+        journal,
+        stateHome,
+        workspaceKey: "wkey",
+        runId: "r-evil",
+        tree: "../../tmp/evil",
+      }),
+    /escape|separator|slug/i,
+    "a tree key that would climb out of runDir must be rejected before any marker is written",
+  );
+  // Nothing leaked: no verify record was appended.
+  assert.equal(readEvidence(runDir).length, 0, "a rejected verify appends no record");
+
+  // A valid tree ("main") still works.
+  const ok = runVerify(runDir, "I1", cfg, "src/x.ts", {
+    cwd: repo,
+    journal,
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-ok",
+    tree: "main",
+  });
+  assert.equal(ok.refused, false, "a valid tree key still runs");
+});
+
+// --- F6: an OVER-AGE marker is broken even when its (recycled) pid is alive -----
+
+test("[6.1-marker-overage] an over-age verify marker is broken even if its pid is live (recycled-pid wedge)", () => {
+  const runDir = freshRunDir();
+  const repo = committedRepo();
+  const stateHome = freshStateHome();
+  const journal = makeJournal(runDir);
+
+  // A marker whose pid is ALIVE (this process) but whose startMs is far in the past:
+  // a crashed run whose pid was recycled by an unrelated live process. Checking only
+  // pidAlive would refuse forever; the over-age break (mirroring state.ts staleLockMs)
+  // must reclaim it.
+  const OLD = Date.now() - 25 * 60 * 60 * 1000; // 25h old (> the 24h default)
+  writeFileSync(
+    path.join(runDir, "verify-running-main.json"),
+    JSON.stringify({ pid: process.pid, startMs: OLD }),
+  );
+
+  const outcome = runVerify(runDir, "I1", verifyConfig([process.execPath, "-e", "process.exit(0)"]), "src/x.ts", {
+    cwd: repo,
+    journal,
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-overage",
+    tree: "main",
+  });
+
+  assert.equal(outcome.refused, false, "an over-age marker is BROKEN and the verify proceeds (F6)");
+  if (!outcome.refused) {
+    assert.ok(outcome.staleMarkerBroken !== undefined, "breaking the over-age marker surfaces an anomaly");
+    assert.equal(outcome.staleMarkerBroken?.pid, process.pid, "the anomaly names the (live but recycled) pid");
+    assert.equal(outcome.staleMarkerBroken?.startMs, OLD, "the anomaly carries the stale startMs");
+  }
+  assert.equal(readEvidence(runDir).length, 1, "after breaking the over-age marker the verify ran and appended a record");
+
+  // The injectable threshold works too: a small staleMarkerMs breaks a young marker.
+  {
+    const runDir2 = freshRunDir();
+    const journal2 = makeJournal(runDir2);
+    writeFileSync(
+      path.join(runDir2, "verify-running-main.json"),
+      JSON.stringify({ pid: process.pid, startMs: Date.now() - 5000 }),
+    );
+    const out2 = runVerify(runDir2, "I1", verifyConfig([process.execPath, "-e", "process.exit(0)"]), "src/x.ts", {
+      cwd: repo,
+      journal: journal2,
+      stateHome,
+      workspaceKey: "wkey",
+      runId: "r-overage2",
+      tree: "main",
+      staleMarkerMs: 1000,
+    });
+    assert.equal(out2.refused, false, "opts.staleMarkerMs makes the over-age threshold injectable (F6)");
+  }
+});
+
+// --- F7: childEnv scrubs the git environment so a child git read is hermetic ----
+
+test("[6.1-childenv-git] childEnv strips GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR and sets GIT_OPTIONAL_LOCKS=0", () => {
+  const base: NodeJS.ProcessEnv = {
+    GIT_DIR: "/somewhere/.git",
+    GIT_WORK_TREE: "/somewhere",
+    GIT_INDEX_FILE: "/somewhere/.git/index",
+    GIT_COMMON_DIR: "/somewhere/.git",
+    NODE_TEST_CONTEXT: "child",
+    PATH: "/usr/bin",
+  };
+  const env = childEnv(base);
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "NODE_TEST_CONTEXT"]) {
+    assert.equal(env[key], undefined, `childEnv must unset ${key} (git/test hygiene parity with gitio)`);
+  }
+  assert.equal(env.GIT_OPTIONAL_LOCKS, "0", "childEnv sets GIT_OPTIONAL_LOCKS=0 so a child git read never writes a lock");
+  assert.equal(env.PATH, "/usr/bin", "unrelated env is preserved");
+});
+
+// --- F8: the timeout kill uses SIGKILL, so a SIGTERM-trapping child cannot fake green
+
+test("[6.1-timeout-sigkill] a scope that TRAPS SIGTERM and exits 0 is still killed (SIGKILL) and read as red", () => {
+  const runDir = freshRunDir();
+  const repo = committedRepo();
+  const stateHome = freshStateHome();
+  const journal = makeJournal(runDir);
+
+  // The child installs a SIGTERM handler that exits 0 (a trappable-signal escape), then
+  // hangs. With a trappable SIGTERM kill it would catch the signal, exit 0, and be read
+  // GREEN — a false pass. The timeout kill MUST be SIGKILL (uncatchable) so the hang is
+  // terminated and the scope is red.
+  const script =
+    `process.on('SIGTERM', () => { process.exit(0); });` +
+    `setInterval(() => {}, 1000);`;
+  const cfg = verifyConfig([process.execPath, "-e", script], { timeoutMs: 300 });
+
+  const outcome = runVerify(runDir, "I1", cfg, "src/x.ts", {
+    cwd: repo,
+    journal,
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-sigkill",
+    tree: "main",
+  });
+
+  const scopes = verifyScopes(outcome);
+  assert.equal(
+    scopes.unit.green,
+    false,
+    "a SIGTERM-trapping hang is KILLED with SIGKILL and read as red — it cannot trap its way to a false green (F8)",
   );
 });

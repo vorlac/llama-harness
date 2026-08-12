@@ -1,1 +1,0 @@
-{"taskId":"phase-6-gate-fix","step":"fixing evidence/quarantine crash-safety + sandbox (C-024), test-first","intendedFiles":["conductor/adapter/evidence.ts","conductor/adapter/quarantine.ts","conductor/tests/evidence.test.ts","conductor/tests/quarantine.test.ts"],"startedAt":"2026-08-12T20:40:00Z"}

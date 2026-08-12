@@ -732,7 +732,7 @@
       "manifest": true,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "6727e37",
       "commitMessage": "conductor: 6.1 evidence engine",
       "planLines": [
         2396,
@@ -740,8 +740,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 781,
-        "pass": 781,
+        "tests": 791,
+        "pass": 791,
         "fail": 0,
         "skipped": 0,
         "todo": 0

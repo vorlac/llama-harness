@@ -20,19 +20,91 @@
 // repoRoot/quarantineDir because recovery may happen in a different process.
 
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
 } from "node:fs";
 import * as path from "node:path";
 
-import { writeFileAtomicSync } from "./state.ts";
+import { assertSafeId, writeFileAtomicSync } from "./state.ts";
 
 const MANIFEST_VERSION = 1;
 const MANIFEST_NAME = "manifest.json";
+
+// ---------------------------------------------------------------------------
+// Crash/sandbox-safe primitives
+// ---------------------------------------------------------------------------
+
+/**
+ * Move `src` to `dst` preserving the mtime (§2.6 freshness invariant). A plain
+ * renameSync is atomic and mtime-preserving on ONE filesystem, but the quarantine
+ * dir lives under $stateHome (the home volume) while the repo may be a different
+ * mount — so renameSync throws EXDEV across volumes. On EXDEV (and only EXDEV) fall
+ * back to copy + explicit mtime restore + unlink, so the moved file keeps the
+ * ORIGINAL's mtime. `rename` is injectable so the EXDEV branch is testable without a
+ * second real filesystem.
+ */
+export function moveFilePreservingMtime(
+  src: string,
+  dst: string,
+  rename: (from: string, to: string) => void = renameSync,
+): void {
+  try {
+    rename(src, dst);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+  }
+  // Cross-filesystem fallback: stat the original FIRST (it still exists), copy the
+  // bytes, stamp the copy with the original atime/mtime, then remove the original.
+  const st = statSync(src);
+  copyFileSync(src, dst);
+  utimesSync(dst, st.atime, st.mtime);
+  unlinkSync(src);
+}
+
+// Alive iff signal 0 does not report ESRCH; EPERM (exists, not ours) counts alive —
+// the same process.kill(pid,0) check state.ts uses for lock owners.
+function pidAlive(checkPid: number): boolean {
+  try {
+    process.kill(checkPid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+// A repo-relative quarantine target must never be absolute or contain a ".." segment:
+// an absolute path or a ".." would let a poisoned excludeTestFiles entry move a file
+// from OUTSIDE the repo (or restore one to an arbitrary location). Reject both.
+function assertSafeRelPath(rel: string): void {
+  if (typeof rel !== "string" || rel.length === 0) {
+    throw new Error("quarantine: refusing an empty file path — unsafe quarantine target");
+  }
+  if (path.isAbsolute(rel)) {
+    throw new Error(`quarantine: refusing absolute path "${rel}" — quarantine targets must be repo-relative`);
+  }
+  const segments = rel.split(/[\\/]/);
+  if (segments.some((seg) => seg === "..")) {
+    throw new Error(`quarantine: refusing "${rel}" — a ".." segment escapes the repository`);
+  }
+}
+
+// True iff `p` exists AND is a directory (a vanished repoRoot must not be recreated).
+function existsDir(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types (pinned by conductor/tests/quarantine.test.ts)
@@ -54,6 +126,14 @@ export interface QuarantineManifest {
   repoRoot: string;
   /** The out-of-repo directory the files were moved to. */
   quarantineDir: string;
+  /**
+   * The pid of the run that owns this quarantine. Replay heals a manifest ONLY when
+   * its owner is NOT alive — a live owner is an in-flight verify, not a crashed
+   * orphan, and stealing its files back mid-verify would corrupt the running verify.
+   */
+  pid: number;
+  /** Wall-clock start of the owning run (informational / parity with the lock). */
+  startMs: number;
   entries: QuarantineManifestEntry[];
 }
 
@@ -69,6 +149,10 @@ export interface QuarantineInput {
   stateHome: string;
   workspaceKey: string;
   runId: string;
+  /** The owning run's pid (defaults to process.pid) — stamped into the manifest. */
+  pid?: number;
+  /** The owning run's start (defaults to Date.now()) — stamped into the manifest. */
+  startMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +165,11 @@ export interface QuarantineInput {
  * result escapes the repo subtree and no whole-tree runner can reach a moved file.
  */
 export function quarantineDirFor(stateHome: string, workspaceKey: string, runId: string): string {
+  // §F3 trust boundary: workspaceKey and runId compose a path under $stateHome that is
+  // later rmSync(recursive)'d — a traversing id (e.g. "../../etc") would target an
+  // arbitrary tree. Reject anything that is not a conservative slug (reuses state.ts).
+  assertSafeId(workspaceKey, "workspaceKey");
+  assertSafeId(runId, "runId");
   return path.join(stateHome, "conductor", workspaceKey, "quarantine", runId);
 }
 
@@ -102,6 +191,9 @@ function flatten(rel: string): string {
  */
 export function quarantineFiles(input: QuarantineInput): QuarantineHandle {
   const { repoRoot, files, stateHome, workspaceKey, runId } = input;
+  // §F3: reject any target that is absolute or climbs out of the repo BEFORE creating
+  // the quarantine dir, so a poisoned excludeTestFiles entry (e.g. "../x") moves nothing.
+  for (const original of files) assertSafeRelPath(original);
   const quarantineDir = quarantineDirFor(stateHome, workspaceKey, runId);
   mkdirSync(quarantineDir, { recursive: true });
   const manifestPath = path.join(quarantineDir, MANIFEST_NAME);
@@ -125,16 +217,36 @@ export function quarantineFiles(input: QuarantineInput): QuarantineHandle {
     runId,
     repoRoot,
     quarantineDir,
+    // §F4: stamp the owning run so replay can tell a live verify from a crashed orphan.
+    pid: input.pid ?? process.pid,
+    startMs: input.startMs ?? Date.now(),
     entries,
   };
 
-  // Manifest BEFORE the moves (crash-safe), then rename each file OUT.
+  // Manifest BEFORE the moves (crash-safe), then move each file OUT (mtime-preserving,
+  // EXDEV-tolerant). A mid-quarantine failure rolls the partial moves back so the repo
+  // is never left with half its foreign red set stranded outside the tree (§F1).
   writeFileAtomicSync(manifestPath, JSON.stringify(manifest, null, 2));
-  for (const entry of entries) {
-    const src = path.join(repoRoot, entry.original);
-    const dst = path.join(quarantineDir, entry.stored);
-    mkdirSync(path.dirname(dst), { recursive: true });
-    renameSync(src, dst);
+  const moved: QuarantineManifestEntry[] = [];
+  try {
+    for (const entry of entries) {
+      const src = path.join(repoRoot, entry.original);
+      const dst = path.join(quarantineDir, entry.stored);
+      mkdirSync(path.dirname(dst), { recursive: true });
+      moveFilePreservingMtime(src, dst);
+      moved.push(entry);
+    }
+  } catch (err) {
+    // Heal what moved (restore it into the repo) before re-raising, so the failure is
+    // not propagated with files stranded out of the tree.
+    for (const entry of moved) {
+      moveFilePreservingMtime(
+        path.join(quarantineDir, entry.stored),
+        path.join(repoRoot, entry.original),
+      );
+    }
+    rmSync(quarantineDir, { recursive: true, force: true });
+    throw err;
   }
 
   return { manifestPath, quarantineDir, entries };
@@ -172,24 +284,51 @@ function readManifest(manifestPath: string): QuarantineManifest | null {
   return isManifest(parsed) ? parsed : null;
 }
 
-// Rename every not-yet-restored entry back to <repoRoot>/<original>, using the
-// manifest's OWN repoRoot/quarantineDir (recovery may run in a different process).
-// A stored file that is already gone (a partial prior restore) is skipped, so the
-// operation is idempotent. Returns the originals actually moved back.
-function restoreEntries(manifest: QuarantineManifest): string[] {
+interface RestoreResult {
+  /** Originals actually moved back into the repo. */
+  restored: string[];
+  /** Originals NOT restored because the repo slot was already refilled (§F2). */
+  conflicts: string[];
+}
+
+// Move every not-yet-restored entry back to <repoRoot>/<original>, using the manifest's
+// OWN repoRoot/quarantineDir (recovery may run in a different process) and preserving
+// mtime (§F1, rename/EXDEV-copy). Idempotent and safe against concurrency:
+//   - §F2 no-clobber: if the repo slot was REFILLED (dst exists), never overwrite it —
+//     skip the entry, leave the stored file in quarantine, and record a conflict.
+//   - §F4 peer-healed: a stored source gone (ENOENT) mid-restore = a peer already
+//     restored it — skip, do not throw.
+//   - a stored file already absent (a prior partial restore) is skipped.
+function restoreEntries(manifest: QuarantineManifest): RestoreResult {
   const restored: string[] = [];
+  const conflicts: string[] = [];
   for (const entry of manifest.entries) {
     if (entry.restored) continue;
     const stored = path.join(manifest.quarantineDir, entry.stored);
     const dst = path.join(manifest.repoRoot, entry.original);
+    if (existsSync(dst)) {
+      // The slot was refilled between the crash and this replay — the stored copy is a
+      // stale red. Do NOT clobber the refilled slot; leave the stored file in quarantine.
+      conflicts.push(entry.original);
+      continue; // entry stays NOT restored so the caller preserves the quarantine dir
+    }
     if (existsSync(stored)) {
       mkdirSync(path.dirname(dst), { recursive: true });
-      renameSync(stored, dst);
+      try {
+        moveFilePreservingMtime(stored, dst);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          // A peer restored this between the existsSync check and the move — healed.
+          entry.restored = true;
+          continue;
+        }
+        throw err;
+      }
       restored.push(entry.original);
     }
     entry.restored = true;
   }
-  return restored;
+  return { restored, conflicts };
 }
 
 /**
@@ -199,11 +338,17 @@ function restoreEntries(manifest: QuarantineManifest): string[] {
  */
 export function restoreQuarantine(handle: QuarantineHandle): void {
   const manifest = readManifest(handle.manifestPath);
-  if (manifest !== null) {
-    restoreEntries(manifest);
-    rmSync(manifest.quarantineDir, { recursive: true, force: true });
+  if (manifest === null) {
+    rmSync(handle.quarantineDir, { recursive: true, force: true });
+    return;
   }
-  rmSync(handle.quarantineDir, { recursive: true, force: true });
+  const result = restoreEntries(manifest);
+  // §F2: a conflict means a stored file is still parked in quarantine (its slot was
+  // refilled). Preserve the quarantine dir so nothing is lost; otherwise clear it.
+  if (result.conflicts.length === 0) {
+    rmSync(manifest.quarantineDir, { recursive: true, force: true });
+    rmSync(handle.quarantineDir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -215,17 +360,42 @@ export function restoreQuarantine(handle: QuarantineHandle): void {
  */
 export function replayPendingRestores(input: { stateHome: string; workspaceKey: string }): string[] {
   const { stateHome, workspaceKey } = input;
+  // §F3: workspaceKey composes the rmSync'd quarantine root — validate it (may throw on
+  // a poisoned id; this is a caller/trust-boundary error, distinct from the per-entry
+  // healing errors below which are swallowed so recovery never wedges a run).
+  assertSafeId(workspaceKey, "workspaceKey");
   const quarantineRoot = path.join(stateHome, "conductor", workspaceKey, "quarantine");
   if (!existsSync(quarantineRoot)) return [];
   const restored: string[] = [];
-  for (const entry of readdirSync(quarantineRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const dir = path.join(quarantineRoot, entry.name);
-    const manifest = readManifest(path.join(dir, MANIFEST_NAME));
-    if (manifest === null) continue;
-    for (const original of restoreEntries(manifest)) restored.push(original);
-    rmSync(manifest.quarantineDir, { recursive: true, force: true });
-    rmSync(dir, { recursive: true, force: true });
+  let dirents: import("node:fs").Dirent[];
+  try {
+    dirents = readdirSync(quarantineRoot, { withFileTypes: true });
+  } catch {
+    return restored; // the root vanished under us — nothing to heal
+  }
+  for (const entry of dirents) {
+    // §F4: per-entry isolation — one bad manifest must never abort healing the rest,
+    // and replay must NEVER throw out of runVerify.
+    try {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(quarantineRoot, entry.name);
+      const manifest = readManifest(path.join(dir, MANIFEST_NAME));
+      if (manifest === null) continue;
+      // §F4: never heal a LIVE run's quarantine — a live owner is an in-flight verify,
+      // not a crashed orphan. Leave it entirely untouched.
+      if (typeof manifest.pid === "number" && pidAlive(manifest.pid)) continue;
+      // §F4: a vanished repoRoot means the checkout is gone — skip, never mkdir-recreate.
+      if (!existsDir(manifest.repoRoot)) continue;
+      const result = restoreEntries(manifest);
+      for (const original of result.restored) restored.push(original);
+      // §F2: only clear a fully-drained dir; a conflict leaves stored files parked.
+      if (result.conflicts.length === 0) {
+        rmSync(manifest.quarantineDir, { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } catch {
+      continue; // heal what we can; a single bad entry never wedges the sweep
+    }
   }
   return restored;
 }

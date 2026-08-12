@@ -58,8 +58,10 @@ import {
   quarantineFiles,
   restoreQuarantine,
   replayPendingRestores,
+  moveFilePreservingMtime,
 } from "../adapter/quarantine.ts";
 import type { QuarantineHandle, QuarantineManifest, QuarantineManifestEntry } from "../adapter/quarantine.ts";
+import { spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Pinned contract the implementer must target (recorded here so evidence.ts and
@@ -132,6 +134,16 @@ function readManifest(manifestPath: string): QuarantineManifest {
 // utimesSync only guarantees the second we set, so we compare floored seconds.
 function mtimeSec(abs: string): number {
   return Math.floor(statSync(abs).mtimeMs / 1000);
+}
+
+// True iff `p` exists AND is a directory (used to assert a vanished repoRoot is NOT
+// recreated by replay).
+function existsDirTest(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 // ===========================================================================
@@ -274,13 +286,17 @@ test("[6.1-q-replay] replayPendingRestores heals a crashed run's orphaned quaran
   writeRepoFile(repoRoot, "tests/foreign.suite.js", "RED\n");
 
   // Simulate a mid-verify KILL: the files are moved out and the manifest is written,
-  // but the process dies before restoreQuarantine runs (no restore call here).
+  // but the process dies before restoreQuarantine runs (no restore call here). A crashed
+  // run's pid is DEAD — replay heals only NON-live owners (F4), so the orphan must carry
+  // a dead pid to be a faithful crash (a live pid would be an in-flight verify, not an
+  // orphan, and must NOT be healed).
   const handle = quarantineFiles({
     repoRoot,
     files: ["tests/foreign.suite.js"],
     stateHome,
     workspaceKey: "wkey",
     runId: "r-crashed",
+    pid: deadPid(),
   });
   assert.equal(existsSync(path.join(repoRoot, "tests/foreign.suite.js")), false, "crashed run left the file quarantined");
   assert.ok(existsSync(handle.manifestPath), "crashed run left an orphaned manifest to replay");
@@ -300,4 +316,223 @@ test("[6.1-q-replay] replayPendingRestores heals a crashed run's orphaned quaran
   const again = replayPendingRestores({ stateHome, workspaceKey: "wkey" });
   assert.deepEqual(again, [], "a second replay with nothing pending restores nothing");
   assert.ok(existsSync(back), "the restored file is untouched by the idempotent second replay");
+});
+
+// ===========================================================================
+// Crash-safety + sandbox hardening (F1–F4)
+// ===========================================================================
+
+// A pid that is provably dead: spawnSync waits for the child, so by the time it
+// returns the pid has exited and been reaped (process.kill(pid,0) -> ESRCH).
+function deadPid(): number {
+  const r = spawnSync(process.execPath, ["-e", "0"], { stdio: "ignore" });
+  if (typeof r.pid === "number" && r.pid > 1) return r.pid;
+  return 2147483646; // fallback: an improbable pid
+}
+
+// --- F1: EXDEV cross-filesystem move preserves mtime ------------------------
+
+test("[6.1-q-exdev] moveFilePreservingMtime falls back to copy+utimes+unlink on EXDEV, preserving the ORIGINAL mtime", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "conductor-quar-exdev-"));
+  tmpDirs.push(dir);
+  const src = path.join(dir, "src.txt");
+  const dst = path.join(dir, "moved.txt");
+  writeFileSync(src, "RED\n");
+  utimesSync(src, FIXED_MTIME_S, FIXED_MTIME_S);
+
+  // Force the cross-filesystem branch deterministically: inject a rename that throws
+  // EXDEV exactly as Node does when src and dst straddle two mounts.
+  let renameCalls = 0;
+  const exdevRename = (): void => {
+    renameCalls += 1;
+    const err = new Error("EXDEV: cross-device link not permitted") as NodeJS.ErrnoException;
+    err.code = "EXDEV";
+    throw err;
+  };
+
+  moveFilePreservingMtime(src, dst, exdevRename);
+
+  assert.equal(renameCalls, 1, "the injected rename was attempted first");
+  assert.equal(existsSync(src), false, "the source is unlinked after the copy fallback (a MOVE, not a copy)");
+  assert.ok(existsSync(dst), "the destination exists after the EXDEV fallback");
+  assert.equal(readFileSync(dst, "utf8"), "RED\n", "the bytes survive the cross-filesystem move");
+  assert.equal(
+    mtimeSec(dst),
+    FIXED_MTIME_S,
+    "the copy-fallback stamps the ORIGINAL's mtime (a naive copy would stamp now and break §2.6 freshness)",
+  );
+});
+
+// --- F2: restore never clobbers a repo slot that was refilled ---------------
+
+test("[6.1-q-noclobber] restore skips (never overwrites) a repo slot refilled between crash and replay; the stored file is preserved", () => {
+  const repoRoot = freshRepo();
+  const stateHome = freshStateHome();
+  writeRepoFile(repoRoot, "tests/foreign.suite.js", "V1-stale-red\n");
+
+  // A crashed run quarantined V1 out (dead pid => an orphan the replay will process).
+  const handle = quarantineFiles({
+    repoRoot,
+    files: ["tests/foreign.suite.js"],
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-clobber",
+    pid: deadPid(),
+  });
+  const slot = path.join(repoRoot, "tests/foreign.suite.js");
+  assert.equal(existsSync(slot), false, "precondition: V1 was moved out");
+
+  // Between the crash and the replay the slot was REFILLED with the correct V2.
+  writeFileSync(slot, "V2-correct\n");
+
+  const restored = replayPendingRestores({ stateHome, workspaceKey: "wkey" });
+
+  assert.equal(
+    readFileSync(slot, "utf8"),
+    "V2-correct\n",
+    "replay must NOT clobber a refilled slot with the stale V1 (reproduced regression)",
+  );
+  assert.equal(
+    restored.includes("tests/foreign.suite.js"),
+    false,
+    "a conflicting entry is NOT reported as restored",
+  );
+  const stored = path.join(handle.quarantineDir, handle.entries[0].stored);
+  assert.ok(existsSync(stored), "the stored V1 is PRESERVED in quarantine (not clobbered into the repo, not deleted)");
+});
+
+// --- F3: sandbox escape via unvalidated ids / paths -------------------------
+
+test("[6.1-q-safeid] quarantineDirFor/quarantineFiles reject id and path traversal; valid slugs still compose", () => {
+  const stateHome = freshStateHome();
+
+  // A workspaceKey that would climb out to /etc must be rejected (rmSync(recursive)
+  // on quarantineDirFor's result would otherwise target an arbitrary tree).
+  assert.throws(
+    () => quarantineDirFor(stateHome, "../../etc", "r-ok"),
+    /escape|separator|slug/i,
+    "quarantineDirFor must reject a traversing workspaceKey",
+  );
+  assert.throws(
+    () => quarantineDirFor(stateHome, "wkey", "../../etc"),
+    /escape|separator|slug/i,
+    "quarantineDirFor must reject a traversing runId",
+  );
+
+  // A valid triple still composes to the §4.2 path.
+  assert.equal(
+    quarantineDirFor(stateHome, "main", "r-abc"),
+    path.join(stateHome, "conductor", "main", "quarantine", "r-abc"),
+    "valid slugs (main, r-abc) still compose the out-of-repo path",
+  );
+
+  // An excludeTestFiles entry that is a "../" traversal must be rejected and move NOTHING.
+  const repoRoot = freshRepo();
+  const outsideDir = mkdtempSync(path.join(tmpdir(), "conductor-quar-outside-"));
+  tmpDirs.push(outsideDir);
+  const outsideFile = path.join(outsideDir, "OUTSIDE.txt");
+  writeFileSync(outsideFile, "secret\n");
+  const relFromRepo = path.relative(repoRoot, outsideFile); // e.g. ../conductor-quar-outside-XXXX/OUTSIDE.txt
+  assert.ok(relFromRepo.startsWith(".."), "precondition: the target is outside the repo (a ../ path)");
+
+  assert.throws(
+    () =>
+      quarantineFiles({
+        repoRoot,
+        files: [relFromRepo],
+        stateHome,
+        workspaceKey: "wkey",
+        runId: "r-esc",
+      }),
+    /escape|repo-relative|\.\./i,
+    "quarantineFiles must reject a ../ file that would move a file from OUTSIDE the repo",
+  );
+  assert.ok(existsSync(outsideFile), "the out-of-repo file was NOT moved (nothing quarantined on rejection)");
+
+  // An absolute file entry is likewise rejected.
+  assert.throws(
+    () =>
+      quarantineFiles({
+        repoRoot,
+        files: [outsideFile],
+        stateHome,
+        workspaceKey: "wkey",
+        runId: "r-esc2",
+      }),
+    /absolute|repo-relative/i,
+    "quarantineFiles must reject an absolute file path",
+  );
+  assert.ok(existsSync(outsideFile), "the absolute-path file was NOT moved");
+});
+
+// --- F4: replay respects a LIVE owner; skips vanished repoRoot; never wedges --
+
+test("[6.1-q-live-owner] replay heals a DEAD owner's orphan but leaves a LIVE owner's quarantine untouched", () => {
+  const repoRoot = freshRepo();
+  const stateHome = freshStateHome();
+  writeRepoFile(repoRoot, "tests/live.suite.js", "LIVE\n");
+  writeRepoFile(repoRoot, "tests/dead.suite.js", "DEAD\n");
+
+  // A manifest owned by a LIVE run (this process) — an in-flight verify, NOT an orphan.
+  const liveHandle = quarantineFiles({
+    repoRoot,
+    files: ["tests/live.suite.js"],
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-live",
+    pid: process.pid,
+  });
+  // A manifest owned by a DEAD run — a genuine crashed orphan.
+  quarantineFiles({
+    repoRoot,
+    files: ["tests/dead.suite.js"],
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-dead",
+    pid: deadPid(),
+  });
+
+  const restored = replayPendingRestores({ stateHome, workspaceKey: "wkey" });
+
+  assert.deepEqual(restored, ["tests/dead.suite.js"], "only the DEAD owner's orphan is healed");
+  assert.ok(existsSync(path.join(repoRoot, "tests/dead.suite.js")), "the dead owner's file is restored");
+  assert.equal(
+    existsSync(path.join(repoRoot, "tests/live.suite.js")),
+    false,
+    "the LIVE run's quarantined file is NOT stolen back mid-verify (F4)",
+  );
+  assert.ok(
+    existsSync(path.join(liveHandle.quarantineDir, liveHandle.entries[0].stored)),
+    "the live run's stored file is left intact for its own restore",
+  );
+
+  // The live run later completes and restores its own quarantine normally.
+  restoreQuarantine(liveHandle);
+  assert.ok(existsSync(path.join(repoRoot, "tests/live.suite.js")), "the live run restores its own file on completion");
+});
+
+test("[6.1-q-replay-robust] replay skips a vanished repoRoot, never recreates it, and a double-replay never throws", () => {
+  const repoRoot = freshRepo();
+  const stateHome = freshStateHome();
+  writeRepoFile(repoRoot, "tests/gone.suite.js", "GONE\n");
+
+  quarantineFiles({
+    repoRoot,
+    files: ["tests/gone.suite.js"],
+    stateHome,
+    workspaceKey: "wkey",
+    runId: "r-gone",
+    pid: deadPid(),
+  });
+
+  // The repoRoot itself vanished (the checkout was deleted) before recovery.
+  rmSync(repoRoot, { recursive: true, force: true });
+
+  const first = replayPendingRestores({ stateHome, workspaceKey: "wkey" });
+  assert.deepEqual(first, [], "a manifest whose repoRoot no longer exists is skipped (not restored)");
+  assert.equal(existsDirTest(repoRoot), false, "replay must NOT mkdir-recreate a vanished repo tree");
+
+  // A second replay is a no-op and must not throw.
+  const second = replayPendingRestores({ stateHome, workspaceKey: "wkey" });
+  assert.deepEqual(second, [], "a double-replay is a no-op and never throws");
 });

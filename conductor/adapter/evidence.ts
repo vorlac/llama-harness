@@ -28,7 +28,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
-import { appendLedgerLineRaw } from "./state.ts";
+import { appendLedgerLineRaw, assertSafeId } from "./state.ts";
 import { currentBranch, headSha } from "./gitio.ts";
 import type { Journal } from "./journal.ts";
 import { quarantineFiles, replayPendingRestores, restoreQuarantine } from "./quarantine.ts";
@@ -297,9 +297,18 @@ interface RunOutcome {
 // children it forks with NODE_TEST_CONTEXT; inherited, a `node --test` verify
 // command would mistake itself for a test child (misreport counts, mask a failing
 // import as a pass) — so it is stripped, mirroring gitio's GIT_DIR hygiene.
-function childEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
+export function childEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
   delete env.NODE_TEST_CONTEXT;
+  // Git hygiene (gitio parity, F7): an inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/
+  // GIT_COMMON_DIR would point the target repo's own test/build git reads at the PARENT
+  // conductor's checkout — a cross-repo leak. Strip them, and disable optional locks so a
+  // child `git status`/`git rev-parse` never writes an index.lock into the target tree.
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_COMMON_DIR;
+  env.GIT_OPTIONAL_LOCKS = "0";
   return env;
 }
 
@@ -312,6 +321,10 @@ function spawnCapture(cmd: string[], cwd: string, timeoutMs: number, now: () => 
     cwd,
     env: childEnv(),
     timeout: timeoutMs,
+    // F8: kill with SIGKILL, not the default (trappable) SIGTERM. A hung test that
+    // installs a SIGTERM handler could otherwise catch the timeout signal, exit 0, and
+    // be read as a false GREEN; SIGKILL is uncatchable so the timeout is authoritative.
+    killSignal: "SIGKILL",
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -386,16 +399,14 @@ function boundExcerpt(text: string): string {
   return trimmed.length > 300 ? trimmed.slice(0, 300) : trimmed;
 }
 
-// §2.1 illegal-red rule support: does the failure text name a file in the item's
-// testScope? (A fallback red naming no testScope file is a suite failure elsewhere
-// impersonating this item's red.)
-function namesAnyTestFile(text: string, testFiles: string[]): boolean {
-  return testFiles.some((f) => {
-    if (f.length === 0) return false;
-    if (text.includes(f)) return true;
-    const base = path.basename(f);
-    return base.length > 0 && text.includes(base);
-  });
+// §2.1 illegal-red rule support: does the bounded failure EXCERPT name a file in the
+// item's testScope by its FULL relative path? (A fallback red naming no testScope file
+// in its excerpt is a suite failure elsewhere impersonating this item's red — §2404/2431.)
+// F5: the check reads ONLY the excerpt (not the full captured output) and matches the
+// FULL relative path (not the basename), so a deep tail mention of the item's file, or a
+// same-basename file in another directory, never launders an illegal red into a legal one.
+function excerptNamesTestFile(excerpt: string, testFiles: string[]): boolean {
+  return testFiles.some((f) => f.length > 0 && excerpt.includes(f));
 }
 
 function isLegalClass(fc: FailureClass): boolean {
@@ -523,7 +534,10 @@ export function runTest(runDir: string, itemId: string, opts: RunTestOptions): R
   const relStderr = relativizePaths(outcome.stderr, opts.cwd);
   const relStdout = relativizePaths(outcome.stdout, opts.cwd);
   const combinedText = relStderr + "\n" + relStdout;
-  const namesTestScopeFile = namesAnyTestFile(combinedText, testFiles);
+  // F5: legality is judged against the SAME bounded excerpt the record carries — the
+  // first <=300 chars — not the full captured output.
+  const excerpt = boundExcerpt(combinedText);
+  const namesTestScopeFile = excerptNamesTestFile(excerpt, testFiles);
 
   const seq = nextSeq(runDir);
   const ts = now();
@@ -546,7 +560,7 @@ export function runTest(runDir: string, itemId: string, opts: RunTestOptions): R
       itemId,
       command: actualCmd,
       exitCode: outcome.exitCode,
-      failureExcerpt: boundExcerpt(combinedText),
+      failureExcerpt: excerpt,
       failureClass,
       targeted,
     };
@@ -595,6 +609,9 @@ export interface VerifyOptions {
   tree?: string;
   now?: () => number;
   pid?: number;
+  // Over-age marker threshold (F6); defaults to 24h. A marker older than this is broken
+  // even if its pid is alive (a recycled pid must never wedge a tree's verify forever).
+  staleMarkerMs?: number;
 }
 
 interface Marker {
@@ -606,7 +623,16 @@ export type VerifyOutcome =
   | { refused: false; record: VerifyRecord; staleMarkerBroken?: Marker }
   | { refused: true; reason: string; tree: string; heldBy: Marker };
 
+// The over-age marker threshold: a verify marker older than this is stale even if its
+// pid is still alive (a crashed run whose pid was recycled by an unrelated process).
+// Mirrors state.ts's staleLockMs; 24h; injectable via VerifyOptions.staleMarkerMs (F6).
+const DEFAULT_STALE_MARKER_MS = 24 * 60 * 60 * 1000;
+
 function markerPathOf(runDir: string, tree: string): string {
+  // F3 trust boundary: tree ("main" or a worktree item id) composes the marker filename
+  // AND is later rmSync'd — a traversing tree ("../../tmp/evil") would let a poisoned key
+  // write/delete outside runDir. Reject anything that is not a conservative slug.
+  assertSafeId(tree, "tree");
   return path.join(runDir, `verify-running-${tree}.json`);
 }
 
@@ -699,14 +725,18 @@ export function runVerify(
   const tree = opts.tree ?? "main";
   const cwd = opts.cwd;
   const exclude = opts.excludeTestFiles ?? [];
+  const staleMarkerMs = opts.staleMarkerMs ?? DEFAULT_STALE_MARKER_MS;
   const markerPath = markerPathOf(runDir, tree);
 
   // Marker gate: a live holder for this tree means another verify is in flight —
-  // refuse, run nothing, and never steal the holder's marker (§4.3).
+  // refuse, run nothing, and never steal the holder's marker (§4.3). A marker is only
+  // honored when its pid is alive AND it is not over-age: a recycled pid on an ancient
+  // marker (F6) is broken like a dead one, so a crashed run can never wedge a tree.
   let staleMarkerBroken: Marker | undefined;
   const existing = readMarker(markerPath);
   if (existing !== null) {
-    if (pidAlive(existing.pid)) {
+    const overAge = now() - existing.startMs > staleMarkerMs;
+    if (pidAlive(existing.pid) && !overAge) {
       return {
         refused: true,
         reason: `a live verify holds tree "${tree}" (pid ${existing.pid})`,
@@ -714,29 +744,37 @@ export function runVerify(
         heldBy: existing,
       };
     }
-    // A dead-pid marker is a killed run's leftover: break it and proceed, surfacing
-    // the broken marker as an anomaly on the outcome (§7.4 evidence vocab stays
-    // red/green/verify — the anomaly rides the outcome, not a journal event).
+    // A dead-pid OR over-age marker is a killed/abandoned run's leftover: break it and
+    // proceed, surfacing the broken marker as an anomaly on the outcome (§7.4 evidence
+    // vocab stays red/green/verify — the anomaly rides the outcome, not a journal event).
     rmSync(markerPath, { force: true });
     staleMarkerBroken = { pid: existing.pid, startMs: existing.startMs };
   }
 
   // Heal any crashed run's orphaned quarantine before this run establishes its own.
+  // Replay only touches NON-live owners and swallows per-entry healing errors, so it
+  // never throws out of runVerify (F4).
   replayPendingRestores({ stateHome: opts.stateHome, workspaceKey: opts.workspaceKey });
 
-  // Quarantine the foreign red set OUT of the repo (before the start-stamp).
+  // The quarantine is created INSIDE the try/finally (F1): a mid-quarantine failure is
+  // rolled back by quarantineFiles itself, and any failure AFTER the move is healed by
+  // the finally's restore — never a raw throw with the foreign red set stranded.
   let handle: QuarantineHandle | null = null;
-  if (exclude.length > 0) {
-    handle = quarantineFiles({
-      repoRoot: cwd,
-      files: exclude,
-      stateHome: opts.stateHome,
-      workspaceKey: opts.workspaceKey,
-      runId: opts.runId,
-    });
-  }
-
   try {
+    // Quarantine the foreign red set OUT of the repo (before the start-stamp). The
+    // manifest is stamped with THIS run's pid so a concurrent replay treats it as a
+    // live owner and leaves it alone (F4).
+    if (exclude.length > 0) {
+      handle = quarantineFiles({
+        repoRoot: cwd,
+        files: exclude,
+        stateHome: opts.stateHome,
+        workspaceKey: opts.workspaceKey,
+        runId: opts.runId,
+        pid,
+      });
+    }
+
     // Start-stamp: taken after quarantine, before the first scope runs (§2.6).
     const startedMs = now();
     const head = headSha(cwd) ?? "";
