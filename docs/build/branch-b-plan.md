@@ -4,6 +4,26 @@ Unblocked (needs 1.1 schemas ✓ + 0.2 streaming finding ✓). Run parallel to t
 This file de-risks the 11.1 scaffold so it can be picked up cleanly (I read CMakeLists.txt,
 Task 11.1 lines 2755–2783, §4.4 lines 1636–1695, §1.1 src layout 380–393 to write it).
 
+## GROUNDWORK CONFIRMED (2026-08-13, before 11.1 execution)
+
+- Submodules ARE populated on main (`git submodule status`: extern/vcpkg @ aae277acf4,
+  extern/llama-cpp @ 89e0aa6fd3 — both checked out, no `-` prefix).
+- All 4 vcpkg ports present in extern/vcpkg/ports/: cpp-httplib, nlohmann-json,
+  json-schema-validator, doctest.
+- CMakePresets binaryDir = `${sourceDir}/.out/build/${presetName}`; preset
+  `clang-relwdebinfo` exists → build dir `.out/build/clang-relwdebinfo`. `.out` is 879M
+  now (gitignored; NEVER rm -rf).
+- CMakeLists.txt confirmed to match the surgery description below (myprogram block at
+  lines 42-68; `include(vcpkg-init)` line 8; `add_subdirectory(extern/llama-cpp)` line 39;
+  `find_package(spdlog)` line 40; `add_subdirectory(tools)` line 72).
+- vcpkg.json dependencies currently `[pkgconf, ftxui, spdlog]` — add the 4 ports.
+- **DECISION: run Branch B ON MAIN (not a worktree).** Submodules already populated;
+  worktree submodule-init is the flagged gotcha; C++ files never overlap conductor/*.ts;
+  test-conductor.sh is cmake-independent so the TS spine stays green regardless. Commit
+  each 11.x task only at ctest-green; stage Branch B files separately from spine commits.
+- Execute 11.1 as ONE focused sequence (surgery + scaffold sources + configure + ctest),
+  NOT interleaved with a delicate spine edit.
+
 ## The submodule+worktree gotcha (read FIRST)
 
 `git worktree add $TMPDIR/branch-b` does NOT populate submodules. Both `include(vcpkg-init)`

@@ -495,3 +495,42 @@ red observed, implementer fixed, full-suite green re-observed — 837/837).
 - **Blast radius:** `conductor/adapter/inject.ts` + two new tests in `inject.test.ts`; both
   ride in the `conductor: 8.2 injection` commit. Ledger rows 8.2-null-recommendation /
   8.2-empty-pack added to task-8.2.assertions.json.
+
+## C-028 (2026-08-13) — Phase 8 (doctrine) gate: 7 confirmed findings, 1 fix round
+
+The Phase 8 adversarial gate (3 blind lenses — doc-fidelity vs the §6.1 port map,
+inject.ts §6.4 conformance, subsystem completeness — each finding skeptic-verified;
+11 raw → 4 refuted → 7 confirmed) found the doctrine subsystem incomplete against the
+plan. Fixed test-first in one round, two commits (102802d packs, efd0f84 injection):
+
+- **MAJOR — debug.md injected into 0 sessions.** §4.1 requires the implementer pack to be
+  `tdd.md (+debug.md in DEBUG)`, but `ROLE_PACKS.implementer` was `["tdd.md"]` and
+  buildSystemAppend keyed purely on role, so the loaded+validated debug.md reached no model.
+  FIX: buildSystemAppend appends debug.md as a secondary pack for an implementer whose active
+  item is in DEBUG posture, via a new OPTIONAL `GateItem.debugging` field (ignored by
+  legalTools; read only by injection). Tight guard; tdd.md stays primary. Test `8.2-debug-pack`.
+- **MAJOR — review.md missing the spec-before-quality adjudication ordering** (§6.1 1841). FIX:
+  added the ordering section (surviving spec findings discard that round's quality findings,
+  re-derived after the code settles). Anchor `8.1-anchors-review-ordering`.
+- **MINOR — core.md missing forbidden satisfaction phrases** (§6.1 1837, verification-before-
+  completion's enforceable red-flags) **and the ponytail lite reminder** (§6.1 1849). FIX:
+  added both sections; reworded the "binds every role" opening (the full pack is injected for
+  only some roles). Anchors `8.1-anchors-core-forbidden` / `8.1-anchors-core-ponytail`.
+- **MINOR — doctrine.test.ts pinned content for only 7/9 packs.** plan.md and skeptic.md had
+  only existence/no-marker checks, so their port-map doctrine could silently drift. FIX: added
+  content anchors `8.1-anchors-plan` / `8.1-anchors-skeptic` (both green today — hardening).
+- **DEFERRED (recorded binding) — receive-review.md delivery.** §6.1 lists it as injected
+  doctrine but §4.1 assigns it to no static role, because its delivery context (an implementer
+  RECEIVING review findings) does not exist until Phase 9 routes surviving findings to the
+  implementer. The pack is loaded/cached now (init stays fail-closed over the full set); the
+  Phase 9 review-receipt/fix-round task must thread a "receiving-review" signal to
+  buildSystemAppend so it appends receive-review.md. The false inject.ts comment claiming it
+  was already "referenced by review receipt" was corrected to name this binding.
+- **NIT (noted, not fixed) — X-Conductor-Group** keyed on raw tree/itemId rather than a
+  role/stage-qualified id; functional as-is; a KV-affinity refinement, not blocking.
+- **Process note:** the two MAJORs (dead packs) were invisible to the 8.1 anchor test and the
+  8.2 unit tests — both proved their packs were *loaded* and *shaped* but neither proved they
+  were *delivered*. The completeness lens exists to catch exactly that "loaded ≠ delivered" gap.
+- **Blast radius:** `conductor/doctrine/core.md`, `review.md`, `conductor/tests/doctrine.test.ts`
+  (102802d); `conductor/core/gates-phase.ts` (optional GateItem field), `conductor/adapter/inject.ts`,
+  `conductor/tests/inject.test.ts` (efd0f84). Phase 8 gate verdict: PASS after 1 fix round.

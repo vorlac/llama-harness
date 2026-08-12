@@ -638,6 +638,24 @@
       },
       "verdict": "PASS after 1 fix round",
       "rejected": "1 MAJOR (unbounded create hang) + 1 low; core concurrency proven airtight by trace + 12x sweep"
+    },
+    "8": {
+      "at": "2026-08-13T00:40:00Z",
+      "what": "Phase 8 (doctrine) gate: 3 blind lenses (doc-fidelity vs §6.1 port map, inject.ts §6.4 conformance, subsystem completeness), each finding skeptic-verified. 11 raw -> 4 refuted -> 7 confirmed.",
+      "lenses": {
+        "doc-fidelity": "core.md omits forbidden satisfaction phrases (§6.1 1837) + ponytail lite reminder (§6.1 1849); review.md lacks the spec-before-quality adjudication ordering section (§6.1 1841); core.md 'every role' opening overstates (injected for 2/7 roles)",
+        "inject-conformance": "debug.md never delivered (ROLE_PACKS.implementer=[tdd.md], no DEBUG-posture branch) — MAJOR; receive-review.md never delivered (no ROLE_PACKS entry, no §4.1 role) + false 'referenced by review receipt' comment; X-Conductor-Group not role/stage-qualified (nit)",
+        "completeness": "debug.md + receive-review.md are loaded/validated but injected into 0 sessions; doctrine.test.ts pins content for only 7/9 packs (plan.md, skeptic.md have no content anchor -> can drift)"
+      },
+      "adjudication": {
+        "status": "RESOLVED in 1 fix round (2 commits: 102802d packs, efd0f84 injection). C-028.",
+        "fixed_packs_102802d": "core.md += forbidden-satisfaction-phrases (should work/should pass/looks good, tied to records-over-assertions) + ponytail lite reminder (cheaper-path/reuse ladder, guardrails never trimmed) + reworded 'every role' overclaim; review.md += spec-before-quality adjudication ordering (surviving spec findings discard that round's quality findings); doctrine.test.ts += 3 RED anchors (now green) + plan.md/skeptic.md hardening anchors",
+        "fixed_inject_efd0f84": "buildSystemAppend delivers debug.md for an implementer whose active item is in DEBUG posture (new optional GateItem.debugging signal; legalTools ignores it); tight guard (role+itemId+found+debugging, no dup); false receive-review.md comment corrected to name the Phase 9 deferred binding; 8.2-debug-pack red->green",
+        "deferred_binding_receive_review": "receive-review.md delivery -> the Phase 9 review-receipt/fix-round routing task threads a 'receiving-review' signal to buildSystemAppend so it appends receive-review.md (its delivery context does not exist until review findings are routed to the implementer; §4.1's role table assigns it to no static role by design; pack is loaded/cached now so init stays fail-closed over the full set)",
+        "noted_nit": "X-Conductor-Group role/stage qualification — functional as-is (group by tree else itemId); refinement noted, not blocking",
+        "orchestrator_reverify": "843/843 full suite green (observed by orchestrator); each confirmed finding checked resolved: debug.md now delivered (8.2-debug-pack), review-ordering/core-forbidden/core-ponytail anchors green, receive-review honestly deferred. Fixes targeted + test-pinned; no full gate re-run needed for a non-milestone phase."
+      },
+      "verdict": "PASS after 1 fix round"
     }
   },
   "rejections": [
@@ -700,6 +718,12 @@
       "gate": "phase-7",
       "what": "fan-out watchdog didn't cover session.create (unbounded wave hang); held-job sync-onClear strand",
       "resolution": "C-025 fixes (watchdog before create + heldUnsubs ordering); F2 bound to 9.4c; 816/816"
+    },
+    {
+      "at": "2026-08-13T00:40:00Z",
+      "gate": "phase-8",
+      "what": "doctrine subsystem: debug.md loaded but injected into 0 sessions (MAJOR); receive-review.md same (no delivery vector); review.md missing spec-before-quality ordering (MAJOR); core.md missing forbidden-satisfaction-phrases + ponytail lite reminder; doctrine.test.ts pinned only 7/9 packs",
+      "resolution": "C-028, 1 fix round / 2 commits (102802d packs, efd0f84 injection): debug.md now delivered on implementer DEBUG posture (GateItem.debugging); core.md/review.md doctrine added + anchored; plan.md/skeptic.md anchored; receive-review.md deferred to Phase 9 review-receipt binding; X-Group nit noted; 843/843"
     }
   ]
 }

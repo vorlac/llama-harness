@@ -1,6 +1,6 @@
 # HANDOFF — read this first on every start
 
-Updated: 2026-08-12 (Phases 0-7 complete + gated; Phase 8 underway — 8.1 committed)
+Updated: 2026-08-13 (Phases 0-8 complete + gated; next = Branch B + Phase 9)
 
 ## Where we are
 
@@ -19,24 +19,28 @@ Updated: 2026-08-12 (Phases 0-7 complete + gated; Phase 8 underway — 8.1 commi
     security MILESTONE (8 bypasses, C-022/C-023). **P6** evidence+quarantine MILESTONE (9
     crash-safety holes, C-024). **P7** fan-out concurrency (watchdog-armed-too-late MAJOR,
     C-025; F2 binding → 9.4c).
-- **Phase 8 (doctrine) — 8.1 + 8.2 COMMITTED.** 8.1: 9 client-agnostic packs
-  (core/decompose/plan/tdd/test-vet/debug/review/skeptic/receive-review) + doctrine.test.ts
-  (10 verbatim-pinned anchors), M4 PASS (00cdcd7). 8.2: `adapter/inject.ts` (buildSystemAppend
-  / paramsForRole / headersFor / loadPacks / initPlugin), 837/837. A per-task adversarial
-  review caught a MAJOR pre-commit (false "terminal" claim injected every request on a stalled
-  EXECUTING wave → now renders legalTools.why) + an empty-pack fail-closed hardening (C-027).
-  8.2 M4 pending post-commit, backfill sha + M4 next docs/build touch.
+- **Phase 8 (doctrine) DONE + gate PASS.** 8.1: 9 packs + doctrine.test.ts, M4 PASS (00cdcd7).
+  8.2: `adapter/inject.ts` (buildSystemAppend / paramsForRole / headersFor / loadPacks /
+  initPlugin), M4 PASS (29a5011). Per-task review caught a MAJOR false-terminality bug +
+  empty-pack hardening pre-commit (C-027). **Phase 8 gate** (3 blind lenses) found 7 confirmed:
+  2 MAJOR dead packs (debug.md + receive-review.md loaded but injected to 0 sessions), review.md
+  missing spec-before-quality ordering, core.md missing forbidden-phrases + ponytail reminder,
+  7/9-pack anchor coverage. Fixed in 1 round / 2 commits (102802d packs, efd0f84 injection),
+  843/843; receive-review.md DEFERRED to Phase 9 (binding below). C-028.
 
 ## What is next (immediate)
 
-1. **Backfill 8.2**: run M4 from the 8.2 commit (remove inject.ts in a scratch worktree →
-   inject.test.ts missing-subject red), then record 8.2 commitSha + M4 in STATE/GATES.
-2. **Phase 8 gate** (doc-fidelity lens: packs faithful to §6.1 port map, no invented rules;
-   inject.ts renders the authoritative legalTools verdict, never a self-computed claim).
-3. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
+1. **Branch B (C++ router, 11.1-11.8)** — groundwork DONE (see branch-b-plan.md: run ON MAIN,
+   submodules+ports+preset confirmed). Execute 11.1 as ONE focused sequence: CMakeLists surgery
+   (remove myprogram block lines 42-68; add find_package httplib/nlohmann_json/validator/doctest
+   + llama-router + router-tests targets) + vcpkg.json (+4 ports) + src/router skeleton +
+   export-schemas.ts + ctest-green, then commit. CMakeLists/vcpkg/CMakePresets ORCHESTRATOR-ONLY.
+   Build ONLY --target llama-router/router-tests (never bare --build → pre-broken llama).
+2. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
    Carries 9.1/9.4a/9.4c/9.5a/9.5b/9.6 bindings below. Then 10.1, 12, 13, 14, 15.
 - Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,
-  overridesRemaining}; init-failure logs via the injected logError seam (§7.1 stderr), never a
+  overridesRemaining}; an implementer's active item with `debugging:true` (optional GateItem
+  field) gets debug.md; init-failure logs via the injected logError seam (§7.1 stderr), never a
   journal event (closed vocab has no init event — widening it is STOP-AND-PARK).
 
 ## Branch B (C++ router 11.1-11.8) — UNBLOCKED, parallel
@@ -61,6 +65,10 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
 - **9.5a**: under-delivered skeptic panel must re-run or count missing verdicts as UPHOLDS.
 - **9.5b**: report handler enforces all-settled as a NON-VERIFY precondition (closing
   re-verify is defeated by the foreign-red-set exclusion). Defense-in-depth.
+- **receive-review.md delivery** (Phase 8 gate, C-028): the review-receipt / fix-round routing
+  that sends surviving findings to the implementer MUST thread a "receiving-review" signal to
+  `buildSystemAppend` so it appends `receive-review.md` (parallel to the debug.md/DEBUG-posture
+  path already wired). The pack is loaded/cached now; only its delivery signal is deferred.
 - **G7 residuals** (honest-limits-pending.md → fold into 15.1): backtick substitution + alias
   injection now DENY (C-022); residual obscure in-place writers; M5 marker scan is
   production-scoped (C-026, stray marker comment in a test caught by diff read only).
