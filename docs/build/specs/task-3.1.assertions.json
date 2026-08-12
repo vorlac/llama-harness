@@ -1,16 +1,64 @@
 {
   "taskId": "3.1",
-  "planLines": [2208, 2233],
-  "kind": "code (tier B). Subagents read §3.1 (1029-1063) and §3.3 (1160-1302) — the transition tables are normative and tests hardcode them.",
+  "planLines": [
+    2208,
+    2233
+  ],
+  "kind": "code (tier B). Subagents read \u00a73.1 (1029-1063) and \u00a73.3 (1160-1302) \u2014 the transition tables are normative and tests hardcode them.",
   "assertions": [
-    { "id": "3.1-vocab", "text": "RUN_STATES, ITEM_STATES exactly as §3 draws them; blocked/deferred/debugging are item ANNOTATIONS, not ITEM_STATES members", "planLine": 2210, "coveredByTest": null },
-    { "id": "3.1-matrix", "text": "full transition matrices: legal set exactly as §3.1/§3.3; every illegal pair rejected with a why naming the legal successor", "planLine": 2221, "coveredByTest": null },
-    { "id": "3.1-green-evidence", "text": "GREEN requires {testExit:0} for behavioral items; GREEN with testExit 1 rejected", "planLine": 2216, "coveredByTest": null },
-    { "id": "3.1-red-evidence", "text": "RED requires testExit!=0 AND failureClass in {assertion, missing-subject}; class error rejected; missing-subject ACCEPTED", "planLine": 2217, "coveredByTest": null },
-    { "id": "3.1-nonbehavioral", "text": "PENDING->GREEN legal iff item.behavioral === false, rejected otherwise; PENDING->RED rejected for a non-behavioral item", "planLine": 2225, "coveredByTest": null },
-    { "id": "3.1-blocked", "text": "a blocked item rejects EVERY transition with a why naming the question id", "planLine": 2226, "coveredByTest": null },
-    { "id": "3.1-trivial", "text": "INTAKE->EXECUTING legal with classification trivial; EXECUTING->TRIVIAL_DONE only for trivial runs (rejected for work); EXECUTING->REPORTED rejected for trivial runs", "planLine": 2227, "coveredByTest": null },
-    { "id": "3.1-decomposed", "text": "INTAKE->DECOMPOSED requires classification work", "planLine": 2230, "coveredByTest": null },
-    { "id": "3.1-plan-reviewed", "text": "PLAN_REVIEWED->EXECUTING and PLANNED->PLAN_REVIEWED both require {survivingMajors:0} or {round:>=max}", "planLine": 2230, "coveredByTest": null }
+    {
+      "id": "3.1-vocab",
+      "text": "RUN_STATES, ITEM_STATES exactly as \u00a73 draws them; blocked/deferred/debugging are item ANNOTATIONS, not ITEM_STATES members",
+      "planLine": 2210,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-vocab)"
+    },
+    {
+      "id": "3.1-matrix",
+      "text": "full transition matrices: legal set exactly as \u00a73.1/\u00a73.3; every illegal pair rejected with a why naming the legal successor",
+      "planLine": 2221,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-matrix)"
+    },
+    {
+      "id": "3.1-green-evidence",
+      "text": "GREEN requires {testExit:0} for behavioral items; GREEN with testExit 1 rejected",
+      "planLine": 2216,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-green-evidence)"
+    },
+    {
+      "id": "3.1-red-evidence",
+      "text": "RED requires testExit!=0 AND failureClass in {assertion, missing-subject}; class error rejected; missing-subject ACCEPTED",
+      "planLine": 2217,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-red-evidence)"
+    },
+    {
+      "id": "3.1-nonbehavioral",
+      "text": "PENDING->GREEN legal iff item.behavioral === false, rejected otherwise; PENDING->RED rejected for a non-behavioral item",
+      "planLine": 2225,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-nonbehavioral)"
+    },
+    {
+      "id": "3.1-blocked",
+      "text": "a blocked item rejects EVERY transition with a why naming the question id",
+      "planLine": 2226,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-blocked)"
+    },
+    {
+      "id": "3.1-trivial",
+      "text": "INTAKE->EXECUTING legal with classification trivial; EXECUTING->TRIVIAL_DONE only for trivial runs (rejected for work); EXECUTING->REPORTED rejected for trivial runs",
+      "planLine": 2227,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-trivial)"
+    },
+    {
+      "id": "3.1-decomposed",
+      "text": "INTAKE->DECOMPOSED requires classification work",
+      "planLine": 2230,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-decomposed)"
+    },
+    {
+      "id": "3.1-plan-reviewed",
+      "text": "PLAN_REVIEWED->EXECUTING and PLANNED->PLAN_REVIEWED both require {survivingMajors:0} or {round:>=max}",
+      "planLine": 2230,
+      "coveredByTest": "fsm-run/fsm-item.test.ts (test names carry assertion id 3.1-plan-reviewed)"
+    }
   ]
 }

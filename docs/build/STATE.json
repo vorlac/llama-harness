@@ -405,7 +405,7 @@
       "taskId": "3.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 3.1 FSMs",
       "planLines": [
@@ -413,14 +413,32 @@
         2233
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 451,
+        "pass": 451,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/fsm-run.ts + fsm-item.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/fsm-run.test.ts",
+        "conductor/tests/fsm-item.test.ts",
+        "conductor/core/fsm-run.ts",
+        "conductor/core/fsm-item.ts"
+      ],
+      "revertAssertion": "removing either FSM module re-fails all 149 transition tests at link time; e.g. fsm-item 'PENDING->RED missing-subject ACCEPTED' only passes against the real table",
+      "attempts": 1,
+      "deviations": [
+        "states defined inline in fsm-*.ts (pure, no ./types coupling); must stay set-equal to types.ts RunState/ItemState \u2014 spec-conformance to verify"
+      ],
+      "startedAt": "2026-08-12T13:15:00Z",
+      "finishedAt": "2026-08-12T11:46:53Z"
     },
     "3.2": {
       "taskId": "3.2",

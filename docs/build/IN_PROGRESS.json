@@ -1,0 +1,1 @@
+{"taskId":"3.1","step":"staged FSM tests moved in; red; implementer next","intendedFiles":["conductor/tests/fsm-run.test.ts","conductor/tests/fsm-item.test.ts","conductor/core/fsm-run.ts","conductor/core/fsm-item.ts"],"startedAt":"2026-08-12T13:15:00Z"}

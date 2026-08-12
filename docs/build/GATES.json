@@ -225,6 +225,18 @@
       "M7": "PASS 9 rows mapped",
       "M8": "n/a",
       "M9": "n/a (bun leg still deferred to 2.2)"
+    },
+    "3.1": {
+      "at": "2026-08-12T11:46:53Z",
+      "M1": "PASS 451/451 + tsc",
+      "M2": "PASS 302 -> 451",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS (4 files)",
+      "M7": "PASS 9 rows",
+      "M8": "n/a",
+      "M9": "n/a"
     }
   },
   "phaseGates": {
