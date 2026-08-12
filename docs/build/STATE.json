@@ -879,7 +879,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "00cdcd7",
       "commitMessage": "conductor: 8.1 doctrine packs",
       "planLines": [
         2517,

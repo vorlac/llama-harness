@@ -430,7 +430,7 @@
       "M1": "PASS 826/826 node + tsc + bun leg (orchestrator-run)",
       "M2": "PASS 816 -> 826 (+10 doctrine anchors)",
       "M3": "PASS",
-      "M4": "pending post-commit (doc variant: revert a pack -> anchor test fails naming the missing anchor); backfilled next docs/build touch",
+      "M4": "PASS post-commit from 00cdcd7 (doc variant, scratch worktree). A: rm tdd.md -> 4 tests red incl ENOENT naming tdd.md. B (stronger, content-level): strip only the 'delete means delete' phrase (file present) -> exactly 8.1-anchors-tdd red with 'tdd.md must contain delete means delete'; restore -> 10/10 green. Anchors pin content verbatim, not file presence.",
       "M5": "PASS (marker scan production-scoped after C-026; 8.1 scope 10 files + full tree 57 files both clean)",
       "M6": "PASS (9 packs read by doctrine.test.ts via readPack())",
       "M7": "PASS 10 rows (each 8.1-* anchor id maps to a test)",
