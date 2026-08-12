@@ -169,10 +169,22 @@
       "M1": "PASS 172/172 + tsc (orchestrator-observed)",
       "M2": "PASS 109 -> 172",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit: rm shell-parse.ts in scratch worktree of 88c07f8 -> suite fails missing-subject, exit 1",
       "M5": "PASS",
       "M6": "PASS",
       "M7": "PASS (8 rows mapped, test names carry assertion ids)",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "1.4": {
+      "at": "2026-08-12T10:20:34Z",
+      "M1": "PASS 176/176 + tsc",
+      "M2": "PASS 172 -> 176",
+      "M3": "PASS",
+      "M4": "PASS (mutation variant, all 3 probes orchestrator-executed: bite/not-over-broad/bite)",
+      "M5": "PASS",
+      "M6": "PASS (1 declared file + docs/build)",
+      "M7": "PASS 4 rows mapped",
       "M8": "n/a",
       "M9": "n/a"
     }
