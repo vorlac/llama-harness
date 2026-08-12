@@ -1,6 +1,6 @@
 # HANDOFF — read this first on every start
 
-Updated: 2026-08-12 (Phase 1 complete + milestone gate PASS)
+Updated: 2026-08-12 (Phases 0-3 complete + gated; Phase 4 underway)
 
 ## Where we are
 

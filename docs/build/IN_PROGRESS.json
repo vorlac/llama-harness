@@ -1,0 +1,1 @@
+{"taskId":"4.2","step":"test-writer dispatched (gitio read-only git queries; ordering override: 4.2 before 4.1)","intendedFiles":["conductor/tests/gitio.test.ts","conductor/adapter/gitio.ts"],"startedAt":"2026-08-12T14:30:00Z"}
