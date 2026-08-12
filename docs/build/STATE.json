@@ -812,8 +812,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 801,
-        "pass": 801,
+        "tests": 816,
+        "pass": 816,
         "fail": 0,
         "skipped": 0,
         "todo": 0
@@ -842,7 +842,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "0d39f34",
       "commitMessage": "conductor: 7.2 router client + failover",
       "planLines": [
         2495,
@@ -850,8 +850,8 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 813,
-        "pass": 813,
+        "tests": 816,
+        "pass": 816,
         "fail": 0,
         "skipped": 0,
         "todo": 0

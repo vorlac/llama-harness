@@ -418,7 +418,7 @@
       "M1": "PASS 813/813 node + tsc + bun leg",
       "M2": "PASS 801 -> 813 (+12)",
       "M3": "PASS",
-      "M4": "pending post-commit",
+      "M4": "PASS post-commit (router-client removed -> missing-subject)",
       "M5": "PASS (G14 clean)",
       "M6": "PASS (2 files)",
       "M7": "PASS 4 rows",
@@ -594,6 +594,24 @@
       },
       "verdict": "PASS after 1 fix round",
       "rejected": "9 crash/data-loss/sandbox holes in the expected-broken quarantine mechanism (2 lenses); milestone review found the design bind (rename vs out-of-volume) the last revision never reconciled"
+    },
+    "7": {
+      "at": "2026-08-12T22:01:12Z",
+      "stage1": "PASS fresh worktree of 0d39f34, own npm install, 813/813 + tsc + bun leg",
+      "flakeSweep": "CLEAN: fanout+router tests 12x identical (22 pass 0 fail every run); post-fix fanout 8x identical",
+      "lenses": {
+        "concurrency": "mostly SOUND (cap, barrier, watchdog-vs-completion double-resolve, registry retry window, freeze-hold double-dispatch, router double-resolve/leak ALL airtight); 3 hang-family findings"
+      },
+      "adjudication": {
+        "fixed_C025": [
+          "F1 MAJOR: watchdog now arms BEFORE session.create (bounds create+prompt); late-create abort guard; done-guard exactly-once",
+          "F3 LOW: heldUnsubs registered before subscribe (robust to synchronous onClear)"
+        ],
+        "bound_to_9.4c": "F2: leaked-marker held-job backstop \u2014 the wave driver must surface a stale-marker break to treeState.onClear (fan-out hold path is deliberately timer-free per \u00a74.2)",
+        "orchestrator_reverify": "816/816; fanout 8x flake re-sweep identical"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "1 MAJOR (unbounded create hang) + 1 low; core concurrency proven airtight by trace + 12x sweep"
     }
   },
   "rejections": [
@@ -650,6 +668,12 @@
       "gate": "phase-6-milestone",
       "what": "quarantine: EXDEV cross-fs crash, clobber-on-restore data loss, sandbox escape via unvalidated ids (rmSync recursive outside), live-run replay, illegal-red too loose, + 4 minor",
       "resolution": "1 fix round (C-024), 791/791; orchestrator re-verified 0 residual"
+    },
+    {
+      "at": "2026-08-12T22:01:12Z",
+      "gate": "phase-7",
+      "what": "fan-out watchdog didn't cover session.create (unbounded wave hang); held-job sync-onClear strand",
+      "resolution": "C-025 fixes (watchdog before create + heldUnsubs ordering); F2 bound to 9.4c; 816/816"
     }
   ]
 }

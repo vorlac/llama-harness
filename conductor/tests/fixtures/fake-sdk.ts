@@ -128,6 +128,27 @@ export type PromptReply =
   | { kind: "pending" } // park; the test releases it later
   | { kind: "hang" }; // never resolves (watchdog fodder)
 
+// The instruction a create-responder returns for a single session.create call. It
+// mirrors the prompt-hang mechanism (Task F1): `hang` makes create NEVER settle, so a
+// test can prove the per-job watchdog bounds the create phase — not just the prompt
+// phase — and that a hung create can never leave its wave hanging. The default is
+// `created` (resolve with the freshly-minted id), which is what every existing test sees.
+export type CreateReply =
+  | { kind: "created" } // resolve now with the generated { id }
+  | { kind: "error"; error: unknown } // resolve now with an SDK error envelope (no id)
+  | { kind: "hang" }; // never resolves — the engine's watchdog must bound create
+
+// The context a create-responder sees for each session.create.
+export interface CreateReqContext {
+  // The id that WOULD be assigned to this session (recorded whatever the responder does).
+  sessionID: string;
+  // 1-based ordinal of this create across the fake's lifetime.
+  createCount: number;
+  body: { title?: string; parentID?: string } | undefined;
+}
+
+export type CreateResponder = (req: CreateReqContext) => CreateReply;
+
 // The context a responder sees for each prompt.
 export interface PromptReqContext {
   sessionID: string;
@@ -156,6 +177,7 @@ export interface FakeSdk {
   messagesCalls: string[];
   pending: PendingPrompt[];
   setResponder(responder: PromptResponder): void;
+  setCreateResponder(responder: CreateResponder): void;
   resolvePending(sessionID: string, reply: PromptReply): void;
   resolveAllPending(reply: PromptReply): void;
   inFlightCount(): number;
@@ -211,19 +233,34 @@ export function makeFakeSdk(opts: { registry: RegistryLike; idPrefix?: string })
   // Default: park everything. Every test sets a responder explicitly, so a missing
   // one never silently auto-completes a prompt and hides a scheduling bug.
   let responder: PromptResponder = () => ({ kind: "pending" });
+  // Default: create succeeds immediately. A test opts into a hanging/erroring create
+  // (Task F1) via setCreateResponder — the create-phase analogue of the prompt hang.
+  let createResponder: CreateResponder = () => ({ kind: "created" });
 
   let seq = 0;
   let createCount = 0;
 
   const client: FakeClient = {
     session: {
-      async create(createOpts?: CreateOptions): Promise<SdkEnvelope<{ id: string }>> {
+      create(createOpts?: CreateOptions): Promise<SdkEnvelope<{ id: string }>> {
         createCount += 1;
         const id = `${idPrefix}${createCount}`;
         seq += 1;
         calls.push({ seq, method: "create", sessionID: id, body: createOpts?.body });
+        const decision = createResponder({ sessionID: id, createCount, body: createOpts?.body });
+        if (decision.kind === "hang") {
+          // Never settles — the engine's per-job watchdog must bound the create phase
+          // (F1). The id is deliberately NOT pushed to `creates`: the engine never
+          // receives it, so from its view no session exists to register or abort.
+          return new Promise<SdkEnvelope<{ id: string }>>(() => {});
+        }
+        if (decision.kind === "error") {
+          // Resolve with an error envelope carrying no id — the engine's
+          // session-create-failed path. No id reached the engine, so none is recorded.
+          return Promise.resolve({ error: decision.error });
+        }
         creates.push(id);
-        return { data: { id } };
+        return Promise.resolve({ data: { id } });
       },
 
       prompt(promptOpts: PromptOptions): Promise<SdkEnvelope<AssistantMessage>> {
@@ -315,6 +352,9 @@ export function makeFakeSdk(opts: { registry: RegistryLike; idPrefix?: string })
     pending,
     setResponder(next: PromptResponder): void {
       responder = next;
+    },
+    setCreateResponder(next: CreateResponder): void {
+      createResponder = next;
     },
     resolvePending(sessionID: string, reply: PromptReply): void {
       const entry = takePending(sessionID);

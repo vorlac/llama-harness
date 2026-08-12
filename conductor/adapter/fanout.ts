@@ -216,12 +216,50 @@ export function createFanout(
         finalizeSlot();
       };
 
+      // Per-job watchdog on the GLOBAL timer (mock-timer controllable). Armed BEFORE
+      // session.create so the timeout bounds the ENTIRE job — the create phase included
+      // (F1). If create hangs, nothing else would abort it and the whole wave would hang.
+      // On fire: abort the session via the SDK IF one exists yet (create may still be in
+      // flight, in which case there is no id to abort), journal the abort, and produce a
+      // timeout error result. The `done` guard makes this exactly-once with every other
+      // completion path, so a create that resolves LATE (after this fired) cannot
+      // double-finish.
+      timer = setTimeout(() => {
+        if (done) return;
+        if (sessionID.length > 0) {
+          client.session.abort({ path: { id: sessionID } }).catch(() => undefined);
+        }
+        journal.log(
+          "warn",
+          "fanout",
+          "subsession.abort",
+          { reason: "watchdog-timeout", timeoutMs },
+          corr(),
+        );
+        finish({
+          sessionID,
+          error: {
+            kind: "env",
+            reason: `watchdog timeout: aborted hung sub-session after ${timeoutMs}ms`,
+          },
+        });
+      }, timeoutMs);
+
       void (async () => {
         try {
           const created = await client.session.create({
             body: { title: `${job.role}:${job.itemId}` },
           });
-          if (done) return;
+          if (done) {
+            // The watchdog already timed this job out during the create phase. If create
+            // nonetheless produced a session id, abort it so it does not leak; the
+            // done-guard ensures we never finish twice.
+            const lateId = created.data?.id;
+            if (typeof lateId === "string" && lateId.length > 0) {
+              client.session.abort({ path: { id: lateId } }).catch(() => undefined);
+            }
+            return;
+          }
           const id = created.data?.id;
           if (typeof id !== "string" || id.length === 0) {
             journal.log(
@@ -246,27 +284,6 @@ export function createFanout(
             { role: job.role, itemId: job.itemId, tree: job.tree, model },
             corr(),
           );
-
-          // Per-job watchdog on the GLOBAL timer (mock-timer controllable). On fire:
-          // abort via the SDK, journal the abort, and produce a timeout error result.
-          timer = setTimeout(() => {
-            if (done) return;
-            client.session.abort({ path: { id: sessionID } }).catch(() => undefined);
-            journal.log(
-              "warn",
-              "fanout",
-              "subsession.abort",
-              { reason: "watchdog-timeout", timeoutMs },
-              corr(),
-            );
-            finish({
-              sessionID,
-              error: {
-                kind: "env",
-                reason: `watchdog timeout: aborted hung sub-session after ${timeoutMs}ms`,
-              },
-            });
-          }, timeoutMs);
 
           let promptText = job.prompt;
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -343,16 +360,33 @@ export function createFanout(
           { role: entry.job.role, itemId: entry.job.itemId, tree: entry.job.tree },
           { runId, itemId: entry.job.itemId },
         );
-        const unsub = treeState.onClear((tree) => {
-          if (tree !== entry.job.tree || treeState.isFrozen(entry.job.tree)) return;
-          const release = heldUnsubs.get(entry.index);
-          if (release === undefined) return; // already released
+        // F3: a TreeState may notify the listener SYNCHRONOUSLY from inside onClear (an
+        // already-cleared tree). Register this entry in heldUnsubs BEFORE subscribing —
+        // reaching the real unsubscribe through a mutable ref — so a synchronous clear
+        // finds the entry registered and releases the held job instead of stranding it
+        // (a wave-hanging bug). `released` makes release idempotent across the sync path
+        // and a later marker-clear notification.
+        const unsubRef: { fn: () => void } = { fn: () => undefined };
+        let released = false;
+        const release = (): void => {
+          if (released) return;
+          released = true;
           heldUnsubs.delete(entry.index);
-          release();
+          unsubRef.fn();
           queue.push(entry);
           pump();
+        };
+        heldUnsubs.set(entry.index, release);
+        const unsub = treeState.onClear((tree) => {
+          if (tree !== entry.job.tree || treeState.isFrozen(entry.job.tree)) return;
+          if (heldUnsubs.get(entry.index) === undefined) return; // already released
+          release();
         });
-        heldUnsubs.set(entry.index, unsub);
+        unsubRef.fn = unsub;
+        // If the listener already fired synchronously during subscribe (release ran
+        // before unsubRef.fn was assigned, so the real unsubscribe was not yet reachable),
+        // unsubscribe now that we finally hold it.
+        if (released) unsub();
       };
 
       const pump = (): void => {

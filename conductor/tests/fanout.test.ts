@@ -401,6 +401,61 @@ test("[7.1-freeze-hold] a writeCapable job into a frozen tree is HELD (not dispa
   assertKnownFanoutEvents(records);
 });
 
+// A §3.5 freeze view that models the SYNCHRONOUS-onClear race (Fix F3): the marker is
+// reported frozen for the pump's admission check (so the write-capable job is HELD), but
+// by the time `hold` subscribes the marker has cleared, and this TreeState notifies the
+// listener SYNCHRONOUSLY from inside onClear (not on a later macrotask). An engine that
+// only records the hold's unsubscribe AFTER subscribing would find nothing registered
+// when the synchronous listener runs and would STRAND the job — the wave would hang.
+function makeSyncClearOnSubscribeTreeState(tree: string): TreeState {
+  let admissionsLeft = 1;
+  return {
+    isFrozen(t: string): boolean {
+      if (t === tree && admissionsLeft > 0) {
+        admissionsLeft -= 1;
+        return true; // the admission check sees the live marker → the job is held
+      }
+      return false; // by subscribe time the marker has already cleared
+    },
+    onClear(listener: (t: string) => void): () => void {
+      listener(tree); // synchronous notification DURING subscribe — the F3 race
+      return () => {
+        /* nothing to unsubscribe: this fake fires exactly once, synchronously */
+      };
+    },
+  };
+}
+
+test("[7.1-freeze-hold] a SYNCHRONOUS onClear during subscribe still releases the held write-capable job (it is not stranded)", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const treeState = makeSyncClearOnSubscribeTreeState("treeSync");
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, treeState);
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+
+  const writeJob = readJob({
+    role: "implementer",
+    writeCapable: true,
+    tree: "treeSync",
+    itemId: "ws",
+    prompt: "edit",
+  });
+
+  // If the held job were stranded by the synchronous notification, this dispatch would
+  // never resolve and the test would hang (caught by the suite's --test-timeout).
+  const result = await fanout.dispatch(writeJob);
+
+  assert.equal(sdk.creates.length, 1, "the held write-capable job was released and dispatched exactly once");
+  assert.equal(result.error, undefined, "the released job succeeds — a synchronous clear must not strand it");
+  assert.deepEqual(result.value, VALID_VALUE);
+  assert.ok(records.some((r) => r.event === "subsession.hold"), "the job was held before it was released");
+  assert.ok(records.some((r) => r.event === "subsession.dispatched"), "the released job then dispatched");
+  assert.equal(registry.size, 0, "the registry is cleaned after the released job completes");
+  assertKnownFanoutEvents(records);
+});
+
 // ---------------------------------------------------------------------------
 // 7.1-registry-first — the registry entry exists BEFORE the first prompt (§3.5).
 // ---------------------------------------------------------------------------
@@ -528,6 +583,72 @@ test("[7.1-watchdog] a hung sub-session is aborted via the SDK after parallel.su
   assert.ok(/timeout|abort|watchdog/.test(errText), "the error attributes the failure to the watchdog");
   assert.ok(result.timings.durationMs >= 5_000, "timings reflect the elapsed watchdog interval");
   assert.ok(records.some((r) => r.event === "subsession.abort"), "the abort is journaled");
+  assertKnownFanoutEvents(records);
+});
+
+test("[7.1-watchdog] a hung session.create is bounded by the watchdog (create-phase timeout): the job resolves as an error, the wave does not hang, and the abort is journaled", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const config = makeConfig({ parallel: { subSessionTimeoutMs: 5_000 } });
+  const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
+
+  // session.create HANGS — it never resolves. The watchdog must be armed BEFORE create,
+  // or nothing aborts it and the whole wave hangs (Fix F1). The prompt phase is never
+  // reached at all.
+  sdk.setCreateResponder(() => ({ kind: "hang" }));
+
+  const pending = fanout.dispatch(readJob({ itemId: "hang-create" }));
+  await microtasks(); // let the (hanging) create be issued and the watchdog arm
+
+  assert.equal(sdk.prompts.length, 0, "no prompt is issued while create hangs");
+  assert.equal(sdk.aborts.length, 0, "no abort before the timeout elapses");
+
+  t.mock.timers.tick(5_000); // the create-phase watchdog fires
+  await microtasks();
+  const result = await pending; // the wave does NOT hang — this resolves
+
+  assert.equal(result.value, undefined);
+  assert.ok(result.error !== undefined, "a create-phase timeout produces an error result");
+  const errText = JSON.stringify(result.error).toLowerCase();
+  assert.ok(/timeout|abort|watchdog/.test(errText), "the error attributes the failure to the watchdog timeout");
+  assert.ok(result.timings.durationMs >= 5_000, "timings reflect the elapsed watchdog interval");
+  assert.ok(records.some((r) => r.event === "subsession.abort"), "the create-phase timeout is journaled as an abort");
+  // No id ever reached the engine, so there is no live session to abort via the SDK and
+  // no registry entry to leak.
+  assert.equal(sdk.aborts.length, 0, "no session existed to abort (create never returned an id)");
+  assert.equal(registry.size, 0, "no registry entry is leaked by the aborted create");
+  assertKnownFanoutEvents(records);
+});
+
+test("[7.1-watchdog] a fast create+prompt clears the watchdog timer — no abort fires after the timeout window elapses", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const config = makeConfig({ parallel: { subSessionTimeoutMs: 5_000 } });
+  const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
+
+  // Default create (immediate) + an immediate valid reply: the job completes at once.
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+
+  const result = await fanout.dispatch(readJob({ itemId: "fast" }));
+  assert.deepEqual(result.value, VALID_VALUE, "the fast job succeeds");
+  assert.equal(registry.size, 0, "the registry entry was cleaned on completion");
+
+  // Advance the clock well past the (now armed-earlier) watchdog window. A timer that was
+  // correctly cleared on completion must NOT fire — no abort, no second completion.
+  t.mock.timers.tick(5_000 * 3);
+  await microtasks();
+
+  assert.equal(sdk.aborts.length, 0, "the watchdog timer was cleared on success — no abort ever fires");
+  assert.ok(
+    !records.some((r) => r.event === "subsession.abort"),
+    "no abort is journaled for a job that already completed",
+  );
   assertKnownFanoutEvents(records);
 });
 
