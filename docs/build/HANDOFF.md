@@ -24,10 +24,12 @@ Updated: 2026-08-12 (Phases 0-3 complete + gated; Phase 4 underway)
 
 ## What is in flight
 
-- **Task 4.2** (adapter/gitio.ts — read-only git queries, execFile shell:false, explicit
-  cwd). Ordering override: 4.2 BEFORE 4.1 (4.1's createRun needs 4.2's reads; stubbing git
-  would violate G4). Then 4.1 state store, then 2.2 bun smoke (the deferred G14 dual-runtime
-  proof of state + journal — bun 1.3.14 installed, leg is ACTIVE).
+- **Task 4.1** (adapter/state.ts + adapter/questions.ts — the state store; big, crash-safety
+  critical: atomic tmp+rename, advisory lockfile with dead-pid healing, retention pruning,
+  liveness beacon, .git/info/exclude, disposition setters, itemsSummary). 4.2 gitio is
+  COMMITTED (37ddab7). After 4.1: 2.2 bun smoke (`conductor: 2.2 bun runtime smoke` — the
+  deferred G14 dual-runtime proof of state+journal; bun 1.3.14 installed, leg ACTIVE),
+  then the Phase 4 gate (crash-recovery + filesystem-safety lenses; stray-write scan).
 
 ## What is parked / unblocked
 
