@@ -187,6 +187,19 @@
       "M7": "PASS 4 rows mapped",
       "M8": "n/a",
       "M9": "n/a"
+    },
+    "1.3": {
+      "at": "2026-08-12T10:26:42Z",
+      "M1": "PASS 228/228 + tsc (orchestrator-observed)",
+      "M2": "PASS 176 -> 228",
+      "M3": "PASS",
+      "M4": "pending post-commit",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 9 rows mapped (test names carry ids)",
+      "M8": "n/a",
+      "M9": "n/a",
+      "review": "tier B lens dispatched post-commit"
     }
   },
   "phaseGates": {
