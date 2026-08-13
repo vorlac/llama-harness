@@ -91,6 +91,8 @@
 #include <utility>
 #include <vector>
 
+#include <unistd.h>  // getpid — the per-process fixture root (see TempDir)
+
 #include "router/config.hpp"
 
 namespace {
@@ -194,9 +196,16 @@ namespace {
     struct TempDir {
         std::filesystem::path path;
 
+        // The directory is per-PROCESS, not just per-label. With a fixed path,
+        // two concurrent router-tests processes shared one fixture tree and the
+        // ctor's remove_all deleted the other's files mid-run — a real
+        // cross-process race (found by running 12 copies at once; ~5 failures
+        // per 12 runs). ctest runs one process, so the gate never saw it.
         explicit TempDir(std::string_view label) {
             std::error_code ec;
-            path = std::filesystem::temp_directory_path(ec) / "conductor-router-11.2" / label;
+            const auto pid = static_cast<long long>(::getpid());
+            path = std::filesystem::temp_directory_path(ec) /
+                   ("conductor-router-11.2-" + std::to_string(pid)) / label;
             std::filesystem::remove_all(path, ec);
             std::filesystem::create_directories(path, ec);
         }
