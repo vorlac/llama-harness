@@ -48,18 +48,18 @@ namespace conductor::router {
     // every serialized line; absence is JSON null, never a missing key, so a
     // downstream reader parses the ledger with a fixed column set.
     struct RequestRecord {
-        std::string model;                          // body `model`; "" per SG-3
-        std::optional<std::string> role;            // RequestTags verbatim
-        std::optional<std::string> group;           // RequestTags verbatim
-        std::string priority;                       // RESOLVED class, SG-4
-        std::int64_t queueWaitMs{ 0 };              // measured across admit()
-        std::optional<std::int64_t> upstreamMs;     // null when never attempted
-        std::optional<std::int64_t> promptTokens;   // from `usage`
+        std::string model;                         // body `model`; "" per SG-3
+        std::optional<std::string> role;           // RequestTags verbatim
+        std::optional<std::string> group;          // RequestTags verbatim
+        std::string priority;                      // RESOLVED class, SG-4
+        std::int64_t queueWaitMs{ 0 };             // measured across admit()
+        std::optional<std::int64_t> upstreamMs;    // null when never attempted
+        std::optional<std::int64_t> promptTokens;  // from `usage`
         std::optional<std::int64_t> completionTokens;
-        nlohmann::json timings;                     // VERBATIM copy; null absent
-        std::optional<bool> schemaMissing;          // caller-supplied (11.6)
-        std::optional<bool> schemaConformed;        // caller-supplied (11.6)
-        int status{ 0 };                            // as returned to the client
+        nlohmann::json timings;                    // VERBATIM copy; null absent
+        std::optional<bool> schemaMissing;         // caller-supplied (11.6)
+        std::optional<bool> schemaConformed;       // caller-supplied (11.6)
+        int status{ 0 };                           // as returned to the client
     };
 
     /**
