@@ -573,7 +573,7 @@
       "M1": "PASS ctest 33/33 (21016 assertions), stable across 3 runs (1.61s/1.68s/1.58s); llama-router still links; the TypeScript gate is unaffected at 943/943",
       "M2": "PASS 26 -> 33 cases (7 authored rows)",
       "M3": "n/a for C++ (the compiler is the typecheck; the declarations-only build was -Wall -Wextra clean)",
-      "M4": "PENDING",
+      "M4": "PASS from 53c5bf7 in the main tree verified clean against the commit (the configured build dir is bound to the main worktree's source path, so a detached-worktree M4 would need its own ~45min vcpkg configure — same method as 11.4): removing src/router/affinity.hpp re-derived the missing-header red in its consumer (admission.hpp:43); restoring it rebuilt and ran 33/33. The three per-law mutations in revertAssertion were each run separately, not reasoned.",
       "M5": "PASS (production-scoped marker scan)",
       "M6": "PASS (AffinityPolicy reached through the real AdmissionController::grantNext and, for the header row, through the live Router — never called only in isolation)",
       "M7": "PASS 7 assertion rows each with a row-id-prefixed TEST_CASE",

@@ -1480,7 +1480,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "53c5bf7",
       "commitMessage": "conductor: 11.5 group affinity",
       "planLines": [
         2817,
