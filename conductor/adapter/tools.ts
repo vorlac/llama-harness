@@ -27,26 +27,36 @@ import * as path from "node:path";
 import { decideGit } from "../core/gates-git.ts";
 import { decideEdit, decideSession, writeShapedPaths } from "../core/gates-edit.ts";
 import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
-import { isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
+import { globMatch, isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
 import { legalRunTransition } from "../core/fsm-run.ts";
+import { legalItemTransition } from "../core/fsm-item.ts";
+import { legalTools } from "../core/gates-phase.ts";
+import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
 import { readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
-import { validate } from "../core/types.ts";
+import { SCHEMAS, validate } from "../core/types.ts";
 import type {
   Classification,
   ClassificationCheck,
   ClassificationKind,
   Config,
+  CriterionVerdict,
   DecisionRecord,
+  EvidenceRecord,
+  FailureClass,
   Findings,
+  ImplementerResult,
   Item,
+  ItemState,
   Plan,
   PlanDecision,
   Queue,
   QueueItem,
+  Run,
   RunState,
+  TestVet,
   TrivialItem,
   Verdict,
 } from "../core/types.ts";
@@ -54,6 +64,9 @@ import { writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import type { Fanout, FanoutJob } from "./fanout.ts";
+import { runTest } from "./evidence.ts";
+import type { RunTestResult, ScopeSpec } from "./evidence.ts";
+import type { Journal } from "./journal.ts";
 
 // ---------------------------------------------------------------------------
 // (1) The §3.4 tool inventory (plan lines 1307-1328) — the EXACT 22 conductor_*
@@ -2051,4 +2064,1474 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
     questionIds,
     blockedItemIds,
   };
+}
+
+// ===========================================================================
+// (7) The §3.3 RED-stage item handlers (Task 9.4a, plan lines 2612-2623): the
+// two tools that carry a BEHAVIORAL item from PENDING to TEST_VETTED —
+// conductor_submit_test (PENDING->RED) and conductor_vet_test (RED->TEST_VETTED).
+// Same §3.4 invariant loop as sections (4)-(6): legality -> derive -> persist ->
+// journal -> compact return.
+//
+// Two rules shape everything here:
+//
+//   THE HANDLER RUNS THE TEST, NOT THE MODEL (§3.3). Every run and re-run goes
+//   through adapter/evidence.ts runTest — the only writer of evidence.jsonl —
+//   which substitutes the §2.1 itemTest template, applies the zero-test policy,
+//   classifies the failure through core classifyFailure (§2.6.1) and appends +
+//   journals the §2.6 record. This file therefore spawns nothing itself, never
+//   re-classifies a failure, and never re-implements an FSM edge: the red is
+//   admitted by core legalItemTransition's redEvidenceGate (exit != 0 AND class
+//   in {assertion, missing-subject}) and by nothing else.
+//
+//   LEGALITY IS THE GATE'S DERIVATION (§3.2). The legality step asks
+//   core/gates-phase.ts legalTools whether THIS tool is offered for THIS item,
+//   over the same run/queue/item facts the injection renders — so the handler and
+//   the gate cannot disagree (the 9.4a/5.3 deferred binding, ENFORCE: a
+//   dependency-unready item is offered no stage tool AND refused by the handler,
+//   with no recovery bypass). A denial THROWS before any dispatch or persist, the
+//   handleDecide/handleDefer convention, so "nothing was written" is checkable.
+//
+// Every §2.11 question minted here reuses an EXISTING origin — the origin
+// vocabulary is CLOSED (core/types.ts QUESTION_ORIGINS) and this task widens
+// nothing: "implementer-blocked" wherever the write-capable test-writer is the
+// party that got stuck (submit_test's spent repair budget; a writer that replied
+// BLOCKED; a mustFix repair that stopped being a legal red) and
+// "review-round-cap" at the vet round cap (the vet loop is a review-round cap
+// over the test). Likewise every journal name below is already in the closed
+// §7.4 vocabulary (core/journal-events.ts EVENTS).
+// ===========================================================================
+
+// Until Task 9.6 lands worktrees, every write-capable sub-session works the main
+// tree (§3.5) — named once so the two dispatch sites cannot drift.
+const STAGE_TREE = "main";
+
+// The §2.10 TEST_VET criteria, READ OUT OF THE REGISTERED SCHEMA rather than
+// restated here (G6 single source): the compact return's tally rows are exactly
+// the criteria the fan-out engine validates each critic receipt against, in
+// schema order.
+function testVetCriteria(): string[] {
+  const schema = SCHEMAS.TestVet as
+    | { properties?: { verdictsByCriterion?: { required?: unknown } } }
+    | undefined;
+  const required = schema?.properties?.verdictsByCriterion?.required;
+  if (!Array.isArray(required) || required.length === 0) {
+    throw new Error(
+      "conductor_vet_test: SCHEMAS.TestVet declares no §2.10 criteria; the vet tally has no source",
+    );
+  }
+  return required.map((name) => String(name));
+}
+
+// evidence.ts takes the full adapter/journal.ts Journal (log + flushSync); the
+// handlers carry the leveled sink shape. Forward log verbatim and flushSync only
+// when the injected sink actually has one — the handler must never invent a sink
+// of its own, or the evidence records would land in a different journal than the
+// rest of the stage.
+function evidenceJournalOf(journal: HandlerJournal): Journal {
+  const sink = journal as HandlerJournal & { flushSync?: () => void };
+  return {
+    log: (level, component, event, data, corr): void => {
+      journal.log(level, component, event, data, corr);
+    },
+    flushSync: (): void => {
+      if (typeof sink.flushSync === "function") sink.flushSync();
+    },
+  };
+}
+
+// The §2.6 red member of the evidence union.
+type RedEvidence = Extract<EvidenceRecord, { kind: "red" }>;
+
+// ---------------------------------------------------------------------------
+// The shared legality step (invariant-loop step 1)
+// ---------------------------------------------------------------------------
+
+// Everything a stage handler needs once legality has passed: the run, the §2.4
+// queue and this item's entry in it, and the §2.5 runtime item.
+interface StageContext {
+  run: Run;
+  queue: Queue;
+  queueItem: QueueItem;
+  item: Item;
+}
+
+// The gate's view of the run's items, built from queue.json's structural facts
+// (behavioral/dependsOn/fileScope) plus each runtime item file's FSM position and
+// annotations. A queue item with no runtime file contributes nothing — it cannot
+// be scheduled and, being un-PUBLISHED, still holds its dependents back.
+function gateItemsOf(store: StateStore, runId: string, queue: Queue): GateItem[] {
+  const gateItems: GateItem[] = [];
+  for (const qi of queue.items) {
+    let item: Item;
+    try {
+      item = store.loadItem(runId, qi.id);
+    } catch {
+      continue;
+    }
+    gateItems.push({
+      id: qi.id,
+      state: item.state,
+      behavioral: qi.behavioral,
+      dependsOn: [...qi.dependsOn],
+      fileScope: [...qi.fileScope],
+      blocked: item.blocked === null ? null : { reason: item.blocked.reason },
+      deferred: item.deferred === null ? null : { reason: item.deferred.reason },
+    });
+  }
+  return gateItems;
+}
+
+// The dependencies of `queueItem` that are not PUBLISHED yet (§4.2: nothing below
+// PUBLISHED unlocks a dependent; an id with no runtime item is never published).
+function unpublishedDeps(queueItem: QueueItem, gateItems: GateItem[]): string[] {
+  const stateById = new Map<string, string>();
+  for (const gi of gateItems) stateById.set(gi.id, gi.state);
+  return queueItem.dependsOn.filter((dep) => stateById.get(dep) !== "PUBLISHED");
+}
+
+// Why the gate does not offer `tool` for this item, in the terms the caller can
+// act on. The alternative stage tool is read back OUT OF THE SAME VERDICT rather
+// than re-derived, so the message can never name a path the gate would refuse.
+function stageDenyReason(
+  tool: string,
+  verdict: LegalToolsResult,
+  context: { run: Run; queueItem: QueueItem; item: Item; gateItems: GateItem[] },
+): string {
+  const { run, queueItem, item } = context;
+  if (run.state !== "EXECUTING") {
+    return (
+      'item "' +
+      queueItem.id +
+      '" cannot run a stage tool: the run is at ' +
+      run.state +
+      ", not EXECUTING (§3.2)"
+    );
+  }
+  if (item.blocked !== null) {
+    return (
+      'item "' +
+      queueItem.id +
+      '" is blocked on question ' +
+      (item.blocked.questionId ?? "(unspecified)") +
+      " (" +
+      item.blocked.reason +
+      "); a blocked item makes no transition until conductor_answer resolves it (§3.3)"
+    );
+  }
+  if (item.deferred !== null) {
+    return (
+      'item "' + queueItem.id + '" is deferred (' + item.deferred.reason + "); it makes no transition (§3.3)"
+    );
+  }
+  const unready = unpublishedDeps(queueItem, context.gateItems);
+  if (unready.length > 0) {
+    return (
+      'item "' +
+      queueItem.id +
+      '" is dependency-UNREADY: it dependsOn ' +
+      unready.join(", ") +
+      ", which " +
+      (unready.length === 1 ? "is" : "are") +
+      " not PUBLISHED yet — nothing below PUBLISHED unlocks a dependent (§4.2), so " +
+      tool +
+      ' is refused for "' +
+      queueItem.id +
+      '"'
+    );
+  }
+  // The gate's own answer to "what MAY this item do right now", read back out of
+  // the verdict: a non-behavioral PENDING item is offered conductor_mark_green,
+  // and that is the path the deny message must name (§3.3, §2.4).
+  for (const [name, hint] of verdict.legal) {
+    if ((hint.itemIds ?? []).includes(queueItem.id)) {
+      return (
+        'item "' +
+        queueItem.id +
+        '" is at ' +
+        item.state +
+        (queueItem.behavioral ? "" : " and is behavioral:false (it owes no test, §2.4)") +
+        ": its legal stage tool right now is " +
+        name +
+        ", not " +
+        tool +
+        " (§3.3)"
+      );
+    }
+  }
+  return 'item "' + queueItem.id + '" is not offered ' + tool + " right now: " + verdict.why;
+}
+
+// The legality step both stage handlers share. Loads the run, queue and item,
+// asks legalTools whether `tool` is offered for `itemId`, and THROWS a named
+// refusal if it is not — before any sub-session is dispatched and before any
+// state is written.
+function requireStageTool(
+  tool: string,
+  store: StateStore,
+  runId: string,
+  itemId: string,
+  runDir: string,
+): StageContext {
+  const run = store.loadRun(runId);
+  const queue = readQueueJson(runDir, tool);
+  const queueItem = queue.items.find((qi) => qi.id === itemId);
+  if (queueItem === undefined) {
+    throw new Error(tool + ': item "' + itemId + "\" is not in this run's queue.json; refusing to run the stage");
+  }
+  let item: Item;
+  try {
+    item = store.loadItem(runId, itemId);
+  } catch {
+    throw new Error(tool + ': item "' + itemId + '" has no runtime item file; refusing to run the stage');
+  }
+
+  const gateItems = gateItemsOf(store, runId, queue);
+  const gateRun: GateRun = {
+    state: run.state,
+    stop: run.stop === null ? null : { kind: run.stop.kind },
+    classification: { kind: run.classification.kind },
+  };
+  // §2.4 paths are repo-relative and stay inside the run's tree. Asserted HERE, at
+  // the legality step, because this is the last point before the two things that
+  // dereference them: the child test runner takes testScope as argv, and the
+  // sub-session prompts read those files' contents. queue.json is model-authored and
+  // core validateQueue constrains ids, DAG shape and sizes but never path SHAPE, so
+  // an escaping entry would otherwise reach both. The rest of the codebase already
+  // refuses exactly this: gates-edit denies a ".." segment before scope matching,
+  // state.assertSafeId rejects separators, quarantine rejects absolute paths.
+  assertContainedPaths(tool, store.root, itemId, "testScope", queueItem.testScope);
+  assertContainedPaths(tool, store.root, itemId, "fileScope", queueItem.fileScope);
+
+  // A crash-torn trailing line in questions.jsonl must fail as a NAMED legality
+  // failure — the reader has to know which tool refused and which file to repair —
+  // never as a raw SyntaxError naming neither (the shape readQueueJson avoids).
+  let questions: Array<{ id: string; answeredIso: string | null }>;
+  try {
+    questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
+  } catch (error) {
+    throw new Error(
+      tool +
+        ": cannot read questions.jsonl in " +
+        runDir +
+        " (a torn or invalid §2.11 record — repair the file to resume): " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
+  const verdict = legalTools(gateRun, gateItems, questions, true);
+  const offered = verdict.legal.get(tool)?.itemIds ?? [];
+  if (!offered.includes(itemId)) {
+    throw new Error(tool + ": " + stageDenyReason(tool, verdict, { run, queueItem, item, gateItems }));
+  }
+  return { run, queue, queueItem, item };
+}
+
+// Every declared path must be repo-relative and resolve INSIDE the run's tree. A
+// ".." or absolute entry is refused by name — never normalised away silently, since
+// the queue that produced it is model-authored and a caller that meant to reach
+// outside the tree should be told, not quietly corrected.
+function assertContainedPaths(
+  tool: string,
+  root: string,
+  itemId: string,
+  label: string,
+  rels: string[],
+): void {
+  const base = path.resolve(root);
+  for (const rel of rels) {
+    const escapes =
+      rel.length === 0 ||
+      path.isAbsolute(rel) ||
+      rel.split(/[\\/]/).includes("..") ||
+      !(path.resolve(base, rel) + path.sep).startsWith(base + path.sep);
+    if (escapes) {
+      throw new Error(
+        tool +
+          ': item "' +
+          itemId +
+          '" declares a ' +
+          label +
+          ' entry that escapes the run tree: "' +
+          rel +
+          '". §2.4 paths are repo-relative; the child test runner would take this as argv and the ' +
+          "sub-session prompts would read it, so the stage refuses it before either happens",
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Running the item test (delegated whole to adapter/evidence.ts)
+// ---------------------------------------------------------------------------
+
+// The §2.1 verify scope this item's test runs under: every requiredScopes entry
+// whose pattern matches one of the item's own paths contributes its scopes, and a
+// scope carrying an itemTest template (the TARGETED run §3.3 depends on) wins over
+// one that only has a full-scope command. An item no scope covers has no
+// constructible test command — a named legality failure, never a silent full-suite
+// fallback.
+function itemVerifyScope(config: Config, queueItem: QueueItem, tool: string): ScopeSpec {
+  const paths = [...queueItem.testScope, ...queueItem.fileScope];
+  const names: string[] = [];
+  for (const req of config.verify.requiredScopes) {
+    if (!paths.some((p) => globMatch(req.pattern, p))) continue;
+    for (const name of req.scopes) {
+      if (!names.includes(name)) names.push(name);
+    }
+  }
+  const candidates: Array<{ name: string; spec: Config["verify"]["scopes"][string] }> = [];
+  for (const name of names) {
+    const spec = config.verify.scopes[name];
+    if (spec !== undefined) candidates.push({ name, spec });
+  }
+  if (candidates.length === 0) {
+    throw new Error(
+      tool +
+        ': no verify.requiredScopes entry covers item "' +
+        queueItem.id +
+        '" (testScope ' +
+        JSON.stringify(queueItem.testScope) +
+        ", fileScope " +
+        JSON.stringify(queueItem.fileScope) +
+        "), so this item has no test command (§2.1)",
+    );
+  }
+  const chosen =
+    candidates.find((c) => Array.isArray(c.spec.itemTest) && c.spec.itemTest.length > 0) ?? candidates[0];
+  return {
+    name: chosen.name,
+    command: [...chosen.spec.command],
+    timeoutMs: chosen.spec.timeoutMs,
+    ...(Array.isArray(chosen.spec.itemTest) ? { itemTest: [...chosen.spec.itemTest] } : {}),
+  };
+}
+
+// One handler-run of the item test. evidence.runTest appends AND journals the
+// §2.6 record; the fixture repo IS the store root, which is the test's cwd.
+function runItemTest(
+  input: { store: StateStore; runId: string; journal: HandlerJournal; now: () => number },
+  queueItem: QueueItem,
+  scope: ScopeSpec,
+  runDir: string,
+): RunTestResult {
+  return runTest(runDir, queueItem.id, {
+    scope,
+    testFiles: [...queueItem.testScope],
+    cwd: input.store.root,
+    fileScope: [...queueItem.fileScope],
+    journal: evidenceJournalOf(input.journal),
+    runId: input.runId,
+    now: input.now,
+  });
+}
+
+// Whether a run's outcome is admissible as THIS item's red. §2.1's illegal-red rule
+// has two halves and core owns only one of them: legalItemTransition applies the
+// §2.6.1 class split, and evidence.ts computes the targeting half as `legalRed` —
+// `isLegalClass(class) && (targeted || the excerpt names a testScope file)`. Reading
+// only the class admits the §3.3 case "a collection failure elsewhere — is NOT red":
+// a full-scope fallback run that failed in somebody else's test, on a project whose
+// verify scope carries no itemTest template (schema-optional) or whose targeted run
+// executed zero tests. Both halves, or it is not this item's red.
+function redAdmission(
+  outcome: RunTestResult,
+  queueItem: QueueItem,
+): { ok: boolean; why: string; repairable: boolean } {
+  const record = outcome.record;
+  if (record.kind !== "red") {
+    return { ok: false, why: "the run exited 0, so it is not a red", repairable: false };
+  }
+  const edge = legalItemTransition("PENDING", "RED", {
+    item: { behavioral: queueItem.behavioral, blocked: null },
+    testExit: record.exitCode,
+    failureClass: record.failureClass,
+  });
+  if (!edge.ok) {
+    return {
+      ok: false,
+      why: 'the last run failed with §2.6.1 class "' + record.failureClass + '", which is not a red',
+      // A broken test is exactly what a test-writer can repair.
+      repairable: true,
+    };
+  }
+  if (!outcome.legalRed) {
+    // NOT repairable: no edit the writer can make to its own test changes the fact
+    // that the run never targeted it. Rewriting the test would spend the whole
+    // budget re-observing somebody else's failure, so the stage stops and asks.
+    const reasons: string[] = [];
+    if (outcome.fellBack) reasons.push("the run fell back to the full verify scope (no §2.1 itemTest template)");
+    if (outcome.ranZeroTests) reasons.push("the targeted run executed zero tests");
+    if (!outcome.targeted && !outcome.fellBack) reasons.push("the run was not targeted at this item");
+    reasons.push("and its output names none of the item's testScope files");
+    return {
+      ok: false,
+      why:
+        "the failure is not this item's: " +
+        reasons.join(", ") +
+        ", so it is a suite failure elsewhere impersonating a red (§2.1, §3.3)",
+      repairable: false,
+    };
+  }
+  return { ok: true, why: edge.why ?? "", repairable: false };
+}
+
+// ---------------------------------------------------------------------------
+// The sub-session prompts (§3.3 roles testWriter + reviewer)
+// ---------------------------------------------------------------------------
+
+// The item as its spec: title + rationale + acceptance + the two scopes. Every
+// dispatch in this stage carries it, and NONE of them carries the implementation.
+function itemSpecBlock(queueItem: QueueItem): string {
+  return (
+    "\n\nTHE ITEM (queue.json):\n" +
+    "id: " +
+    queueItem.id +
+    "\ntitle: " +
+    queueItem.title +
+    "\nrationale: " +
+    queueItem.rationale +
+    "\nacceptance:\n" +
+    queueItem.acceptance.map((line) => "- " + line).join("\n") +
+    "\ntestScope (the ONLY paths you may write): " +
+    queueItem.testScope.join(", ") +
+    "\nfileScope (the production paths this item will change LATER — not now): " +
+    queueItem.fileScope.join(", ")
+  );
+}
+
+// The item's test files as they stand on disk. The vet critics judge THIS text,
+// and a repair prompt shows the writer what it actually produced.
+function testScopeContent(root: string, queueItem: QueueItem): string {
+  const parts: string[] = [];
+  for (const rel of queueItem.testScope) {
+    const abs = path.join(root, rel);
+    if (!existsSync(abs)) {
+      parts.push("--- " + rel + " (not written yet) ---");
+      continue;
+    }
+    parts.push("--- " + rel + " ---\n" + readFileSync(abs, "utf8"));
+  }
+  return parts.join("\n");
+}
+
+// The captured red, rendered for a prompt: the command, the exit code, the §2.6.1
+// class and the bounded excerpt — the run's OWN output, never a paraphrase.
+function redBlock(record: RedEvidence): string {
+  return (
+    "\n\nTHE CAPTURED RED (the handler ran this test itself):\n" +
+    "command: " +
+    record.command.join(" ") +
+    "\nexit code: " +
+    String(record.exitCode) +
+    "\n§2.6.1 failure class: " +
+    record.failureClass +
+    "\ncaptured output:\n" +
+    record.failureExcerpt
+  );
+}
+
+// The tdd.md charge the test-writer works under (§3.3): test files ONLY, inside
+// the item's testScope, and a failure that fails for the RIGHT reason.
+function testWriterPrompt(queueItem: QueueItem): string {
+  return (
+    "You are the TEST-WRITER for one queue item, working under the TDD doctrine: the test " +
+    "comes FIRST and must FAIL before any implementation of this item exists.\n" +
+    "Write ONLY test files, and only the paths listed in testScope below — the edit-scope gate " +
+    "refuses every other path (§2.4). Do NOT write, stub or sketch the production code: another " +
+    "sub-session implements it against your test.\n" +
+    "Assert the item's ACCEPTANCE as observable behaviour through the subject's public surface — " +
+    "not an internal call count, not a mock's bookkeeping — so a subtly wrong implementation " +
+    "still fails your test.\n" +
+    "THE HANDLER, not you, runs the test after you reply. It is admitted as a RED only when it " +
+    'exits non-zero for a §2.6.1-legal reason: "assertion" (the behaviour was evaluated and was ' +
+    'wrong) or "missing-subject" (the subject this item is contracted to build does not exist ' +
+    'yet). A test that fails to PARSE, or that fails to resolve something OUTSIDE the item\'s ' +
+    'fileScope, is class "error" — that is not a red and comes straight back to you for repair. ' +
+    "A test that PASSES immediately is rejected outright.\n" +
+    "Reply with a single JSON object matching the ImplementerResult schema (status, summary, " +
+    "concerns, neededContext, blockReason) once the file is written." +
+    itemSpecBlock(queueItem)
+  );
+}
+
+// The §3.3 repair re-dispatch: the original charge plus the run's OWN captured
+// failure and the test as it stands, with the remaining budget stated plainly.
+function testRepairPrompt(
+  queueItem: QueueItem,
+  record: RedEvidence,
+  testText: string,
+  repair: number,
+  max: number,
+): string {
+  return (
+    testWriterPrompt(queueItem) +
+    "\n\nYOUR TEST IS NOT A LEGAL RED (repair " +
+    String(repair) +
+    " of " +
+    String(max) +
+    "). The handler ran it and the failure classified as \"" +
+    record.failureClass +
+    '" — the behaviour was never evaluated, so this failure proves nothing about the item.' +
+    redBlock(record) +
+    "\n\nTHE TEST AS IT STANDS:\n" +
+    testText +
+    "\n\nRepair the TEST so that it runs and fails for the RIGHT reason (§2.6.1 " +
+    '"assertion" or "missing-subject"), then reply again with a single valid ImplementerResult ' +
+    "JSON object." +
+    (repair >= max
+      ? " This is the LAST repair attempt: if it is still not a legal red the item is blocked and " +
+        "a question is raised."
+      : "")
+  );
+}
+
+// §3.3 TEST_VET: fresh reviewer critics judging the test on the §2.10 criteria,
+// given the spec + the test + the captured red and NOT the implementation.
+function vetCriticPrompt(
+  queueItem: QueueItem,
+  testText: string,
+  record: RedEvidence,
+  critics: number,
+  round: number,
+  max: number,
+): string {
+  return (
+    "You are one of " +
+    String(critics) +
+    " INDEPENDENT test-vet critics judging ONE test, in a fresh context (vet round " +
+    String(round) +
+    " of at most " +
+    String(max) +
+    "). You are given the item's spec, the test as written, and the captured red output — and " +
+    "deliberately NOT the implementation: none exists yet, and that is the point, since a critic " +
+    "shown code that already passes is anchored by it.\n" +
+    "Judge the test on exactly these criteria (§2.10 TEST_VET):\n" +
+    "- observableBehavior: it asserts observable behaviour through the subject's public surface, " +
+    "not internals.\n" +
+    "- wouldCatchWrongImpl: a subtly WRONG implementation would still fail it — it is not a " +
+    "tautology and it is not testing a mock.\n" +
+    "- rightLevel: it is at the right level (unit vs integration) for what it pins.\n" +
+    "- pinsAcceptance: it pins THIS item's acceptance criteria, not a neighbouring concern.\n" +
+    "- antiPatterns: no anti-patterns — no sleep-based timing, no assertion-free run, no " +
+    "snapshot of everything, no test that cannot fail.\n" +
+    "Reply with a single JSON object matching the TestVet schema: a verdict {pass, note} for each " +
+    "criterion, plus `mustFix` — the concrete changes this test MUST have before it can be " +
+    "vetted. An EMPTY mustFix is the approval; never invent a fix to look thorough, and never " +
+    "ask for a change that only restates a criterion." +
+    itemSpecBlock(queueItem) +
+    "\n\nTHE TEST AS WRITTEN:\n" +
+    testText +
+    redBlock(record)
+  );
+}
+
+// The mustFix re-dispatch: the UNION of the round's critics, back to the writer.
+function vetRepairPrompt(
+  queueItem: QueueItem,
+  testText: string,
+  record: RedEvidence,
+  mustFix: readonly string[],
+  round: number,
+  max: number,
+): string {
+  return (
+    testWriterPrompt(queueItem) +
+    "\n\nTHE TEST VET RAISED MUST-FIX ITEMS (vet round " +
+    String(round) +
+    " of at most " +
+    String(max) +
+    "). Independent critics judged your test against the item's acceptance and every item below " +
+    "must be resolved:\n" +
+    mustFix.map((entry) => "- " + entry).join("\n") +
+    "\n\nTHE TEST AS IT STANDS:\n" +
+    testText +
+    redBlock(record) +
+    "\n\nRewrite the test so every must-fix item is resolved AND it still fails for a §2.6.1-legal " +
+    "reason — the handler re-runs it before the critics see it again, and a test that stops being " +
+    "a legal red cannot be vetted. Reply again with a single valid ImplementerResult JSON object."
+  );
+}
+
+// Every testWriter dispatch in this stage: write-capable, on the main tree, with
+// the already-registered ImplementerResult schema (9.4a authors NO schema).
+function testWriterJob(itemId: string, prompt: string): FanoutJob {
+  return {
+    role: "testWriter",
+    itemId,
+    tree: STAGE_TREE,
+    writeCapable: true,
+    prompt,
+    schemaName: "ImplementerResult",
+    priority: "interactive",
+  };
+}
+
+// The receipt plus the sub-session that produced it: a §2.11 question raised over
+// a stuck writer records THAT session in `askedBy` (provenance, not a guess).
+async function dispatchTestWriter(
+  tool: string,
+  fanout: Fanout,
+  itemId: string,
+  prompt: string,
+): Promise<{ reply: ImplementerResult; sessionID: string }> {
+  const result = await fanout.dispatch(testWriterJob(itemId, prompt));
+  const reply = result.value as ImplementerResult | undefined;
+  if (reply === undefined) {
+    throw new Error(
+      tool +
+        ': the test-writer sub-session for item "' +
+        itemId +
+        '" produced no valid ImplementerResult (' +
+        JSON.stringify(result.error) +
+        ")",
+    );
+  }
+  return { reply, sessionID: result.sessionID };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_submit_test (§3.3 PENDING->RED)
+// ---------------------------------------------------------------------------
+
+const SUBMIT_TEST_TOOL = "conductor_submit_test";
+const VET_TEST_TOOL = "conductor_vet_test";
+
+export interface SubmitTestInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: HandlerJournal;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface SubmitTestResult {
+  ok: boolean; // true IFF the item advanced PENDING->RED
+  itemState: ItemState; // the PERSISTED state after the call
+  exitCode: number | null; // the last handler-run test's exit code
+  failureClass: FailureClass | null; // the last red's §2.6.1 class (null on a green)
+  excerpt: string | null; // the appended record's bounded failureExcerpt
+  attempts: number; // TOTAL testWriter dispatches consumed (<= 1 + testRepairAttempts)
+  questionId: string | null; // the §2.11 question minted at repair exhaustion
+  decisionId: string | null; // the §2.7 record minted on an immediate pass
+  fork: string | null; // names the immediate-pass fork for the orchestrator
+}
+
+// The two arms of the immediate-pass fork (§3.3: "either the behavior already
+// exists — recorded as a decision, ponytail rung skip — or the test is wrong").
+// Both are REAL options and both are scored, so the record satisfies §2.7's
+// >=2-scored-options rule as core requireTwoOptions enforces it.
+const PASS_SKIP_OPTION = "behavior-already-exists (ponytail rung skip; this item may be unnecessary)";
+const PASS_WRONG_OPTION = "test-is-wrong (rewrite the test and resubmit)";
+
+/**
+ * conductor_submit_test (§3.3 PENDING->RED, behavioral items only). Owns the
+ * WHOLE stage: it dispatches the test-writer sub-session (role "testWriter",
+ * write-capable, schema ImplementerResult), runs the item test ITSELF through
+ * evidence.runTest, and admits the result through core legalItemTransition.
+ *
+ * exit 0 is a rejection (a passing test is not a red): the ponytail-skip fork is
+ * recorded as a §2.7 derived decision and the item is left PENDING and un-blocked
+ * for the orchestrator to defer or re-dispatch. Class "error" is not a red
+ * either: the captured failure goes back to the writer for repair, bounded at
+ * config.workflow.testRepairAttempts REPAIRS (the initial write is not a repair,
+ * so at most 1 + testRepairAttempts writer dispatches in all), after which the
+ * item is blocked at stage "RED" and ONE §2.11 question is raised.
+ */
+export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTestResult> {
+  const { store, fanout, runId, itemId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality — the gate's own derivation, before a single sub-session is
+  //     spent and before anything is written.
+  const stage = requireStageTool(SUBMIT_TEST_TOOL, store, runId, itemId, runDir);
+  const queueItem = stage.queueItem;
+  const scope = itemVerifyScope(config, queueItem, SUBMIT_TEST_TOOL);
+  // The §2.1 schema types the knob `number` and the subset validator has no integer
+  // keyword, so a fractional value loads. Floor it: `repairs >= maxRepairs` with 1.5
+  // would spend TWO repairs — a budget the operator never configured. Knobs round
+  // down, never up.
+  const maxRepairs = Math.max(0, Math.floor(config.workflow.testRepairAttempts));
+
+  // (2) derive: write -> run -> judge, with the bounded repair loop.
+  let dispatches = 0;
+  let repairs = 0;
+  let prompt = testWriterPrompt(queueItem);
+  let lastRed: RedEvidence | null = null;
+  // The sub-session a §2.11 question would name in `askedBy` (§2.11 provenance):
+  // the writer that was working the item when the stage gave up.
+  let writerSessionID = input.sessionID ?? "";
+
+  // The shared exhaustion exit (repair budget spent, or a writer that declared
+  // itself BLOCKED — burning the remaining attempts on a sub-session that has
+  // said it cannot proceed buys nothing). The item stays PENDING: `blocked` is a
+  // §2.5 ANNOTATION, not an FSM position.
+  const blockAndAsk = (why: string): SubmitTestResult => {
+    const item = store.loadItem(runId, itemId);
+    // ACCUMULATED, never assigned: §2.5 attempts are the ITEM's history. A second
+    // call after an answered question spends its own repairs on the same item, and a
+    // counter that showed only the last call's would hide what the item really cost.
+    item.attempts.testRepairs += repairs;
+    store.saveItem(runId, item);
+
+    const questionText =
+      SUBMIT_TEST_TOOL +
+      ' could not obtain a legal RED for item "' +
+      itemId +
+      '" — ' +
+      why +
+      " (workflow.testRepairAttempts=" +
+      String(maxRepairs) +
+      ", repairs spent " +
+      String(repairs) +
+      ").\n" +
+      (lastRed === null
+        ? "No §2.6.1-legal failure was ever captured."
+        : "The last run exited " +
+          String(lastRed.exitCode) +
+          ' with §2.6.1 class "' +
+          lastRed.failureClass +
+          '":\n' +
+          lastRed.failureExcerpt) +
+      "\nSay how this item's first failing test should be written, or whether the item itself " +
+      "should be reshaped.";
+    const question = appendQuestion(
+      runDir,
+      {
+        runId,
+        question: questionText,
+        askedBy: { role: "testWriter", sessionID: writerSessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      now(),
+    );
+    const reason =
+      "test-writer could not produce a legal §2.6.1 red for the PENDING->RED stage: " +
+      why +
+      " (repairs spent " +
+      String(repairs) +
+      " of workflow.testRepairAttempts=" +
+      String(maxRepairs) +
+      ")";
+    const blocked = store.setBlocked(runId, itemId, {
+      reason,
+      stage: "RED",
+      questionId: question.id,
+    });
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: true, questionId: question.id, stage: "RED", testRepairs: repairs },
+      { runId, itemId },
+    );
+    return {
+      ok: false,
+      itemState: blocked.state,
+      exitCode: lastRed === null ? null : lastRed.exitCode,
+      failureClass: lastRed === null ? null : lastRed.failureClass,
+      excerpt: lastRed === null ? null : lastRed.failureExcerpt,
+      attempts: dispatches,
+      questionId: question.id,
+      decisionId: null,
+      fork: null,
+    };
+  };
+
+  for (;;) {
+    const writer = await dispatchTestWriter(SUBMIT_TEST_TOOL, fanout, itemId, prompt);
+    const reply = writer.reply;
+    dispatches += 1;
+    writerSessionID = writer.sessionID;
+    if (reply.status === "BLOCKED") {
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "RED", itemId, reason: "test-writer BLOCKED", detail: reply.blockReason ?? reply.summary },
+        { runId, itemId },
+      );
+      return blockAndAsk(
+        "the test-writer replied BLOCKED: " + (reply.blockReason ?? reply.summary),
+      );
+    }
+    if (reply.status === "NEEDS_CONTEXT") {
+      // Same reading as BLOCKED, for the same reason: re-issuing an identical prompt
+      // cannot supply what the writer just said it lacks, so repairing would burn the
+      // budget a round at a time and ask the human to unblock a stage without telling
+      // them what is missing. The ask RELAYS what was asked for.
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "RED", itemId, reason: "test-writer NEEDS_CONTEXT", detail: reply.neededContext ?? reply.summary },
+        { runId, itemId },
+      );
+      return blockAndAsk(
+        "the test-writer replied NEEDS_CONTEXT: " + (reply.neededContext ?? reply.summary),
+      );
+    }
+
+    // THE HANDLER runs the test (§3.3) — evidence.ts appends and journals the
+    // §2.6 record; nothing here re-classifies it.
+    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const record = outcome.record;
+
+    if (record.kind === "green") {
+      // (3a) REJECTION: a passing test is not a red. Record the §3.3 fork as a
+      //      §2.7 derived decision and leave the item exactly where it was —
+      //      PENDING, un-blocked, unquestioned: the orchestrator chooses.
+      const decision: DecisionRecord = {
+        id: mintDecisionId(runDir),
+        tsIso: new Date(now()).toISOString(),
+        question:
+          'conductor_submit_test: item "' +
+          itemId +
+          "\"'s submitted test PASSED on its first run (exit 0), so it is not a red. Does the " +
+          "behaviour already exist, or is the test wrong?",
+        options: [
+          {
+            name: PASS_SKIP_OPTION,
+            score: {
+              capability: 1,
+              testability: 1,
+              movingParts: 2,
+              validationEarliness: 1,
+              singleSource: 2,
+            },
+          },
+          {
+            name: PASS_WRONG_OPTION,
+            score: {
+              capability: 2,
+              testability: 3,
+              movingParts: 2,
+              validationEarliness: 3,
+              singleSource: 2,
+            },
+          },
+        ],
+        choice: PASS_WRONG_OPTION,
+        why:
+          "A test that passes before any implementation of this item exists either asserts " +
+          "behaviour that is already present (the ponytail ladder's skip rung — the item may be " +
+          "unnecessary) or asserts the wrong thing. The conservative default is test-is-wrong: " +
+          "the rejection already forces a resubmission, and the skip arm stays available to the " +
+          "orchestrator through conductor_defer, which reads this ledger.",
+        kind: "derived",
+        appliedWhere: "item " + itemId,
+      };
+      // §2.7's >=2-scored-options law, ENFORCED at the write rather than asserted in
+      // a comment — the same core gate handleDecide and the plan path run, so this
+      // site cannot drift out of compliance if the literal above is ever edited.
+      const passGate = requireTwoOptions(decision);
+      if (!passGate.ok) {
+        throw new Error(SUBMIT_TEST_TOOL + ": " + (passGate.why ?? "the pass-rejection decision is not §2.7-legal"));
+      }
+      appendDecision(runDir, decision);
+      journal.log(
+        "info",
+        "state",
+        "decision.recorded",
+        { decisionId: decision.id, kind: decision.kind, choice: decision.choice, itemId },
+        { runId, itemId },
+      );
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "RED", itemId, reason: "test passed immediately", exitCode: record.exitCode },
+        { runId, itemId },
+      );
+      return {
+        ok: false,
+        itemState: store.loadItem(runId, itemId).state,
+        exitCode: record.exitCode,
+        failureClass: null,
+        excerpt: null,
+        attempts: dispatches,
+        questionId: null,
+        decisionId: decision.id,
+        fork: PASS_SKIP_OPTION + " vs " + PASS_WRONG_OPTION + " — recorded choice: " + PASS_WRONG_OPTION,
+      };
+    }
+
+    if (record.kind !== "red") {
+      // runTest appends red|green for an item test; a verify record here would
+      // mean the ledger writer changed under us. Say so rather than reading
+      // fields that are not there.
+      throw new Error(
+        SUBMIT_TEST_TOOL +
+          ': the item test run for "' +
+          itemId +
+          '" appended a §2.6 "' +
+          record.kind +
+          '" record; an item test yields red|green only',
+      );
+    }
+
+    lastRed = record;
+    const edge = redAdmission(outcome, queueItem);
+
+    if (edge.ok) {
+      // (3b) persist the advance: the FSM position, the repairs actually spent,
+      //      and the §2.6 pointer to the red the item advanced ON.
+      const item = store.loadItem(runId, itemId);
+      item.state = "RED";
+      item.attempts.testRepairs += repairs;
+      item.evidence.red = { ledger: "evidence.jsonl", seq: record.seq };
+      store.saveItem(runId, item);
+
+      // (4) journal through the closed §7.4 vocabulary only.
+      journal.log(
+        "info",
+        "fsm",
+        "transition",
+        {
+          itemId,
+          from: "PENDING",
+          to: "RED",
+          failureClass: record.failureClass,
+          exitCode: record.exitCode,
+          targeted: outcome.targeted,
+          evidenceSeq: record.seq,
+          attempts: dispatches,
+          testRepairs: repairs,
+          why: edge.why,
+        },
+        { runId, itemId },
+      );
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId, state: "RED", testRepairs: repairs, evidenceSeq: record.seq },
+        { runId, itemId },
+      );
+
+      // (5) compact return.
+      return {
+        ok: true,
+        itemState: item.state,
+        exitCode: record.exitCode,
+        failureClass: record.failureClass,
+        excerpt: record.failureExcerpt,
+        attempts: dispatches,
+        questionId: null,
+        decisionId: null,
+        fork: null,
+      };
+    }
+
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      {
+        stage: "RED",
+        itemId,
+        failureClass: record.failureClass,
+        exitCode: record.exitCode,
+        repairs,
+        maxRepairs,
+        targeted: outcome.targeted,
+        fellBack: outcome.fellBack,
+        ranZeroTests: outcome.ranZeroTests,
+        legalRed: outcome.legalRed,
+        why: edge.why,
+      },
+      { runId, itemId },
+    );
+
+    // A red the writer cannot repair (the run never targeted this item) stops the
+    // stage at once — see redAdmission. Only a §2.6.1 class-"error" red is worth
+    // another dispatch.
+    if (!edge.repairable) return blockAndAsk(edge.why);
+
+    // The red is illegal (class "error"). Spend a REPAIR if the budget has one
+    // left — the initial write was not a repair (§2.1 "illegal-red repair
+    // attempts"), so the loop makes at most 1 + testRepairAttempts dispatches.
+    if (repairs >= maxRepairs) {
+      return blockAndAsk(edge.why + ", and the repair budget is spent");
+    }
+    repairs += 1;
+    prompt = testRepairPrompt(
+      queueItem,
+      record,
+      testScopeContent(store.root, queueItem),
+      repairs,
+      maxRepairs,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// conductor_vet_test (§3.3 RED->TEST_VETTED)
+// ---------------------------------------------------------------------------
+
+export interface VetTestInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: HandlerJournal;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface VetCriterionTally {
+  criterion: string;
+  passed: number;
+  failed: number;
+}
+
+export interface VetTestResult {
+  ok: boolean; // true IFF the item advanced RED->TEST_VETTED
+  itemState: ItemState; // the PERSISTED state after the call
+  rounds: number; // vet rounds run (== item.attempts.vetRounds)
+  verdicts: VetCriterionTally[]; // the FINAL round's per-criterion tally, in schema order
+  mustFix: string[]; // the final round's UNION ([] on a clean exit)
+  questionId: string | null; // the §2.11 question minted at the round cap
+}
+
+// The red this item is carrying: the record its §2.6 pointer names, else the last
+// red on the ledger for this item. A RED item with no captured red cannot be
+// vetted — the critics' whole job is to judge a test against what it produced.
+// `stale` is true when the ledger holds a LATER run for this item than the red the
+// critics would be shown — i.e. the test on disk has been re-run since, so the red no
+// longer describes what it produces. The caller re-establishes the red before vetting
+// rather than pairing an old failure with a new test.
+function capturedRedOf(
+  runDir: string,
+  item: Item,
+  itemId: string,
+): { red: RedEvidence; stale: boolean; resolvedByFallback: boolean } {
+  const ledger = path.join(runDir, "evidence.jsonl");
+  const reds: RedEvidence[] = [];
+  let latestSeq = -1;
+  if (existsSync(ledger)) {
+    let raw = readFileSync(ledger, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+      let parsed: EvidenceRecord;
+      try {
+        parsed = JSON.parse(trimmed) as EvidenceRecord;
+      } catch {
+        continue; // a torn crash artifact is skipped, never allowed to wedge the vet
+      }
+      if (parsed.itemId !== itemId) continue;
+      // Every run for this item counts toward "what ran last", red or green.
+      if (parsed.seq > latestSeq) latestSeq = parsed.seq;
+      // Only a §2.6.1-LEGAL red is a red. A class-"error" record is one the submit
+      // side refuses outright ("that is not a red"), so handing it to the critics as
+      // THE CAPTURED RED would vet a test against its own brokenness.
+      if (parsed.kind === "red" && (parsed.failureClass === "assertion" || parsed.failureClass === "missing-subject")) {
+        reds.push(parsed);
+      }
+    }
+  }
+  const pointer = item.evidence.red;
+  let resolvedByFallback = true;
+  let chosen: RedEvidence | undefined;
+  if (pointer !== undefined) {
+    chosen = reds.find((record) => record.seq === pointer.seq);
+    if (chosen !== undefined) resolvedByFallback = false;
+  }
+  if (chosen === undefined) chosen = reds[reds.length - 1];
+  if (chosen === undefined) {
+    throw new Error(
+      VET_TEST_TOOL +
+        ': item "' +
+        itemId +
+        '" is at RED but evidence.jsonl carries no §2.6.1-legal red record for it (a class-"error" ' +
+        "record is not a red); there is nothing for the critics to judge the test against (§2.6)",
+    );
+  }
+  return { red: chosen, stale: chosen.seq !== latestSeq, resolvedByFallback };
+}
+
+/**
+ * conductor_vet_test (§3.3 RED->TEST_VETTED). Fans out readFanout("vet", config)
+ * critics as ONE parallel group (role "reviewer", read-only, schema TestVet, a
+ * fresh sub-session each), every prompt carrying the item spec + the test + the
+ * captured red and NOT the implementation. A round in which every critic returns
+ * an empty mustFix advances the item through core legalItemTransition; any
+ * non-empty mustFix sends the UNION back to the test-writer in one write-capable
+ * re-dispatch, re-runs the repaired test through evidence.runTest (which must
+ * still be a §2.6.1-legal red — so the next round's prompt carries a TRUE
+ * captured red for the test it judges) and re-vets. The loop is bounded by
+ * config.workflow.vetMaxRounds: at the cap the item STAYS at RED with
+ * blocked:{stage:"TEST_VETTED"} and ONE §2.11 question.
+ */
+export async function handleVetTest(input: VetTestInput): Promise<VetTestResult> {
+  const { store, fanout, runId, itemId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality — same derivation, same throw-before-anything discipline.
+  const stage = requireStageTool(VET_TEST_TOOL, store, runId, itemId, runDir);
+  const queueItem = stage.queueItem;
+  const criteria = testVetCriteria();
+  // Floored for the same reason as testRepairAttempts: a fractional fan-out would
+  // dispatch MORE critics than configured (2.5 -> 3), which can also breach a
+  // fractional parallel.maxReaders ceiling.
+  const critics = Math.floor(readFanout("vet", config));
+  if (critics < 1) {
+    throw new Error(
+      VET_TEST_TOOL +
+        ": the configured vet fan-out is " +
+        String(critics) +
+        " critic(s) (workflow.vetCritics clamped to parallel.maxReaders), so no critic could judge " +
+        'item "' +
+        itemId +
+        "\"'s test; configure at least one (§4.3)",
+    );
+  }
+  const max = Math.floor(config.workflow.vetMaxRounds);
+  if (max < 1) {
+    throw new Error(
+      VET_TEST_TOOL +
+        ": workflow.vetMaxRounds is " +
+        String(max) +
+        ", so no vet round may run; configure at least one (§2.1)",
+    );
+  }
+
+  const scope = itemVerifyScope(config, queueItem, VET_TEST_TOOL);
+  const captured = capturedRedOf(runDir, stage.item, itemId);
+  let red = captured.red;
+  if (captured.resolvedByFallback) {
+    journal.log(
+      "warn",
+      "state",
+      "item.updated",
+      { itemId, evidenceSeq: red.seq, why: "the item's §2.6 red pointer did not resolve; fell back to the last legal red" },
+      { runId, itemId },
+    );
+  }
+  let testText = testScopeContent(store.root, queueItem);
+  let rounds = 0;
+  // Both are the FINAL round's products; every exit below runs at least one round
+  // and overwrites them, so the initializers are only the empty starting state.
+  let mustFix: string[] = [];
+  let tally: VetCriterionTally[] = [];
+  // §2.11 provenance for a question raised out of this loop: the critic (or the
+  // writer) whose sub-session the ask came out of.
+  let askedBySessionID = input.sessionID ?? "";
+
+  // The loop's STUCK exit (a writer that declared itself BLOCKED, or a repair that
+  // stopped being a §2.6.1 red): the item stays at RED — `blocked` is a §2.5
+  // annotation, not an FSM position — carrying blocked:{stage:"TEST_VETTED"} and
+  // ONE §2.11 question on the EXISTING origin "implementer-blocked" (the blocked
+  // write-capable sub-session here IS the test-writer; nothing widens the closed
+  // vocabulary). Same shape as the submit-side exhaustion, so both stage tools
+  // leave a stuck item in one recognisable state with one unblock path.
+  const blockVetAndAsk = (detail: string, sessionID: string): VetTestResult => {
+    const item = store.loadItem(runId, itemId);
+    // ACCUMULATED (see the submit side): §2.5 attempts are the item's history, and a
+    // second call after an answered question spends its own rounds on the same item.
+    item.attempts.vetRounds += rounds;
+    store.saveItem(runId, item);
+
+    const questionText =
+      VET_TEST_TOOL +
+      ' could not vet item "' +
+      itemId +
+      '": ' +
+      detail +
+      ".\nThe critics judge a test against the failure it actually produces, so this item cannot " +
+      "be vetted until its test is a legal §2.6.1 red again. Say how the test should pin this " +
+      "item's acceptance, or whether the item itself should be reshaped.";
+    const question = appendQuestion(
+      runDir,
+      {
+        runId,
+        question: questionText,
+        askedBy: { role: "testWriter", sessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      now(),
+    );
+    const blocked = store.setBlocked(runId, itemId, {
+      reason: "the test vet could not proceed: " + detail,
+      stage: "TEST_VETTED",
+      questionId: question.id,
+    });
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "TEST_VETTED", itemId, round: rounds, reason: detail },
+      { runId, itemId },
+    );
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: true, questionId: question.id, stage: "TEST_VETTED", vetRounds: rounds },
+      { runId, itemId },
+    );
+    return {
+      ok: false,
+      itemState: blocked.state,
+      rounds,
+      verdicts: tally,
+      mustFix,
+      questionId: question.id,
+    };
+  };
+
+  // The captured red must describe the test the critics are about to judge, not
+  // whatever produced it once. If ANY run for this item is newer than the red — a
+  // mustFix repair from an earlier call that stopped being a red, an interrupted
+  // stage, a crash between the re-run and the pointer write — the pairing is stale
+  // and re-establishing it is the whole point of G6: without this, a repaired test
+  // that PASSES gets vetted against the pre-repair red, and RED->TEST_VETTED->GREEN
+  // needs only exit 0, publishing an item whose shipped test never had a red.
+  // P6 is intact: on the normal path the red IS the newest run, so nothing re-runs.
+  if (captured.stale) {
+    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const admission = redAdmission(outcome, queueItem);
+    if (!admission.ok) {
+      return blockVetAndAsk(
+        "the test on disk no longer produces the captured red — " + admission.why,
+        input.sessionID ?? "",
+      );
+    }
+    red = outcome.record as RedEvidence;
+    const item = store.loadItem(runId, itemId);
+    item.evidence.red = { ledger: "evidence.jsonl", seq: red.seq };
+    store.saveItem(runId, item);
+    testText = testScopeContent(store.root, queueItem);
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, evidenceSeq: red.seq, why: "the captured red was stale; re-established before vetting (G6)" },
+      { runId, itemId },
+    );
+  }
+
+  for (;;) {
+    // (2) derive: ONE parallel group of fresh critics per round.
+    rounds += 1;
+    const jobs: FanoutJob[] = [];
+    for (let i = 0; i < critics; i += 1) {
+      jobs.push({
+        role: "reviewer",
+        itemId,
+        tree: STAGE_TREE,
+        writeCapable: false,
+        prompt: vetCriticPrompt(queueItem, testText, red, critics, rounds, max),
+        schemaName: "TestVet",
+        priority: "interactive",
+      });
+    }
+    const results = await fanout.dispatchWave(jobs);
+    if (results.length > 0) askedBySessionID = results[0].sessionID;
+
+    const roundTally: VetCriterionTally[] = criteria.map((criterion) => ({
+      criterion,
+      passed: 0,
+      failed: 0,
+    }));
+    const union: string[] = [];
+    for (const [index, result] of results.entries()) {
+      const vet = result.value as TestVet | undefined;
+      // A critic that produced nothing is a BLIND SPOT, not an approval: vetting a
+      // test on verdicts nobody gathered is exactly the failure this stage exists
+      // to prevent, so the round aborts instead (the item is untouched and the
+      // tool can simply be run again).
+      if (vet === undefined) {
+        throw new Error(
+          VET_TEST_TOOL +
+            ": vet critic " +
+            String(index + 1) +
+            " of " +
+            String(critics) +
+            ' for item "' +
+            itemId +
+            '" produced no valid TestVet (' +
+            JSON.stringify(result.error) +
+            ")",
+        );
+      }
+      const byCriterion = vet.verdictsByCriterion as unknown as Record<string, CriterionVerdict>;
+      for (const row of roundTally) {
+        const verdict = byCriterion[row.criterion];
+        if (verdict !== undefined && verdict.pass) row.passed += 1;
+        else row.failed += 1;
+      }
+      for (const entry of vet.mustFix) {
+        if (!union.includes(entry)) union.push(entry);
+      }
+    }
+    tally = roundTally;
+    mustFix = union;
+
+    if (union.length === 0) {
+      // (3a) a clean round: the core edge, then persist + journal + return.
+      const item = store.loadItem(runId, itemId);
+      const edge = legalItemTransition("RED", "TEST_VETTED", {
+        item: { behavioral: queueItem.behavioral, blocked: item.blocked },
+      });
+      if (!edge.ok) {
+        throw new Error(VET_TEST_TOOL + ": " + (edge.why ?? "RED->TEST_VETTED is not legal for this item"));
+      }
+      item.state = "TEST_VETTED";
+      item.attempts.vetRounds += rounds;
+      item.evidence.red = { ledger: "evidence.jsonl", seq: red.seq };
+      store.saveItem(runId, item);
+
+      journal.log(
+        "info",
+        "fsm",
+        "transition",
+        {
+          itemId,
+          from: "RED",
+          to: "TEST_VETTED",
+          rounds,
+          critics,
+          verdicts: tally,
+          why: edge.why,
+        },
+        { runId, itemId },
+      );
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId, state: "TEST_VETTED", vetRounds: rounds },
+        { runId, itemId },
+      );
+
+      return { ok: true, itemState: item.state, rounds, verdicts: tally, mustFix, questionId: null };
+    }
+
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "TEST_VETTED", itemId, round: rounds, max, mustFix: union },
+      { runId, itemId },
+    );
+
+    // (3b) the round cap: the item STAYS at RED (blocked is an annotation) and
+    //      ONE §2.11 question is raised, mirroring the submit-side exhaustion.
+    //      Nothing is dispatched after this round.
+    if (rounds >= max) {
+      const item = store.loadItem(runId, itemId);
+      item.attempts.vetRounds += rounds;
+      item.evidence.red = { ledger: "evidence.jsonl", seq: red.seq };
+      store.saveItem(runId, item);
+
+      const questionText =
+        VET_TEST_TOOL +
+        ' reached its round cap for item "' +
+        itemId +
+        '": ' +
+        String(rounds) +
+        " of workflow.vetMaxRounds=" +
+        String(max) +
+        " vet round(s) spent and the critics still require:\n" +
+        union.map((entry) => "- " + entry).join("\n") +
+        "\nThe test stands as written and the item is blocked until you answer: say how the test " +
+        "should pin this item's acceptance, or that it should stand as it is.";
+      const question = appendQuestion(
+        runDir,
+        {
+          runId,
+          question: questionText,
+          askedBy: { role: "reviewer", sessionID: askedBySessionID },
+          humanTerritory: isHumanTerritory(questionText),
+          origin: "review-round-cap",
+          blocksItems: [itemId],
+        },
+        now(),
+      );
+      const blocked = store.setBlocked(runId, itemId, {
+        reason:
+          "test vet reached vetMaxRounds=" +
+          String(max) +
+          " with mustFix still outstanding: " +
+          union.join("; "),
+        stage: "TEST_VETTED",
+        questionId: question.id,
+      });
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId, blocked: true, questionId: question.id, stage: "TEST_VETTED", vetRounds: rounds },
+        { runId, itemId },
+      );
+
+      return {
+        ok: false,
+        itemState: blocked.state,
+        rounds,
+        verdicts: tally,
+        mustFix,
+        questionId: question.id,
+      };
+    }
+
+    // (3c) below the cap: ONE write-capable re-dispatch carrying the UNION, then
+    //      a re-run that must still be a §2.6.1-legal red before the next round —
+    //      so every round's critics judge a test against ITS OWN captured red.
+    const writer = await dispatchTestWriter(
+      VET_TEST_TOOL,
+      fanout,
+      itemId,
+      vetRepairPrompt(queueItem, testText, red, union, rounds, max),
+    );
+    if (writer.reply.status === "BLOCKED") {
+      // Same reading as the submit side: a writer that has declared it cannot
+      // proceed is not made to try again — the item stops with an unblock path.
+      return blockVetAndAsk(
+        "the test-writer replied BLOCKED on the must-fix re-dispatch: " +
+          (writer.reply.blockReason ?? writer.reply.summary),
+        writer.sessionID,
+      );
+    }
+    if (writer.reply.status === "NEEDS_CONTEXT") {
+      return blockVetAndAsk(
+        "the test-writer replied NEEDS_CONTEXT on the must-fix re-dispatch: " +
+          (writer.reply.neededContext ?? writer.reply.summary),
+        writer.sessionID,
+      );
+    }
+
+    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const record = outcome.record;
+    // The repaired test must STILL be a §2.6.1-legal red — admitted by the SAME rule
+    // the submit side applies (class split + targeting), never re-derived here.
+    const admission = redAdmission(outcome, queueItem);
+    if (!admission.ok) {
+      // §3.3's changed-test rule: the repaired test re-enters the test
+      // discipline, and it did not survive it. That is a submit-side failure, not
+      // something to vet, so the loop stops with the blocked+question shape the
+      // submit side uses — never a silent re-vet of a test that is no longer red.
+      return blockVetAndAsk(
+        record.kind === "red"
+          ? "the repaired test is not a red: " + admission.why
+          : "the repaired test PASSES (exit 0), so it is no longer a red",
+        writer.sessionID,
+      );
+    }
+
+    red = record as RedEvidence;
+    testText = testScopeContent(store.root, queueItem);
+  }
 }

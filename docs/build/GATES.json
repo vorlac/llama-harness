@@ -1,807 +1,820 @@
 {
- "selfTests": [
-  {
-   "at": "2026-08-12T08:46:14Z",
-   "trigger": "pre-0.1 (orchestrator prompt \u00a77.3)",
-   "cases": [
+  "selfTests": [
     {
-     "id": "S1",
-     "case": "passing suite",
-     "expect": "exit 0",
-     "observed": "exit 0, tests=1 pass=1",
-     "verdict": "OK"
+      "at": "2026-08-12T08:46:14Z",
+      "trigger": "pre-0.1 (orchestrator prompt §7.3)",
+      "cases": [
+        {
+          "id": "S1",
+          "case": "passing suite",
+          "expect": "exit 0",
+          "observed": "exit 0, tests=1 pass=1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S2",
+          "case": "failing suite",
+          "expect": "nonzero",
+          "observed": "exit 1, fail=1 rejected",
+          "verdict": "OK"
+        },
+        {
+          "id": "S3",
+          "case": "skip present",
+          "expect": "nonzero",
+          "observed": "exit 1, skipped=1 rejected despite node exit 0",
+          "verdict": "OK"
+        },
+        {
+          "id": "S4",
+          "case": "todo present",
+          "expect": "nonzero",
+          "observed": "exit 1, todo=1 rejected despite node exit 0",
+          "verdict": "OK"
+        },
+        {
+          "id": "S5",
+          "case": "zero-match glob",
+          "expect": "nonzero",
+          "observed": "exit 1, tests=0 rejected despite node exit 0",
+          "verdict": "OK"
+        },
+        {
+          "id": "S6",
+          "case": "directory arg",
+          "expect": "converted to glob, exit 0",
+          "observed": "exit 0, 1 test ran",
+          "verdict": "OK"
+        },
+        {
+          "id": "S7",
+          "case": "M5 TODO marker",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S8",
+          "case": "M5 test.skip",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S9",
+          "case": "M5 assert.ok(true)",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S10",
+          "case": "M5 empty catch",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S11",
+          "case": "M5 clean file",
+          "expect": "exit 0",
+          "observed": "exit 0",
+          "verdict": "OK"
+        }
+      ],
+      "result": "11/11 OK. node --test traps re-verified same day: directory positional = bogus failing test (exit 1, MODULE_NOT_FOUND as test failure); zero-match glob = exit 0; quoted glob + TAP reporter = parseable counts.",
+      "rerunDue": "Phase 5, 9, 13 boundaries"
     },
     {
-     "id": "S2",
-     "case": "failing suite",
-     "expect": "nonzero",
-     "observed": "exit 1, fail=1 rejected",
-     "verdict": "OK"
+      "at": "2026-08-12T09:47:49Z",
+      "trigger": "phase-0 gate fix (C-015)",
+      "cases": [
+        {
+          "id": "S12",
+          "case": "describe-level skip hiding a failing test",
+          "expect": "nonzero",
+          "observed": "exit 1, skipdirectives=1 rejected (was GATE PASS before fix — hole reproduced by orchestrator first)",
+          "verdict": "OK"
+        },
+        {
+          "id": "S13",
+          "case": "it-level skip (regression check)",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "S14",
+          "case": "clean pass (regression check)",
+          "expect": "exit 0",
+          "observed": "exit 0",
+          "verdict": "OK"
+        }
+      ],
+      "result": "3/3 OK; TAP now rejects any SKIP/TODO directive at any subtest depth"
     },
     {
-     "id": "S3",
-     "case": "skip present",
-     "expect": "nonzero",
-     "observed": "exit 1, skipped=1 rejected despite node exit 0",
-     "verdict": "OK"
-    },
-    {
-     "id": "S4",
-     "case": "todo present",
-     "expect": "nonzero",
-     "observed": "exit 1, todo=1 rejected despite node exit 0",
-     "verdict": "OK"
-    },
-    {
-     "id": "S5",
-     "case": "zero-match glob",
-     "expect": "nonzero",
-     "observed": "exit 1, tests=0 rejected despite node exit 0",
-     "verdict": "OK"
-    },
-    {
-     "id": "S6",
-     "case": "directory arg",
-     "expect": "converted to glob, exit 0",
-     "observed": "exit 0, 1 test ran",
-     "verdict": "OK"
-    },
-    {
-     "id": "S7",
-     "case": "M5 TODO marker",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
-    },
-    {
-     "id": "S8",
-     "case": "M5 test.skip",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
-    },
-    {
-     "id": "S9",
-     "case": "M5 assert.ok(true)",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
-    },
-    {
-     "id": "S10",
-     "case": "M5 empty catch",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
-    },
-    {
-     "id": "S11",
-     "case": "M5 clean file",
-     "expect": "exit 0",
-     "observed": "exit 0",
-     "verdict": "OK"
+      "at": "2026-08-12T19:40:06Z",
+      "trigger": "phase-5 milestone (§7.3 re-run)",
+      "cases": [
+        {
+          "id": "MS1",
+          "case": "failing test",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "MS2",
+          "case": "hidden describe-skip",
+          "expect": "nonzero",
+          "observed": "exit 1 (directive scan)",
+          "verdict": "OK"
+        },
+        {
+          "id": "MS3",
+          "case": "zero-match glob",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        },
+        {
+          "id": "MS4",
+          "case": "TODO marker (M5)",
+          "expect": "nonzero",
+          "observed": "exit 1",
+          "verdict": "OK"
+        }
+      ],
+      "result": "4/4 OK at the phase-5 boundary; the gate still catches cheating"
     }
-   ],
-   "result": "11/11 OK. node --test traps re-verified same day: directory positional = bogus failing test (exit 1, MODULE_NOT_FOUND as test failure); zero-match glob = exit 0; quoted glob + TAP reporter = parseable counts.",
-   "rerunDue": "Phase 5, 9, 13 boundaries"
-  },
-  {
-   "at": "2026-08-12T09:47:49Z",
-   "trigger": "phase-0 gate fix (C-015)",
-   "cases": [
-    {
-     "id": "S12",
-     "case": "describe-level skip hiding a failing test",
-     "expect": "nonzero",
-     "observed": "exit 1, skipdirectives=1 rejected (was GATE PASS before fix \u2014 hole reproduced by orchestrator first)",
-     "verdict": "OK"
+  ],
+  "taskGates": {
+    "0.3": {
+      "at": "2026-08-12T09:03:09Z",
+      "M1": "PASS tests=7 pass=7 fail=0 skipped=0 todo=0",
+      "M2": "PASS first TS task: 0 -> 7 passes (strictly greater, adds tests)",
+      "M3": "PASS tsc --noEmit clean",
+      "M4": "PASS post-commit re-derivation: scratch worktree at da2dab2, both new impl files removed -> 7/7 fail missing-subject naming task-scope paths, exit 1",
+      "M5": "PASS after 1 rejection (see rejections)",
+      "M6": "PASS scope = intendedFiles + docs/build/*",
+      "M7": "PASS all 7 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a (bun leg starts at 2.2)"
     },
-    {
-     "id": "S13",
-     "case": "it-level skip (regression check)",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
+    "6.2": {
+      "at": "2026-08-12T09:13:04Z",
+      "M1": "PASS suite unchanged 7/7 (doc-only task)",
+      "M2": "PASS pass-count 7 -> 7 (no tests added)",
+      "M3": "PASS (bundled in M1 run)",
+      "M4": "n/a (live probe; M8 instead)",
+      "M5": "n/a (markdown artifact)",
+      "M6": "PASS targeted add: RUNNER-DISCOVERY.md + docs/build only; 0.2 WIP (tests/fixtures) explicitly excluded",
+      "M7": "PASS all 7 rows mapped to artifact sections",
+      "M8": "PASS artifact 595 lines, verbatim transcripts; orchestrator re-ran node (c) cell — output matched (3 tests, 1 fail, exit 1)",
+      "M9": "n/a"
     },
-    {
-     "id": "S14",
-     "case": "clean pass (regression check)",
-     "expect": "exit 0",
-     "observed": "exit 0",
-     "verdict": "OK"
+    "0.2": {
+      "at": "2026-08-12T09:39:02Z",
+      "M1": "PASS tests=24 pass=24 fail=0 skipped=0 todo=0 + tsc (observed by orchestrator, not the agent's claim)",
+      "M2": "PASS 7 -> 24 (strictly greater, adds tests)",
+      "M3": "PASS",
+      "M4": "n/a discovery task (no classic red); no-skip tripwire + phase-gate discovery-integrity lens instead",
+      "M5": "PASS after two gate refinements (C-013)",
+      "M6": "PASS; justified cross-task edit: fragment + fragment.test.ts gained tools.task=false (C-014)",
+      "M7": "PASS all 19 rows mapped",
+      "M8": "wire-notes cross-checked against orchestrator's own suite run + binary version check",
+      "M9": "n/a"
+    },
+    "1.1": {
+      "at": "2026-08-12T10:13:29Z",
+      "M1": "PASS 109/109 + tsc (orchestrator-observed)",
+      "M2": "PASS 24 -> 109",
+      "M3": "PASS",
+      "M4": "pending post-commit re-derivation",
+      "M5": "PASS",
+      "M6": "PASS (2 declared files + docs/build)",
+      "M7": "PASS all 9 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a",
+      "review": "tier B lens returned: NO majors; 2 minors (DecisionRecord score-conditionality -> enforced by 1.5 requireTwoOptions + 9.1 handler; ClassificationCheck correctedKind conditionality -> 9.1 classify handler obligation); 2 nits (JournalRecord extra-prop untested; taint under-constrained per plan's own example). Adjudication: defer-to-named-owners, no schema mutation; obligations recorded in HANDOFF for 9.1."
+    },
+    "1.2": {
+      "at": "2026-08-12T10:19:44Z",
+      "M1": "PASS 172/172 + tsc (orchestrator-observed)",
+      "M2": "PASS 109 -> 172",
+      "M3": "PASS",
+      "M4": "PASS post-commit: rm shell-parse.ts in scratch worktree of 88c07f8 -> suite fails missing-subject, exit 1",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS (8 rows mapped, test names carry assertion ids)",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "1.4": {
+      "at": "2026-08-12T10:20:34Z",
+      "M1": "PASS 176/176 + tsc",
+      "M2": "PASS 172 -> 176",
+      "M3": "PASS",
+      "M4": "PASS (mutation variant, all 3 probes orchestrator-executed: bite/not-over-broad/bite)",
+      "M5": "PASS",
+      "M6": "PASS (1 declared file + docs/build)",
+      "M7": "PASS 4 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "1.3": {
+      "at": "2026-08-12T10:26:42Z",
+      "M1": "PASS 228/228 + tsc (orchestrator-observed)",
+      "M2": "PASS 176 -> 228",
+      "M3": "PASS",
+      "M4": "PASS post-commit: rm all three modules in scratch worktree of 29c7e03 -> each suite fails missing-subject (1/1/1) | DONE",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 9 rows mapped (test names carry ids)",
+      "M8": "n/a",
+      "M9": "n/a",
+      "review": "tier B lens dispatched post-commit"
+    },
+    "1.5": {
+      "at": "2026-08-12T10:30:38Z",
+      "M1": "PASS 252/252 + tsc (orchestrator-observed)",
+      "M2": "PASS 228 -> 252",
+      "M3": "PASS",
+      "M4": "PASS post-commit: rm decide.ts in scratch worktree of bbc0f85 -> suite fails missing-subject, exit 1",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 4 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a",
+      "review": "tier B lens folded into the Phase 1 gate panel (correctness/boundary/counterexample lenses cover core/ cumulatively)"
+    },
+    "2.1": {
+      "at": "2026-08-12T11:31:03Z",
+      "M1": "PASS 301/301 + tsc (orchestrator-observed)",
+      "M2": "PASS 279 -> 301",
+      "M3": "PASS",
+      "M4": "PASS post-commit: rm both journal subjects in scratch worktree of 85e0f6a -> suite fails missing-subject, exit 1",
+      "M5": "PASS (G14 re-grepped by orchestrator: no Bun/shell-tag; Date.now count in core = 0)",
+      "M6": "PASS (3 declared files)",
+      "M7": "PASS 9 rows mapped",
+      "M8": "n/a",
+      "M9": "n/a (bun leg still deferred to 2.2)"
+    },
+    "3.1": {
+      "at": "2026-08-12T11:46:53Z",
+      "M1": "PASS 451/451 + tsc",
+      "M2": "PASS 302 -> 451",
+      "M3": "PASS",
+      "M4": "PASS post-commit re-derivation (both FSM modules removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (4 files)",
+      "M7": "PASS 9 rows",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "3.3": {
+      "at": "2026-08-12T11:52:44Z",
+      "M1": "PASS 464/464 + tsc",
+      "M2": "PASS 451 -> 464",
+      "M3": "PASS",
+      "M4": "PASS post-commit (schedule removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 5 rows + empty-scope binding",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "3.2": {
+      "at": "2026-08-12T12:04:27Z",
+      "M1": "PASS 479/479 + tsc",
+      "M2": "PASS 464 -> 479",
+      "M3": "PASS",
+      "M4": "PASS post-commit (gates-phase removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS",
+      "M7": "PASS 11 rows",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "4.2": {
+      "at": "2026-08-12T12:40:06Z",
+      "M1": "PASS 491/491 + tsc",
+      "M2": "PASS 482 -> 491",
+      "M3": "PASS",
+      "M4": "PASS post-commit (gitio removed -> missing-subject)",
+      "M5": "PASS (G14 re-grepped: no Bun/shell-tag)",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 6 rows",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "4.1": {
+      "at": "2026-08-12T13:21:05Z",
+      "M1": "PASS 509/509 + tsc",
+      "M2": "PASS 491 -> 509",
+      "M3": "PASS",
+      "M4": "PASS post-commit (state.ts+questions.ts removed -> missing-subject)",
+      "M5": "PASS (G14+G6 re-verified by orchestrator: appendLedgerLineRaw only in state.ts; no Bun/shell-tag)",
+      "M6": "PASS (4 files)",
+      "M7": "PASS 10 rows",
+      "M8": "n/a",
+      "M9": "n/a"
+    },
+    "2.2": {
+      "at": "2026-08-12T13:41:09Z",
+      "M1": "PASS 517/517 node + tsc",
+      "M2": "PASS 509 -> 517",
+      "M3": "PASS",
+      "M4": "n/a (proof task)",
+      "M5": "PASS",
+      "M6": "PASS (bun-smoke.test.ts + test-conductor.sh orchestrator-owned)",
+      "M7": "n/a (mirrors 4.1/2.1 rows)",
+      "M8": "n/a",
+      "M9": "PASS — bun leg green (8/8), orchestrator re-ran `bun test` directly (8 pass); NO divergence node vs bun"
+    },
+    "5.1": {
+      "at": "2026-08-12T16:14:17Z",
+      "M1": "PASS 642/642 node + tsc + bun leg",
+      "M2": "PASS 522 -> 642 (+120)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (gates-git removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 7 rows + phaseGate1Bindings encoded",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "18/18 security-critical deny/allow cases re-run directly: branch -D deny, apply deny, env/A=b/path/value-flag git push deny, per-segment scan, two-word discrimination, false-positive guards, default-deny, branch-policy matrix — all correct",
+      "review": "tier A — folds into the Phase 5 MILESTONE gate (security/bypass + red-team-by-data >=20 deny spellings)"
+    },
+    "5.2": {
+      "at": "2026-08-12T16:24:06Z",
+      "M1": "PASS 691/691 node + tsc + bun leg",
+      "M2": "PASS 642 -> 691 (+49)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (gates-edit removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 9 rows + binding",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "12/12 security cases re-run: unconditional spawn deny (registered+unregistered), unregistered read-allow/write-deny/conductor-deny, freeze strict (test-writer denied in own testScope), different-tree no-freeze, reviewer-deny, implementer scope, wrapper-aware env-sh-c write extraction",
+      "review": "tier A — folds into Phase 5 MILESTONE gate (red-team-by-data >=15 write-shapes)"
+    },
+    "5.3": {
+      "at": "2026-08-12T17:03:01Z",
+      "M1": "PASS 703/703 node + tsc + bun leg",
+      "M2": "PASS 691 -> 703 (+12)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (tools.ts+plugin removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (3 files)",
+      "M7": "PASS 7 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "fail-closed proof re-run directly: crashed git-rule-checker -> git commit DENIED (throw), ls ALLOWED, both journaled gate-crash (2)"
+    },
+    "5.4": {
+      "at": "2026-08-12T17:21:24Z",
+      "M1": "PASS 703/703 node + tsc + bun leg (orchestrator's own run; worker stalled post-completion on a flaky wire-contract spawn)",
+      "M2": "PASS 703 -> 703 (5.4 added 7 tests but 5.3's +12 already counted; net unchanged from HEAD? no — chat-message +7 over 703 pre-5.3... recomputed: full green)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (chat-message removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (3 files incl justified journal-events vocab add, diff read by orchestrator)",
+      "M7": "PASS 6 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg"
+    },
+    "6.1": {
+      "at": "2026-08-12T20:30:45Z",
+      "M1": "PASS 781/781 node + tsc + bun leg",
+      "M2": "PASS 763 -> 781 (+18)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (evidence.ts+quarantine.ts removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (4 files)",
+      "M7": "PASS 11 rows + 3 bindings",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "quarantine round-trip re-run: file moved OUT of repo, quarantine dir outside repo, mtime survived (rename not copy), restored; G6 (only evidence.ts imports appendLedgerLineRaw) + G14 re-checked",
+      "review": "tier A + one of the 4 expected-broken mechanisms -> folds into Phase 6 milestone gate (crash-recovery + filesystem-safety + residual-risk lenses; stray-write scan)"
+    },
+    "7.1": {
+      "at": "2026-08-12T21:39:53Z",
+      "M1": "PASS 801/801 node + tsc + bun leg",
+      "M2": "PASS 791 -> 801 (+10)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (fanout removed -> missing-subject)",
+      "M5": "PASS",
+      "M6": "PASS (3 files incl fake-sdk fixture)",
+      "M7": "PASS 8 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg",
+      "orchestratorReverify": "no-format binding honored (only comments mention format), registry.set before prompt, G14 clean"
+    },
+    "7.2": {
+      "at": "2026-08-12T21:45:08Z",
+      "M1": "PASS 813/813 node + tsc + bun leg",
+      "M2": "PASS 801 -> 813 (+12)",
+      "M3": "PASS",
+      "M4": "PASS post-commit (router-client removed -> missing-subject)",
+      "M5": "PASS (G14 clean)",
+      "M6": "PASS (2 files)",
+      "M7": "PASS 4 rows",
+      "M8": "n/a",
+      "M9": "PASS bun leg"
+    },
+    "8.1": {
+      "at": "2026-08-12T23:25:00Z",
+      "M1": "PASS 826/826 node + tsc + bun leg (orchestrator-run)",
+      "M2": "PASS 816 -> 826 (+10 doctrine anchors)",
+      "M3": "PASS",
+      "M4": "PASS post-commit from 00cdcd7 (doc variant, scratch worktree). A: rm tdd.md -> 4 tests red incl ENOENT naming tdd.md. B (stronger, content-level): strip only the 'delete means delete' phrase (file present) -> exactly 8.1-anchors-tdd red with 'tdd.md must contain delete means delete'; restore -> 10/10 green. Anchors pin content verbatim, not file presence.",
+      "M5": "PASS (marker scan production-scoped after C-026; 8.1 scope 10 files + full tree 57 files both clean)",
+      "M6": "PASS (9 packs read by doctrine.test.ts via readPack())",
+      "M7": "PASS 10 rows (each 8.1-* anchor id maps to a test)",
+      "M8": "n/a (no router/C++ in changeset)",
+      "M9": "PASS bun leg (8 pass)",
+      "orchestratorReverify": "read all nine packs + doctrine.test.ts myself: substantive, client-agnostic doctrine, each <=120 lines, all anchors present verbatim; independent grep clean of TODO/TBD literals and client/vendor names; observed green 10/10 myself, not on a subagent's report. Gate false-positive (marker scan on test-subject/test-data) root-caused and fixed at the gate (C-026), not papered over."
+    },
+    "8.2": {
+      "at": "2026-08-13T00:15:00Z",
+      "M1": "PASS 837/837 node + tsc + bun leg (orchestrator-run full suite)",
+      "M2": "PASS 826 -> 837 (+11: 9 inject assertions + G9 + 2 review-driven corrections)",
+      "M3": "PASS",
+      "M4": "PASS post-commit from 29a5011 (scratch worktree): remove inject.ts -> inject.test.ts red with ERR_MODULE_NOT_FOUND (missing-subject), tests=1 fail=1.",
+      "M5": "PASS (changeset 2 files + full tree 58 files both clean)",
+      "M6": "PASS (inject.ts imported by inject.test.ts:81)",
+      "M7": "PASS 9 rows (7 §6.4 assertions + 2 review-driven: null-recommendation, empty-pack)",
+      "M8": "n/a",
+      "M9": "PASS bun leg (8 pass)",
+      "orchestratorReverify": "observed the ORIGINAL missing-subject red (ERR_MODULE_NOT_FOUND inject.ts) and the FINAL 837/837 green MYSELF, plus the intermediate red for the two correction assertions (11 tests, 9 pass, 2 fail) BEFORE the fix. Read the full inject.ts + both fixed regions myself. Ran a per-task adversarial review workflow (3 lenses, skeptic-verified) that caught a MAJOR (false 'terminal' claim injected every request on a stalled EXECUTING wave) + a fail-closed hardening (empty pack) — both fixed test-first pre-commit (C-027). Also caught the implementer's targeted-glob 'GATE PASS' masking a full-suite G14 guard failure (Bun token in a comment), fixed before commit."
+    },
+    "11.1": {
+      "at": "2026-08-13T01:20:00Z",
+      "M1": "PASS TS 847/847 node+tsc+bun + C++ ctest 1/1 (orchestrator-run: cmake configure clean, llama-router+router-tests built/linked, ctest green, llama-router binary runs)",
+      "M2": "PASS TS 843->847 (+4 export-schemas); ctest 0->1",
+      "M3": "PASS (tsc --noEmit + C++ compiles under clang++ C++23)",
+      "M4": "PASS post-commit from d6745de: moved export-schemas.ts aside -> export-schemas.test.ts red (ERR_MODULE_NOT_FOUND, tests=1 fail=1), restored -> 4/4 green (orchestrator-observed). C++ sources are load-bearing by construction (targets list them; the build+ctest that passed proves it).",
+      "M5": "PASS (export-schemas.ts + C++ sources scanned; no markers)",
+      "M6": "PASS (export-schemas.ts imported by its test; C++ sources compiled into the targets)",
+      "M7": "PASS 4 rows (cmake-surgery, scaffold-green, export-schemas, upstream-contract-deferred)",
+      "M8": "C++ ctest PASS 1/1 (router-tests scaffold, real assertion on router_version)",
+      "M9": "n/a (no bun change; TS bun leg still green)",
+      "orchestratorReverify": "did the CMakeLists surgery + build files MYSELF; observed cmake configure exit 0, both router targets link, ctest 1/1 PASS, llama-router binary output, and the export-schemas TS red->847 green — all first-hand. Found+fixed the validator ::validator target name from the configure log. Step 2 (live) DEFERRED to 12.1, honestly recorded in UPSTREAM_CONTRACT.md (assets confirmed present; NOT fabricated)."
+    },
+    "9.1": {
+      "at": "2026-08-13T02:30:00Z",
+      "M1": "PASS 864/864 node + tsc + bun leg + schema export (orchestrator-run full suite)",
+      "M2": "PASS 847 -> 864 (+17: 10 authored + 7 review-fix tests)",
+      "M3": "PASS (tsc --noEmit clean incl. the optional GateItem.debugging and the new handler types)",
+      "M4": "PASS post-commit from ed3d407 (scratch worktree): dropped handleAnswer's export -> tools-9.1.test.ts red with 'does not provide an export named handleAnswer' (tests=1 fail=1); handlers load-bearing.",
+      "M5": "PASS (tools.ts + journal-events.ts scanned; no markers)",
+      "M6": "PASS (the 6 handlers imported/driven by tools-9.1.test.ts)",
+      "M7": "PASS 15 rows (8 §3.4 tool assertions + 7 C-029 review-fix rows)",
+      "M8": "n/a",
+      "M9": "PASS bun leg (8 pass)",
+      "orchestratorReverify": "MILESTONE task. Observed the missing-export red and the FINAL 864/864 green MYSELF, plus the intermediate red for the 6 review-fix tests (17 tests, 11 pass, 6 fail) BEFORE the fixes. Read all 6 handlers + all 6 fixed regions + the journal widening myself. CAUGHT the first implementer returning an anomalous/injected 0-edit result by verifying the tree (re-dispatched fresh). Ran a 3-lens skeptic-verified adversarial review that found 4 MAJOR + 2 minor real defects the 10 authored tests missed (classify hard-throw, surface/defer half-write, humanTerritory, null-iff-agreed, torn-line) — all fixed test-first pre-commit (C-029); verified the F6 torn-line mint is injection-robust (JSON escaping). 2 nits deferred to 10.1 with bindings. NOTE: the Phase 9 MILESTONE gate runs after 9.6 over the whole tools subsystem."
+    },
+    "11.2": {
+      "at": "2026-08-13T04:05:00Z",
+      "M1": "PASS ctest 1/1; doctest 7 cases 119/119 assertions (orchestrator-run: build + ctest + direct binary)",
+      "M2": "PASS doctest cases 1->7 (+6 config, one per assertion row)",
+      "M3": "PASS (compiles clean under clang++ C++23, -Wall clean per implementer; orchestrator rebuild clean)",
+      "M4": "PASS pre-commit from the working tree: mv src/router/config.hpp aside -> router-tests compile FAILED ('config.hpp' file not found), restore -> rebuild + ctest 1/1 (orchestrator-observed both directions)",
+      "M5": "PASS (config.hpp + config_test.cpp scanned; no markers)",
+      "M6": "PASS (config.hpp included by config_test.cpp; compiled into router-tests)",
+      "M7": "PASS (assertions file 6 rows; all covered by name-prefixed TEST_CASEs)",
+      "M8": "PASS ctest observed by orchestrator directly (7/7, 119/119)",
+      "M9": "n/a (C++-only; TS untouched)",
+      "orchestratorReverify": "moved the staged test in MYSELF, wired CMakeLists MYSELF (orchestrator-only file), observed the compile red before implementation and the 7/7 green + M4 red re-derivation after, and read the full config.hpp. Known nit ledgered in STATE (empty-field() ConfigError on input-JSON parse errors vs the class-comment contract) for the Phase 11 gate."
+    },
+    "9.2": {
+      "at": "2026-08-13T04:40:00Z",
+      "M1": "PASS 887/887 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
+      "M2": "PASS 864 -> 873 (9 authored) -> 887 (14 review-fix)",
+      "M3": "PASS (tsc --noEmit clean; pre-implementation tsc showed ONLY the 2 missing-export errors)",
+      "M4": "PASS post-commit from 75a2531 in a detached scratch worktree: removed conductor/core/planning.ts -> ERR_MODULE_NOT_FOUND from adapter/tools.ts (tests=1 pass=0), restored -> 23/23 green. Orchestrator-observed both directions; worktree removed.",
+      "M5": "PASS (production-scoped marker scan over planning.ts/tools.ts/types.ts)",
+      "M6": "PASS (planning.ts imported by tools.ts + the test; both handlers exported and exercised)",
+      "M7": "PASS 9 assertion rows, each with a name-prefixed test, + 14 review-fix rows",
+      "M8": "n/a (no live-model observation in this task; the fake SDK drives every dispatch)",
+      "M9": "PASS (bun leg green, 8 pass)",
+      "orchestratorReverify": "observed the missing-export red MYSELF before implementation and the 887/887 green after; read the ENTIRE diff (planning.ts in full, the tools.ts diff, the types.ts diff); ran a 3-lens skeptic-verified adversarial panel PRE-COMMIT which found 19 real defects the 873-test suite missed, including 2 MAJORs that would break runs under the DEFAULT config; wrote all 14 fix-tests myself, observed 12 of them red, and fixed them myself. Honestly recorded: R13 passed pre-fix (guard, not red-driven), and 9 skeptics died on a session limit so their findings were counted as upheld rather than dropped."
+    },
+    "9.3": {
+      "at": "2026-08-13T06:30:00Z",
+      "M1": "PASS 901/901 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
+      "M2": "PASS 895 (8 authored) -> 901 (6 review-fix)",
+      "M3": "PASS (tsc clean; pre-implementation tsc showed ONLY the missing handlePlanReview export)",
+      "M4": "PASS post-commit from 1ad82b7 in a detached scratch worktree: un-exported handlePlanReview -> missing-export SyntaxError (tests=1 pass=0), restored -> 14/14 green. Orchestrator-observed both directions; worktree removed.",
+      "M5": "PASS (production-scoped marker scan)",
+      "M6": "PASS (handlePlanReview exported + exercised; findingBlocksItems imported by tools.ts and the test)",
+      "M7": "PASS 8 assertion rows each with a name-prefixed test + 6 review-fix rows",
+      "M8": "n/a (fake SDK drives every dispatch)",
+      "M9": "PASS (bun leg green)",
+      "orchestratorReverify": "vetted a staged test whose writer had DIED mid-run before trusting it; observed the missing-export red and the 901/901 green MYSELF; read the whole diff and independently verified the correctness-critical claim that dispatchWave preserves job order (groupByModel carries the ORIGINAL index; runGroup writes results[index]), which is what makes the index*k+i verdict binding sound; independently flagged the overlapping-block defect BEFORE the panel confirmed it; refused to accept an empty review result produced by two crashed lenses as a pass."
+    },
+    "11.3": {
+      "at": "2026-08-13T07:40:00Z",
+      "M1": "PASS ctest 1/1; doctest 17/17 cases, 243/243 assertions (orchestrator-run: build + ctest + direct binary)",
+      "M2": "PASS doctest cases 7 -> 17 (+10, one per assertion row)",
+      "M3": "PASS (compiles clean, zero warnings, clang++ C++23)",
+      "M4": "PASS pre-commit, orchestrator-observed both directions: mv router.hpp aside -> compile FAILS ('router/router.hpp' file not found); restore -> rebuild + ctest 1/1",
+      "M5": "PASS (router.hpp + proxy_test.cpp scanned; no markers)",
+      "M6": "PASS (router.hpp included by proxy_test.cpp; compiled into router-tests)",
+      "M7": "PASS 10 assertion rows, each a name-prefixed TEST_CASE",
+      "M8": "PASS ctest + direct binary observed by orchestrator",
+      "M9": "n/a (C++-only)",
+      "orchestratorReverify": "Vetted a staged test whose writer had died mid-run, and PORTED it to the user's new src/ layout myself before use. Wired CMake myself (orchestrator-only). Observed the compile red before implementation and 17/17 + M4 both directions after. Implementer's own flake-hunt (98 runs incl. 12-way concurrency) surfaced a REAL pre-existing defect in Task 11.2's TEST fixture (fixed temp path + remove_all in ctor/dtor => concurrent processes delete each other's fixtures); ctest never runs concurrently so it does not affect the gate, and it is fixed separately."
+    },
+    "9.4a": {
+      "at": "2026-08-13T09:05:00Z",
+      "M1": "PASS 921/921 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
+      "M2": "PASS 901 -> 912 (11 authored) -> 921 (9 review-fix). Each review-fix test observed red on its own defect assertion before the fix.",
+      "M3": "PASS (tsc clean; pre-implementation tsc showed ONLY the two missing handleSubmitTest/handleVetTest exports)",
+      "M4": "PENDING",
+      "M5": "PASS (production-scoped marker scan)",
+      "M6": "PASS (handleSubmitTest + handleVetTest exported and exercised; core depsReady/cannotEverPublish reached through legalTools by both the handler and the pure gate test)",
+      "M7": "PASS 11 assertion rows each with a name-prefixed test + 9 review-fix rows (C032-D1..D9)",
+      "M8": "n/a (fake SDK drives every dispatch; the item test itself runs REAL child node --test processes against real on-disk fixture repos)",
+      "M9": "PASS (bun leg green)",
+      "orchestratorReverify": "observed the missing-export red and the 912/912 then 921/921 greens MYSELF; read the whole diff; re-derived all five surviving MAJORs against the code before accepting any of them (F3/E1 confirmed by grep showing evidence.legalRed written and read by nobody; F2/E2 confirmed by reading blockVetAndAsk's writes and capturedRedOf's pointer preference; E5 confirmed by reading runItemTest's argv path and testScopeContent's path.join); NARROWED my own first E11 fix after the committed 8.2-null-recommendation test caught it treating a recoverable BLOCKED dependency as permanently stuck — the test's premise was right and my fix was too broad."
     }
-   ],
-   "result": "3/3 OK; TAP now rejects any SKIP/TODO directive at any subtest depth"
   },
-  {
-   "at": "2026-08-12T19:40:06Z",
-   "trigger": "phase-5 milestone (\u00a77.3 re-run)",
-   "cases": [
-    {
-     "id": "MS1",
-     "case": "failing test",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
+  "phaseGates": {
+    "0": {
+      "at": "2026-08-12T09:47:49Z",
+      "stage1": "PASS: fresh worktree of 0cf8b82, own npm install, full gate green from scratch (24/24 incl. live wire suite + tsc + M5)",
+      "lenses": {
+        "spec-conformance": "CONFORMANT; 3 nits (empty dirs untracked until files land; plan's authoring date in marker template; G1-vs-§5.1 tool() import tension -> resolve explicitly at 5.3)",
+        "discovery-integrity": "FINDINGS: 2 majors + 4 minors + 2 nits; core discovery verified REAL (live suite re-run by lens; non-tautological chains; DRIFTs pinned as tripwires)"
+      },
+      "adjudication": [
+        "MAJOR 1 (gate hole: describe-level skips invisible to TAP trailer counts) — mechanically CONFIRMED by orchestrator reproduction; fixed in test-conductor.sh (SKIP/TODO directive scan); self-tested S12-S14",
+        "MAJOR 2 (7 wire-notes sub-claims under an 'every line is asserted' header with no asserting test) — CONFIRMED by inspection; fixed by [observed] tags + honest header + Assertion-coverage notes section",
+        "minors 3-8 (assertion tightness: fileref replace-vs-append, 'always' unexercised, payload fields, file:// shape, laziness, full tool list) — recorded in wire-notes coverage notes, non-blocking",
+        "nits recorded; no skeptic round needed (both majors probe-confirmed, plan §7.2 ladder step 2)"
+      ],
+      "verdict": "PASS after fix round 1 of 3",
+      "rejected": "2 majors (gate credit: the phase gate is not rubber-stamping)"
     },
-    {
-     "id": "MS2",
-     "case": "hidden describe-skip",
-     "expect": "nonzero",
-     "observed": "exit 1 (directive scan)",
-     "verdict": "OK"
+    "1": {
+      "at": "2026-08-12T11:08:48Z",
+      "stage1": "PASS: fresh worktree of bbc0f85, own npm install, 252/252 + tsc + M5(20 files) from scratch",
+      "lenses": {
+        "spec-conformance(1.1)": "CONFORMANT (no majors; 2 minors -> 9.1 obligations; 2 nits)",
+        "spec-conformance(1.3)": "FINDINGS: 1 minor (normalizeSpecifier interior-.. anti-conservative) — corroborated by counterexample F-1",
+        "correctness x2": "FINDINGS: gitSubcommand value-flag false-ALLOW (MAJOR), classifyFailure absolute/nested-path misclassify (MAJOR), zero-budget env (minor), quoted-operator over-split (minor, safe), nits",
+        "boundary-cases x2": "FINDINGS: globMatch exponential DoS (MAJOR), classifyFailure ESM absolute-path (MAJOR), zero-budget env, tuple-items divergence, empty-scope, missing-verdict overturn, tokenizer git-bypass",
+        "counterexample x2": "FINDINGS: gitSubcommand false-ALLOW (MAJOR), isGitCommand env/wrapper/backtick bypass (MAJOR), isHumanTerritory money/secret/irreversible misses (MAJOR), freshness NaN fail-open (minor), classifyFailure text-only causality (minor)"
+      },
+      "adjudication": {
+        "fixed_in_place_round1": [
+          "F-1 classifyFailure interior-.. escape -> error",
+          "S-1 scopesIntersect case-insensitive (pure-safe)",
+          "H-1/H-2 isHumanTerritory push --force/-f + $N/month",
+          "E-1 zero-budget env guard (used>0 && used>=max)"
+        ],
+        "fixed_in_place_round2": [
+          "F1 globMatch exponential -> collapse ** + memoize (130s->0.1ms)",
+          "F2 gitSubcommand fail-safe on unrecognized globals (closes false-ALLOW)",
+          "F3 isGitCommand skips env-assign/env/command/sudo/exec wrappers + basename resolve",
+          "F4 verifyFreshFor non-finite timestamp -> stale (fail-safe)",
+          "F5 scanKeywords rejects tuple-form items (2020-12 divergence)"
+        ],
+        "bound_to_future_tasks": {
+          "5.1": "deny matrix over FULL tokens not single subcommand (branch -D must deny); red-team-by-data includes value-flag/env-prefix spellings",
+          "5.2": "writeShapedPaths wrapper-aware; no reliance on possibly-undefined evidence fields",
+          "6.1": "evidence.ts validates per-kind required fields; relativizes absolute cwd-prefixes before classifyFailure (ESM); tight anchored runnerRules tested vs RUNNER-DISCOVERY.md",
+          "9.1": "derived-decision scored-options enforcement; ClassificationCheck correctedKind==null iff agreed",
+          "9.5a": "under-delivered skeptic panel: re-run or count missing verdicts as UPHOLDS (never silent-drop a major)",
+          "3.3": "nextWave treats empty/degenerate scope conservatively (serialize)"
+        },
+        "documented_g7": "honest-limits-pending.md: backtick substitution, alias injection, sh -c/bash -c wrappers, $'...' ANSI-C quoting — detection gaps disclosed, not prevented",
+        "verification": "orchestrator re-ran all 26 lens malicious inputs against the fixed modules: 26/26 corrected (probe transcript). Full suite 279/279 in 6.9s."
+      },
+      "verdict": "PASS after 2 fix rounds (of 3 allowed)",
+      "rejected": "8 confirmed defects across 6 lens contexts incl. 5 majors — the milestone gate is emphatically not rubber-stamping (catch-credit recorded)"
     },
-    {
-     "id": "MS3",
-     "case": "zero-match glob",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
+    "2": {
+      "at": "2026-08-12T11:37:48Z",
+      "stage1": "PASS (main tree 302/302 + tsc + M5; single-module phase, fresh-worktree deferred to the milestone gates)",
+      "lenses": {
+        "correctness": "folded into 2.1 task gate (well-covered, 22 tests)",
+        "crash-recovery": "orchestrator-run mechanical probe (torn trailing line + seq continuation across simulated restart)"
+      },
+      "adjudication": {
+        "finding": "crash-recovery: a torn trailing line (partial record from a power-loss/disk-full mid-append) was not healed — the next append concatenated onto it, corrupting the NEXT record too. Confirmed by orchestrator probe.",
+        "fix": "adapter/journal.ts: on first append per instance, if the file ends without a newline, prepend one so the torn partial is isolated on its own line and the new record stays a clean parseable line. Test-first ([2.1-torn-write]); orchestrator re-ran its own probe: 0 fail.",
+        "verification": "302/302; orchestrator crash-probe passes (torn line isolated, new record clean at seq 6)"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "1 crash-recovery durability gap in the write-ahead journal (catch-credit: the crash-recovery lens found a real defect before it reached production)"
     },
-    {
-     "id": "MS4",
-     "case": "TODO marker (M5)",
-     "expect": "nonzero",
-     "observed": "exit 1",
-     "verdict": "OK"
+    "3": {
+      "at": "2026-08-12T12:22:20Z",
+      "stage1": "PASS fresh worktree of bd35785, own npm install, 479/479 + tsc + M5(31 files)",
+      "lenses": {
+        "state-machine-completeness": "FINDINGS: PLAN_REVIEWED->EXECUTING livelock (major, ->9.4c binding), trivial-report (minor), deferred-not-frozen (low, plan-faithful)",
+        "correctness": "SOUND, no majors; minor dep-readiness legal-set inconsistency (->5.3/9.4a), informational single-source (->fixed with guard test)",
+        "counterexample": "FINDINGS: trivial-report MAJOR (loses work, handler backstop defeated by foreign-red-set exclusion); everything else SOUND (no red-skip to GREEN, no scope-overlap corruption, publish only at REVIEWED, dispatch only at PLAN_REVIEWED)"
+      },
+      "adjudication": {
+        "fixed_in_place": [
+          "trivial-report hole: reportLegal = allSettled (drop trivial ||); [3.2-trivial] test tightened to safe contract + settled positive case; orchestrator re-ran the exact malicious input: report denied for trivial+PENDING, allowed for trivial+PUBLISHED",
+          "G6 single-source guard: conductor/tests/single-source.test.ts asserts RUN_STATES/ITEM_STATES set-equal to SCHEMAS.Run/Item.properties.state.enum (by-construction now)"
+        ],
+        "bound_to_future_tasks": {
+          "9.4c": "dispatch_wave supplies PLAN_REVIEWED->EXECUTING context (survivingMajors:0 if planReviewRounds<max else round>=max) — satisfiable-by-construction",
+          "9.5b": "report handler enforces all-settled as a NON-VERIFY precondition (verify is defeated by foreign-red-set exclusion)",
+          "9.4a/5.3": "decide + make gate/handler consistent on dependency-readiness for direct per-item stage-tool calls"
+        },
+        "verification": "482/482; orchestrator re-ran the counterexample's exact malicious input (2/2 corrected)"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "1 MAJOR (trivial-report work-loss) + G6 latent-risk hardened; catch-credit: 3 lenses, the counterexample lens escalated what the completeness lens under-rated"
+    },
+    "4": {
+      "at": "2026-08-12T14:09:59Z",
+      "stage1": "PASS fresh worktree of 06818b3, own npm install, 517/517 node + tsc + bun leg(8) + M5",
+      "strayWriteScan": "CLEAN: no files created outside throwaway fixtures; ~/.conductor 0->0; no stray .conductor/ in the repo tree",
+      "lenses": {
+        "crash-recovery": "FINDINGS: F1 answerQuestion order MAJOR (answer-first wedge, no legal recovery tool); F4 lock TOCTOU minor; F5 orphan-dir minor. Atomic write, dead-pid/over-age lock, retention pruning, no-git all SOUND.",
+        "filesystem-safety": "FINDINGS: F2 path-traversal via unvalidated ids MAJOR-latent; F3 questions.ts predictable-tmp symlink-follow minor. Deletion, lock, .git/info/exclude (G10), gitio command-injection all SOUND."
+      },
+      "adjudication": {
+        "fixed_in_place": [
+          "F1 answerQuestion clears items FIRST then marks answered (idempotent mid-crash retry; question stays open)",
+          "F2 assertSafeId in every state.ts path builder (rejects ../ and separators; orchestrator re-verified the exact ../../../../tmp/pwned input rejected + valid ids accepted)",
+          "F3 questions.ts randomBytes(6) tmp + flag wx (no symlink-follow)",
+          "F4 lock fresh-claim exclusive-create (flag wx), EEXIST->contention, seam-tested deterministically",
+          "F5 createRun writes run.json before items dir (orphan prunable)"
+        ],
+        "bound_to_future": {
+          "9.6": "registerConductorExclude must resolve real gitdir / skip when root/.git is a file (linked-worktree ENOTDIR; C-021)"
+        },
+        "verification": "522/522 node + bun(8); orchestrator re-ran F2 (traversal rejected, valid ids ok) + confirmed the F1 test asserts item-cleared-before-mark + question-open-after-crash + idempotent-retry with a complete fixture"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "2 majors (answerQuestion wedge, path-traversal escape) + 3 minors; catch-credit: crash-recovery lens found an unrecoverable wedge a same-author suite would never surface"
+    },
+    "5": {
+      "at": "2026-08-12T19:40:06Z",
+      "milestone": true,
+      "stage1": "PASS fresh worktree of 1176178, own npm install, 710/710 node + tsc + bun leg; §7.3 gate self-test re-run 4/4 (still catches fail/hidden-skip/zero-glob/TODO)",
+      "lenses": {
+        "security/bypass": "FINDINGS: 4 confirmed bypasses (ANSI-C/param-expansion git write; >| force-redirect; .. path traversal; non-enumerated in-place writers) — ALL re-run + confirmed by orchestrator",
+        "spec-conformance": "CONFORMANT row-by-row (§3.5 matrix fully + faithfully encoded); 1 minor under-block advisory (checkout -f/switch --discard-changes not enumerated)",
+        "red-team-by-data": "generator died to API error; orchestrator generated + executed its OWN 33-input battery across 2 attack passes instead"
+      },
+      "adjudication": {
+        "fix_round_1_C022": [
+          "shellTokens decode $'...'/$\"...\"",
+          "decideGit deny unresolvable command word (backtick/$'/$\"/${/$(/$VAR/backslash)",
+          "writeShapedPaths recognize >| force-redirect",
+          "writeShapedPaths add perl -pi/dd of=/gawk -i inplace/ex/ed",
+          "decideEdit deny any path with a .. segment",
+          "decideCheckout/decideSwitch deny -f/--force/--discard-changes unconditionally"
+        ],
+        "fix_round_2_C023": [
+          "wrapper-with-flags: skipWrapperOptions in shell-parse (sudo -u/-g/... value flags, env NAME=value) + shared commandWordLocation reused by gates-git; fail-safe deny on unresolvable wrapper structure"
+        ],
+        "orchestrator_reattack": "2 passes, 33 malicious inputs total. Pass 1 found 3 residuals (wrapper-with-flags) that fix-round-1 tests missed -> fix round 2. Pass 2: 0 residual holes. Wrapped read-only git still ALLOWED (correct extraction, not blanket deny).",
+        "documented_g7": "honest-limits-pending.md updated: backtick/alias now DENY (fail-safe); residual obscure in-place writers + second-wrapper over-approx documented"
+      },
+      "verdict": "PASS after 2 fix rounds (of 3 allowed)",
+      "rejected": "4 security bypasses + 1 spec under-block + 3 orchestrator-found wrapper residuals = 8 real holes closed; the milestone security gate is emphatically load-bearing"
+    },
+    "6": {
+      "at": "2026-08-12T21:05:39Z",
+      "milestone": true,
+      "stage1": "PASS fresh worktree of 6727e37, own npm install, 781/781 + tsc + bun leg; stray-write scan CLEAN (repo file count unchanged, ~/.local/state/conductor + ~/.conductor 0->0, no orphan quarantine dirs)",
+      "lenses": {
+        "residual-risk(quarantine)": "FINDINGS: EXDEV cross-fs MAJOR, clobber-on-restore MAJOR, stale/gone repoRoot, concurrent-replay race, ..-traversal, restored-flag vestigial, ENOTDIR-in-finally, refusal-skips-heal",
+        "crash-recovery+fs-safety": "FINDINGS: sandbox escape via unvalidated workspaceKey/tree/excludeTestFiles MAJOR (rmSync recursive on /etc), live-run replay MAJOR, illegal-red too loose MAJOR, recycled-pid wedge, childEnv git hygiene, SIGTERM-trap false-green"
+      },
+      "adjudication": {
+        "fixed_C024": [
+          "F1 EXDEV -> copy+utimes(preserve mtime)+unlink fallback + heal-in-try",
+          "F2 no-clobber restore (skip existing dst, keep stored, conflict)",
+          "F3 assertSafeId on runId/workspaceKey/tree + reject ../absolute in files/excludeTestFiles",
+          "F4 manifest {pid,startMs}; replay heals only dead-owner orphans; ENOENT=peer-healed; vanished-repoRoot skip; never throws out of runVerify",
+          "F5 illegal-red uses excerpt-only + full-path match",
+          "F6 over-age marker break (startMs, staleMarkerMs default 24h)",
+          "F7 childEnv strips GIT_* + GIT_OPTIONAL_LOCKS=0",
+          "F8 timeout SIGKILL"
+        ],
+        "test_adjustments": "2 legitimate fidelity fixes (added pid:deadPid() so [6.1-q-replay]/[6.1-heal] simulate a CRASHED run, not a live one — F4 correctly refuses to heal a live owner); orchestrator confirmed no assertion deleted",
+        "orchestrator_reverify": "re-ran F1/F2/F3/F4 reproductions against patched code: 0 residual (clobber kept V2, ../ + traversing key rejected, live-owner not healed, EXDEV fallback moves + preserves mtime)"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "9 crash/data-loss/sandbox holes in the expected-broken quarantine mechanism (2 lenses); milestone review found the design bind (rename vs out-of-volume) the last revision never reconciled"
+    },
+    "7": {
+      "at": "2026-08-12T22:01:12Z",
+      "stage1": "PASS fresh worktree of 0d39f34, own npm install, 813/813 + tsc + bun leg",
+      "flakeSweep": "CLEAN: fanout+router tests 12x identical (22 pass 0 fail every run); post-fix fanout 8x identical",
+      "lenses": {
+        "concurrency": "mostly SOUND (cap, barrier, watchdog-vs-completion double-resolve, registry retry window, freeze-hold double-dispatch, router double-resolve/leak ALL airtight); 3 hang-family findings"
+      },
+      "adjudication": {
+        "fixed_C025": [
+          "F1 MAJOR: watchdog now arms BEFORE session.create (bounds create+prompt); late-create abort guard; done-guard exactly-once",
+          "F3 LOW: heldUnsubs registered before subscribe (robust to synchronous onClear)"
+        ],
+        "bound_to_9.4c": "F2: leaked-marker held-job backstop — the wave driver must surface a stale-marker break to treeState.onClear (fan-out hold path is deliberately timer-free per §4.2)",
+        "orchestrator_reverify": "816/816; fanout 8x flake re-sweep identical"
+      },
+      "verdict": "PASS after 1 fix round",
+      "rejected": "1 MAJOR (unbounded create hang) + 1 low; core concurrency proven airtight by trace + 12x sweep"
+    },
+    "8": {
+      "at": "2026-08-13T00:40:00Z",
+      "what": "Phase 8 (doctrine) gate: 3 blind lenses (doc-fidelity vs §6.1 port map, inject.ts §6.4 conformance, subsystem completeness), each finding skeptic-verified. 11 raw -> 4 refuted -> 7 confirmed.",
+      "lenses": {
+        "doc-fidelity": "core.md omits forbidden satisfaction phrases (§6.1 1837) + ponytail lite reminder (§6.1 1849); review.md lacks the spec-before-quality adjudication ordering section (§6.1 1841); core.md 'every role' opening overstates (injected for 2/7 roles)",
+        "inject-conformance": "debug.md never delivered (ROLE_PACKS.implementer=[tdd.md], no DEBUG-posture branch) — MAJOR; receive-review.md never delivered (no ROLE_PACKS entry, no §4.1 role) + false 'referenced by review receipt' comment; X-Conductor-Group not role/stage-qualified (nit)",
+        "completeness": "debug.md + receive-review.md are loaded/validated but injected into 0 sessions; doctrine.test.ts pins content for only 7/9 packs (plan.md, skeptic.md have no content anchor -> can drift)"
+      },
+      "adjudication": {
+        "status": "RESOLVED in 1 fix round (2 commits: 102802d packs, efd0f84 injection). C-028.",
+        "fixed_packs_102802d": "core.md += forbidden-satisfaction-phrases (should work/should pass/looks good, tied to records-over-assertions) + ponytail lite reminder (cheaper-path/reuse ladder, guardrails never trimmed) + reworded 'every role' overclaim; review.md += spec-before-quality adjudication ordering (surviving spec findings discard that round's quality findings); doctrine.test.ts += 3 RED anchors (now green) + plan.md/skeptic.md hardening anchors",
+        "fixed_inject_efd0f84": "buildSystemAppend delivers debug.md for an implementer whose active item is in DEBUG posture (new optional GateItem.debugging signal; legalTools ignores it); tight guard (role+itemId+found+debugging, no dup); false receive-review.md comment corrected to name the Phase 9 deferred binding; 8.2-debug-pack red->green",
+        "deferred_binding_receive_review": "receive-review.md delivery -> the Phase 9 review-receipt/fix-round routing task threads a 'receiving-review' signal to buildSystemAppend so it appends receive-review.md (its delivery context does not exist until review findings are routed to the implementer; §4.1's role table assigns it to no static role by design; pack is loaded/cached now so init stays fail-closed over the full set)",
+        "noted_nit": "X-Conductor-Group role/stage qualification — functional as-is (group by tree else itemId); refinement noted, not blocking",
+        "orchestrator_reverify": "843/843 full suite green (observed by orchestrator); each confirmed finding checked resolved: debug.md now delivered (8.2-debug-pack), review-ordering/core-forbidden/core-ponytail anchors green, receive-review honestly deferred. Fixes targeted + test-pinned; no full gate re-run needed for a non-milestone phase."
+      },
+      "verdict": "PASS after 1 fix round"
     }
-   ],
-   "result": "4/4 OK at the phase-5 boundary; the gate still catches cheating"
-  }
- ],
- "taskGates": {
-  "0.3": {
-   "at": "2026-08-12T09:03:09Z",
-   "M1": "PASS tests=7 pass=7 fail=0 skipped=0 todo=0",
-   "M2": "PASS first TS task: 0 -> 7 passes (strictly greater, adds tests)",
-   "M3": "PASS tsc --noEmit clean",
-   "M4": "PASS post-commit re-derivation: scratch worktree at da2dab2, both new impl files removed -> 7/7 fail missing-subject naming task-scope paths, exit 1",
-   "M5": "PASS after 1 rejection (see rejections)",
-   "M6": "PASS scope = intendedFiles + docs/build/*",
-   "M7": "PASS all 7 rows mapped",
-   "M8": "n/a",
-   "M9": "n/a (bun leg starts at 2.2)"
   },
-  "6.2": {
-   "at": "2026-08-12T09:13:04Z",
-   "M1": "PASS suite unchanged 7/7 (doc-only task)",
-   "M2": "PASS pass-count 7 -> 7 (no tests added)",
-   "M3": "PASS (bundled in M1 run)",
-   "M4": "n/a (live probe; M8 instead)",
-   "M5": "n/a (markdown artifact)",
-   "M6": "PASS targeted add: RUNNER-DISCOVERY.md + docs/build only; 0.2 WIP (tests/fixtures) explicitly excluded",
-   "M7": "PASS all 7 rows mapped to artifact sections",
-   "M8": "PASS artifact 595 lines, verbatim transcripts; orchestrator re-ran node (c) cell \u2014 output matched (3 tests, 1 fail, exit 1)",
-   "M9": "n/a"
-  },
-  "0.2": {
-   "at": "2026-08-12T09:39:02Z",
-   "M1": "PASS tests=24 pass=24 fail=0 skipped=0 todo=0 + tsc (observed by orchestrator, not the agent's claim)",
-   "M2": "PASS 7 -> 24 (strictly greater, adds tests)",
-   "M3": "PASS",
-   "M4": "n/a discovery task (no classic red); no-skip tripwire + phase-gate discovery-integrity lens instead",
-   "M5": "PASS after two gate refinements (C-013)",
-   "M6": "PASS; justified cross-task edit: fragment + fragment.test.ts gained tools.task=false (C-014)",
-   "M7": "PASS all 19 rows mapped",
-   "M8": "wire-notes cross-checked against orchestrator's own suite run + binary version check",
-   "M9": "n/a"
-  },
-  "1.1": {
-   "at": "2026-08-12T10:13:29Z",
-   "M1": "PASS 109/109 + tsc (orchestrator-observed)",
-   "M2": "PASS 24 -> 109",
-   "M3": "PASS",
-   "M4": "pending post-commit re-derivation",
-   "M5": "PASS",
-   "M6": "PASS (2 declared files + docs/build)",
-   "M7": "PASS all 9 rows mapped",
-   "M8": "n/a",
-   "M9": "n/a",
-   "review": "tier B lens returned: NO majors; 2 minors (DecisionRecord score-conditionality -> enforced by 1.5 requireTwoOptions + 9.1 handler; ClassificationCheck correctedKind conditionality -> 9.1 classify handler obligation); 2 nits (JournalRecord extra-prop untested; taint under-constrained per plan's own example). Adjudication: defer-to-named-owners, no schema mutation; obligations recorded in HANDOFF for 9.1."
-  },
-  "1.2": {
-   "at": "2026-08-12T10:19:44Z",
-   "M1": "PASS 172/172 + tsc (orchestrator-observed)",
-   "M2": "PASS 109 -> 172",
-   "M3": "PASS",
-   "M4": "PASS post-commit: rm shell-parse.ts in scratch worktree of 88c07f8 -> suite fails missing-subject, exit 1",
-   "M5": "PASS",
-   "M6": "PASS",
-   "M7": "PASS (8 rows mapped, test names carry assertion ids)",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "1.4": {
-   "at": "2026-08-12T10:20:34Z",
-   "M1": "PASS 176/176 + tsc",
-   "M2": "PASS 172 -> 176",
-   "M3": "PASS",
-   "M4": "PASS (mutation variant, all 3 probes orchestrator-executed: bite/not-over-broad/bite)",
-   "M5": "PASS",
-   "M6": "PASS (1 declared file + docs/build)",
-   "M7": "PASS 4 rows mapped",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "1.3": {
-   "at": "2026-08-12T10:26:42Z",
-   "M1": "PASS 228/228 + tsc (orchestrator-observed)",
-   "M2": "PASS 176 -> 228",
-   "M3": "PASS",
-   "M4": "PASS post-commit: rm all three modules in scratch worktree of 29c7e03 -> each suite fails missing-subject (1/1/1) | DONE",
-   "M5": "PASS",
-   "M6": "PASS",
-   "M7": "PASS 9 rows mapped (test names carry ids)",
-   "M8": "n/a",
-   "M9": "n/a",
-   "review": "tier B lens dispatched post-commit"
-  },
-  "1.5": {
-   "at": "2026-08-12T10:30:38Z",
-   "M1": "PASS 252/252 + tsc (orchestrator-observed)",
-   "M2": "PASS 228 -> 252",
-   "M3": "PASS",
-   "M4": "PASS post-commit: rm decide.ts in scratch worktree of bbc0f85 -> suite fails missing-subject, exit 1",
-   "M5": "PASS",
-   "M6": "PASS",
-   "M7": "PASS 4 rows mapped",
-   "M8": "n/a",
-   "M9": "n/a",
-   "review": "tier B lens folded into the Phase 1 gate panel (correctness/boundary/counterexample lenses cover core/ cumulatively)"
-  },
-  "2.1": {
-   "at": "2026-08-12T11:31:03Z",
-   "M1": "PASS 301/301 + tsc (orchestrator-observed)",
-   "M2": "PASS 279 -> 301",
-   "M3": "PASS",
-   "M4": "PASS post-commit: rm both journal subjects in scratch worktree of 85e0f6a -> suite fails missing-subject, exit 1",
-   "M5": "PASS (G14 re-grepped by orchestrator: no Bun/shell-tag; Date.now count in core = 0)",
-   "M6": "PASS (3 declared files)",
-   "M7": "PASS 9 rows mapped",
-   "M8": "n/a",
-   "M9": "n/a (bun leg still deferred to 2.2)"
-  },
-  "3.1": {
-   "at": "2026-08-12T11:46:53Z",
-   "M1": "PASS 451/451 + tsc",
-   "M2": "PASS 302 -> 451",
-   "M3": "PASS",
-   "M4": "PASS post-commit re-derivation (both FSM modules removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (4 files)",
-   "M7": "PASS 9 rows",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "3.3": {
-   "at": "2026-08-12T11:52:44Z",
-   "M1": "PASS 464/464 + tsc",
-   "M2": "PASS 451 -> 464",
-   "M3": "PASS",
-   "M4": "PASS post-commit (schedule removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS",
-   "M7": "PASS 5 rows + empty-scope binding",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "3.2": {
-   "at": "2026-08-12T12:04:27Z",
-   "M1": "PASS 479/479 + tsc",
-   "M2": "PASS 464 -> 479",
-   "M3": "PASS",
-   "M4": "PASS post-commit (gates-phase removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS",
-   "M7": "PASS 11 rows",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "4.2": {
-   "at": "2026-08-12T12:40:06Z",
-   "M1": "PASS 491/491 + tsc",
-   "M2": "PASS 482 -> 491",
-   "M3": "PASS",
-   "M4": "PASS post-commit (gitio removed -> missing-subject)",
-   "M5": "PASS (G14 re-grepped: no Bun/shell-tag)",
-   "M6": "PASS (2 files)",
-   "M7": "PASS 6 rows",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "4.1": {
-   "at": "2026-08-12T13:21:05Z",
-   "M1": "PASS 509/509 + tsc",
-   "M2": "PASS 491 -> 509",
-   "M3": "PASS",
-   "M4": "PASS post-commit (state.ts+questions.ts removed -> missing-subject)",
-   "M5": "PASS (G14+G6 re-verified by orchestrator: appendLedgerLineRaw only in state.ts; no Bun/shell-tag)",
-   "M6": "PASS (4 files)",
-   "M7": "PASS 10 rows",
-   "M8": "n/a",
-   "M9": "n/a"
-  },
-  "2.2": {
-   "at": "2026-08-12T13:41:09Z",
-   "M1": "PASS 517/517 node + tsc",
-   "M2": "PASS 509 -> 517",
-   "M3": "PASS",
-   "M4": "n/a (proof task)",
-   "M5": "PASS",
-   "M6": "PASS (bun-smoke.test.ts + test-conductor.sh orchestrator-owned)",
-   "M7": "n/a (mirrors 4.1/2.1 rows)",
-   "M8": "n/a",
-   "M9": "PASS \u2014 bun leg green (8/8), orchestrator re-ran `bun test` directly (8 pass); NO divergence node vs bun"
-  },
-  "5.1": {
-   "at": "2026-08-12T16:14:17Z",
-   "M1": "PASS 642/642 node + tsc + bun leg",
-   "M2": "PASS 522 -> 642 (+120)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (gates-git removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (2 files)",
-   "M7": "PASS 7 rows + phaseGate1Bindings encoded",
-   "M8": "n/a",
-   "M9": "PASS bun leg",
-   "orchestratorReverify": "18/18 security-critical deny/allow cases re-run directly: branch -D deny, apply deny, env/A=b/path/value-flag git push deny, per-segment scan, two-word discrimination, false-positive guards, default-deny, branch-policy matrix \u2014 all correct",
-   "review": "tier A \u2014 folds into the Phase 5 MILESTONE gate (security/bypass + red-team-by-data >=20 deny spellings)"
-  },
-  "5.2": {
-   "at": "2026-08-12T16:24:06Z",
-   "M1": "PASS 691/691 node + tsc + bun leg",
-   "M2": "PASS 642 -> 691 (+49)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (gates-edit removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (2 files)",
-   "M7": "PASS 9 rows + binding",
-   "M8": "n/a",
-   "M9": "PASS bun leg",
-   "orchestratorReverify": "12/12 security cases re-run: unconditional spawn deny (registered+unregistered), unregistered read-allow/write-deny/conductor-deny, freeze strict (test-writer denied in own testScope), different-tree no-freeze, reviewer-deny, implementer scope, wrapper-aware env-sh-c write extraction",
-   "review": "tier A \u2014 folds into Phase 5 MILESTONE gate (red-team-by-data >=15 write-shapes)"
-  },
-  "5.3": {
-   "at": "2026-08-12T17:03:01Z",
-   "M1": "PASS 703/703 node + tsc + bun leg",
-   "M2": "PASS 691 -> 703 (+12)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (tools.ts+plugin removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (3 files)",
-   "M7": "PASS 7 rows",
-   "M8": "n/a",
-   "M9": "PASS bun leg",
-   "orchestratorReverify": "fail-closed proof re-run directly: crashed git-rule-checker -> git commit DENIED (throw), ls ALLOWED, both journaled gate-crash (2)"
-  },
-  "5.4": {
-   "at": "2026-08-12T17:21:24Z",
-   "M1": "PASS 703/703 node + tsc + bun leg (orchestrator's own run; worker stalled post-completion on a flaky wire-contract spawn)",
-   "M2": "PASS 703 -> 703 (5.4 added 7 tests but 5.3's +12 already counted; net unchanged from HEAD? no \u2014 chat-message +7 over 703 pre-5.3... recomputed: full green)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (chat-message removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (3 files incl justified journal-events vocab add, diff read by orchestrator)",
-   "M7": "PASS 6 rows",
-   "M8": "n/a",
-   "M9": "PASS bun leg"
-  },
-  "6.1": {
-   "at": "2026-08-12T20:30:45Z",
-   "M1": "PASS 781/781 node + tsc + bun leg",
-   "M2": "PASS 763 -> 781 (+18)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (evidence.ts+quarantine.ts removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (4 files)",
-   "M7": "PASS 11 rows + 3 bindings",
-   "M8": "n/a",
-   "M9": "PASS bun leg",
-   "orchestratorReverify": "quarantine round-trip re-run: file moved OUT of repo, quarantine dir outside repo, mtime survived (rename not copy), restored; G6 (only evidence.ts imports appendLedgerLineRaw) + G14 re-checked",
-   "review": "tier A + one of the 4 expected-broken mechanisms -> folds into Phase 6 milestone gate (crash-recovery + filesystem-safety + residual-risk lenses; stray-write scan)"
-  },
-  "7.1": {
-   "at": "2026-08-12T21:39:53Z",
-   "M1": "PASS 801/801 node + tsc + bun leg",
-   "M2": "PASS 791 -> 801 (+10)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (fanout removed -> missing-subject)",
-   "M5": "PASS",
-   "M6": "PASS (3 files incl fake-sdk fixture)",
-   "M7": "PASS 8 rows",
-   "M8": "n/a",
-   "M9": "PASS bun leg",
-   "orchestratorReverify": "no-format binding honored (only comments mention format), registry.set before prompt, G14 clean"
-  },
-  "7.2": {
-   "at": "2026-08-12T21:45:08Z",
-   "M1": "PASS 813/813 node + tsc + bun leg",
-   "M2": "PASS 801 -> 813 (+12)",
-   "M3": "PASS",
-   "M4": "PASS post-commit (router-client removed -> missing-subject)",
-   "M5": "PASS (G14 clean)",
-   "M6": "PASS (2 files)",
-   "M7": "PASS 4 rows",
-   "M8": "n/a",
-   "M9": "PASS bun leg"
-  },
-  "8.1": {
-   "at": "2026-08-12T23:25:00Z",
-   "M1": "PASS 826/826 node + tsc + bun leg (orchestrator-run)",
-   "M2": "PASS 816 -> 826 (+10 doctrine anchors)",
-   "M3": "PASS",
-   "M4": "PASS post-commit from 00cdcd7 (doc variant, scratch worktree). A: rm tdd.md -> 4 tests red incl ENOENT naming tdd.md. B (stronger, content-level): strip only the 'delete means delete' phrase (file present) -> exactly 8.1-anchors-tdd red with 'tdd.md must contain delete means delete'; restore -> 10/10 green. Anchors pin content verbatim, not file presence.",
-   "M5": "PASS (marker scan production-scoped after C-026; 8.1 scope 10 files + full tree 57 files both clean)",
-   "M6": "PASS (9 packs read by doctrine.test.ts via readPack())",
-   "M7": "PASS 10 rows (each 8.1-* anchor id maps to a test)",
-   "M8": "n/a (no router/C++ in changeset)",
-   "M9": "PASS bun leg (8 pass)",
-   "orchestratorReverify": "read all nine packs + doctrine.test.ts myself: substantive, client-agnostic doctrine, each <=120 lines, all anchors present verbatim; independent grep clean of TODO/TBD literals and client/vendor names; observed green 10/10 myself, not on a subagent's report. Gate false-positive (marker scan on test-subject/test-data) root-caused and fixed at the gate (C-026), not papered over."
-  },
-  "8.2": {
-   "at": "2026-08-13T00:15:00Z",
-   "M1": "PASS 837/837 node + tsc + bun leg (orchestrator-run full suite)",
-   "M2": "PASS 826 -> 837 (+11: 9 inject assertions + G9 + 2 review-driven corrections)",
-   "M3": "PASS",
-   "M4": "PASS post-commit from 29a5011 (scratch worktree): remove inject.ts -> inject.test.ts red with ERR_MODULE_NOT_FOUND (missing-subject), tests=1 fail=1.",
-   "M5": "PASS (changeset 2 files + full tree 58 files both clean)",
-   "M6": "PASS (inject.ts imported by inject.test.ts:81)",
-   "M7": "PASS 9 rows (7 \u00a76.4 assertions + 2 review-driven: null-recommendation, empty-pack)",
-   "M8": "n/a",
-   "M9": "PASS bun leg (8 pass)",
-   "orchestratorReverify": "observed the ORIGINAL missing-subject red (ERR_MODULE_NOT_FOUND inject.ts) and the FINAL 837/837 green MYSELF, plus the intermediate red for the two correction assertions (11 tests, 9 pass, 2 fail) BEFORE the fix. Read the full inject.ts + both fixed regions myself. Ran a per-task adversarial review workflow (3 lenses, skeptic-verified) that caught a MAJOR (false 'terminal' claim injected every request on a stalled EXECUTING wave) + a fail-closed hardening (empty pack) \u2014 both fixed test-first pre-commit (C-027). Also caught the implementer's targeted-glob 'GATE PASS' masking a full-suite G14 guard failure (Bun token in a comment), fixed before commit."
-  },
-  "11.1": {
-   "at": "2026-08-13T01:20:00Z",
-   "M1": "PASS TS 847/847 node+tsc+bun + C++ ctest 1/1 (orchestrator-run: cmake configure clean, llama-router+router-tests built/linked, ctest green, llama-router binary runs)",
-   "M2": "PASS TS 843->847 (+4 export-schemas); ctest 0->1",
-   "M3": "PASS (tsc --noEmit + C++ compiles under clang++ C++23)",
-   "M4": "PASS post-commit from d6745de: moved export-schemas.ts aside -> export-schemas.test.ts red (ERR_MODULE_NOT_FOUND, tests=1 fail=1), restored -> 4/4 green (orchestrator-observed). C++ sources are load-bearing by construction (targets list them; the build+ctest that passed proves it).",
-   "M5": "PASS (export-schemas.ts + C++ sources scanned; no markers)",
-   "M6": "PASS (export-schemas.ts imported by its test; C++ sources compiled into the targets)",
-   "M7": "PASS 4 rows (cmake-surgery, scaffold-green, export-schemas, upstream-contract-deferred)",
-   "M8": "C++ ctest PASS 1/1 (router-tests scaffold, real assertion on router_version)",
-   "M9": "n/a (no bun change; TS bun leg still green)",
-   "orchestratorReverify": "did the CMakeLists surgery + build files MYSELF; observed cmake configure exit 0, both router targets link, ctest 1/1 PASS, llama-router binary output, and the export-schemas TS red->847 green \u2014 all first-hand. Found+fixed the validator ::validator target name from the configure log. Step 2 (live) DEFERRED to 12.1, honestly recorded in UPSTREAM_CONTRACT.md (assets confirmed present; NOT fabricated)."
-  },
-  "9.1": {
-   "at": "2026-08-13T02:30:00Z",
-   "M1": "PASS 864/864 node + tsc + bun leg + schema export (orchestrator-run full suite)",
-   "M2": "PASS 847 -> 864 (+17: 10 authored + 7 review-fix tests)",
-   "M3": "PASS (tsc --noEmit clean incl. the optional GateItem.debugging and the new handler types)",
-   "M4": "PASS post-commit from ed3d407 (scratch worktree): dropped handleAnswer's export -> tools-9.1.test.ts red with 'does not provide an export named handleAnswer' (tests=1 fail=1); handlers load-bearing.",
-   "M5": "PASS (tools.ts + journal-events.ts scanned; no markers)",
-   "M6": "PASS (the 6 handlers imported/driven by tools-9.1.test.ts)",
-   "M7": "PASS 15 rows (8 \u00a73.4 tool assertions + 7 C-029 review-fix rows)",
-   "M8": "n/a",
-   "M9": "PASS bun leg (8 pass)",
-   "orchestratorReverify": "MILESTONE task. Observed the missing-export red and the FINAL 864/864 green MYSELF, plus the intermediate red for the 6 review-fix tests (17 tests, 11 pass, 6 fail) BEFORE the fixes. Read all 6 handlers + all 6 fixed regions + the journal widening myself. CAUGHT the first implementer returning an anomalous/injected 0-edit result by verifying the tree (re-dispatched fresh). Ran a 3-lens skeptic-verified adversarial review that found 4 MAJOR + 2 minor real defects the 10 authored tests missed (classify hard-throw, surface/defer half-write, humanTerritory, null-iff-agreed, torn-line) \u2014 all fixed test-first pre-commit (C-029); verified the F6 torn-line mint is injection-robust (JSON escaping). 2 nits deferred to 10.1 with bindings. NOTE: the Phase 9 MILESTONE gate runs after 9.6 over the whole tools subsystem."
-  },
-  "11.2": {
-   "at": "2026-08-13T04:05:00Z",
-   "M1": "PASS ctest 1/1; doctest 7 cases 119/119 assertions (orchestrator-run: build + ctest + direct binary)",
-   "M2": "PASS doctest cases 1->7 (+6 config, one per assertion row)",
-   "M3": "PASS (compiles clean under clang++ C++23, -Wall clean per implementer; orchestrator rebuild clean)",
-   "M4": "PASS pre-commit from the working tree: mv src/router/config.hpp aside -> router-tests compile FAILED ('config.hpp' file not found), restore -> rebuild + ctest 1/1 (orchestrator-observed both directions)",
-   "M5": "PASS (config.hpp + config_test.cpp scanned; no markers)",
-   "M6": "PASS (config.hpp included by config_test.cpp; compiled into router-tests)",
-   "M7": "PASS (assertions file 6 rows; all covered by name-prefixed TEST_CASEs)",
-   "M8": "PASS ctest observed by orchestrator directly (7/7, 119/119)",
-   "M9": "n/a (C++-only; TS untouched)",
-   "orchestratorReverify": "moved the staged test in MYSELF, wired CMakeLists MYSELF (orchestrator-only file), observed the compile red before implementation and the 7/7 green + M4 red re-derivation after, and read the full config.hpp. Known nit ledgered in STATE (empty-field() ConfigError on input-JSON parse errors vs the class-comment contract) for the Phase 11 gate."
-  },
-  "9.2": {
-   "at": "2026-08-13T04:40:00Z",
-   "M1": "PASS 887/887 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
-   "M2": "PASS 864 -> 873 (9 authored) -> 887 (14 review-fix)",
-   "M3": "PASS (tsc --noEmit clean; pre-implementation tsc showed ONLY the 2 missing-export errors)",
-   "M4": "PASS post-commit from 75a2531 in a detached scratch worktree: removed conductor/core/planning.ts -> ERR_MODULE_NOT_FOUND from adapter/tools.ts (tests=1 pass=0), restored -> 23/23 green. Orchestrator-observed both directions; worktree removed.",
-   "M5": "PASS (production-scoped marker scan over planning.ts/tools.ts/types.ts)",
-   "M6": "PASS (planning.ts imported by tools.ts + the test; both handlers exported and exercised)",
-   "M7": "PASS 9 assertion rows, each with a name-prefixed test, + 14 review-fix rows",
-   "M8": "n/a (no live-model observation in this task; the fake SDK drives every dispatch)",
-   "M9": "PASS (bun leg green, 8 pass)",
-   "orchestratorReverify": "observed the missing-export red MYSELF before implementation and the 887/887 green after; read the ENTIRE diff (planning.ts in full, the tools.ts diff, the types.ts diff); ran a 3-lens skeptic-verified adversarial panel PRE-COMMIT which found 19 real defects the 873-test suite missed, including 2 MAJORs that would break runs under the DEFAULT config; wrote all 14 fix-tests myself, observed 12 of them red, and fixed them myself. Honestly recorded: R13 passed pre-fix (guard, not red-driven), and 9 skeptics died on a session limit so their findings were counted as upheld rather than dropped."
-  },
-  "9.3": {
-   "at": "2026-08-13T06:30:00Z",
-   "M1": "PASS 901/901 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
-   "M2": "PASS 895 (8 authored) -> 901 (6 review-fix)",
-   "M3": "PASS (tsc clean; pre-implementation tsc showed ONLY the missing handlePlanReview export)",
-   "M4": "PASS post-commit from 1ad82b7 in a detached scratch worktree: un-exported handlePlanReview -> missing-export SyntaxError (tests=1 pass=0), restored -> 14/14 green. Orchestrator-observed both directions; worktree removed.",
-   "M5": "PASS (production-scoped marker scan)",
-   "M6": "PASS (handlePlanReview exported + exercised; findingBlocksItems imported by tools.ts and the test)",
-   "M7": "PASS 8 assertion rows each with a name-prefixed test + 6 review-fix rows",
-   "M8": "n/a (fake SDK drives every dispatch)",
-   "M9": "PASS (bun leg green)",
-   "orchestratorReverify": "vetted a staged test whose writer had DIED mid-run before trusting it; observed the missing-export red and the 901/901 green MYSELF; read the whole diff and independently verified the correctness-critical claim that dispatchWave preserves job order (groupByModel carries the ORIGINAL index; runGroup writes results[index]), which is what makes the index*k+i verdict binding sound; independently flagged the overlapping-block defect BEFORE the panel confirmed it; refused to accept an empty review result produced by two crashed lenses as a pass."
-  },
-  "11.3": {
-   "at": "2026-08-13T07:40:00Z",
-   "M1": "PASS ctest 1/1; doctest 17/17 cases, 243/243 assertions (orchestrator-run: build + ctest + direct binary)",
-   "M2": "PASS doctest cases 7 -> 17 (+10, one per assertion row)",
-   "M3": "PASS (compiles clean, zero warnings, clang++ C++23)",
-   "M4": "PASS pre-commit, orchestrator-observed both directions: mv router.hpp aside -> compile FAILS ('router/router.hpp' file not found); restore -> rebuild + ctest 1/1",
-   "M5": "PASS (router.hpp + proxy_test.cpp scanned; no markers)",
-   "M6": "PASS (router.hpp included by proxy_test.cpp; compiled into router-tests)",
-   "M7": "PASS 10 assertion rows, each a name-prefixed TEST_CASE",
-   "M8": "PASS ctest + direct binary observed by orchestrator",
-   "M9": "n/a (C++-only)",
-   "orchestratorReverify": "Vetted a staged test whose writer had died mid-run, and PORTED it to the user's new src/ layout myself before use. Wired CMake myself (orchestrator-only). Observed the compile red before implementation and 17/17 + M4 both directions after. Implementer's own flake-hunt (98 runs incl. 12-way concurrency) surfaced a REAL pre-existing defect in Task 11.2's TEST fixture (fixed temp path + remove_all in ctor/dtor => concurrent processes delete each other's fixtures); ctest never runs concurrently so it does not affect the gate, and it is fixed separately."
-  }
- },
- "phaseGates": {
-  "0": {
-   "at": "2026-08-12T09:47:49Z",
-   "stage1": "PASS: fresh worktree of 0cf8b82, own npm install, full gate green from scratch (24/24 incl. live wire suite + tsc + M5)",
-   "lenses": {
-    "spec-conformance": "CONFORMANT; 3 nits (empty dirs untracked until files land; plan's authoring date in marker template; G1-vs-\u00a75.1 tool() import tension -> resolve explicitly at 5.3)",
-    "discovery-integrity": "FINDINGS: 2 majors + 4 minors + 2 nits; core discovery verified REAL (live suite re-run by lens; non-tautological chains; DRIFTs pinned as tripwires)"
-   },
-   "adjudication": [
-    "MAJOR 1 (gate hole: describe-level skips invisible to TAP trailer counts) \u2014 mechanically CONFIRMED by orchestrator reproduction; fixed in test-conductor.sh (SKIP/TODO directive scan); self-tested S12-S14",
-    "MAJOR 2 (7 wire-notes sub-claims under an 'every line is asserted' header with no asserting test) \u2014 CONFIRMED by inspection; fixed by [observed] tags + honest header + Assertion-coverage notes section",
-    "minors 3-8 (assertion tightness: fileref replace-vs-append, 'always' unexercised, payload fields, file:// shape, laziness, full tool list) \u2014 recorded in wire-notes coverage notes, non-blocking",
-    "nits recorded; no skeptic round needed (both majors probe-confirmed, plan \u00a77.2 ladder step 2)"
-   ],
-   "verdict": "PASS after fix round 1 of 3",
-   "rejected": "2 majors (gate credit: the phase gate is not rubber-stamping)"
-  },
-  "1": {
-   "at": "2026-08-12T11:08:48Z",
-   "stage1": "PASS: fresh worktree of bbc0f85, own npm install, 252/252 + tsc + M5(20 files) from scratch",
-   "lenses": {
-    "spec-conformance(1.1)": "CONFORMANT (no majors; 2 minors -> 9.1 obligations; 2 nits)",
-    "spec-conformance(1.3)": "FINDINGS: 1 minor (normalizeSpecifier interior-.. anti-conservative) \u2014 corroborated by counterexample F-1",
-    "correctness x2": "FINDINGS: gitSubcommand value-flag false-ALLOW (MAJOR), classifyFailure absolute/nested-path misclassify (MAJOR), zero-budget env (minor), quoted-operator over-split (minor, safe), nits",
-    "boundary-cases x2": "FINDINGS: globMatch exponential DoS (MAJOR), classifyFailure ESM absolute-path (MAJOR), zero-budget env, tuple-items divergence, empty-scope, missing-verdict overturn, tokenizer git-bypass",
-    "counterexample x2": "FINDINGS: gitSubcommand false-ALLOW (MAJOR), isGitCommand env/wrapper/backtick bypass (MAJOR), isHumanTerritory money/secret/irreversible misses (MAJOR), freshness NaN fail-open (minor), classifyFailure text-only causality (minor)"
-   },
-   "adjudication": {
-    "fixed_in_place_round1": [
-     "F-1 classifyFailure interior-.. escape -> error",
-     "S-1 scopesIntersect case-insensitive (pure-safe)",
-     "H-1/H-2 isHumanTerritory push --force/-f + $N/month",
-     "E-1 zero-budget env guard (used>0 && used>=max)"
-    ],
-    "fixed_in_place_round2": [
-     "F1 globMatch exponential -> collapse ** + memoize (130s->0.1ms)",
-     "F2 gitSubcommand fail-safe on unrecognized globals (closes false-ALLOW)",
-     "F3 isGitCommand skips env-assign/env/command/sudo/exec wrappers + basename resolve",
-     "F4 verifyFreshFor non-finite timestamp -> stale (fail-safe)",
-     "F5 scanKeywords rejects tuple-form items (2020-12 divergence)"
-    ],
-    "bound_to_future_tasks": {
-     "5.1": "deny matrix over FULL tokens not single subcommand (branch -D must deny); red-team-by-data includes value-flag/env-prefix spellings",
-     "5.2": "writeShapedPaths wrapper-aware; no reliance on possibly-undefined evidence fields",
-     "6.1": "evidence.ts validates per-kind required fields; relativizes absolute cwd-prefixes before classifyFailure (ESM); tight anchored runnerRules tested vs RUNNER-DISCOVERY.md",
-     "9.1": "derived-decision scored-options enforcement; ClassificationCheck correctedKind==null iff agreed",
-     "9.5a": "under-delivered skeptic panel: re-run or count missing verdicts as UPHOLDS (never silent-drop a major)",
-     "3.3": "nextWave treats empty/degenerate scope conservatively (serialize)"
+  "rejections": [
+    {
+      "at": "2026-08-12T09:03:09Z",
+      "gate": "M5",
+      "what": "fragment.test.ts contained the scan word 'placeholder' (benign: describing the literal ${LLAMA_HARNESS_ROOT} token)",
+      "resolution": "reworded comments/messages to 'substitution token'; gate kept strict"
     },
-    "documented_g7": "honest-limits-pending.md: backtick substitution, alias injection, sh -c/bash -c wrappers, $'...' ANSI-C quoting \u2014 detection gaps disclosed, not prevented",
-    "verification": "orchestrator re-ran all 26 lens malicious inputs against the fixed modules: 26/26 corrected (probe transcript). Full suite 279/279 in 6.9s."
-   },
-   "verdict": "PASS after 2 fix rounds (of 3 allowed)",
-   "rejected": "8 confirmed defects across 6 lens contexts incl. 5 majors \u2014 the milestone gate is emphatically not rubber-stamping (catch-credit recorded)"
-  },
-  "2": {
-   "at": "2026-08-12T11:37:48Z",
-   "stage1": "PASS (main tree 302/302 + tsc + M5; single-module phase, fresh-worktree deferred to the milestone gates)",
-   "lenses": {
-    "correctness": "folded into 2.1 task gate (well-covered, 22 tests)",
-    "crash-recovery": "orchestrator-run mechanical probe (torn trailing line + seq continuation across simulated restart)"
-   },
-   "adjudication": {
-    "finding": "crash-recovery: a torn trailing line (partial record from a power-loss/disk-full mid-append) was not healed \u2014 the next append concatenated onto it, corrupting the NEXT record too. Confirmed by orchestrator probe.",
-    "fix": "adapter/journal.ts: on first append per instance, if the file ends without a newline, prepend one so the torn partial is isolated on its own line and the new record stays a clean parseable line. Test-first ([2.1-torn-write]); orchestrator re-ran its own probe: 0 fail.",
-    "verification": "302/302; orchestrator crash-probe passes (torn line isolated, new record clean at seq 6)"
-   },
-   "verdict": "PASS after 1 fix round",
-   "rejected": "1 crash-recovery durability gap in the write-ahead journal (catch-credit: the crash-recovery lens found a real defect before it reached production)"
-  },
-  "3": {
-   "at": "2026-08-12T12:22:20Z",
-   "stage1": "PASS fresh worktree of bd35785, own npm install, 479/479 + tsc + M5(31 files)",
-   "lenses": {
-    "state-machine-completeness": "FINDINGS: PLAN_REVIEWED->EXECUTING livelock (major, ->9.4c binding), trivial-report (minor), deferred-not-frozen (low, plan-faithful)",
-    "correctness": "SOUND, no majors; minor dep-readiness legal-set inconsistency (->5.3/9.4a), informational single-source (->fixed with guard test)",
-    "counterexample": "FINDINGS: trivial-report MAJOR (loses work, handler backstop defeated by foreign-red-set exclusion); everything else SOUND (no red-skip to GREEN, no scope-overlap corruption, publish only at REVIEWED, dispatch only at PLAN_REVIEWED)"
-   },
-   "adjudication": {
-    "fixed_in_place": [
-     "trivial-report hole: reportLegal = allSettled (drop trivial ||); [3.2-trivial] test tightened to safe contract + settled positive case; orchestrator re-ran the exact malicious input: report denied for trivial+PENDING, allowed for trivial+PUBLISHED",
-     "G6 single-source guard: conductor/tests/single-source.test.ts asserts RUN_STATES/ITEM_STATES set-equal to SCHEMAS.Run/Item.properties.state.enum (by-construction now)"
-    ],
-    "bound_to_future_tasks": {
-     "9.4c": "dispatch_wave supplies PLAN_REVIEWED->EXECUTING context (survivingMajors:0 if planReviewRounds<max else round>=max) \u2014 satisfiable-by-construction",
-     "9.5b": "report handler enforces all-settled as a NON-VERIFY precondition (verify is defeated by foreign-red-set exclusion)",
-     "9.4a/5.3": "decide + make gate/handler consistent on dependency-readiness for direct per-item stage-tool calls"
+    {
+      "at": "2026-08-12T09:39:02Z",
+      "gate": "M5",
+      "what": "bare word 'stub' flagged in wire-contract test + stub-llm-server fixture (the plan's own §8 vocabulary for the fake LLM server)",
+      "resolution": "C-013: 'stub' forbidden in production source only; allowed as test-double name under conductor/tests/; .md files excluded from M5 (doc content is anchor-tested)"
     },
-    "verification": "482/482; orchestrator re-ran the counterexample's exact malicious input (2/2 corrected)"
-   },
-   "verdict": "PASS after 1 fix round",
-   "rejected": "1 MAJOR (trivial-report work-loss) + G6 latent-risk hardened; catch-credit: 3 lenses, the counterexample lens escalated what the completeness lens under-rated"
-  },
-  "4": {
-   "at": "2026-08-12T14:09:59Z",
-   "stage1": "PASS fresh worktree of 06818b3, own npm install, 517/517 node + tsc + bun leg(8) + M5",
-   "strayWriteScan": "CLEAN: no files created outside throwaway fixtures; ~/.conductor 0->0; no stray .conductor/ in the repo tree",
-   "lenses": {
-    "crash-recovery": "FINDINGS: F1 answerQuestion order MAJOR (answer-first wedge, no legal recovery tool); F4 lock TOCTOU minor; F5 orphan-dir minor. Atomic write, dead-pid/over-age lock, retention pruning, no-git all SOUND.",
-    "filesystem-safety": "FINDINGS: F2 path-traversal via unvalidated ids MAJOR-latent; F3 questions.ts predictable-tmp symlink-follow minor. Deletion, lock, .git/info/exclude (G10), gitio command-injection all SOUND."
-   },
-   "adjudication": {
-    "fixed_in_place": [
-     "F1 answerQuestion clears items FIRST then marks answered (idempotent mid-crash retry; question stays open)",
-     "F2 assertSafeId in every state.ts path builder (rejects ../ and separators; orchestrator re-verified the exact ../../../../tmp/pwned input rejected + valid ids accepted)",
-     "F3 questions.ts randomBytes(6) tmp + flag wx (no symlink-follow)",
-     "F4 lock fresh-claim exclusive-create (flag wx), EEXIST->contention, seam-tested deterministically",
-     "F5 createRun writes run.json before items dir (orphan prunable)"
-    ],
-    "bound_to_future": {
-     "9.6": "registerConductorExclude must resolve real gitdir / skip when root/.git is a file (linked-worktree ENOTDIR; C-021)"
+    {
+      "at": "2026-08-12T09:47:49Z",
+      "gate": "phase-0/discovery-integrity",
+      "what": "describe({skip}) suites evade skipped-count rejection; 7 unasserted wire-notes claims",
+      "resolution": "C-015: directive scan added to test-conductor.sh; wire-notes [observed] tagging"
     },
-    "verification": "522/522 node + bun(8); orchestrator re-ran F2 (traversal rejected, valid ids ok) + confirmed the F1 test asserts item-cleared-before-mark + question-open-after-crash + idempotent-retry with a complete fixture"
-   },
-   "verdict": "PASS after 1 fix round",
-   "rejected": "2 majors (answerQuestion wedge, path-traversal escape) + 3 minors; catch-credit: crash-recovery lens found an unrecoverable wedge a same-author suite would never surface"
-  },
-  "5": {
-   "at": "2026-08-12T19:40:06Z",
-   "milestone": true,
-   "stage1": "PASS fresh worktree of 1176178, own npm install, 710/710 node + tsc + bun leg; \u00a77.3 gate self-test re-run 4/4 (still catches fail/hidden-skip/zero-glob/TODO)",
-   "lenses": {
-    "security/bypass": "FINDINGS: 4 confirmed bypasses (ANSI-C/param-expansion git write; >| force-redirect; .. path traversal; non-enumerated in-place writers) \u2014 ALL re-run + confirmed by orchestrator",
-    "spec-conformance": "CONFORMANT row-by-row (\u00a73.5 matrix fully + faithfully encoded); 1 minor under-block advisory (checkout -f/switch --discard-changes not enumerated)",
-    "red-team-by-data": "generator died to API error; orchestrator generated + executed its OWN 33-input battery across 2 attack passes instead"
-   },
-   "adjudication": {
-    "fix_round_1_C022": [
-     "shellTokens decode $'...'/$\"...\"",
-     "decideGit deny unresolvable command word (backtick/$'/$\"/${/$(/$VAR/backslash)",
-     "writeShapedPaths recognize >| force-redirect",
-     "writeShapedPaths add perl -pi/dd of=/gawk -i inplace/ex/ed",
-     "decideEdit deny any path with a .. segment",
-     "decideCheckout/decideSwitch deny -f/--force/--discard-changes unconditionally"
-    ],
-    "fix_round_2_C023": [
-     "wrapper-with-flags: skipWrapperOptions in shell-parse (sudo -u/-g/... value flags, env NAME=value) + shared commandWordLocation reused by gates-git; fail-safe deny on unresolvable wrapper structure"
-    ],
-    "orchestrator_reattack": "2 passes, 33 malicious inputs total. Pass 1 found 3 residuals (wrapper-with-flags) that fix-round-1 tests missed -> fix round 2. Pass 2: 0 residual holes. Wrapped read-only git still ALLOWED (correct extraction, not blanket deny).",
-    "documented_g7": "honest-limits-pending.md updated: backtick/alias now DENY (fail-safe); residual obscure in-place writers + second-wrapper over-approx documented"
-   },
-   "verdict": "PASS after 2 fix rounds (of 3 allowed)",
-   "rejected": "4 security bypasses + 1 spec under-block + 3 orchestrator-found wrapper residuals = 8 real holes closed; the milestone security gate is emphatically load-bearing"
-  },
-  "6": {
-   "at": "2026-08-12T21:05:39Z",
-   "milestone": true,
-   "stage1": "PASS fresh worktree of 6727e37, own npm install, 781/781 + tsc + bun leg; stray-write scan CLEAN (repo file count unchanged, ~/.local/state/conductor + ~/.conductor 0->0, no orphan quarantine dirs)",
-   "lenses": {
-    "residual-risk(quarantine)": "FINDINGS: EXDEV cross-fs MAJOR, clobber-on-restore MAJOR, stale/gone repoRoot, concurrent-replay race, ..-traversal, restored-flag vestigial, ENOTDIR-in-finally, refusal-skips-heal",
-    "crash-recovery+fs-safety": "FINDINGS: sandbox escape via unvalidated workspaceKey/tree/excludeTestFiles MAJOR (rmSync recursive on /etc), live-run replay MAJOR, illegal-red too loose MAJOR, recycled-pid wedge, childEnv git hygiene, SIGTERM-trap false-green"
-   },
-   "adjudication": {
-    "fixed_C024": [
-     "F1 EXDEV -> copy+utimes(preserve mtime)+unlink fallback + heal-in-try",
-     "F2 no-clobber restore (skip existing dst, keep stored, conflict)",
-     "F3 assertSafeId on runId/workspaceKey/tree + reject ../absolute in files/excludeTestFiles",
-     "F4 manifest {pid,startMs}; replay heals only dead-owner orphans; ENOENT=peer-healed; vanished-repoRoot skip; never throws out of runVerify",
-     "F5 illegal-red uses excerpt-only + full-path match",
-     "F6 over-age marker break (startMs, staleMarkerMs default 24h)",
-     "F7 childEnv strips GIT_* + GIT_OPTIONAL_LOCKS=0",
-     "F8 timeout SIGKILL"
-    ],
-    "test_adjustments": "2 legitimate fidelity fixes (added pid:deadPid() so [6.1-q-replay]/[6.1-heal] simulate a CRASHED run, not a live one \u2014 F4 correctly refuses to heal a live owner); orchestrator confirmed no assertion deleted",
-    "orchestrator_reverify": "re-ran F1/F2/F3/F4 reproductions against patched code: 0 residual (clobber kept V2, ../ + traversing key rejected, live-owner not healed, EXDEV fallback moves + preserves mtime)"
-   },
-   "verdict": "PASS after 1 fix round",
-   "rejected": "9 crash/data-loss/sandbox holes in the expected-broken quarantine mechanism (2 lenses); milestone review found the design bind (rename vs out-of-volume) the last revision never reconciled"
-  },
-  "7": {
-   "at": "2026-08-12T22:01:12Z",
-   "stage1": "PASS fresh worktree of 0d39f34, own npm install, 813/813 + tsc + bun leg",
-   "flakeSweep": "CLEAN: fanout+router tests 12x identical (22 pass 0 fail every run); post-fix fanout 8x identical",
-   "lenses": {
-    "concurrency": "mostly SOUND (cap, barrier, watchdog-vs-completion double-resolve, registry retry window, freeze-hold double-dispatch, router double-resolve/leak ALL airtight); 3 hang-family findings"
-   },
-   "adjudication": {
-    "fixed_C025": [
-     "F1 MAJOR: watchdog now arms BEFORE session.create (bounds create+prompt); late-create abort guard; done-guard exactly-once",
-     "F3 LOW: heldUnsubs registered before subscribe (robust to synchronous onClear)"
-    ],
-    "bound_to_9.4c": "F2: leaked-marker held-job backstop \u2014 the wave driver must surface a stale-marker break to treeState.onClear (fan-out hold path is deliberately timer-free per \u00a74.2)",
-    "orchestrator_reverify": "816/816; fanout 8x flake re-sweep identical"
-   },
-   "verdict": "PASS after 1 fix round",
-   "rejected": "1 MAJOR (unbounded create hang) + 1 low; core concurrency proven airtight by trace + 12x sweep"
-  },
-  "8": {
-   "at": "2026-08-13T00:40:00Z",
-   "what": "Phase 8 (doctrine) gate: 3 blind lenses (doc-fidelity vs \u00a76.1 port map, inject.ts \u00a76.4 conformance, subsystem completeness), each finding skeptic-verified. 11 raw -> 4 refuted -> 7 confirmed.",
-   "lenses": {
-    "doc-fidelity": "core.md omits forbidden satisfaction phrases (\u00a76.1 1837) + ponytail lite reminder (\u00a76.1 1849); review.md lacks the spec-before-quality adjudication ordering section (\u00a76.1 1841); core.md 'every role' opening overstates (injected for 2/7 roles)",
-    "inject-conformance": "debug.md never delivered (ROLE_PACKS.implementer=[tdd.md], no DEBUG-posture branch) \u2014 MAJOR; receive-review.md never delivered (no ROLE_PACKS entry, no \u00a74.1 role) + false 'referenced by review receipt' comment; X-Conductor-Group not role/stage-qualified (nit)",
-    "completeness": "debug.md + receive-review.md are loaded/validated but injected into 0 sessions; doctrine.test.ts pins content for only 7/9 packs (plan.md, skeptic.md have no content anchor -> can drift)"
-   },
-   "adjudication": {
-    "status": "RESOLVED in 1 fix round (2 commits: 102802d packs, efd0f84 injection). C-028.",
-    "fixed_packs_102802d": "core.md += forbidden-satisfaction-phrases (should work/should pass/looks good, tied to records-over-assertions) + ponytail lite reminder (cheaper-path/reuse ladder, guardrails never trimmed) + reworded 'every role' overclaim; review.md += spec-before-quality adjudication ordering (surviving spec findings discard that round's quality findings); doctrine.test.ts += 3 RED anchors (now green) + plan.md/skeptic.md hardening anchors",
-    "fixed_inject_efd0f84": "buildSystemAppend delivers debug.md for an implementer whose active item is in DEBUG posture (new optional GateItem.debugging signal; legalTools ignores it); tight guard (role+itemId+found+debugging, no dup); false receive-review.md comment corrected to name the Phase 9 deferred binding; 8.2-debug-pack red->green",
-    "deferred_binding_receive_review": "receive-review.md delivery -> the Phase 9 review-receipt/fix-round routing task threads a 'receiving-review' signal to buildSystemAppend so it appends receive-review.md (its delivery context does not exist until review findings are routed to the implementer; \u00a74.1's role table assigns it to no static role by design; pack is loaded/cached now so init stays fail-closed over the full set)",
-    "noted_nit": "X-Conductor-Group role/stage qualification \u2014 functional as-is (group by tree else itemId); refinement noted, not blocking",
-    "orchestrator_reverify": "843/843 full suite green (observed by orchestrator); each confirmed finding checked resolved: debug.md now delivered (8.2-debug-pack), review-ordering/core-forbidden/core-ponytail anchors green, receive-review honestly deferred. Fixes targeted + test-pinned; no full gate re-run needed for a non-milestone phase."
-   },
-   "verdict": "PASS after 1 fix round"
-  }
- },
- "rejections": [
-  {
-   "at": "2026-08-12T09:03:09Z",
-   "gate": "M5",
-   "what": "fragment.test.ts contained the scan word 'placeholder' (benign: describing the literal ${LLAMA_HARNESS_ROOT} token)",
-   "resolution": "reworded comments/messages to 'substitution token'; gate kept strict"
-  },
-  {
-   "at": "2026-08-12T09:39:02Z",
-   "gate": "M5",
-   "what": "bare word 'stub' flagged in wire-contract test + stub-llm-server fixture (the plan's own \u00a78 vocabulary for the fake LLM server)",
-   "resolution": "C-013: 'stub' forbidden in production source only; allowed as test-double name under conductor/tests/; .md files excluded from M5 (doc content is anchor-tested)"
-  },
-  {
-   "at": "2026-08-12T09:47:49Z",
-   "gate": "phase-0/discovery-integrity",
-   "what": "describe({skip}) suites evade skipped-count rejection; 7 unasserted wire-notes claims",
-   "resolution": "C-015: directive scan added to test-conductor.sh; wire-notes [observed] tagging"
-  },
-  {
-   "at": "2026-08-12T11:08:48Z",
-   "gate": "phase-1",
-   "what": "5 MAJOR + several minor defects: gitSubcommand false-ALLOW, isGitCommand bypass, globMatch DoS, classifyFailure escape/absolute, isHumanTerritory misses",
-   "resolution": "2 fix rounds (11+16 pinning tests), 6 future-task bindings, 4 G7-documented residuals; orchestrator re-verified 26/26 inputs"
-  },
-  {
-   "at": "2026-08-12T11:37:48Z",
-   "gate": "phase-2/crash-recovery",
-   "what": "torn trailing line corrupts the next journal record",
-   "resolution": "first-append newline heal in adapter/journal.ts, test-first ([2.1-torn-write])"
-  },
-  {
-   "at": "2026-08-12T12:22:20Z",
-   "gate": "phase-3",
-   "what": "trivial run could conductor_report with an unsettled item (closes run, loses work; handler re-verify defeated by foreign-red-set exclusion)",
-   "resolution": "reportLegal=allSettled at the gate + 9.5b handler-precondition binding; G6 single-source guard added"
-  },
-  {
-   "at": "2026-08-12T14:09:59Z",
-   "gate": "phase-4",
-   "what": "answerQuestion answer-first wedge (MAJOR); unvalidated-id path traversal (MAJOR-latent); questions tmp symlink-follow; lock TOCTOU; createRun orphan dir",
-   "resolution": "5 fixes test-first (522>517); 9.6 binding for worktree exclude"
-  },
-  {
-   "at": "2026-08-12T19:40:06Z",
-   "gate": "phase-5-milestone",
-   "what": "8 security holes: shell-expansion git bypass, wrapper-with-flags bypass x3, >| redirect, .. traversal, in-place writers, checkout -f",
-   "resolution": "2 fix rounds, 763/763; orchestrator re-attacked twice, 0 residuals"
-  },
-  {
-   "at": "2026-08-12T21:05:39Z",
-   "gate": "phase-6-milestone",
-   "what": "quarantine: EXDEV cross-fs crash, clobber-on-restore data loss, sandbox escape via unvalidated ids (rmSync recursive outside), live-run replay, illegal-red too loose, + 4 minor",
-   "resolution": "1 fix round (C-024), 791/791; orchestrator re-verified 0 residual"
-  },
-  {
-   "at": "2026-08-12T22:01:12Z",
-   "gate": "phase-7",
-   "what": "fan-out watchdog didn't cover session.create (unbounded wave hang); held-job sync-onClear strand",
-   "resolution": "C-025 fixes (watchdog before create + heldUnsubs ordering); F2 bound to 9.4c; 816/816"
-  },
-  {
-   "at": "2026-08-13T00:40:00Z",
-   "gate": "phase-8",
-   "what": "doctrine subsystem: debug.md loaded but injected into 0 sessions (MAJOR); receive-review.md same (no delivery vector); review.md missing spec-before-quality ordering (MAJOR); core.md missing forbidden-satisfaction-phrases + ponytail lite reminder; doctrine.test.ts pinned only 7/9 packs",
-   "resolution": "C-028, 1 fix round / 2 commits (102802d packs, efd0f84 injection): debug.md now delivered on implementer DEBUG posture (GateItem.debugging); core.md/review.md doctrine added + anchored; plan.md/skeptic.md anchored; receive-review.md deferred to Phase 9 review-receipt binding; X-Group nit noted; 843/843"
-  }
- ]
+    {
+      "at": "2026-08-12T11:08:48Z",
+      "gate": "phase-1",
+      "what": "5 MAJOR + several minor defects: gitSubcommand false-ALLOW, isGitCommand bypass, globMatch DoS, classifyFailure escape/absolute, isHumanTerritory misses",
+      "resolution": "2 fix rounds (11+16 pinning tests), 6 future-task bindings, 4 G7-documented residuals; orchestrator re-verified 26/26 inputs"
+    },
+    {
+      "at": "2026-08-12T11:37:48Z",
+      "gate": "phase-2/crash-recovery",
+      "what": "torn trailing line corrupts the next journal record",
+      "resolution": "first-append newline heal in adapter/journal.ts, test-first ([2.1-torn-write])"
+    },
+    {
+      "at": "2026-08-12T12:22:20Z",
+      "gate": "phase-3",
+      "what": "trivial run could conductor_report with an unsettled item (closes run, loses work; handler re-verify defeated by foreign-red-set exclusion)",
+      "resolution": "reportLegal=allSettled at the gate + 9.5b handler-precondition binding; G6 single-source guard added"
+    },
+    {
+      "at": "2026-08-12T14:09:59Z",
+      "gate": "phase-4",
+      "what": "answerQuestion answer-first wedge (MAJOR); unvalidated-id path traversal (MAJOR-latent); questions tmp symlink-follow; lock TOCTOU; createRun orphan dir",
+      "resolution": "5 fixes test-first (522>517); 9.6 binding for worktree exclude"
+    },
+    {
+      "at": "2026-08-12T19:40:06Z",
+      "gate": "phase-5-milestone",
+      "what": "8 security holes: shell-expansion git bypass, wrapper-with-flags bypass x3, >| redirect, .. traversal, in-place writers, checkout -f",
+      "resolution": "2 fix rounds, 763/763; orchestrator re-attacked twice, 0 residuals"
+    },
+    {
+      "at": "2026-08-12T21:05:39Z",
+      "gate": "phase-6-milestone",
+      "what": "quarantine: EXDEV cross-fs crash, clobber-on-restore data loss, sandbox escape via unvalidated ids (rmSync recursive outside), live-run replay, illegal-red too loose, + 4 minor",
+      "resolution": "1 fix round (C-024), 791/791; orchestrator re-verified 0 residual"
+    },
+    {
+      "at": "2026-08-12T22:01:12Z",
+      "gate": "phase-7",
+      "what": "fan-out watchdog didn't cover session.create (unbounded wave hang); held-job sync-onClear strand",
+      "resolution": "C-025 fixes (watchdog before create + heldUnsubs ordering); F2 bound to 9.4c; 816/816"
+    },
+    {
+      "at": "2026-08-13T00:40:00Z",
+      "gate": "phase-8",
+      "what": "doctrine subsystem: debug.md loaded but injected into 0 sessions (MAJOR); receive-review.md same (no delivery vector); review.md missing spec-before-quality ordering (MAJOR); core.md missing forbidden-satisfaction-phrases + ponytail lite reminder; doctrine.test.ts pinned only 7/9 packs",
+      "resolution": "C-028, 1 fix round / 2 commits (102802d packs, efd0f84 injection): debug.md now delivered on implementer DEBUG posture (GateItem.debugging); core.md/review.md doctrine added + anchored; plan.md/skeptic.md anchored; receive-review.md deferred to Phase 9 review-receipt binding; X-Group nit noted; 843/843"
+    }
+  ]
 }

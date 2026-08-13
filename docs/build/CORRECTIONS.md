@@ -729,3 +729,109 @@ have been a false green of exactly the kind these gates exist to catch. Re-run; 
 - **Blast radius:** `conductor/core/planning.ts` (findingBlocksItems + pathLikeTokens + ID_BOUNDARY),
   `conductor/adapter/tools.ts` (lens roster, skeptic guard, cumulative claims, journal), and
   `conductor/tests/tools-9.3.test.ts` (8 authored + 6 review-fix = 14). 901/901 green.
+
+## C-032 — Task 9.4a (conductor_submit_test + conductor_vet_test): adversarial review found 5 surviving MAJORs, 3 distinct defects
+
+**How it was found.** Throttled adversarial review of the uncommitted 9.4a diff (2 blind lenses —
+spec-conformance and edge-counterexample — then 2 refute-biased skeptics per MAJOR only; spec quoted
+inline so no agent re-read the 3,399-line plan). 18 agents, 2.3M tokens. Five majors survived, and they
+collapse to THREE defects: each lens independently found two of them. One major (F1, the `testWriter`
+vs `test-writer` role vocabulary) was REFUTED by both its skeptics — the string the diff uses is the one
+§3.3 and the pinned contract name — and is recorded here only so the refutation is not re-litigated.
+
+The 11 authored tests passed throughout. Every defect below is one the suite structurally could not
+catch, which is the whole reason the review exists.
+
+- **MAJOR (F3 + E1) — a failure somewhere ELSE in the suite was admitted as this item's RED.**
+  `adapter/evidence.ts` computes `legalRed` — the §2.1 illegal-red rule, `isLegalClass(class) &&
+  (targeted || the excerpt names a testScope file)` — for exactly the §3.3 case "a collection failure
+  elsewhere — is NOT red". Both handlers DROPPED it, taking only `outcome.record` and admitting the red
+  on failureClass alone. Reachable on any project whose verify scope carries no §2.1 `itemTest` template
+  (schema-optional: the scope schema requires only command + timeoutMs) and via the zero-test fallback.
+  `grep legalRed` showed it was written by evidence.ts and read by NOBODY. The fixture config hid it: its
+  full-scope tripwire emits a token that classifies as "error", so the tests only ever asserted the
+  tripwire's absence. FIX: one `redAdmission` helper applies BOTH halves — core keeps the §2.6.1 class
+  split, evidence.ts keeps the targeting half — at both the submit admission and the vet re-run. An
+  untargeted red is NOT repairable (no edit to the writer's own test makes a full-suite run target it),
+  so it stops the stage and asks instead of burning the repair budget re-observing someone else's failure.
+
+- **MAJOR (F2 + E2) — a PASSING test could reach TEST_VETTED, and thence GREEN.** The vet's captured red
+  was a property of the POINTER, not of the test on disk. When a mustFix repair stopped being a red,
+  `blockVetAndAsk` wrote only `attempts.vetRounds` — it never re-pointed or invalidated
+  `item.evidence.red` — and `capturedRedOf` PREFERS the pointer over the ledger's latest record. So after
+  the question was answered, the next vet paired the PRE-repair red with the POST-repair (passing) test,
+  a clean critic round advanced RED→TEST_VETTED, and TEST_VETTED→GREEN requires only `testExit === 0`,
+  which a passing test satisfies. An item could go green with no red ever proven for the test it ships —
+  the exact anchoring G6/P6 exist to prevent. FIX: `capturedRedOf` also reports whether ANY run for the
+  item is newer than that red; a stale pairing is re-established through `evidence.runTest` at vet entry
+  (and must still be a legal red, or the stage blocks and asks). P6 is intact — on the normal path the red
+  IS the newest run, so a clean first round still re-runs nothing.
+
+- **MAJOR (E5) — queue-declared `testScope` paths escaped the repo, in BOTH directions.** They were
+  dereferenced un-normalised: handed to the child test runner as argv, and read into sub-session prompts.
+  A `..` entry made the child EXECUTE an out-of-repo file and streamed its contents to the model
+  (reproduced: sentinel written, marker in the prompt). queue.json is model-authored and core
+  `validateQueue` constrains ids, DAG shape, sizes and behavioral/testScope pairing but never path SHAPE.
+  The rest of the codebase takes the opposite posture — gates-edit denies a `..` segment before scope
+  matching, state.assertSafeId rejects separators, quarantine rejects absolute paths. FIX:
+  `assertContainedPaths` at the legality step (the last point before both dereferences), refusing absolute
+  and `..` entries by name rather than normalising them away.
+
+- **MINOR (E11) — a REGRESSION this diff introduced.** The 9.4a/5.3 depsReady binding made a DEFERRED
+  dependency wedge the run: dependents got no stage tool (unready) and were not `isSettled`, so
+  `conductor_report` was never legalized and `recommended` was null — permanently, with no escape the
+  gate's `why` or the deny message mentioned. Before the binding the dependents were still offered their
+  stage tool, so the run could finish. FIX: a new `cannotEverPublish` fixpoint in core/gates-phase.ts
+  extends the report precondition — an item stalled behind a chain that can never reach PUBLISHED is as
+  closed as a settled one. A BLOCKED dependency is deliberately EXCLUDED (a question can be answered and
+  the item resumes, so conductor_answer is the way out and the run is waiting, not finished); this is
+  what keeps the committed 8.2-null-recommendation contract intact, and a first, broader version of the
+  fix that retracted blocked deps too was caught by that test and narrowed.
+
+- **MINOR (E6, fixed) — `capturedRedOf` trusted the ledger unconditionally**, so a §2.6.1 class-"error"
+  record — the very class the submit side refuses as "not a red" — could be handed to the critics as THE
+  CAPTURED RED, and an unresolvable pointer silently substituted the newest red with no warning. FIX:
+  filter to the legal classes; journal a warn when the pointer had to be resolved by fallback.
+
+- **MINOR (E10, fixed) — §2.5 attempts under-reported the item's history.** `attempts.testRepairs` and
+  `attempts.vetRounds` were ASSIGNED the current call's local counter, so a second call after an answered
+  question overwrote what the first spent. FIX: accumulate. (The related question — whether the BUDGET
+  itself should be per-item rather than per-call — is a policy choice, raised at the Phase 9 gate.)
+
+- **MINOR (F4, fixed) — `NEEDS_CONTEXT` was treated as a completed write.** Only status "BLOCKED" was
+  handled, so a writer asking for context silently burned a repair attempt per round (reproduced: all 4
+  dispatches spent) and the question raised at exhaustion did not relay what it asked for. FIX: same exit
+  as BLOCKED, with `neededContext` carried into the question.
+
+- **MINOR (F7, fixed, no new test) — the §2.7 two-options law was asserted in a comment, not enforced.**
+  The immediate-pass fork appended its decision straight through `appendDecision`, while every other
+  decision-writing site gates on core `requireTwoOptions` first. The literal is compliant today, so no
+  test could go red; the gate is now called at the write so the site cannot drift.
+
+- **NIT (E12, fixed) — a crash-torn questions.jsonl line killed the LEGALITY step** with a raw
+  SyntaxError naming neither the tool nor the file. FIX: a named legality failure, the shape
+  `readQueueJson` was written to have.
+
+- **NIT (E13, fixed) — fractional knobs rounded budgets UP.** The §2.1 schema types them `number` and the
+  subset validator has no integer/minimum keyword, so `testRepairAttempts: 1.5` spent TWO repairs and a
+  2.5 vet fan-out dispatched THREE critics. FIX: floor at the read.
+
+- **Raised at the Phase 9 milestone gate (POLICY, not defects):** (a) **F5** the §4.2 readiness predicate
+  is written twice — `depsReady` (enforcing) and `unpublishedDeps` (which composes the refusal message) —
+  with no single source; (b) **F6** `itemVerifyScope` matches requiredScopes against fileScope as well as
+  testScope and silently takes the first candidate with an `itemTest`, so a repo whose production and
+  test paths select different scopes can run the wrong runner; (c) **E8** `vetCritics: 0` /
+  `vetMaxRounds: 0` make the handler throw while the gate still RECOMMENDS the tool — knob validation
+  belongs at config load; (d) **E9** the item test runs synchronously inside an async handler, freezing
+  the orchestrator's event loop (and every fan-out watchdog) for the duration of each run; (e) **E14**
+  the vet roster is sized by `readFanout` alone while handlePlanReview floors its roster at the coverage
+  set — two stages disagreeing in one file; (f) whether the repair/round BUDGETS should be per-item
+  rather than per-call. **Deferred to Task 10.1** (crash/partial-write class, with the C-030/C-031
+  parks): **E7**, the question-then-setBlocked window, which can leave an OPEN question no item
+  references.
+
+- **Blast radius:** `conductor/adapter/tools.ts` (redAdmission + assertContainedPaths + capturedRedOf
+  staleness + the two NEEDS_CONTEXT exits + floored knobs + accumulated attempts + requireTwoOptions),
+  `conductor/core/gates-phase.ts` (cannotEverPublish + the report precondition), and the new
+  `conductor/tests/tools-9.4a-review.test.ts` (9 defect reproductions, red before / green after).
+  921/921 green, typecheck OK, bun leg OK.

@@ -1,1744 +1,1768 @@
 {
- "meta": {
-  "buildStarted": "2026-08-12T08:46:14Z",
-  "planFile": "docs/plans/2026-08-07-conductor-harness-plan.md",
-  "planLines": 3399,
-  "planRevision": 5,
-  "manifestCount": 52,
-  "canonicalTestCmd": "bash scripts/test-conductor.sh",
-  "environment": {
-   "node": "v26.7.0",
-   "opencode": "1.18.10",
-   "python3": "3.9.6 (/usr/bin/python3)",
-   "bun": "1.3.14 (installed at preflight via brew)",
-   "pytest": "8.4.2 (installed at preflight via pip --user; invoke as /usr/bin/python3 -m pytest)",
-   "cmake": "4.4.2",
-   "ninja": "1.13.2",
-   "go": "1.26.5",
-   "clang": "Apple clang 21.0.0",
-   "git": "2.50.1",
-   "timeout": "ABSENT",
-   "loginShell": "/bin/zsh (prompt said fish; no impact, scripts are bash)",
-   "llamaServer": "version 10298 at .data/tools/llama-server (verified runs)",
-   "g13Model": "qwen3.6-27b (21G, present)",
-   "smokeModel": "ornith-9b (5.2G, present)",
-   "port8080": "free at preflight",
-   "diskFree": "431Gi"
+  "meta": {
+    "buildStarted": "2026-08-12T08:46:14Z",
+    "planFile": "docs/plans/2026-08-07-conductor-harness-plan.md",
+    "planLines": 3399,
+    "planRevision": 5,
+    "manifestCount": 52,
+    "canonicalTestCmd": "bash scripts/test-conductor.sh",
+    "environment": {
+      "node": "v26.7.0",
+      "opencode": "1.18.10",
+      "python3": "3.9.6 (/usr/bin/python3)",
+      "bun": "1.3.14 (installed at preflight via brew)",
+      "pytest": "8.4.2 (installed at preflight via pip --user; invoke as /usr/bin/python3 -m pytest)",
+      "cmake": "4.4.2",
+      "ninja": "1.13.2",
+      "go": "1.26.5",
+      "clang": "Apple clang 21.0.0",
+      "git": "2.50.1",
+      "timeout": "ABSENT",
+      "loginShell": "/bin/zsh (prompt said fish; no impact, scripts are bash)",
+      "llamaServer": "version 10298 at .data/tools/llama-server (verified runs)",
+      "g13Model": "qwen3.6-27b (21G, present)",
+      "smokeModel": "ornith-9b (5.2G, present)",
+      "port8080": "free at preflight",
+      "diskFree": "431Gi"
+    },
+    "orderingOverrides": [
+      "0.3 before 0.2",
+      "4.2 before 4.1",
+      "2.2 after 4.1",
+      "12.1 split into 12.1-core + 12.1-G5"
+    ],
+    "convention.commitSha": "A row's commitSha is backfilled by the next STATE.json touch (the row's own commit cannot know its sha); git log --grep on commitMessage is authoritative meanwhile."
   },
-  "orderingOverrides": [
-   "0.3 before 0.2",
-   "4.2 before 4.1",
-   "2.2 after 4.1",
-   "12.1 split into 12.1-core + 12.1-G5"
-  ],
-  "convention.commitSha": "A row's commitSha is backfilled by the next STATE.json touch (the row's own commit cannot know its sha); git log --grep on commitMessage is authoritative meanwhile."
- },
- "tasks": {
-  "0.1": {
-   "taskId": "0.1",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "cf90018",
-   "commitMessage": "conductor: 0.1 standing decisions",
-   "planLines": [
-    1978,
-    1998
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": {
-    "cmd": null,
-    "exitCode": null,
-    "class": "n/a",
-    "excerpt": "doc-only task; the plan enumerates no test for 0.1 (tier C mechanical)"
-   },
-   "filesTouched": [
-    "conductor/DECISIONS.md"
-   ],
-   "revertAssertion": "no test by plan design; acceptance-level check instead: conductor/DECISIONS.md exists, non-empty, contains headings (a)-(g) with Options/Why sections (verify-acceptance.sh will assert this)",
-   "attempts": 1,
-   "deviations": [],
-   "startedAt": "2026-08-12T08:55:00Z",
-   "finishedAt": "2026-08-12T08:55:12Z"
-  },
-  "0.2": {
-   "taskId": "0.2",
-   "manifest": true,
-   "tier": "phase-gate:discovery-integrity",
-   "status": "COMMITTED",
-   "commitSha": "0cf8b82",
-   "commitMessage": "conductor: 0.2 wire contract pinned",
-   "planLines": [
-    1999,
-    2041
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 24,
-    "pass": 24,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": null,
-    "exitCode": null,
-    "class": "n/a",
-    "excerpt": "discovery task: green = test passes with RECORDED reality (plan line 2038); no-skip guard asserts the suite ran on this machine; phase-gate discovery-integrity lens audits execution"
-   },
-   "filesTouched": [
-    "conductor/tests/wire-contract.test.ts",
-    "conductor/tests/fixtures/recorder-plugin.ts",
-    "conductor/tests/fixtures/crashing-plugin.ts",
-    "conductor/tests/fixtures/stub-llm-server.ts",
-    "conductor/tests/fixtures/wire-markers.ts",
-    "conductor/adapter/wire-notes.md",
-    "conductor/opencode-fragment.json",
-    "conductor/tests/fragment.test.ts",
-    "scripts/conductor-gate.sh"
-   ],
-   "revertAssertion": "reverting wire-notes.md/fixtures breaks the 17-test wire suite (imports + the 0.2-noskip mainSuiteRan tripwire); reverting the fragment tools key fails 'fragment: every agent denies the built-in task spawn tool'",
-   "attempts": 1,
-   "deviations": [
-    "C-012: binary self-updated 1.18.10 -> 1.18.15 mid-build; contract pinned against 1.18.15",
-    "DRIFT: prompt format:{json_schema} does not exist -> structured output = prompt-shaped + independent validation (scopes 7.1); requests carry NO schema field (scopes 11.6)",
-    "DRIFT: permission reply = POST /session/{id}/permissions/{permissionID} {response}, not client.permission.reply({requestID, reply})",
-    "C-014: fragment + fragment.test.ts gained tools.task=false (plan-mandated cross-task update, \u00a75.3 lines 1792-1798, key pinned by discovery iii)"
-   ],
-   "startedAt": "2026-08-12T09:10:00Z",
-   "finishedAt": "2026-08-12T09:39:02Z"
-  },
-  "0.3": {
-   "taskId": "0.3",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "da2dab2",
-   "commitMessage": "conductor: 0.3 scaffold",
-   "planLines": [
-    2042,
-    2056
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 7,
-    "pass": 7,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/types.ts (smoke); ENOENT conductor/opencode-fragment.json (6 fragment tests); observed by orchestrator pre-implementation"
-   },
-   "filesTouched": [
-    "conductor/tsconfig.json",
-    "conductor/package.json",
-    "conductor/package-lock.json",
-    ".gitignore",
-    "conductor/tests/smoke.test.ts",
-    "conductor/tests/fragment.test.ts",
-    "conductor/core/types.ts",
-    "conductor/opencode-fragment.json"
-   ],
-   "revertAssertion": "smoke.test.ts 'CONDUCTOR_NAME imported from ../core/types.ts equals \"conductor\"' fails ERR_MODULE_NOT_FOUND if core/types.ts is reverted; all 6 fragment.test.ts tests fail ENOENT if opencode-fragment.json is reverted",
-   "attempts": 1,
-   "deviations": [
-    "C-010 (no 1===1 assertion; @types/node third devDep)",
-    "type:module added to package.json for import.meta under nodenext"
-   ],
-   "startedAt": "2026-08-12T09:00:00Z",
-   "finishedAt": "2026-08-12T09:03:09Z"
-  },
-  "1.1": {
-   "taskId": "1.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "99751fc",
-   "commitMessage": "conductor: 1.1 schemas",
-   "planLines": [
-    2059,
-    2084
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 109,
-    "pass": 109,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/types.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "SyntaxError: The requested module '../core/types.ts' does not provide an export named 'SCHEMAS' (link-time, names the task-scope module; observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/types.test.ts",
-    "conductor/core/types.ts"
-   ],
-   "revertAssertion": "reverting core/types.ts to its 0.3 form fails all of types.test.ts at link time (missing SCHEMAS/validate exports) \u2014 84 tests; e.g. 'rejects item state \"DONE\"' can only pass against the real Item schema",
-   "attempts": 1,
-   "deviations": [
-    "EvidenceRecord/AnomalyRecord encoded as merged object schemas (subset has no combinator; tests reject oneOf); TS discriminated unions carry the per-kind strictness; noted in file comments"
-   ],
-   "startedAt": "2026-08-12T10:05:00Z",
-   "finishedAt": "2026-08-12T10:13:29Z"
-  },
-  "1.2": {
-   "taskId": "1.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "88c07f8",
-   "commitMessage": "conductor: 1.2 shell/glob parse",
-   "planLines": [
-    2085,
-    2099
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 172,
-    "pass": 172,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/shell-parse.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/shell-parse.ts (observed by orchestrator after moving staged tests in)"
-   },
-   "filesTouched": [
-    "conductor/tests/shell-parse.test.ts",
-    "conductor/core/shell-parse.ts"
-   ],
-   "revertAssertion": "removing core/shell-parse.ts re-fails all 63 shell-parse tests at link time; e.g. '[1.2-glued] a.cpp;git -> a.cpp / ; / git' passes only against the real tokenizer",
-   "attempts": 1,
-   "deviations": [],
-   "startedAt": "2026-08-12T10:40:00Z",
-   "finishedAt": "2026-08-12T10:19:44Z"
-  },
-  "1.3": {
-   "taskId": "1.3",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "29c7e03",
-   "commitMessage": "conductor: 1.3 freshness/failure-class/stops/verdict",
-   "planLines": [
-    2100,
-    2129
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 228,
-    "pass": 228,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "3 suites fail ERR_MODULE_NOT_FOUND naming core/freshness.ts, core/stops.ts, core/verdict.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/freshness.test.ts",
-    "conductor/tests/stops.test.ts",
-    "conductor/tests/verdict.test.ts",
-    "conductor/core/freshness.ts",
-    "conductor/core/stops.ts",
-    "conductor/core/verdict.ts"
-   ],
-   "revertAssertion": "removing the three core modules re-fails all 52 tests at link time; e.g. stops.test.ts's 80-combo interrupt sweep only passes against the real shouldTerminate",
-   "attempts": 1,
-   "deviations": [
-    "shouldTerminate guards isTerminal(run) first (plan silent, \u00a73.7-consistent)",
-    "multi-specifier rule: ALL must be in-scope for missing-subject (conservative per \u00a72.6.1)",
-    "classification by output shape, exitCode recorded-not-consulted (runners disagree on codes)"
-   ],
-   "startedAt": "2026-08-12T11:15:00Z",
-   "finishedAt": "2026-08-12T10:26:42Z"
-  },
-  "1.4": {
-   "taskId": "1.4",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "d078a21",
-   "commitMessage": "conductor: 1.4 purity + dual-runtime guards",
-   "planLines": [
-    2130,
-    2143
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 176,
-    "pass": 176,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": null,
-    "exitCode": null,
-    "class": "n/a",
-    "excerpt": "guard task: no red by design (plan line 2135 'trivially green now; bites later'); M4 mutation variant executed instead \u2014 see revertAssertion"
-   },
-   "filesTouched": [
-    "conductor/tests/purity.test.ts"
-   ],
-   "revertAssertion": "mutation probes run by orchestrator: (A) node:fs import injected into core/types.ts -> 2 guard tests FAIL naming the file/token; (B) legal core-sibling import -> 4/4 PASS (not over-broad); (C) Bun.spawn in adapter/probe-adapter.ts -> 2 guard tests FAIL naming G14",
-   "attempts": 1,
-   "deviations": [
-    "executed after 1.2, before 1.3/1.5 (within the prompt \u00a76.2 safe-pair {1.1,1.2,1.4})"
-   ],
-   "startedAt": "2026-08-12T11:05:00Z",
-   "finishedAt": "2026-08-12T10:20:34Z"
-  },
-  "1.5": {
-   "taskId": "1.5",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "bbc0f85",
-   "commitMessage": "conductor: 1.5 decision helpers",
-   "planLines": [
-    2144,
-    2160
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 252,
-    "pass": 252,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/decide.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/decide.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/decide.test.ts",
-    "conductor/core/decide.ts"
-   ],
-   "revertAssertion": "removing core/decide.ts re-fails all 24 decide tests at link time; the 13-row human-territory table only passes against the real classifier",
-   "attempts": 1,
-   "deviations": [
-    "unscored options total 0 in scoreOptions (requireTwoOptions is the rejection gate); empty options -> {winner:null, tie:false}"
-   ],
-   "startedAt": "2026-08-12T11:45:00Z",
-   "finishedAt": "2026-08-12T10:30:38Z"
-  },
-  "2.1": {
-   "taskId": "2.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "85e0f6a",
-   "commitMessage": "conductor: 2.1 journal",
-   "planLines": [
-    2163,
-    2178
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 302,
-    "pass": 302,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/journal.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND core/journal-events.ts + adapter/journal.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/journal.test.ts",
-    "conductor/core/journal-events.ts",
-    "conductor/adapter/journal.ts"
-   ],
-   "revertAssertion": "removing either journal subject re-fails all 22 journal tests at link time; e.g. '[2.1-seq] seq monotonic, second journal continues from last seq' only passes against the real re-read-last-seq adapter",
-   "attempts": 1,
-   "deviations": [
-    "dev/test-vs-prod flag = env.NODE_ENV (prod arm retains+surfaces, never drops, per \u00a77.4); rotation index found via existsSync probe (readdirSync not in the allowed fs set)"
-   ],
-   "startedAt": "2026-08-12T12:30:00Z",
-   "finishedAt": "2026-08-12T11:31:03Z",
-   "note": "+1 test in Phase-2 gate fix (torn-line heal); see phaseGates.2"
-  },
-  "2.2": {
-   "taskId": "2.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "06818b3",
-   "commitMessage": "conductor: 2.2 bun runtime smoke",
-   "planLines": [
-    2179,
-    2205
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 522,
-    "pass": 522,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": null,
-    "exitCode": null,
-    "class": "n/a",
-    "excerpt": "proof task (dual-runtime smoke of existing modules): no missing-subject red; green = recorded reality that state/journal/gitio behave identically under node AND bun (like a discovery task). bun leg is M9, orchestrator-run."
-   },
-   "filesTouched": [
-    "conductor/tests/bun-smoke.test.ts",
-    "scripts/test-conductor.sh"
-   ],
-   "revertAssertion": "removing bun-smoke.test.ts drops the bun leg (test-conductor.sh guards on its existence); the 8 dual-runtime assertions (atomic-throw, lock stale-break, journal ordering+torn-heal, gitio execFile) fail under bun if the adapters ever diverge by runtime",
-   "attempts": 1,
-   "deviations": [
-    "ordering override 3: 2.2 committed immediately after 4.1 (not in Phase 2)",
-    "G14 leg ACTIVE (bun 1.3.14) \u2014 the preflight-uncertain acceptance row (\u00a72.5/C-002) is now a real green, NOT SKIPPED_UNMET",
-    "no cross-runtime divergence: no adapter change, no wire-notes stamp needed"
-   ],
-   "startedAt": "2026-08-12T15:40:00Z",
-   "finishedAt": "2026-08-12T13:41:09Z"
-  },
-  "3.1": {
-   "taskId": "3.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "c61c99d",
-   "commitMessage": "conductor: 3.1 FSMs",
-   "planLines": [
-    2208,
-    2233
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 482,
-    "pass": 482,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND core/fsm-run.ts + fsm-item.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/fsm-run.test.ts",
-    "conductor/tests/fsm-item.test.ts",
-    "conductor/core/fsm-run.ts",
-    "conductor/core/fsm-item.ts"
-   ],
-   "revertAssertion": "removing either FSM module re-fails all 149 transition tests at link time; e.g. fsm-item 'PENDING->RED missing-subject ACCEPTED' only passes against the real table",
-   "attempts": 1,
-   "deviations": [
-    "states defined inline in fsm-*.ts (pure, no ./types coupling); must stay set-equal to types.ts RunState/ItemState \u2014 spec-conformance to verify"
-   ],
-   "startedAt": "2026-08-12T13:15:00Z",
-   "finishedAt": "2026-08-12T11:46:53Z"
-  },
-  "3.2": {
-   "taskId": "3.2",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "bd35785",
-   "commitMessage": "conductor: 3.2 phase legality",
-   "planLines": [
-    2234,
-    2260
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 482,
-    "pass": 482,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-phase.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND core/gates-phase.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/gates-phase.test.ts",
-    "conductor/core/gates-phase.ts"
-   ],
-   "revertAssertion": "removing core/gates-phase.ts re-fails all 15 legality tests; [3.2-two-item-wave] reorder-determinism only passes against the nextWave-delegated derivation",
-   "attempts": 1,
-   "deviations": [
-    "conductor_report also legalized when ALL items settled (not only trivial) \u2014 \u00a73.2 'no terminal path writes nothing'; adds report to a lone-blocked legal set (test only asserts the 6 per-item tools absent, so passes). To confirm at Phase-3 gate."
-   ],
-   "startedAt": "2026-08-12T13:50:00Z",
-   "finishedAt": "2026-08-12T12:04:27Z"
-  },
-  "3.3": {
-   "taskId": "3.3",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "680c6d9",
-   "commitMessage": "conductor: 3.3 wave scheduler",
-   "planLines": [
-    2261,
-    2273
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 482,
-    "pass": 482,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/schedule.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND core/schedule.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/schedule.test.ts",
-    "conductor/core/schedule.ts"
-   ],
-   "revertAssertion": "removing core/schedule.ts re-fails all 13 scheduler tests; the empty-scope binding test [3.3-empty-scope] only passes against the explicit isDegenerateScope predicate",
-   "attempts": 1,
-   "deviations": [
-    "phaseGate1 binding satisfied via explicit isDegenerateScope (empty OR wildcard-head) forcing serialize, not trusting scopesIntersect"
-   ],
-   "startedAt": "2026-08-12T13:35:00Z",
-   "finishedAt": "2026-08-12T11:52:44Z"
-  },
-  "4.1": {
-   "taskId": "4.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "db408ba",
-   "commitMessage": "conductor: 4.1 state store",
-   "planLines": [
-    2276,
-    2304
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 522,
-    "pass": 522,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/state.ts + adapter/questions.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/state.test.ts",
-    "conductor/tests/questions.test.ts",
-    "conductor/adapter/state.ts",
-    "conductor/adapter/questions.ts"
-   ],
-   "revertAssertion": "removing state.ts re-fails all 16 state tests; [4.1-atomic] injected-throw-leaves-old-file only passes against the tmp+rename+rmSync-on-catch writer; [4.1-lock] stale-break only passes against isAlive ESRCH + over-age logic",
-   "attempts": 1,
-   "deviations": [
-    "C-019 stale-break routed to journal (not AnomalyRecord)",
-    "beacon shape {pid,startMs,version,sessionID} per \u00a73.8 over \u00a71.2's 3-field comment",
-    "staleLockMs default 24h injectable",
-    "injected DI clock (now) + pid for deterministic lock/beacon/sinceMs"
-   ],
-   "startedAt": "2026-08-12T14:55:00Z",
-   "finishedAt": "2026-08-12T13:21:05Z"
-  },
-  "4.2": {
-   "taskId": "4.2",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "37ddab7",
-   "commitMessage": "conductor: 4.2 gitio",
-   "planLines": [
-    2305,
-    2321
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 522,
-    "pass": 522,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gitio.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/gitio.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/gitio.test.ts",
-    "conductor/adapter/gitio.ts"
-   ],
-   "revertAssertion": "removing adapter/gitio.ts re-fails all 9 gitio tests; [4.2-zero-commit] headSha-null only passes against the tryGit exit-128->null mapping",
-   "attempts": 1,
-   "deviations": [
-    "built BEFORE 4.1 (ordering override 2); strips GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR from git env (safety, prevents off-cwd redirect)"
-   ],
-   "startedAt": "2026-08-12T14:30:00Z",
-   "finishedAt": "2026-08-12T12:40:06Z"
-  },
-  "5.1": {
-   "taskId": "5.1",
-   "manifest": true,
-   "tier": "A",
-   "status": "COMMITTED",
-   "commitSha": "0f2a282",
-   "commitMessage": "conductor: 5.1 git policy",
-   "planLines": [
-    2324,
-    2350
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 642,
-    "pass": 642,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-git.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND core/gates-git.ts (observed by orchestrator; first impl attempt died to a machine-sleep env error before creating any file \u2014 clean recovery, no partial work)"
-   },
-   "filesTouched": [
-    "conductor/tests/gates-git.test.ts",
-    "conductor/core/gates-git.ts"
-   ],
-   "revertAssertion": "removing core/gates-git.ts re-fails all 120 git-policy tests; [5.1-phasegate] 'git branch -D x -> deny' only passes against the operand-scanning decideBranch (keying on gitSubcommand alone would ALLOW it). Orchestrator independently re-ran 18 security-critical cases: 18/18 correct.",
-   "attempts": 2,
-   "deviations": [
-    "sessionRole/gitMode void'd (git policy role/mode-uniform per \u00a73.5:1373; publish handler runs git via execFile, never reaching this gate)",
-    "bare git remote/reflog/stash-show/tag default-denied (not on the exhaustive allow-list; spec-faithful \u2014 a missing allow only surfaces a question)"
-   ],
-   "startedAt": "2026-08-12T16:50:00Z",
-   "finishedAt": "2026-08-12T16:14:17Z"
-  },
-  "5.2": {
-   "taskId": "5.2",
-   "manifest": true,
-   "tier": "A",
-   "status": "COMMITTED",
-   "commitSha": "cc0ed55",
-   "commitMessage": "conductor: 5.2 edit + session gates",
-   "planLines": [
-    2351,
-    2374
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 691,
-    "pass": 691,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-edit.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND core/gates-edit.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/gates-edit.test.ts",
-    "conductor/core/gates-edit.ts"
-   ],
-   "revertAssertion": "removing core/gates-edit.ts re-fails all 49 edit-gate tests; [5.2-freeze] test-writer-denied-in-own-testScope and [5.2-unregistered] spawn-denied-from-registered only pass against freeze-before-role + unconditional-spawn-first. Orchestrator re-ran 12 security cases: 12/12 correct.",
-   "attempts": 1,
-   "deviations": [
-    "freeze/.conductor/role ordering (both denies; no test distinguishes)",
-    "decideEdit doesn't re-adjudicate registered (decideSession owns it, \u00a73.5:1344)",
-    "paths outside sessionTree left non-normalized -> fail-safe via role deny"
-   ],
-   "startedAt": "2026-08-12T17:20:00Z",
-   "finishedAt": "2026-08-12T16:24:06Z"
-  },
-  "5.3": {
-   "taskId": "5.3",
-   "manifest": true,
-   "tier": "A",
-   "status": "COMMITTED",
-   "commitSha": "3f794d6",
-   "commitMessage": "conductor: 5.3 gate wiring",
-   "planLines": [
-    2375,
-    2393
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 703,
-    "pass": 703,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gate-wiring.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/tools.ts + plugin/index.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/gate-wiring.test.ts",
-    "conductor/adapter/tools.ts",
-    "conductor/plugin/index.ts"
-   ],
-   "revertAssertion": "removing tools.ts/index.ts re-fails all 12 wiring tests; [5.3-fail-closed] only passes against the up-front guardedness flag (crash a git command -> deny; crash ls -> allow). Orchestrator independently re-ran the fail-closed/open proof: git commit BLOCKED, ls ALLOWED, 2 gate-crash logged.",
-   "attempts": 1,
-   "deviations": [
-    "tool() imported as a runtime value from @opencode-ai/plugin (sanctioned: the dev-dep opencode loads at runtime; the recorder-plugin fixture already relies on it); types via import type. G1 spirit preserved (adapter composes only pure cores).",
-    "plugin hook uses an empty registry + pin/runActive defaults as construction-safe placeholders replaced by later phases (5.4/9.x)"
-   ],
-   "startedAt": "2026-08-12T17:45:00Z",
-   "finishedAt": "2026-08-12T17:03:01Z"
-  },
-  "6.1": {
-   "taskId": "6.1",
-   "manifest": true,
-   "tier": "A",
-   "status": "COMMITTED",
-   "commitSha": "6727e37",
-   "commitMessage": "conductor: 6.1 evidence engine",
-   "planLines": [
-    2396,
-    2442
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 791,
-    "pass": 791,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/evidence.ts + adapter/quarantine.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/evidence.test.ts",
-    "conductor/tests/quarantine.test.ts",
-    "conductor/adapter/evidence.ts",
-    "conductor/adapter/quarantine.ts"
-   ],
-   "revertAssertion": "removing evidence.ts/quarantine.ts re-fails all 18 tests; [6.1-quarantine] mtime-survives + [6.1-classify-e2e] ESM-absolute-path-relativize only pass against rename+relativize logic. Orchestrator re-verified quarantine round-trip: moved OUT, mtime survived (1717200000000==), restored.",
-   "attempts": 1,
-   "deviations": [
-    "buildCommand on a VerifyConfig superset (core Config scope schema is frozen additionalProperties:false)",
-    "stale-marker break surfaced on VerifyOutcome (staleMarkerBroken) not a journal anomaly (\u00a77.4 evidence vocab is red/green/verify only; anomaly kinds lack marker-break) \u2014 same posture as C-019",
-    "strips NODE_TEST_CONTEXT in the child env (nested node --test would else mis-report a fail as pass) \u2014 env-hygiene like gitio's GIT_DIR strip",
-    "longest-prefix-first relativization for /var vs /private/var symlink"
-   ],
-   "startedAt": "2026-08-12T19:40:00Z",
-   "finishedAt": "2026-08-12T20:30:45Z"
-  },
-  "6.2": {
-   "taskId": "6.2",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "d02b642",
-   "commitMessage": "conductor: 6.2 runner discovery probe",
-   "planLines": [
-    2443,
-    2462
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": {
-    "cmd": null,
-    "exitCode": null,
-    "class": "n/a",
-    "excerpt": "live probe task: no red step; M8 live-artifact integrity applies instead"
-   },
-   "filesTouched": [
-    "conductor/docs/RUNNER-DISCOVERY.md"
-   ],
-   "revertAssertion": "M8 artifact: verify-acceptance checks RUNNER-DISCOVERY.md exists, >20 lines, contains command transcripts; orchestrator independently re-ran the node (c) cell and matched the recorded output (3 tests, wt_fail red, whole-tree exit 1)",
-   "attempts": 1,
-   "deviations": [
-    "committed out of \u00a78 order as free early parallel work (orchestrator prompt \u00a76.2); C-011"
-   ],
-   "startedAt": "2026-08-12T09:12:00Z",
-   "finishedAt": "2026-08-12T09:13:04Z"
-  },
-  "7.1": {
-   "taskId": "7.1",
-   "manifest": true,
-   "tier": "A",
-   "status": "COMMITTED",
-   "commitSha": "c3e1983",
-   "commitMessage": "conductor: 7.1 fanout engine",
-   "planLines": [
-    2465,
-    2494
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 816,
-    "pass": 816,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/fanout.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/fanout.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/fanout.test.ts",
-    "conductor/tests/fixtures/fake-sdk.ts",
-    "conductor/adapter/fanout.ts"
-   ],
-   "revertAssertion": "removing fanout.ts re-fails all 10 fanout tests; [7.1-grouping] AABB + [7.1-freeze-hold] + [7.1-retry] no-format validate-retry only pass against the real engine. Orchestrator verified: no format field on prompt body (binding), registry.set(241) before prompt(273), G14 clean.",
-   "attempts": 1,
-   "deviations": [
-    "optional trailing runId='' param (createFanout is a fixed 5-arg call site but Corr.runId is mandatory)"
-   ],
-   "startedAt": "2026-08-12T21:15:00Z",
-   "finishedAt": "2026-08-12T21:39:53Z"
-  },
-  "7.2": {
-   "taskId": "7.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "0d39f34",
-   "commitMessage": "conductor: 7.2 router client + failover",
-   "planLines": [
-    2495,
-    2514
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 816,
-    "pass": 816,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/router-client.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/router-client.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/router-client.test.ts",
-    "conductor/adapter/router-client.ts"
-   ],
-   "revertAssertion": "removing router-client.ts re-fails all 12 tests; [7.2-second-failover] zero-network short-circuit + [7.2-cases] bounded-timeout no-throw only pass against the real fail-soft client",
-   "attempts": 1,
-   "deviations": [
-    "health endpoint /conductor/health (plan names only /conductor/metrics; test path-agnostic)"
-   ],
-   "startedAt": "2026-08-12T21:55:00Z",
-   "finishedAt": "2026-08-12T21:45:08Z"
-  },
-  "8.1": {
-   "taskId": "8.1",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "00cdcd7",
-   "commitMessage": "conductor: 8.1 doctrine packs",
-   "planLines": [
-    2517,
-    2541
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 826,
-    "pass": 826,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/doctrine.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "tests=10 pass=0 fail=10; all nine packs ENOENT via readPack() before any pack written (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/doctrine.test.ts",
-    "conductor/doctrine/core.md",
-    "conductor/doctrine/decompose.md",
-    "conductor/doctrine/plan.md",
-    "conductor/doctrine/tdd.md",
-    "conductor/doctrine/test-vet.md",
-    "conductor/doctrine/debug.md",
-    "conductor/doctrine/review.md",
-    "conductor/doctrine/skeptic.md",
-    "conductor/doctrine/receive-review.md"
-   ],
-   "revertAssertion": "reverting any one pack makes doctrine.test.ts fail naming that pack's missing anchor(s): e.g. removing tdd.md fails 8.1-files (ENOENT), 8.1-mechanism ('the handler runs the test'), and 8.1-anchors-tdd ('NO PRODUCTION CODE WITHOUT A FAILING TEST' / 'delete means delete'); the soft/hasWord matchers pin the exact anchor words, not mere file presence",
-   "attempts": 1,
-   "deviations": [
-    "M5 gate refinement (C-026) required first: the marker scan is now production-scoped so doctrine.test.ts's legitimate 'placeholder marker' subject (and the 15.1 doc-fidelity test's like need) do not false-trip M5; landed as conductor-build infra commit df7f49f ahead of this task"
-   ],
-   "startedAt": "2026-08-12T23:05:00Z",
-   "finishedAt": "2026-08-12T23:25:00Z"
-  },
-  "8.2": {
-   "taskId": "8.2",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "29a5011",
-   "commitMessage": "conductor: 8.2 injection",
-   "planLines": [
-    2542,
-    2560
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 837,
-    "pass": 837,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/inject.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND file:///.../conductor/adapter/inject.ts (observed by orchestrator before inject.ts existed). Two later review-driven assertions (8.2-null-recommendation, 8.2-empty-pack) each independently observed red 10/11+11/11-fail against the un-fixed inject.ts."
-   },
-   "filesTouched": [
-    "conductor/tests/inject.test.ts",
-    "conductor/adapter/inject.ts"
-   ],
-   "revertAssertion": "removing inject.ts re-fails all 11 tests (missing-subject); reverting FIX #1 alone re-reds 8.2-null-recommendation (block renders legalTools.why, not a hardcoded 'terminal'); reverting FIX #2 alone re-reds 8.2-empty-pack (empty pack must fail-closed before the beacon)",
-   "attempts": 1,
-   "deviations": [
-    "buildSystemAppend gained a trailing ctx object {repoConfigured, taintCount, overridesRemaining}: the \u00a76.4 ledger arg list omits the scalars legalTools + the state block need. Helper-signature extension only; \u00a72 schema untouched.",
-    "init-failure channel is the injected logError seam (\u00a77.1 stderr / client.app.log), NOT a journal event: the closed vocabulary (journal-events.ts) has no init event and widening it is a STOP-AND-PARK closed-vocab change, correctly avoided.",
-    "C-027 pre-commit adversarial review: MAJOR false-terminality in the null-recommendation block (fixed to render legalTools.why) + fail-closed empty-pack hardening in loadPacks. Both fixed test-first inside this task; rows 8.2-null-recommendation/8.2-empty-pack added to the ledger."
-   ],
-   "startedAt": "2026-08-12T23:45:00Z",
-   "finishedAt": "2026-08-13T00:15:00Z"
-  },
-  "9.1": {
-   "taskId": "9.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "ed3d407",
-   "commitMessage": "conductor: 9.1 intake + question tools",
-   "planLines": [
-    2567,
-    2583
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 864,
-    "pass": 864,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "node --test 'conductor/tests/tools-9.1.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleAnswer' (observed by orchestrator before the 6 handlers existed). The 6 review-fix tests (F1-F6) each independently observed red against the un-fixed handlers (17 tests, 11 pass, 6 fail)."
-   },
-   "filesTouched": [
-    "conductor/adapter/tools.ts",
-    "conductor/core/journal-events.ts",
-    "conductor/tests/tools-9.1.test.ts"
-   ],
-   "revertAssertion": "removing any of the 6 handler exports re-reds tools-9.1.test.ts (missing-subject); reverting F1's escalation re-reds [9.1-fix-classify-escalate-work] (hard-throw); reverting F2/F3 prechecks re-reds the surface/defer half-write tests; reverting F4 re-reds humanTerritory; reverting the decision.recorded widening reds [9.1-fix-known-events] via the real throwing journal",
-   "attempts": 2,
-   "deviations": [
-    "First implementer attempt returned an anomalous/injected-looking result with 0 tool uses (no edits); caught by orchestrator verifying the actual tree (nothing written, test still red), discarded, re-dispatched fresh.",
-    "\u00a77.4 journal widening: added state:decision.recorded to journal-events.ts EVENTS (decide/defer record no run/item state; sanctioned by the file's widening rule; NO \u00a72-schema enum touched, no STOP-AND-PARK). Grep-tested via the real throwing journal (F7).",
-    "queue.json + decisions.jsonl are handler-owned ledgers written directly (writeFileAtomicSync / JSONL append), not via state.ts's private evidence appender (G6 restricts that to state.ts/evidence.ts).",
-    "C-029 pre-commit adversarial review: 4 MAJOR (classify hard-throw, surface/defer half-write, surface humanTerritory) + 2 minor (correctedKind null-iff-agreed, decisions torn-line) fixed test-first. 2 nits deferred to 10.1 (classify archiveRun; decide isHumanTerritory ask-gate)."
-   ],
-   "startedAt": "2026-08-13T01:40:00Z",
-   "finishedAt": "2026-08-13T02:30:00Z"
-  },
-  "9.2": {
-   "taskId": "9.2",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "75a2531",
-   "commitMessage": "conductor: 9.2 planning tools",
-   "planLines": [
-    2584,
-    2594
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 887,
-    "pass": 887,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "node --test 'conductor/tests/tools-9.2.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleDecompose' (observed by orchestrator before the handlers existed; tsc showed ONLY those 2 TS2305 errors, proving every other API assumption in the test was already correct). The 14 review-fix tests (R1-R14) were each observed red against the un-fixed implementation: 23 tests, 11 pass, 12 fail."
-   },
-   "filesTouched": [
-    "conductor/adapter/tools.ts",
-    "conductor/core/planning.ts",
-    "conductor/core/types.ts",
-    "conductor/tests/tools-9.2.test.ts",
-    "docs/build/specs/task-9.2.assertions.json"
-   ],
-   "revertAssertion": "removing handleDecompose/handlePlan re-reds tools-9.2.test.ts (missing-subject); reverting ITEM_MAX_FILES to config.workflow.trivialMaxFiles re-reds [9.2-fix-size-budget]; reverting the determiner skip re-reds [9.2-fix-acceptance-clusters]; reverting the union-edges deps map re-reds [9.2-fix-duplicate-id-cycle]; reverting findDependsOnCycles to first-cycle-only re-reds [9.2-fix-all-cycles]; reverting the rootLevelOnly guard re-reds [9.2-fix-rootless-glob]; reverting planDefects re-reds [9.2-fix-decision-placeholders] + [9.2-fix-journal-decision-reject]",
-   "attempts": 1,
-   "deviations": [
-    "SCHEMAS.Plan is a NEW 18th schema in core/types.ts. Not optional: fanout's schemaName is mandatory and validate() resolves it from SCHEMAS at call time, so conductor_plan cannot dispatch without one. export-schemas.test.ts derives from Object.keys(SCHEMAS), so the addition is safe by construction.",
-    "The pure \u00a73.2 validation table lives in a NEW core/planning.ts (G3 pure-core/thin-adapter); tools.ts stays dispatch/re-prompt/persist/journal.",
-    "Re-prompt budget is ONE uniformly for every \u00a73.2 row (the plan reserves the bounded round for the size row and 9.2's bullet for the cycle case). Strictly more forgiving; still ends in a named rejection. Raised at the Phase 9 gate (C-030 F5).",
-    "'> 1 acceptance cluster' has no spec definition; approximated by the criterion's subject token after skipping determiners, documented in planning.ts. No authored test exercises this row directly.",
-    "C-030 pre-commit adversarial review: 19 surviving findings (2 MAJOR) fixed test-first across 14 R-tests; 3 refuted; E10 (crash-mid-persist reconciliation) deferred to 10.1. 9 skeptics died on a session limit and their findings were counted as UPHELD per the plan's under-delivered-panel rule.",
-    "R13 (derived plan-decision schema) PASSED pre-fix \u2014 it is a regression guard, not red-driven TDD evidence. Recorded rather than presented as a red."
-   ],
-   "startedAt": "2026-08-13T02:45:00Z",
-   "finishedAt": "2026-08-13T04:40:00Z"
-  },
-  "9.3": {
-   "taskId": "9.3",
-   "manifest": true,
-   "tier": "B",
-   "status": "COMMITTED",
-   "commitSha": "1ad82b7",
-   "commitMessage": "conductor: 9.3 plan review",
-   "planLines": [
-    2596,
-    2604
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 901,
-    "pass": 901,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "node --test 'conductor/tests/tools-9.3.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handlePlanReview' (orchestrator-observed; tsc showed ONLY that one TS2305). The 6 review-fix tests (R1-R6) were each observed red against the un-fixed handler: 14 tests, 8 pass, 6 fail."
-   },
-   "filesTouched": [
-    "conductor/adapter/tools.ts",
-    "conductor/core/planning.ts",
-    "conductor/tests/tools-9.3.test.ts",
-    "docs/build/specs/task-9.3.assertions.json"
-   ],
-   "revertAssertion": "removing handlePlanReview re-reds tools-9.3.test.ts (missing-subject); reverting the Math.max lens roster re-reds [9.3-fix-lens-coverage]; reverting the file-shaped token rule re-reds [9.3-fix-blocks-no-directory-tokens]; reverting the citation normalisation re-reds [9.3-fix-blocks-common-citation-forms]; reverting cumulative claims re-reds [9.3-fix-overlapping-blocks]; reverting ID_BOUNDARY re-reds [9.3-fix-id-boundary]; reverting the k<1 guard re-reds [9.3-fix-zero-skeptics]",
-   "attempts": 1,
-   "deviations": [
-    "The staged red test came from the lookahead burst whose writer DIED on a session limit; the orchestrator verified completeness (1077 lines, 8 tests = 8 assertions, clean EOF, node --check, tsc showing only the missing export) before trusting it.",
-    "Lens ROSTER is max(readFanout('planReview'), 4), which can exceed workflow.planReviewers. \u00a73.2 mandates four lenses and they are the substance of the stage; the reader clamp is a concurrency knob the fan-out engine enforces internally. Raised at the Phase 9 gate.",
-    "blocksItems mapping is the pinned spec-gap resolution (\u00a72.10 findings carry no item reference): id tokens + file-shaped path tokens, over-match biased (a human unblocks) but never whole-queue. Raised at the Phase 9 gate.",
-    "Question origin/round semantics: planReviewRounds counts REVISION rounds; the cap exit itself performs no revision.",
-    "C-031 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 16 agents/1.4M tokens vs C-030's 79/5.7M): 5 MAJOR + 2 minor fixed test-first; 5 crash-class findings deferred to 10.1; 2 raised at the Phase 9 gate.",
-    "A first review run returned an EMPTY finding set because both lenses died to a connection error; treated as 'review did not run', not as a pass, and re-run."
-   ],
-   "startedAt": "2026-08-13T05:10:00Z",
-   "finishedAt": "2026-08-13T06:30:00Z"
-  },
-  "9.4a": {
-   "taskId": "9.4a",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.4a test submission + vetting",
-   "planLines": [
-    2612,
-    2624
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "9.4b": {
-   "taskId": "9.4b",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.4b green/validate/amend",
-   "planLines": [
-    2625,
-    2639
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "9.4c": {
-   "taskId": "9.4c",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.4c wave driver",
-   "planLines": [
-    2640,
-    2651
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "9.5a": {
-   "taskId": "9.5a",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.5a item review",
-   "planLines": [
-    2652,
-    2666
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "9.5b": {
-   "taskId": "9.5b",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.5b publish + report",
-   "planLines": [
-    2667,
-    2686
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "9.5c": {
-   "taskId": "9.5c",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.5c stop reports + hatches",
-   "planLines": [
-    2687,
-    2699
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "9.6": {
-   "taskId": "9.6",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 9.6 worktree mode",
-   "planLines": [
-    2700,
-    2728
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "10.1": {
-   "taskId": "10.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 10.1 continuation + ask gate",
-   "planLines": [
-    2731,
-    2748
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "11.1": {
-   "taskId": "11.1",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "d6745de",
-   "commitMessage": "conductor: 11.1 router scaffold + upstream contract",
-   "planLines": [
-    2755,
-    2783
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh + ctest --test-dir .out/build/clang-relwdebinfo",
-   "tap": {
-    "tests": 847,
-    "pass": 847,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0,
-    "ctest": "1/1 PASS (router-tests)"
-   },
-   "redEvidence": {
-    "cmd": "node --test conductor/tests/export-schemas.test.ts (TS half); C++ half is scaffold bring-up (no red-first, per plan 'trivial doctest builds+runs green')",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND conductor/tools/export-schemas.ts (observed by orchestrator before the tool existed)"
-   },
-   "filesTouched": [
-    "CMakeLists.txt",
-    "vcpkg.json",
-    ".gitignore",
-    "scripts/test-conductor.sh",
-    "src/router/version.hpp",
-    "src/router/main.cpp",
-    "src/router/UPSTREAM_CONTRACT.md",
-    "src/router-tests/scaffold_test.cpp",
-    "conductor/tools/export-schemas.ts",
-    "conductor/tests/export-schemas.test.ts"
-   ],
-   "revertAssertion": "removing export-schemas.ts re-reds export-schemas.test.ts (missing-subject); removing src/router/main.cpp fails the llama-router link; removing scaffold_test.cpp / version.hpp fails the router-tests build; the ctest proves the C++ sources are load-bearing",
-   "attempts": 1,
-   "deviations": [
-    "Branch B run ON MAIN (not a worktree): submodules already populated, worktree submodule-init is the flagged gotcha, C++ never overlaps conductor/*.ts, test-conductor.sh is cmake-independent (branch-b-plan.md groundwork).",
-    "CMakeLists: dropped include(compiler-warnings) with the myprogram block (it applies target_compile_options to the removed ${PROJECT_NAME}=myprogram target; tools/ does not use it). Router warnings can be re-added target-scoped later.",
-    "validator target is nlohmann_json_schema_validator::validator (confirmed from the vcpkg port usage; configure passed but link needed the ::validator target).",
-    "router-tests registered with ctest via add_test (whole-binary) rather than doctest_discover_tests (per-case) to avoid the include(doctest) module-path gotcha; per-case discovery is a later refinement.",
-    "Step 2 (LIVE upstream contract) DEFERRED to 12.1 \u2014 serve.py (its specified vehicle) is not built; assets (llama-server binary + qwen3.6-27b) confirmed present; recorded in src/router/UPSTREAM_CONTRACT.md, NOT fabricated.",
-    "CMake pre-build custom_command for export-schemas deferred to 11.6 (when router-tests consumes the schemas); test-conductor.sh already regenerates them."
-   ],
-   "startedAt": "2026-08-13T01:00:00Z",
-   "finishedAt": "2026-08-13T01:20:00Z"
-  },
-  "11.2": {
-   "taskId": "11.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": "efdffc5",
-   "commitMessage": "conductor: 11.2 router config",
-   "planLines": [
-    2784,
-    2788
-   ],
-   "canonicalTestCmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo",
-   "tap": {
-    "ctest": "1/1 PASS; doctest 7 cases (scaffold+6 config), 119/119 assertions"
-   },
-   "redEvidence": {
-    "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "fatal error: 'config.hpp' file not found (observed by orchestrator after wiring config_test.cpp, before the header existed)"
-   },
-   "filesTouched": [
-    "CMakeLists.txt",
-    "src/router-tests/config_test.cpp",
-    "src/router/config.hpp",
-    "docs/build/specs/task-11.2.assertions.json"
-   ],
-   "revertAssertion": "M4 re-derived from the working tree: mv config.hpp away => router-tests compile fails ('config.hpp' file not found); restore => 7/7 cases 119/119 green. Recorded by orchestrator.",
-   "attempts": 1,
-   "deviations": [
-    "HEADER-ONLY implementation (src/router/config.hpp, namespace conductor::router) so CMakeLists source-wiring stays orchestrator-only; no config.cpp.",
-    "Parse order pinned by the test: JSON parse -> fill the three documented \u00a72.2 defaults -> schema-file validation (exported RouterConfig.schema.json, single-source) -> port range 1..65535 in the parser (schema has no min/max) -> logging.level vocabulary check.",
-    "Test author proved the suite satisfiable against a throwaway scratchpad reference impl and ran 6 mutations, each caught by exactly the intended case; reference deleted before delivery.",
-    "KNOWN NIT for the Phase 11 gate: malformed INPUT JSON also throws ConfigError with empty field(), which the class comment reserves for schema-file trouble (doc/contract mismatch, no test pins it; flagged honestly by the implementer).",
-    "Fractional ports rejected via is_number_integer() before the range test (schema's bare 'number' would admit them)."
-   ],
-   "startedAt": "2026-08-13T03:20:00Z",
-   "finishedAt": "2026-08-13T04:05:00Z"
-  },
-  "11.3": {
-   "taskId": "11.3",
-   "manifest": true,
-   "tier": "C",
-   "status": "COMMITTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 11.3 router proxy",
-   "planLines": [
-    2790,
-    2802
-   ],
-   "canonicalTestCmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo",
-   "tap": {
-    "ctest": "1/1 PASS; doctest 17 cases / 243 assertions (10 cases / 124 assertions are 11.3)"
-   },
-   "redEvidence": {
-    "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "fatal error: 'router/router.hpp' file not found (orchestrator-observed after wiring proxy_test.cpp, before the header existed)"
-   },
-   "filesTouched": [
-    "CMakeLists.txt",
-    "src/tests/proxy_test.cpp",
-    "src/router/router.hpp",
-    "docs/build/specs/task-11.3.assertions.json"
-   ],
-   "revertAssertion": "M4 orchestrator-observed both directions: mv src/router/router.hpp aside => router-tests compile FAILS ('router/router.hpp' file not found); restore => rebuild + ctest 1/1, 17/17 cases.",
-   "attempts": 1,
-   "deviations": [
-    "Staged test came from the lookahead burst (writer died on a session limit). Orchestrator verified completeness (839 lines, 10 cases = 10 assertions, clean EOF) AND updated it to the user-directed src/ layout: moved to src/tests/proxy_test.cpp and converted to full-path includes (#include \"router/router.hpp\").",
-    "HEADER-ONLY src/router/router.hpp so CMakeLists source wiring stays orchestrator-only (same posture as 11.2's config.hpp).",
-    "Verbatim relay does NOT use httplib Response::set_content: this vcpkg build has brotli support, so set_content would gzip/brotli the body whenever the caller sent Accept-Encoding, adding Content-Encoding/Vary the upstream never sent. Buffered relays use a fixed-length content provider instead, which httplib does not re-encode. Tests would have passed either way (the client decompresses transparently) \u2014 this is about being verbatim ON THE WIRE.",
-    "SSE needs a worker thread: httplib invokes the server-side chunked content provider AFTER the handler returns, and the client's send() blocks, so both cannot be driven from one thread. Lifetime is owned by a detail::UpstreamCall captured in the provider lambda; its destructor cancels + client->stop() + joins, so a downstream disconnect can neither leak nor wedge a thread.",
-    "TCP_NODELAY enabled on both legs (httplib defaults it off) \u2014 right for token-by-token SSE and removes Nagle as a flake source.",
-    "G5 fail-soft verified in the implementation, not just the tests: json::parse uses allow_exceptions=false, dump() is wrapped so an un-round-trippable body forwards ORIGINAL bytes, and the only minted status is the 502 for an unreachable upstream.",
-    "FLAKE-HUNT: implementer ran 30 sequential 11.3-only + 20 sequential full ctest + 48 runs at 12-way concurrency, zero 11.3 failures."
-   ],
-   "startedAt": "2026-08-13T06:45:00Z",
-   "finishedAt": "2026-08-13T07:40:00Z"
-  },
-  "11.4": {
-   "taskId": "11.4",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 11.4 admission",
-   "planLines": [
-    2803,
-    2816
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "11.5": {
-   "taskId": "11.5",
-   "manifest": true,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 11.5 group affinity",
-   "planLines": [
-    2817,
-    2828
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "11.6": {
-   "taskId": "11.6",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 11.6 schema observer",
-   "planLines": [
-    2829,
-    2845
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "11.7": {
-   "taskId": "11.7",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 11.7 metrics",
-   "planLines": [
-    2846,
-    2854
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "11.8": {
-   "taskId": "11.8",
-   "manifest": true,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 11.8 router live smoke",
-   "planLines": [
-    2855,
-    2863
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "12.1": {
-   "taskId": "12.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 12.1 serve wiring",
-   "planLines": [
-    2866,
-    2889
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "12.2": {
-   "taskId": "12.2",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 12.2 first-run setup",
-   "planLines": [
-    2890,
-    2913
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "13.1": {
-   "taskId": "13.1",
-   "manifest": true,
-   "tier": "A",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 13.1 e2e scripted",
-   "planLines": [
-    2916,
-    2960
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "13.2": {
-   "taskId": "13.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 13.2 live smoke",
-   "planLines": [
-    2961,
-    2976
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "14.1": {
-   "taskId": "14.1",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 14.1 bench driver",
-   "planLines": [
-    2979,
-    3015
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "14.2": {
-   "taskId": "14.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 14.2 POC run",
-   "planLines": [
-    3016,
-    3025
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "15.0": {
-   "taskId": "15.0",
-   "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 15.0 replay tool",
-   "planLines": [
-    3028,
-    3035
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "15.1": {
-   "taskId": "15.1",
-   "manifest": true,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 15.1 ops docs",
-   "planLines": [
-    3036,
-    3044
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "15.2": {
-   "taskId": "15.2",
-   "manifest": true,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": "conductor: 15.2 dashboard",
-   "planLines": [
-    3045,
-    3053
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
-  },
-  "5.4": {
-   "taskId": "5.4",
-   "manifest": false,
-   "tier": "A",
-   "status": "COMMITTED",
-   "commitSha": "1176178",
-   "commitMessage": "conductor: 5.4 chat.message hook",
-   "planLines": null,
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": {
-    "tests": 703,
-    "pass": 703,
-    "fail": 0,
-    "skipped": 0,
-    "todo": 0
-   },
-   "redEvidence": {
-    "cmd": "bash scripts/test-conductor.sh 'conductor/tests/chat-message.test.ts'",
-    "exitCode": 1,
-    "class": "missing-subject",
-    "excerpt": "ERR_MODULE_NOT_FOUND adapter/chat-message.ts (observed by orchestrator)"
-   },
-   "filesTouched": [
-    "conductor/tests/chat-message.test.ts",
-    "conductor/adapter/chat-message.ts",
-    "conductor/core/journal-events.ts"
-   ],
-   "revertAssertion": "removing adapter/chat-message.ts re-fails all 7 chat-message tests; [5.4-midrun] (route a prompt into a live run, journal user.midrun-prompt) only passes against the currentRun/isTerminal branch + the vocab addition",
-   "attempts": 1,
-   "deviations": [
-    "ADDED user.midrun-prompt to core/journal-events.ts 'state' vocabulary (justified cross-task M6 edit: plan line 1074 mandates the event; 2.1's vocab predated this task)",
-    "implementer worker STALLED post-completion during its own verification (flaky wire-contract test spawning opencode); work was complete + 7/7 green; orchestrator verified full suite green independently and kept it"
-   ],
-   "startedAt": "2026-08-12T18:10:00Z",
-   "finishedAt": "2026-08-12T17:21:24Z",
-   "note": "Added per orchestrator prompt \u00a73.3 (unassigned chat.message hook; plan \u00a73.2 lines 1064-1159, \u00a73.5 lines 1334-1427). Own red->green->commit before Phase 9."
-  },
-  "12.1-G5": {
-   "taskId": "12.1-G5",
-   "manifest": false,
-   "tier": "C",
-   "status": "NOT_STARTED",
-   "commitSha": null,
-   "commitMessage": null,
-   "planLines": [
-    2866,
-    2889
-   ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null,
-   "note": "G5 equivalence half of Task 12.1 (run 13.1 e2e with and without router). Executes after 13.1 green; no separate commit; \u00a711 acceptance row 9."
+  "tasks": {
+    "0.1": {
+      "taskId": "0.1",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "cf90018",
+      "commitMessage": "conductor: 0.1 standing decisions",
+      "planLines": [
+        1978,
+        1998
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "doc-only task; the plan enumerates no test for 0.1 (tier C mechanical)"
+      },
+      "filesTouched": [
+        "conductor/DECISIONS.md"
+      ],
+      "revertAssertion": "no test by plan design; acceptance-level check instead: conductor/DECISIONS.md exists, non-empty, contains headings (a)-(g) with Options/Why sections (verify-acceptance.sh will assert this)",
+      "attempts": 1,
+      "deviations": [],
+      "startedAt": "2026-08-12T08:55:00Z",
+      "finishedAt": "2026-08-12T08:55:12Z"
+    },
+    "0.2": {
+      "taskId": "0.2",
+      "manifest": true,
+      "tier": "phase-gate:discovery-integrity",
+      "status": "COMMITTED",
+      "commitSha": "0cf8b82",
+      "commitMessage": "conductor: 0.2 wire contract pinned",
+      "planLines": [
+        1999,
+        2041
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 24,
+        "pass": 24,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "discovery task: green = test passes with RECORDED reality (plan line 2038); no-skip guard asserts the suite ran on this machine; phase-gate discovery-integrity lens audits execution"
+      },
+      "filesTouched": [
+        "conductor/tests/wire-contract.test.ts",
+        "conductor/tests/fixtures/recorder-plugin.ts",
+        "conductor/tests/fixtures/crashing-plugin.ts",
+        "conductor/tests/fixtures/stub-llm-server.ts",
+        "conductor/tests/fixtures/wire-markers.ts",
+        "conductor/adapter/wire-notes.md",
+        "conductor/opencode-fragment.json",
+        "conductor/tests/fragment.test.ts",
+        "scripts/conductor-gate.sh"
+      ],
+      "revertAssertion": "reverting wire-notes.md/fixtures breaks the 17-test wire suite (imports + the 0.2-noskip mainSuiteRan tripwire); reverting the fragment tools key fails 'fragment: every agent denies the built-in task spawn tool'",
+      "attempts": 1,
+      "deviations": [
+        "C-012: binary self-updated 1.18.10 -> 1.18.15 mid-build; contract pinned against 1.18.15",
+        "DRIFT: prompt format:{json_schema} does not exist -> structured output = prompt-shaped + independent validation (scopes 7.1); requests carry NO schema field (scopes 11.6)",
+        "DRIFT: permission reply = POST /session/{id}/permissions/{permissionID} {response}, not client.permission.reply({requestID, reply})",
+        "C-014: fragment + fragment.test.ts gained tools.task=false (plan-mandated cross-task update, §5.3 lines 1792-1798, key pinned by discovery iii)"
+      ],
+      "startedAt": "2026-08-12T09:10:00Z",
+      "finishedAt": "2026-08-12T09:39:02Z"
+    },
+    "0.3": {
+      "taskId": "0.3",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "da2dab2",
+      "commitMessage": "conductor: 0.3 scaffold",
+      "planLines": [
+        2042,
+        2056
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 7,
+        "pass": 7,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/types.ts (smoke); ENOENT conductor/opencode-fragment.json (6 fragment tests); observed by orchestrator pre-implementation"
+      },
+      "filesTouched": [
+        "conductor/tsconfig.json",
+        "conductor/package.json",
+        "conductor/package-lock.json",
+        ".gitignore",
+        "conductor/tests/smoke.test.ts",
+        "conductor/tests/fragment.test.ts",
+        "conductor/core/types.ts",
+        "conductor/opencode-fragment.json"
+      ],
+      "revertAssertion": "smoke.test.ts 'CONDUCTOR_NAME imported from ../core/types.ts equals \"conductor\"' fails ERR_MODULE_NOT_FOUND if core/types.ts is reverted; all 6 fragment.test.ts tests fail ENOENT if opencode-fragment.json is reverted",
+      "attempts": 1,
+      "deviations": [
+        "C-010 (no 1===1 assertion; @types/node third devDep)",
+        "type:module added to package.json for import.meta under nodenext"
+      ],
+      "startedAt": "2026-08-12T09:00:00Z",
+      "finishedAt": "2026-08-12T09:03:09Z"
+    },
+    "1.1": {
+      "taskId": "1.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "99751fc",
+      "commitMessage": "conductor: 1.1 schemas",
+      "planLines": [
+        2059,
+        2084
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 109,
+        "pass": 109,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/types.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: The requested module '../core/types.ts' does not provide an export named 'SCHEMAS' (link-time, names the task-scope module; observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/types.test.ts",
+        "conductor/core/types.ts"
+      ],
+      "revertAssertion": "reverting core/types.ts to its 0.3 form fails all of types.test.ts at link time (missing SCHEMAS/validate exports) — 84 tests; e.g. 'rejects item state \"DONE\"' can only pass against the real Item schema",
+      "attempts": 1,
+      "deviations": [
+        "EvidenceRecord/AnomalyRecord encoded as merged object schemas (subset has no combinator; tests reject oneOf); TS discriminated unions carry the per-kind strictness; noted in file comments"
+      ],
+      "startedAt": "2026-08-12T10:05:00Z",
+      "finishedAt": "2026-08-12T10:13:29Z"
+    },
+    "1.2": {
+      "taskId": "1.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "88c07f8",
+      "commitMessage": "conductor: 1.2 shell/glob parse",
+      "planLines": [
+        2085,
+        2099
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 172,
+        "pass": 172,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/shell-parse.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/shell-parse.ts (observed by orchestrator after moving staged tests in)"
+      },
+      "filesTouched": [
+        "conductor/tests/shell-parse.test.ts",
+        "conductor/core/shell-parse.ts"
+      ],
+      "revertAssertion": "removing core/shell-parse.ts re-fails all 63 shell-parse tests at link time; e.g. '[1.2-glued] a.cpp;git -> a.cpp / ; / git' passes only against the real tokenizer",
+      "attempts": 1,
+      "deviations": [],
+      "startedAt": "2026-08-12T10:40:00Z",
+      "finishedAt": "2026-08-12T10:19:44Z"
+    },
+    "1.3": {
+      "taskId": "1.3",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "29c7e03",
+      "commitMessage": "conductor: 1.3 freshness/failure-class/stops/verdict",
+      "planLines": [
+        2100,
+        2129
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 228,
+        "pass": 228,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "3 suites fail ERR_MODULE_NOT_FOUND naming core/freshness.ts, core/stops.ts, core/verdict.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/freshness.test.ts",
+        "conductor/tests/stops.test.ts",
+        "conductor/tests/verdict.test.ts",
+        "conductor/core/freshness.ts",
+        "conductor/core/stops.ts",
+        "conductor/core/verdict.ts"
+      ],
+      "revertAssertion": "removing the three core modules re-fails all 52 tests at link time; e.g. stops.test.ts's 80-combo interrupt sweep only passes against the real shouldTerminate",
+      "attempts": 1,
+      "deviations": [
+        "shouldTerminate guards isTerminal(run) first (plan silent, §3.7-consistent)",
+        "multi-specifier rule: ALL must be in-scope for missing-subject (conservative per §2.6.1)",
+        "classification by output shape, exitCode recorded-not-consulted (runners disagree on codes)"
+      ],
+      "startedAt": "2026-08-12T11:15:00Z",
+      "finishedAt": "2026-08-12T10:26:42Z"
+    },
+    "1.4": {
+      "taskId": "1.4",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "d078a21",
+      "commitMessage": "conductor: 1.4 purity + dual-runtime guards",
+      "planLines": [
+        2130,
+        2143
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 176,
+        "pass": 176,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "guard task: no red by design (plan line 2135 'trivially green now; bites later'); M4 mutation variant executed instead — see revertAssertion"
+      },
+      "filesTouched": [
+        "conductor/tests/purity.test.ts"
+      ],
+      "revertAssertion": "mutation probes run by orchestrator: (A) node:fs import injected into core/types.ts -> 2 guard tests FAIL naming the file/token; (B) legal core-sibling import -> 4/4 PASS (not over-broad); (C) Bun.spawn in adapter/probe-adapter.ts -> 2 guard tests FAIL naming G14",
+      "attempts": 1,
+      "deviations": [
+        "executed after 1.2, before 1.3/1.5 (within the prompt §6.2 safe-pair {1.1,1.2,1.4})"
+      ],
+      "startedAt": "2026-08-12T11:05:00Z",
+      "finishedAt": "2026-08-12T10:20:34Z"
+    },
+    "1.5": {
+      "taskId": "1.5",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "bbc0f85",
+      "commitMessage": "conductor: 1.5 decision helpers",
+      "planLines": [
+        2144,
+        2160
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 252,
+        "pass": 252,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/decide.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND conductor/core/decide.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/decide.test.ts",
+        "conductor/core/decide.ts"
+      ],
+      "revertAssertion": "removing core/decide.ts re-fails all 24 decide tests at link time; the 13-row human-territory table only passes against the real classifier",
+      "attempts": 1,
+      "deviations": [
+        "unscored options total 0 in scoreOptions (requireTwoOptions is the rejection gate); empty options -> {winner:null, tie:false}"
+      ],
+      "startedAt": "2026-08-12T11:45:00Z",
+      "finishedAt": "2026-08-12T10:30:38Z"
+    },
+    "2.1": {
+      "taskId": "2.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "85e0f6a",
+      "commitMessage": "conductor: 2.1 journal",
+      "planLines": [
+        2163,
+        2178
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 302,
+        "pass": 302,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/journal.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/journal-events.ts + adapter/journal.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/journal.test.ts",
+        "conductor/core/journal-events.ts",
+        "conductor/adapter/journal.ts"
+      ],
+      "revertAssertion": "removing either journal subject re-fails all 22 journal tests at link time; e.g. '[2.1-seq] seq monotonic, second journal continues from last seq' only passes against the real re-read-last-seq adapter",
+      "attempts": 1,
+      "deviations": [
+        "dev/test-vs-prod flag = env.NODE_ENV (prod arm retains+surfaces, never drops, per §7.4); rotation index found via existsSync probe (readdirSync not in the allowed fs set)"
+      ],
+      "startedAt": "2026-08-12T12:30:00Z",
+      "finishedAt": "2026-08-12T11:31:03Z",
+      "note": "+1 test in Phase-2 gate fix (torn-line heal); see phaseGates.2"
+    },
+    "2.2": {
+      "taskId": "2.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "06818b3",
+      "commitMessage": "conductor: 2.2 bun runtime smoke",
+      "planLines": [
+        2179,
+        2205
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 522,
+        "pass": 522,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "proof task (dual-runtime smoke of existing modules): no missing-subject red; green = recorded reality that state/journal/gitio behave identically under node AND bun (like a discovery task). bun leg is M9, orchestrator-run."
+      },
+      "filesTouched": [
+        "conductor/tests/bun-smoke.test.ts",
+        "scripts/test-conductor.sh"
+      ],
+      "revertAssertion": "removing bun-smoke.test.ts drops the bun leg (test-conductor.sh guards on its existence); the 8 dual-runtime assertions (atomic-throw, lock stale-break, journal ordering+torn-heal, gitio execFile) fail under bun if the adapters ever diverge by runtime",
+      "attempts": 1,
+      "deviations": [
+        "ordering override 3: 2.2 committed immediately after 4.1 (not in Phase 2)",
+        "G14 leg ACTIVE (bun 1.3.14) — the preflight-uncertain acceptance row (§2.5/C-002) is now a real green, NOT SKIPPED_UNMET",
+        "no cross-runtime divergence: no adapter change, no wire-notes stamp needed"
+      ],
+      "startedAt": "2026-08-12T15:40:00Z",
+      "finishedAt": "2026-08-12T13:41:09Z"
+    },
+    "3.1": {
+      "taskId": "3.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "c61c99d",
+      "commitMessage": "conductor: 3.1 FSMs",
+      "planLines": [
+        2208,
+        2233
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 482,
+        "pass": 482,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/fsm-run.ts + fsm-item.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/fsm-run.test.ts",
+        "conductor/tests/fsm-item.test.ts",
+        "conductor/core/fsm-run.ts",
+        "conductor/core/fsm-item.ts"
+      ],
+      "revertAssertion": "removing either FSM module re-fails all 149 transition tests at link time; e.g. fsm-item 'PENDING->RED missing-subject ACCEPTED' only passes against the real table",
+      "attempts": 1,
+      "deviations": [
+        "states defined inline in fsm-*.ts (pure, no ./types coupling); must stay set-equal to types.ts RunState/ItemState — spec-conformance to verify"
+      ],
+      "startedAt": "2026-08-12T13:15:00Z",
+      "finishedAt": "2026-08-12T11:46:53Z"
+    },
+    "3.2": {
+      "taskId": "3.2",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "bd35785",
+      "commitMessage": "conductor: 3.2 phase legality",
+      "planLines": [
+        2234,
+        2260
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 482,
+        "pass": 482,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-phase.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-phase.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gates-phase.test.ts",
+        "conductor/core/gates-phase.ts"
+      ],
+      "revertAssertion": "removing core/gates-phase.ts re-fails all 15 legality tests; [3.2-two-item-wave] reorder-determinism only passes against the nextWave-delegated derivation",
+      "attempts": 1,
+      "deviations": [
+        "conductor_report also legalized when ALL items settled (not only trivial) — §3.2 'no terminal path writes nothing'; adds report to a lone-blocked legal set (test only asserts the 6 per-item tools absent, so passes). To confirm at Phase-3 gate."
+      ],
+      "startedAt": "2026-08-12T13:50:00Z",
+      "finishedAt": "2026-08-12T12:04:27Z"
+    },
+    "3.3": {
+      "taskId": "3.3",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "680c6d9",
+      "commitMessage": "conductor: 3.3 wave scheduler",
+      "planLines": [
+        2261,
+        2273
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 482,
+        "pass": 482,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/schedule.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/schedule.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/schedule.test.ts",
+        "conductor/core/schedule.ts"
+      ],
+      "revertAssertion": "removing core/schedule.ts re-fails all 13 scheduler tests; the empty-scope binding test [3.3-empty-scope] only passes against the explicit isDegenerateScope predicate",
+      "attempts": 1,
+      "deviations": [
+        "phaseGate1 binding satisfied via explicit isDegenerateScope (empty OR wildcard-head) forcing serialize, not trusting scopesIntersect"
+      ],
+      "startedAt": "2026-08-12T13:35:00Z",
+      "finishedAt": "2026-08-12T11:52:44Z"
+    },
+    "4.1": {
+      "taskId": "4.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "db408ba",
+      "commitMessage": "conductor: 4.1 state store",
+      "planLines": [
+        2276,
+        2304
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 522,
+        "pass": 522,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/state.ts + adapter/questions.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/state.test.ts",
+        "conductor/tests/questions.test.ts",
+        "conductor/adapter/state.ts",
+        "conductor/adapter/questions.ts"
+      ],
+      "revertAssertion": "removing state.ts re-fails all 16 state tests; [4.1-atomic] injected-throw-leaves-old-file only passes against the tmp+rename+rmSync-on-catch writer; [4.1-lock] stale-break only passes against isAlive ESRCH + over-age logic",
+      "attempts": 1,
+      "deviations": [
+        "C-019 stale-break routed to journal (not AnomalyRecord)",
+        "beacon shape {pid,startMs,version,sessionID} per §3.8 over §1.2's 3-field comment",
+        "staleLockMs default 24h injectable",
+        "injected DI clock (now) + pid for deterministic lock/beacon/sinceMs"
+      ],
+      "startedAt": "2026-08-12T14:55:00Z",
+      "finishedAt": "2026-08-12T13:21:05Z"
+    },
+    "4.2": {
+      "taskId": "4.2",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "37ddab7",
+      "commitMessage": "conductor: 4.2 gitio",
+      "planLines": [
+        2305,
+        2321
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 522,
+        "pass": 522,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gitio.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/gitio.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gitio.test.ts",
+        "conductor/adapter/gitio.ts"
+      ],
+      "revertAssertion": "removing adapter/gitio.ts re-fails all 9 gitio tests; [4.2-zero-commit] headSha-null only passes against the tryGit exit-128->null mapping",
+      "attempts": 1,
+      "deviations": [
+        "built BEFORE 4.1 (ordering override 2); strips GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR from git env (safety, prevents off-cwd redirect)"
+      ],
+      "startedAt": "2026-08-12T14:30:00Z",
+      "finishedAt": "2026-08-12T12:40:06Z"
+    },
+    "5.1": {
+      "taskId": "5.1",
+      "manifest": true,
+      "tier": "A",
+      "status": "COMMITTED",
+      "commitSha": "0f2a282",
+      "commitMessage": "conductor: 5.1 git policy",
+      "planLines": [
+        2324,
+        2350
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 642,
+        "pass": 642,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-git.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-git.ts (observed by orchestrator; first impl attempt died to a machine-sleep env error before creating any file — clean recovery, no partial work)"
+      },
+      "filesTouched": [
+        "conductor/tests/gates-git.test.ts",
+        "conductor/core/gates-git.ts"
+      ],
+      "revertAssertion": "removing core/gates-git.ts re-fails all 120 git-policy tests; [5.1-phasegate] 'git branch -D x -> deny' only passes against the operand-scanning decideBranch (keying on gitSubcommand alone would ALLOW it). Orchestrator independently re-ran 18 security-critical cases: 18/18 correct.",
+      "attempts": 2,
+      "deviations": [
+        "sessionRole/gitMode void'd (git policy role/mode-uniform per §3.5:1373; publish handler runs git via execFile, never reaching this gate)",
+        "bare git remote/reflog/stash-show/tag default-denied (not on the exhaustive allow-list; spec-faithful — a missing allow only surfaces a question)"
+      ],
+      "startedAt": "2026-08-12T16:50:00Z",
+      "finishedAt": "2026-08-12T16:14:17Z"
+    },
+    "5.2": {
+      "taskId": "5.2",
+      "manifest": true,
+      "tier": "A",
+      "status": "COMMITTED",
+      "commitSha": "cc0ed55",
+      "commitMessage": "conductor: 5.2 edit + session gates",
+      "planLines": [
+        2351,
+        2374
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 691,
+        "pass": 691,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-edit.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-edit.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gates-edit.test.ts",
+        "conductor/core/gates-edit.ts"
+      ],
+      "revertAssertion": "removing core/gates-edit.ts re-fails all 49 edit-gate tests; [5.2-freeze] test-writer-denied-in-own-testScope and [5.2-unregistered] spawn-denied-from-registered only pass against freeze-before-role + unconditional-spawn-first. Orchestrator re-ran 12 security cases: 12/12 correct.",
+      "attempts": 1,
+      "deviations": [
+        "freeze/.conductor/role ordering (both denies; no test distinguishes)",
+        "decideEdit doesn't re-adjudicate registered (decideSession owns it, §3.5:1344)",
+        "paths outside sessionTree left non-normalized -> fail-safe via role deny"
+      ],
+      "startedAt": "2026-08-12T17:20:00Z",
+      "finishedAt": "2026-08-12T16:24:06Z"
+    },
+    "5.3": {
+      "taskId": "5.3",
+      "manifest": true,
+      "tier": "A",
+      "status": "COMMITTED",
+      "commitSha": "3f794d6",
+      "commitMessage": "conductor: 5.3 gate wiring",
+      "planLines": [
+        2375,
+        2393
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 703,
+        "pass": 703,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gate-wiring.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/tools.ts + plugin/index.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/gate-wiring.test.ts",
+        "conductor/adapter/tools.ts",
+        "conductor/plugin/index.ts"
+      ],
+      "revertAssertion": "removing tools.ts/index.ts re-fails all 12 wiring tests; [5.3-fail-closed] only passes against the up-front guardedness flag (crash a git command -> deny; crash ls -> allow). Orchestrator independently re-ran the fail-closed/open proof: git commit BLOCKED, ls ALLOWED, 2 gate-crash logged.",
+      "attempts": 1,
+      "deviations": [
+        "tool() imported as a runtime value from @opencode-ai/plugin (sanctioned: the dev-dep opencode loads at runtime; the recorder-plugin fixture already relies on it); types via import type. G1 spirit preserved (adapter composes only pure cores).",
+        "plugin hook uses an empty registry + pin/runActive defaults as construction-safe placeholders replaced by later phases (5.4/9.x)"
+      ],
+      "startedAt": "2026-08-12T17:45:00Z",
+      "finishedAt": "2026-08-12T17:03:01Z"
+    },
+    "6.1": {
+      "taskId": "6.1",
+      "manifest": true,
+      "tier": "A",
+      "status": "COMMITTED",
+      "commitSha": "6727e37",
+      "commitMessage": "conductor: 6.1 evidence engine",
+      "planLines": [
+        2396,
+        2442
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 791,
+        "pass": 791,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/evidence.ts + adapter/quarantine.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/evidence.test.ts",
+        "conductor/tests/quarantine.test.ts",
+        "conductor/adapter/evidence.ts",
+        "conductor/adapter/quarantine.ts"
+      ],
+      "revertAssertion": "removing evidence.ts/quarantine.ts re-fails all 18 tests; [6.1-quarantine] mtime-survives + [6.1-classify-e2e] ESM-absolute-path-relativize only pass against rename+relativize logic. Orchestrator re-verified quarantine round-trip: moved OUT, mtime survived (1717200000000==), restored.",
+      "attempts": 1,
+      "deviations": [
+        "buildCommand on a VerifyConfig superset (core Config scope schema is frozen additionalProperties:false)",
+        "stale-marker break surfaced on VerifyOutcome (staleMarkerBroken) not a journal anomaly (§7.4 evidence vocab is red/green/verify only; anomaly kinds lack marker-break) — same posture as C-019",
+        "strips NODE_TEST_CONTEXT in the child env (nested node --test would else mis-report a fail as pass) — env-hygiene like gitio's GIT_DIR strip",
+        "longest-prefix-first relativization for /var vs /private/var symlink"
+      ],
+      "startedAt": "2026-08-12T19:40:00Z",
+      "finishedAt": "2026-08-12T20:30:45Z"
+    },
+    "6.2": {
+      "taskId": "6.2",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "d02b642",
+      "commitMessage": "conductor: 6.2 runner discovery probe",
+      "planLines": [
+        2443,
+        2462
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": {
+        "cmd": null,
+        "exitCode": null,
+        "class": "n/a",
+        "excerpt": "live probe task: no red step; M8 live-artifact integrity applies instead"
+      },
+      "filesTouched": [
+        "conductor/docs/RUNNER-DISCOVERY.md"
+      ],
+      "revertAssertion": "M8 artifact: verify-acceptance checks RUNNER-DISCOVERY.md exists, >20 lines, contains command transcripts; orchestrator independently re-ran the node (c) cell and matched the recorded output (3 tests, wt_fail red, whole-tree exit 1)",
+      "attempts": 1,
+      "deviations": [
+        "committed out of §8 order as free early parallel work (orchestrator prompt §6.2); C-011"
+      ],
+      "startedAt": "2026-08-12T09:12:00Z",
+      "finishedAt": "2026-08-12T09:13:04Z"
+    },
+    "7.1": {
+      "taskId": "7.1",
+      "manifest": true,
+      "tier": "A",
+      "status": "COMMITTED",
+      "commitSha": "c3e1983",
+      "commitMessage": "conductor: 7.1 fanout engine",
+      "planLines": [
+        2465,
+        2494
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 816,
+        "pass": 816,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/fanout.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/fanout.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/fanout.test.ts",
+        "conductor/tests/fixtures/fake-sdk.ts",
+        "conductor/adapter/fanout.ts"
+      ],
+      "revertAssertion": "removing fanout.ts re-fails all 10 fanout tests; [7.1-grouping] AABB + [7.1-freeze-hold] + [7.1-retry] no-format validate-retry only pass against the real engine. Orchestrator verified: no format field on prompt body (binding), registry.set(241) before prompt(273), G14 clean.",
+      "attempts": 1,
+      "deviations": [
+        "optional trailing runId='' param (createFanout is a fixed 5-arg call site but Corr.runId is mandatory)"
+      ],
+      "startedAt": "2026-08-12T21:15:00Z",
+      "finishedAt": "2026-08-12T21:39:53Z"
+    },
+    "7.2": {
+      "taskId": "7.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "0d39f34",
+      "commitMessage": "conductor: 7.2 router client + failover",
+      "planLines": [
+        2495,
+        2514
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 816,
+        "pass": 816,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/router-client.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/router-client.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/router-client.test.ts",
+        "conductor/adapter/router-client.ts"
+      ],
+      "revertAssertion": "removing router-client.ts re-fails all 12 tests; [7.2-second-failover] zero-network short-circuit + [7.2-cases] bounded-timeout no-throw only pass against the real fail-soft client",
+      "attempts": 1,
+      "deviations": [
+        "health endpoint /conductor/health (plan names only /conductor/metrics; test path-agnostic)"
+      ],
+      "startedAt": "2026-08-12T21:55:00Z",
+      "finishedAt": "2026-08-12T21:45:08Z"
+    },
+    "8.1": {
+      "taskId": "8.1",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "00cdcd7",
+      "commitMessage": "conductor: 8.1 doctrine packs",
+      "planLines": [
+        2517,
+        2541
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 826,
+        "pass": 826,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/doctrine.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "tests=10 pass=0 fail=10; all nine packs ENOENT via readPack() before any pack written (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/doctrine.test.ts",
+        "conductor/doctrine/core.md",
+        "conductor/doctrine/decompose.md",
+        "conductor/doctrine/plan.md",
+        "conductor/doctrine/tdd.md",
+        "conductor/doctrine/test-vet.md",
+        "conductor/doctrine/debug.md",
+        "conductor/doctrine/review.md",
+        "conductor/doctrine/skeptic.md",
+        "conductor/doctrine/receive-review.md"
+      ],
+      "revertAssertion": "reverting any one pack makes doctrine.test.ts fail naming that pack's missing anchor(s): e.g. removing tdd.md fails 8.1-files (ENOENT), 8.1-mechanism ('the handler runs the test'), and 8.1-anchors-tdd ('NO PRODUCTION CODE WITHOUT A FAILING TEST' / 'delete means delete'); the soft/hasWord matchers pin the exact anchor words, not mere file presence",
+      "attempts": 1,
+      "deviations": [
+        "M5 gate refinement (C-026) required first: the marker scan is now production-scoped so doctrine.test.ts's legitimate 'placeholder marker' subject (and the 15.1 doc-fidelity test's like need) do not false-trip M5; landed as conductor-build infra commit df7f49f ahead of this task"
+      ],
+      "startedAt": "2026-08-12T23:05:00Z",
+      "finishedAt": "2026-08-12T23:25:00Z"
+    },
+    "8.2": {
+      "taskId": "8.2",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "29a5011",
+      "commitMessage": "conductor: 8.2 injection",
+      "planLines": [
+        2542,
+        2560
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 837,
+        "pass": 837,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/inject.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND file:///.../conductor/adapter/inject.ts (observed by orchestrator before inject.ts existed). Two later review-driven assertions (8.2-null-recommendation, 8.2-empty-pack) each independently observed red 10/11+11/11-fail against the un-fixed inject.ts."
+      },
+      "filesTouched": [
+        "conductor/tests/inject.test.ts",
+        "conductor/adapter/inject.ts"
+      ],
+      "revertAssertion": "removing inject.ts re-fails all 11 tests (missing-subject); reverting FIX #1 alone re-reds 8.2-null-recommendation (block renders legalTools.why, not a hardcoded 'terminal'); reverting FIX #2 alone re-reds 8.2-empty-pack (empty pack must fail-closed before the beacon)",
+      "attempts": 1,
+      "deviations": [
+        "buildSystemAppend gained a trailing ctx object {repoConfigured, taintCount, overridesRemaining}: the §6.4 ledger arg list omits the scalars legalTools + the state block need. Helper-signature extension only; §2 schema untouched.",
+        "init-failure channel is the injected logError seam (§7.1 stderr / client.app.log), NOT a journal event: the closed vocabulary (journal-events.ts) has no init event and widening it is a STOP-AND-PARK closed-vocab change, correctly avoided.",
+        "C-027 pre-commit adversarial review: MAJOR false-terminality in the null-recommendation block (fixed to render legalTools.why) + fail-closed empty-pack hardening in loadPacks. Both fixed test-first inside this task; rows 8.2-null-recommendation/8.2-empty-pack added to the ledger."
+      ],
+      "startedAt": "2026-08-12T23:45:00Z",
+      "finishedAt": "2026-08-13T00:15:00Z"
+    },
+    "9.1": {
+      "taskId": "9.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "ed3d407",
+      "commitMessage": "conductor: 9.1 intake + question tools",
+      "planLines": [
+        2567,
+        2583
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 864,
+        "pass": 864,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.1.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleAnswer' (observed by orchestrator before the 6 handlers existed). The 6 review-fix tests (F1-F6) each independently observed red against the un-fixed handlers (17 tests, 11 pass, 6 fail)."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/journal-events.ts",
+        "conductor/tests/tools-9.1.test.ts"
+      ],
+      "revertAssertion": "removing any of the 6 handler exports re-reds tools-9.1.test.ts (missing-subject); reverting F1's escalation re-reds [9.1-fix-classify-escalate-work] (hard-throw); reverting F2/F3 prechecks re-reds the surface/defer half-write tests; reverting F4 re-reds humanTerritory; reverting the decision.recorded widening reds [9.1-fix-known-events] via the real throwing journal",
+      "attempts": 2,
+      "deviations": [
+        "First implementer attempt returned an anomalous/injected-looking result with 0 tool uses (no edits); caught by orchestrator verifying the actual tree (nothing written, test still red), discarded, re-dispatched fresh.",
+        "§7.4 journal widening: added state:decision.recorded to journal-events.ts EVENTS (decide/defer record no run/item state; sanctioned by the file's widening rule; NO §2-schema enum touched, no STOP-AND-PARK). Grep-tested via the real throwing journal (F7).",
+        "queue.json + decisions.jsonl are handler-owned ledgers written directly (writeFileAtomicSync / JSONL append), not via state.ts's private evidence appender (G6 restricts that to state.ts/evidence.ts).",
+        "C-029 pre-commit adversarial review: 4 MAJOR (classify hard-throw, surface/defer half-write, surface humanTerritory) + 2 minor (correctedKind null-iff-agreed, decisions torn-line) fixed test-first. 2 nits deferred to 10.1 (classify archiveRun; decide isHumanTerritory ask-gate)."
+      ],
+      "startedAt": "2026-08-13T01:40:00Z",
+      "finishedAt": "2026-08-13T02:30:00Z"
+    },
+    "9.2": {
+      "taskId": "9.2",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "75a2531",
+      "commitMessage": "conductor: 9.2 planning tools",
+      "planLines": [
+        2584,
+        2594
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 887,
+        "pass": 887,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.2.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleDecompose' (observed by orchestrator before the handlers existed; tsc showed ONLY those 2 TS2305 errors, proving every other API assumption in the test was already correct). The 14 review-fix tests (R1-R14) were each observed red against the un-fixed implementation: 23 tests, 11 pass, 12 fail."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/planning.ts",
+        "conductor/core/types.ts",
+        "conductor/tests/tools-9.2.test.ts",
+        "docs/build/specs/task-9.2.assertions.json"
+      ],
+      "revertAssertion": "removing handleDecompose/handlePlan re-reds tools-9.2.test.ts (missing-subject); reverting ITEM_MAX_FILES to config.workflow.trivialMaxFiles re-reds [9.2-fix-size-budget]; reverting the determiner skip re-reds [9.2-fix-acceptance-clusters]; reverting the union-edges deps map re-reds [9.2-fix-duplicate-id-cycle]; reverting findDependsOnCycles to first-cycle-only re-reds [9.2-fix-all-cycles]; reverting the rootLevelOnly guard re-reds [9.2-fix-rootless-glob]; reverting planDefects re-reds [9.2-fix-decision-placeholders] + [9.2-fix-journal-decision-reject]",
+      "attempts": 1,
+      "deviations": [
+        "SCHEMAS.Plan is a NEW 18th schema in core/types.ts. Not optional: fanout's schemaName is mandatory and validate() resolves it from SCHEMAS at call time, so conductor_plan cannot dispatch without one. export-schemas.test.ts derives from Object.keys(SCHEMAS), so the addition is safe by construction.",
+        "The pure §3.2 validation table lives in a NEW core/planning.ts (G3 pure-core/thin-adapter); tools.ts stays dispatch/re-prompt/persist/journal.",
+        "Re-prompt budget is ONE uniformly for every §3.2 row (the plan reserves the bounded round for the size row and 9.2's bullet for the cycle case). Strictly more forgiving; still ends in a named rejection. Raised at the Phase 9 gate (C-030 F5).",
+        "'> 1 acceptance cluster' has no spec definition; approximated by the criterion's subject token after skipping determiners, documented in planning.ts. No authored test exercises this row directly.",
+        "C-030 pre-commit adversarial review: 19 surviving findings (2 MAJOR) fixed test-first across 14 R-tests; 3 refuted; E10 (crash-mid-persist reconciliation) deferred to 10.1. 9 skeptics died on a session limit and their findings were counted as UPHELD per the plan's under-delivered-panel rule.",
+        "R13 (derived plan-decision schema) PASSED pre-fix — it is a regression guard, not red-driven TDD evidence. Recorded rather than presented as a red."
+      ],
+      "startedAt": "2026-08-13T02:45:00Z",
+      "finishedAt": "2026-08-13T04:40:00Z"
+    },
+    "9.3": {
+      "taskId": "9.3",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": "1ad82b7",
+      "commitMessage": "conductor: 9.3 plan review",
+      "planLines": [
+        2596,
+        2604
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 901,
+        "pass": 901,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.3.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handlePlanReview' (orchestrator-observed; tsc showed ONLY that one TS2305). The 6 review-fix tests (R1-R6) were each observed red against the un-fixed handler: 14 tests, 8 pass, 6 fail."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/planning.ts",
+        "conductor/tests/tools-9.3.test.ts",
+        "docs/build/specs/task-9.3.assertions.json"
+      ],
+      "revertAssertion": "removing handlePlanReview re-reds tools-9.3.test.ts (missing-subject); reverting the Math.max lens roster re-reds [9.3-fix-lens-coverage]; reverting the file-shaped token rule re-reds [9.3-fix-blocks-no-directory-tokens]; reverting the citation normalisation re-reds [9.3-fix-blocks-common-citation-forms]; reverting cumulative claims re-reds [9.3-fix-overlapping-blocks]; reverting ID_BOUNDARY re-reds [9.3-fix-id-boundary]; reverting the k<1 guard re-reds [9.3-fix-zero-skeptics]",
+      "attempts": 1,
+      "deviations": [
+        "The staged red test came from the lookahead burst whose writer DIED on a session limit; the orchestrator verified completeness (1077 lines, 8 tests = 8 assertions, clean EOF, node --check, tsc showing only the missing export) before trusting it.",
+        "Lens ROSTER is max(readFanout('planReview'), 4), which can exceed workflow.planReviewers. §3.2 mandates four lenses and they are the substance of the stage; the reader clamp is a concurrency knob the fan-out engine enforces internally. Raised at the Phase 9 gate.",
+        "blocksItems mapping is the pinned spec-gap resolution (§2.10 findings carry no item reference): id tokens + file-shaped path tokens, over-match biased (a human unblocks) but never whole-queue. Raised at the Phase 9 gate.",
+        "Question origin/round semantics: planReviewRounds counts REVISION rounds; the cap exit itself performs no revision.",
+        "C-031 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 16 agents/1.4M tokens vs C-030's 79/5.7M): 5 MAJOR + 2 minor fixed test-first; 5 crash-class findings deferred to 10.1; 2 raised at the Phase 9 gate.",
+        "A first review run returned an EMPTY finding set because both lenses died to a connection error; treated as 'review did not run', not as a pass, and re-run."
+      ],
+      "startedAt": "2026-08-13T05:10:00Z",
+      "finishedAt": "2026-08-13T06:30:00Z"
+    },
+    "9.4a": {
+      "taskId": "9.4a",
+      "manifest": true,
+      "tier": "B",
+      "status": "COMMITTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.4a test submission + vetting",
+      "planLines": [
+        2612,
+        2623
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 921,
+        "pass": 921,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.4a.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleSubmitTest' (orchestrator-observed; tsc showed ONLY the two missing-export TS2305s). The 9 review-fix tests (C032-D1..D9) were EACH observed red against the un-fixed handlers before any fix: 9 tests, 0 pass, 9 fail, each failing on its own defect assertion (e.g. D8 spent 2 repairs on a 1.5 budget; D9 burned all 4 dispatches on NEEDS_CONTEXT)."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/gates-phase.ts",
+        "conductor/tests/tools-9.4a.test.ts",
+        "conductor/tests/tools-9.4a-review.test.ts",
+        "docs/build/specs/task-9.4a.assertions.json"
+      ],
+      "revertAssertion": "removing handleSubmitTest re-reds tools-9.4a.test.ts (missing-subject); reverting redAdmission to the class-only edge re-reds [C032-D1-fallback-red-refused]; reverting the capturedRedOf staleness report re-reds [C032-D2-stale-red]; removing assertContainedPaths re-reds [C032-D3-testscope-escape]; reverting cannotEverPublish re-reds [C032-D4-deferred-dep-wedge]; reverting the legal-class filter re-reds [C032-D5-illegal-class-red]; reverting the accumulated attempts re-reds [C032-D6-attempts-accumulate]; removing the named questions.jsonl failure re-reds [C032-D7-torn-questions]; removing the Math.floor knobs re-reds [C032-D8-fractional-budget]; removing the NEEDS_CONTEXT exit re-reds [C032-D9-needs-context]",
+      "attempts": 1,
+      "deviations": [
+        "testRepairAttempts bounds REPAIRS, not total dispatches (§3.3 'returns the failure to the writer FOR REPAIR, bounded at testRepairAttempts' + the §2.1 knob comment 'submit_test: illegal-red repair attempts'), so one call makes at most 1 + testRepairAttempts writer dispatches. An earlier orchestrator-signed draft of the assertions row said total dispatches <= the knob; corrected in the assertions file BEFORE the tests were written, and the test-writer returned a mutation table proving only 1+budget satisfies both loop tests.",
+        "Question origins REUSE the closed §2.11 vocabulary: 'implementer-blocked' at submit repair exhaustion (the blocked write-capable sub-session IS the test-writer) and 'review-round-cap' at the vet cap. Raised at the Phase 9 gate.",
+        "The 9.4a/5.3 deferred binding is ENFORCE: core/gates-phase depsReady removes the stage tool for a dependency-unready item, so gate and handler cannot disagree. It introduced the E11 wedge (a deferred dependency left the run with no legal exit), fixed in the same commit by cannotEverPublish.",
+        "An untargeted red (evidence legalRed=false) is NOT routed into the repair loop, unlike a class-'error' red: no edit the writer can make to its own test makes a full-suite fallback target it, so the stage stops and asks rather than spending the budget re-observing another suite's failure.",
+        "C-032 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 18 agents/2.3M tokens): 5 surviving MAJORs collapsing to 3 distinct defects, plus 6 minors/nits fixed; 1 crash-class finding deferred to 10.1; 6 policy questions raised at the Phase 9 gate.",
+        "One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics — the string the diff uses is the one §3.3 and the pinned contract name — and is recorded in C-032 so it is not re-litigated."
+      ],
+      "startedAt": "2026-08-13T06:30:00Z",
+      "finishedAt": "2026-08-13T09:05:00Z"
+    },
+    "9.4b": {
+      "taskId": "9.4b",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.4b green/validate/amend",
+      "planLines": [
+        2625,
+        2639
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "9.4c": {
+      "taskId": "9.4c",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.4c wave driver",
+      "planLines": [
+        2640,
+        2651
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "9.5a": {
+      "taskId": "9.5a",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.5a item review",
+      "planLines": [
+        2652,
+        2666
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "9.5b": {
+      "taskId": "9.5b",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.5b publish + report",
+      "planLines": [
+        2667,
+        2686
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "9.5c": {
+      "taskId": "9.5c",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.5c stop reports + hatches",
+      "planLines": [
+        2687,
+        2699
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "9.6": {
+      "taskId": "9.6",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 9.6 worktree mode",
+      "planLines": [
+        2700,
+        2728
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "10.1": {
+      "taskId": "10.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 10.1 continuation + ask gate",
+      "planLines": [
+        2731,
+        2748
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "11.1": {
+      "taskId": "11.1",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "d6745de",
+      "commitMessage": "conductor: 11.1 router scaffold + upstream contract",
+      "planLines": [
+        2755,
+        2783
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh + ctest --test-dir .out/build/clang-relwdebinfo",
+      "tap": {
+        "tests": 847,
+        "pass": 847,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0,
+        "ctest": "1/1 PASS (router-tests)"
+      },
+      "redEvidence": {
+        "cmd": "node --test conductor/tests/export-schemas.test.ts (TS half); C++ half is scaffold bring-up (no red-first, per plan 'trivial doctest builds+runs green')",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND conductor/tools/export-schemas.ts (observed by orchestrator before the tool existed)"
+      },
+      "filesTouched": [
+        "CMakeLists.txt",
+        "vcpkg.json",
+        ".gitignore",
+        "scripts/test-conductor.sh",
+        "src/router/version.hpp",
+        "src/router/main.cpp",
+        "src/router/UPSTREAM_CONTRACT.md",
+        "src/router-tests/scaffold_test.cpp",
+        "conductor/tools/export-schemas.ts",
+        "conductor/tests/export-schemas.test.ts"
+      ],
+      "revertAssertion": "removing export-schemas.ts re-reds export-schemas.test.ts (missing-subject); removing src/router/main.cpp fails the llama-router link; removing scaffold_test.cpp / version.hpp fails the router-tests build; the ctest proves the C++ sources are load-bearing",
+      "attempts": 1,
+      "deviations": [
+        "Branch B run ON MAIN (not a worktree): submodules already populated, worktree submodule-init is the flagged gotcha, C++ never overlaps conductor/*.ts, test-conductor.sh is cmake-independent (branch-b-plan.md groundwork).",
+        "CMakeLists: dropped include(compiler-warnings) with the myprogram block (it applies target_compile_options to the removed ${PROJECT_NAME}=myprogram target; tools/ does not use it). Router warnings can be re-added target-scoped later.",
+        "validator target is nlohmann_json_schema_validator::validator (confirmed from the vcpkg port usage; configure passed but link needed the ::validator target).",
+        "router-tests registered with ctest via add_test (whole-binary) rather than doctest_discover_tests (per-case) to avoid the include(doctest) module-path gotcha; per-case discovery is a later refinement.",
+        "Step 2 (LIVE upstream contract) DEFERRED to 12.1 — serve.py (its specified vehicle) is not built; assets (llama-server binary + qwen3.6-27b) confirmed present; recorded in src/router/UPSTREAM_CONTRACT.md, NOT fabricated.",
+        "CMake pre-build custom_command for export-schemas deferred to 11.6 (when router-tests consumes the schemas); test-conductor.sh already regenerates them."
+      ],
+      "startedAt": "2026-08-13T01:00:00Z",
+      "finishedAt": "2026-08-13T01:20:00Z"
+    },
+    "11.2": {
+      "taskId": "11.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "efdffc5",
+      "commitMessage": "conductor: 11.2 router config",
+      "planLines": [
+        2784,
+        2788
+      ],
+      "canonicalTestCmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo",
+      "tap": {
+        "ctest": "1/1 PASS; doctest 7 cases (scaffold+6 config), 119/119 assertions"
+      },
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "fatal error: 'config.hpp' file not found (observed by orchestrator after wiring config_test.cpp, before the header existed)"
+      },
+      "filesTouched": [
+        "CMakeLists.txt",
+        "src/router-tests/config_test.cpp",
+        "src/router/config.hpp",
+        "docs/build/specs/task-11.2.assertions.json"
+      ],
+      "revertAssertion": "M4 re-derived from the working tree: mv config.hpp away => router-tests compile fails ('config.hpp' file not found); restore => 7/7 cases 119/119 green. Recorded by orchestrator.",
+      "attempts": 1,
+      "deviations": [
+        "HEADER-ONLY implementation (src/router/config.hpp, namespace conductor::router) so CMakeLists source-wiring stays orchestrator-only; no config.cpp.",
+        "Parse order pinned by the test: JSON parse -> fill the three documented §2.2 defaults -> schema-file validation (exported RouterConfig.schema.json, single-source) -> port range 1..65535 in the parser (schema has no min/max) -> logging.level vocabulary check.",
+        "Test author proved the suite satisfiable against a throwaway scratchpad reference impl and ran 6 mutations, each caught by exactly the intended case; reference deleted before delivery.",
+        "KNOWN NIT for the Phase 11 gate: malformed INPUT JSON also throws ConfigError with empty field(), which the class comment reserves for schema-file trouble (doc/contract mismatch, no test pins it; flagged honestly by the implementer).",
+        "Fractional ports rejected via is_number_integer() before the range test (schema's bare 'number' would admit them)."
+      ],
+      "startedAt": "2026-08-13T03:20:00Z",
+      "finishedAt": "2026-08-13T04:05:00Z"
+    },
+    "11.3": {
+      "taskId": "11.3",
+      "manifest": true,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 11.3 router proxy",
+      "planLines": [
+        2790,
+        2802
+      ],
+      "canonicalTestCmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo",
+      "tap": {
+        "ctest": "1/1 PASS; doctest 17 cases / 243 assertions (10 cases / 124 assertions are 11.3)"
+      },
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "fatal error: 'router/router.hpp' file not found (orchestrator-observed after wiring proxy_test.cpp, before the header existed)"
+      },
+      "filesTouched": [
+        "CMakeLists.txt",
+        "src/tests/proxy_test.cpp",
+        "src/router/router.hpp",
+        "docs/build/specs/task-11.3.assertions.json"
+      ],
+      "revertAssertion": "M4 orchestrator-observed both directions: mv src/router/router.hpp aside => router-tests compile FAILS ('router/router.hpp' file not found); restore => rebuild + ctest 1/1, 17/17 cases.",
+      "attempts": 1,
+      "deviations": [
+        "Staged test came from the lookahead burst (writer died on a session limit). Orchestrator verified completeness (839 lines, 10 cases = 10 assertions, clean EOF) AND updated it to the user-directed src/ layout: moved to src/tests/proxy_test.cpp and converted to full-path includes (#include \"router/router.hpp\").",
+        "HEADER-ONLY src/router/router.hpp so CMakeLists source wiring stays orchestrator-only (same posture as 11.2's config.hpp).",
+        "Verbatim relay does NOT use httplib Response::set_content: this vcpkg build has brotli support, so set_content would gzip/brotli the body whenever the caller sent Accept-Encoding, adding Content-Encoding/Vary the upstream never sent. Buffered relays use a fixed-length content provider instead, which httplib does not re-encode. Tests would have passed either way (the client decompresses transparently) — this is about being verbatim ON THE WIRE.",
+        "SSE needs a worker thread: httplib invokes the server-side chunked content provider AFTER the handler returns, and the client's send() blocks, so both cannot be driven from one thread. Lifetime is owned by a detail::UpstreamCall captured in the provider lambda; its destructor cancels + client->stop() + joins, so a downstream disconnect can neither leak nor wedge a thread.",
+        "TCP_NODELAY enabled on both legs (httplib defaults it off) — right for token-by-token SSE and removes Nagle as a flake source.",
+        "G5 fail-soft verified in the implementation, not just the tests: json::parse uses allow_exceptions=false, dump() is wrapped so an un-round-trippable body forwards ORIGINAL bytes, and the only minted status is the 502 for an unreachable upstream.",
+        "FLAKE-HUNT: implementer ran 30 sequential 11.3-only + 20 sequential full ctest + 48 runs at 12-way concurrency, zero 11.3 failures."
+      ],
+      "startedAt": "2026-08-13T06:45:00Z",
+      "finishedAt": "2026-08-13T07:40:00Z"
+    },
+    "11.4": {
+      "taskId": "11.4",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 11.4 admission",
+      "planLines": [
+        2803,
+        2816
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "11.5": {
+      "taskId": "11.5",
+      "manifest": true,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 11.5 group affinity",
+      "planLines": [
+        2817,
+        2828
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "11.6": {
+      "taskId": "11.6",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 11.6 schema observer",
+      "planLines": [
+        2829,
+        2845
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "11.7": {
+      "taskId": "11.7",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 11.7 metrics",
+      "planLines": [
+        2846,
+        2854
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "11.8": {
+      "taskId": "11.8",
+      "manifest": true,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 11.8 router live smoke",
+      "planLines": [
+        2855,
+        2863
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "12.1": {
+      "taskId": "12.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 12.1 serve wiring",
+      "planLines": [
+        2866,
+        2889
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "12.2": {
+      "taskId": "12.2",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 12.2 first-run setup",
+      "planLines": [
+        2890,
+        2913
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "13.1": {
+      "taskId": "13.1",
+      "manifest": true,
+      "tier": "A",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 13.1 e2e scripted",
+      "planLines": [
+        2916,
+        2960
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "13.2": {
+      "taskId": "13.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 13.2 live smoke",
+      "planLines": [
+        2961,
+        2976
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "14.1": {
+      "taskId": "14.1",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 14.1 bench driver",
+      "planLines": [
+        2979,
+        3015
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "14.2": {
+      "taskId": "14.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 14.2 POC run",
+      "planLines": [
+        3016,
+        3025
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "15.0": {
+      "taskId": "15.0",
+      "manifest": true,
+      "tier": "B",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 15.0 replay tool",
+      "planLines": [
+        3028,
+        3035
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "15.1": {
+      "taskId": "15.1",
+      "manifest": true,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 15.1 ops docs",
+      "planLines": [
+        3036,
+        3044
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "15.2": {
+      "taskId": "15.2",
+      "manifest": true,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": "conductor: 15.2 dashboard",
+      "planLines": [
+        3045,
+        3053
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null
+    },
+    "5.4": {
+      "taskId": "5.4",
+      "manifest": false,
+      "tier": "A",
+      "status": "COMMITTED",
+      "commitSha": "1176178",
+      "commitMessage": "conductor: 5.4 chat.message hook",
+      "planLines": null,
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "tests": 703,
+        "pass": 703,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/chat-message.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND adapter/chat-message.ts (observed by orchestrator)"
+      },
+      "filesTouched": [
+        "conductor/tests/chat-message.test.ts",
+        "conductor/adapter/chat-message.ts",
+        "conductor/core/journal-events.ts"
+      ],
+      "revertAssertion": "removing adapter/chat-message.ts re-fails all 7 chat-message tests; [5.4-midrun] (route a prompt into a live run, journal user.midrun-prompt) only passes against the currentRun/isTerminal branch + the vocab addition",
+      "attempts": 1,
+      "deviations": [
+        "ADDED user.midrun-prompt to core/journal-events.ts 'state' vocabulary (justified cross-task M6 edit: plan line 1074 mandates the event; 2.1's vocab predated this task)",
+        "implementer worker STALLED post-completion during its own verification (flaky wire-contract test spawning opencode); work was complete + 7/7 green; orchestrator verified full suite green independently and kept it"
+      ],
+      "startedAt": "2026-08-12T18:10:00Z",
+      "finishedAt": "2026-08-12T17:21:24Z",
+      "note": "Added per orchestrator prompt §3.3 (unassigned chat.message hook; plan §3.2 lines 1064-1159, §3.5 lines 1334-1427). Own red->green->commit before Phase 9."
+    },
+    "12.1-G5": {
+      "taskId": "12.1-G5",
+      "manifest": false,
+      "tier": "C",
+      "status": "NOT_STARTED",
+      "commitSha": null,
+      "commitMessage": null,
+      "planLines": [
+        2866,
+        2889
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": null,
+      "redEvidence": null,
+      "filesTouched": [],
+      "revertAssertion": null,
+      "attempts": 0,
+      "deviations": [],
+      "startedAt": null,
+      "finishedAt": null,
+      "note": "G5 equivalence half of Task 12.1 (run 13.1 e2e with and without router). Executes after 13.1 green; no separate commit; §11 acceptance row 9."
+    }
   }
- }
 }

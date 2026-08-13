@@ -148,10 +148,64 @@ function isActionable(item: GateItem): boolean {
   return item.blocked === null && item.deferred === null && nextStageTool(item) !== null;
 }
 
+// §4.2 dependency readiness — the ONE rule nextWave already applies: an item is
+// ready iff EVERY id in its dependsOn names an item this run has PUBLISHED (an
+// unknown id is never published, so it is never ready). Nothing below PUBLISHED
+// unlocks a dependent.
+//
+// The 9.4a/5.3 deferred binding (ENFORCE) lands here: an item whose dependency is
+// not yet PUBLISHED contributes NO stage tool, so the legal set the injection and
+// the continuation engine read can never offer a stage tool the Phase-9 handler
+// would refuse — gate and handler cannot disagree, and there is no recovery
+// bypass. Without it, `recommended` (which is computed from nextWave, and so was
+// already deps-aware) and `legal` disagreed: the gate offered
+// conductor_submit_test for an item the scheduler would never schedule.
+function depsReady(item: GateItem, publishedIds: Set<string>): boolean {
+  for (const dep of item.dependsOn) {
+    if (!publishedIds.has(dep)) return false;
+  }
+  return true;
+}
+
 // §3.4 conductor_report precondition: every item is PUBLISHED, blocked, or
 // deferred — the dispositions a report can close on.
 function isSettled(item: GateItem): boolean {
   return item.state === "PUBLISHED" || item.blocked !== null || item.deferred !== null;
+}
+
+// The items that can NEVER reach PUBLISHED in this run. `isSettled` names three
+// dispositions, but the depsReady binding above creates a fourth the original rule
+// had no word for: an item whose dependency chain is permanently stuck contributes no
+// stage tool AND is not settled, so a single deferred dependency would leave the run
+// with no legal exit at all — no stage tool for the dependents, no report,
+// `recommended` null, forever.
+//
+// PERMANENTLY stuck means DEFERRED (a judgment this run does not revisit) or a
+// dependency id no item in this run carries. A BLOCKED dependency is deliberately NOT
+// included: a question can be answered and the item resumes, so a run stalled behind
+// one is waiting rather than finished, conductor_answer is the way out, and
+// legalizing the report there would offer an exit over work that is still live.
+//
+// Computed as a FIXPOINT (seed, then propagate) rather than a recursive walk: a queue
+// whose dependsOn edges form a cycle — which core validateQueue rejects, but which
+// the gate must not assume — terminates here instead of recursing forever.
+function cannotEverPublish(items: GateItem[]): Set<string> {
+  const known = new Set(items.map((item) => item.id));
+  const stuck = new Set<string>();
+  for (const item of items) {
+    if (item.state !== "PUBLISHED" && item.deferred !== null) stuck.add(item.id);
+  }
+  for (;;) {
+    let added = false;
+    for (const item of items) {
+      if (item.state === "PUBLISHED" || stuck.has(item.id)) continue;
+      if (item.dependsOn.some((dep) => !known.has(dep) || stuck.has(dep))) {
+        stuck.add(item.id);
+        added = true;
+      }
+    }
+    if (!added) return stuck;
+  }
 }
 
 // Record a per-item stage tool into the legal map, aggregating the item id into
@@ -277,9 +331,16 @@ export function legalTools(
       // tool, aggregated by tool. A blocked/deferred/PUBLISHED item contributes
       // none (§3.3, §3.4).
       const itemById = new Map<string, GateItem>();
-      for (const it of items) itemById.set(it.id, it);
+      const publishedIds = new Set<string>();
+      for (const it of items) {
+        itemById.set(it.id, it);
+        if (it.state === "PUBLISHED") publishedIds.add(it.id);
+      }
       for (const it of items) {
         if (!isActionable(it)) continue;
+        // §4.2 (a), the 9.4a/5.3 binding: a dependency-unready item is not
+        // offered its stage tool at all — the same predicate nextWave applies.
+        if (!depsReady(it, publishedIds)) continue;
         const tool = nextStageTool(it);
         if (tool !== null) addStageTool(legal, tool, it.id);
       }
@@ -291,7 +352,8 @@ export function legalTools(
       // legal over an unsettled item merely because the run is trivial (C-018 —
       // the safe reading of the plan's 2256-vs-1142 contradiction).
       const trivial = run.classification !== null && run.classification.kind === "trivial";
-      const allSettled = items.length > 0 && items.every(isSettled);
+      const stuck = cannotEverPublish(items);
+      const allSettled = items.length > 0 && items.every((it) => isSettled(it) || stuck.has(it.id));
       const reportLegal = allSettled;
       if (reportLegal) legal.set(REPORT, {});
 
