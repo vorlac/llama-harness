@@ -1049,7 +1049,7 @@
    "manifest": true,
    "tier": "B",
    "status": "COMMITTED",
-   "commitSha": null,
+   "commitSha": "1ad82b7",
    "commitMessage": "conductor: 9.3 plan review",
    "planLines": [
     2596,
@@ -1349,23 +1349,43 @@
   "11.3": {
    "taskId": "11.3",
    "manifest": true,
-   "tier": "B",
-   "status": "NOT_STARTED",
+   "tier": "C",
+   "status": "COMMITTED",
    "commitSha": null,
-   "commitMessage": "conductor: 11.3 proxy",
+   "commitMessage": "conductor: 11.3 router proxy",
    "planLines": [
     2790,
     2802
    ],
-   "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
+   "canonicalTestCmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo",
+   "tap": {
+    "ctest": "1/1 PASS; doctest 17 cases / 243 assertions (10 cases / 124 assertions are 11.3)"
+   },
+   "redEvidence": {
+    "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+    "exitCode": 1,
+    "class": "missing-subject",
+    "excerpt": "fatal error: 'router/router.hpp' file not found (orchestrator-observed after wiring proxy_test.cpp, before the header existed)"
+   },
+   "filesTouched": [
+    "CMakeLists.txt",
+    "src/tests/proxy_test.cpp",
+    "src/router/router.hpp",
+    "docs/build/specs/task-11.3.assertions.json"
+   ],
+   "revertAssertion": "M4 orchestrator-observed both directions: mv src/router/router.hpp aside => router-tests compile FAILS ('router/router.hpp' file not found); restore => rebuild + ctest 1/1, 17/17 cases.",
+   "attempts": 1,
+   "deviations": [
+    "Staged test came from the lookahead burst (writer died on a session limit). Orchestrator verified completeness (839 lines, 10 cases = 10 assertions, clean EOF) AND updated it to the user-directed src/ layout: moved to src/tests/proxy_test.cpp and converted to full-path includes (#include \"router/router.hpp\").",
+    "HEADER-ONLY src/router/router.hpp so CMakeLists source wiring stays orchestrator-only (same posture as 11.2's config.hpp).",
+    "Verbatim relay does NOT use httplib Response::set_content: this vcpkg build has brotli support, so set_content would gzip/brotli the body whenever the caller sent Accept-Encoding, adding Content-Encoding/Vary the upstream never sent. Buffered relays use a fixed-length content provider instead, which httplib does not re-encode. Tests would have passed either way (the client decompresses transparently) \u2014 this is about being verbatim ON THE WIRE.",
+    "SSE needs a worker thread: httplib invokes the server-side chunked content provider AFTER the handler returns, and the client's send() blocks, so both cannot be driven from one thread. Lifetime is owned by a detail::UpstreamCall captured in the provider lambda; its destructor cancels + client->stop() + joins, so a downstream disconnect can neither leak nor wedge a thread.",
+    "TCP_NODELAY enabled on both legs (httplib defaults it off) \u2014 right for token-by-token SSE and removes Nagle as a flake source.",
+    "G5 fail-soft verified in the implementation, not just the tests: json::parse uses allow_exceptions=false, dump() is wrapped so an un-round-trippable body forwards ORIGINAL bytes, and the only minted status is the 502 for an unreachable upstream.",
+    "FLAKE-HUNT: implementer ran 30 sequential 11.3-only + 20 sequential full ctest + 48 runs at 12-way concurrency, zero 11.3 failures."
+   ],
+   "startedAt": "2026-08-13T06:45:00Z",
+   "finishedAt": "2026-08-13T07:40:00Z"
   },
   "11.4": {
    "taskId": "11.4",

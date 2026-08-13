@@ -1,0 +1,81 @@
+{
+  "taskId": "11.3",
+  "planLines": [
+    2790,
+    2802
+  ],
+  "kind": "code (Branch B, C++ router \u2014 src/router/router.{hpp,cpp} + src/router-tests/router_test.cpp; doctest RED is first a COMPILE failure, the subject header does not exist yet). This task implements NO conductor_* tool and adds NO adapter/tools.ts handleX handler \u2014 the handleX convention is the TS tools surface (handleClassify/handleStatus/... in adapter/tools.ts) and Branch B is C++. The exact new exports, in the established namespace conductor::router (version.hpp): class Router \u2014 owns the listen-side httplib::Server and the upstream-side httplib::Client, is constructed from the Task 11.2 config module's parsed RouterConfig (listen/upstream endpoints), start()/stop() with the bound listen port test-visible so doctests run the router AND the stub upstream on ephemeral ports (Phase 11 header, plan 2751-2753: stub upstream = an httplib::Server started by the test; no model, no llama-server) \u2014 and extract_and_strip_tags(nlohmann::json& body) -> RequestTags, the Task 0.2-pinned x_conductor body-field fallback (extraction + stripping), normalizing into the SAME RequestTags representation the X-Conductor-* header path yields. Streaming is implemented via httplib content provider/receiver per the bullet (plan 2800). CMakeLists.txt wiring is ORCHESTRATOR-ONLY (HANDOFF standing fact); router_test.cpp must NOT redefine DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN (scaffold_test.cpp owns the doctest main). Subagents read: Task 11.3 bullet (2790-2802), \u00a74.4 normative router semantics (1636-1698), \u00a72.2 router config (636-670), G5 (87-94) + dependency-direction law (224-228), conductor/adapter/wire-notes.md line 27 (the IF-clause pin: chat.headers WORKS and the x_conductor fallback was pinned anyway).",
+  "reusesExisting": [
+    "src/router/version.hpp \u2014 conductor::router namespace + router_version(): router.hpp joins this namespace and include style (headers resolve via the targets' src/router include dir); do NOT mint a second namespace",
+    "CMakeLists.txt targets llama-router + router-tests (Task 11.1, ORCHESTRATOR-ONLY file) \u2014 already link httplib::httplib, nlohmann_json::nlohmann_json, nlohmann_json_schema_validator::validator, spdlog::spdlog: NO new find_package, NO new vcpkg port; the orchestrator adds router.cpp / router_test.cpp to the existing target source lists; build ONLY --target llama-router / --target router-tests (never bare --build)",
+    "src/router-tests/scaffold_test.cpp \u2014 owns DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN; router_test.cpp includes <doctest/doctest.h> WITHOUT that define or the suite double-defines main",
+    "Task 11.2's src/router/config.{hpp,cpp} (SERIAL predecessor per plan layout line 391 + task-11.2.assertions.json; NOT on disk today \u2014 11.2 runs first): Router consumes its parsed RouterConfig; 11.3 must NOT re-parse or re-validate config JSON",
+    "src/router-tests/schemas/RouterConfig.schema.json (exported by conductor/tools/export-schemas.ts, Task 11.1, from core/types.ts SCHEMAS.RouterConfig) \u2014 the machine-readable \u00a72.2 shape; 11.3 reads config fields only through 11.2's module, never a hand-rewritten shape",
+    "conductor/adapter/inject.ts headersFor (COMMITTED, Task 8.2) \u2014 mints the EXACT four header names the router's header path must match verbatim: X-Conductor-Role, X-Conductor-Priority, X-Conductor-Group, X-Conductor-Schema (values 'required' etc.), aligned with \u00a72.2 affinity.header / schema.observeHeader; do not invent new header strings in C++",
+    "conductor/tests/fixtures/wire-markers.ts PARAMS_FALLBACK_FIELD = \"x_conductor\" (COMMITTED, Task 0.2) \u2014 the pinned body-field name; the C++ literal must be the identical string",
+    "conductor/adapter/wire-notes.md line 27 (COMMITTED) \u2014 the authority that the IF-clause is ACTIVE: chat.headers output reaches the provider as HTTP headers (primary path) AND the x_conductor top-level body-field fallback was pinned anyway, so extraction + stripping IS in this task's scope",
+    "conductor/adapter/router-client.ts resolveBaseUrl / noteRouterFailure / createFailoverState (COMMITTED, Task 7.2) \u2014 the TS consumer of router availability; context for the 502-envelope gap: router-origin errors must stay parseable JSON for the fan-out side"
+  ],
+  "specGaps": [
+    "PLAN GAP (x_conductor payload shape): the field's VALUE layout is never pinned \u2014 Task 0.2 proved only that a chat.params output.options key lands as a TOP-LEVEL provider-body field (the probe value was a plain string, wire-notes.md line 27), and \u00a74.4 names four tags but no field shape. PROPOSED RESOLUTION: pin an object {\"role\"?, \"priority\"?, \"group\"?, \"schema\"?} of strings, each present key treated exactly as its X-Conductor-* header equivalent (\"schema\":\"required\" \u21d4 X-Conductor-Schema: required); a non-object or unrecognized payload is spdlog-logged and IGNORED for tagging (fail-open, G5) and the field is STILL stripped. Record the pinned shape in HANDOFF so any future TS fallback emitter matches it.",
+    "PLAN GAP (verbatim vs strip): 'body forwarded verbatim' (2792-2793) and 'STRIPS it before proxying' (2797) cannot both be byte-literal \u2014 stripping forces a JSON re-serialize. PROPOSED RESOLUTION: when the body has NO x_conductor key (or is not parseable JSON) the ORIGINAL BYTES are forwarded untouched (byte-identity asserted); only when the key is present is the body re-serialized, and the test asserts JSON-equality with (original minus x_conductor), not byte-equality, in that one case.",
+    "PLAN GAP (502 shape): the bullet demands '502 JSON error' with no shape; \u00a74.4 pins only a shape-less '503 JSON the fan-out engine understands' for Task 11.4. PROPOSED RESOLUTION: one shared router-origin error envelope {\"error\":{\"message\":\"<names upstream host:port + cause>\",\"type\":\"router_upstream_unreachable\",\"code\":502}} with Content-Type application/json; 11.3 pins status + parseability + the type field; Task 11.4's 503 reuses the envelope with its own type string. Record in HANDOFF for 11.4 consistency.",
+    "PLAN GAP (headers 'verbatim' is impossible for transport headers): Host, Content-Length, Connection, Accept-Encoding are necessarily the proxy client's own. PROPOSED RESOLUTION: 'verbatim' = every END-TO-END header crosses with unchanged name+value \u2014 pinned request-side on X-Conductor-*, Authorization, Content-Type and response-side on Content-Type; hop-by-hop/transport headers are excluded from the assertion.",
+    "PLAN GAP (both tag sources present): the bullet only says with working chat.headers the field never appears \u2014 the headers-AND-x_conductor-both-present case is unspecified. PROPOSED RESOLUTION: X-Conductor-* headers win per-tag over x_conductor keys, the field is stripped regardless, and the disagreement is spdlog-logged at debug; one doctest pins header-wins so 11.4/11.5 never see two conflicting tag sources.",
+    "PLAN GAP (404 vs /conductor/*): \u00a74.4's 'everything else 404s except /conductor/*' names endpoints that land only at Task 11.7. PROPOSED RESOLUTION: the 11.3 doctest pins 404 + zero-upstream-contact for non-/v1 non-/conductor paths only, and deliberately does NOT pin /conductor/* behavior, so 11.7 can add those handlers without breaking 11.3's suite.",
+    "PLAN GAP (where extracted tags go at 11.3): the tags' consumers (admission 11.4, affinity 11.5, observer 11.6, metrics 11.7) do not exist yet. PROPOSED RESOLUTION: both tag paths normalize into one RequestTags value exposed by Router for tests (a test-visible last-request-tags seam or tags callback); 11.3 asserts extraction correctness only and attaches NO behavior to the tags \u2014 the single normalized tag surface is what 11.4+ consume."
+  ],
+  "assertions": [
+    {
+      "id": "11.3-post-forward-verbatim",
+      "text": "POST /v1/chat/completions is forwarded to the stub upstream with method POST, path /v1/chat/completions, the request body BYTE-identical (no-x_conductor case), and every end-to-end header crossing with unchanged name+value \u2014 pinned on X-Conductor-Role/-Priority/-Group/-Schema, Authorization, Content-Type as observed by the stub (hop-by-hop transport headers excluded per the pinned gap resolution)",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-response-verbatim-status",
+      "text": "the upstream response returns to the caller verbatim: body bytes unchanged, Content-Type preserved, and the STATUS forwarded as-is INCLUDING non-2xx \u2014 a stub 400 (error body) comes back as 400 with that exact body; the router never rewrites an upstream status or wraps an upstream body in its own envelope (G5, plan 90-92: the router never returns a status the direct path would not have returned)",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-sse-incremental",
+      "text": "SSE streaming is incremental and unbuffered (\u00a74.4 1638-1640, via httplib content provider/receiver): the stub emits two text/event-stream chunks with the second HELD until released; the doctest observes the FIRST chunk on the client side BEFORE the stub releases the second, synchronized by a readiness poll on observed state with NO sleeps (plan 2794-2795); Content-Type text/event-stream and the chunk payload bytes/order are preserved end-to-end",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-non-v1-404",
+      "text": "a request to a path outside /v1/* and outside the reserved /conductor/* prefix (e.g. GET /foo, POST /api/x) is answered 404 BY THE ROUTER and the stub upstream observes ZERO requests for it; the test deliberately does NOT pin /conductor/* behavior (reserved for Task 11.7 per the pinned gap resolution)",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-v1-wildcard",
+      "text": "pass-through covers /v1/* generally, not only chat/completions (\u00a74.4 1638-1639 names chat/completions, embeddings, models): GET /v1/models is proxied to the upstream and its status + body return verbatim",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-upstream-down-502",
+      "text": "with NOTHING listening on the configured upstream port (connection refused), POST /v1/chat/completions returns 502 with Content-Type application/json and a parseable JSON error envelope naming the upstream (the pinned router_upstream_unreachable shape); the router process survives and, once the stub upstream is up, the next request proxies normally \u2014 a dead upstream is a per-request 502, never a router crash or a latched failure",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-xconductor-extract",
+      "text": "IF-clause ACTIVE (wire-notes.md line 27 pinned the fallback): a request whose JSON body carries the top-level \"x_conductor\" field (the exact PARAMS_FALLBACK_FIELD string from Task 0.2) has its tags EXTRACTED \u2014 the doctest asserts the router's normalized RequestTags (role/priority/group/schema) equal the field's payload per the pinned object shape, and that a malformed (non-object) payload extracts nothing while still being stripped",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-xconductor-strip",
+      "text": "the same request's body AS OBSERVED AT THE STUB has NO \"x_conductor\" key and is JSON-equal to the original minus that one key \u2014 model, messages, stream, response_format and every other field preserved; stripping removes exactly the fallback field and nothing else (plan 2796-2798: doctest for extraction + stripping)",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-header-path-untouched",
+      "text": "the production path (plan 2798-2799: with working chat.headers the field never appears): a request tagged ONLY via X-Conductor-* headers reaches the stub with its body BYTE-identical (no parse/re-serialize mutation on the no-field path) and the X-Conductor-* headers arrive upstream unchanged; the header path yields the same normalized RequestTags as the fallback path, and when BOTH sources are present the headers win per-tag (pinned gap resolution) with the field still stripped",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.3-fail-open-nonjson",
+      "text": "G5 law (plan 87-94, 224-228, 2837-2838): a POST /v1/chat/completions whose body is NOT valid JSON is forwarded byte-verbatim and the upstream's response returned verbatim \u2014 the extraction step's parse failure NEVER becomes a router-origin 4xx/5xx; the proxy path performs no request validation of any kind, so no request the direct path would have served is ever rejected by the router",
+      "coveredByTest": null
+    }
+  ],
+  "orchestratorReview": "PROMOTED from the lookahead draft after orchestrator review. Test file updated to the USER-DIRECTED src/ layout: it lives at src/tests/proxy_test.cpp and includes by full path relative to src/ (#include \"router/router.hpp\"). Implementation must be HEADER-ONLY (src/router/router.hpp), matching 11.2's config.hpp, so CMakeLists source lists (orchestrator-only) need no further churn. G5 fail-soft is law: the router never turns a request the direct path would serve into an error."
+}

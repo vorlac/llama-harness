@@ -1,27 +1,17 @@
 {
   "spineTask": {
-    "taskId": "9.2",
-    "step": "GREEN OBSERVED PERSONALLY (873/873 + tsc + bun + schema-export, GATE PASS) after the implementer added core/planning.ts (pure §3.2 table: validateQueue/findDependsOnCycle/firstIntersectingGlob/vagueAcceptance/acceptanceClusters/scanPlaceholders), SCHEMAS.Plan + PlanDecision/Plan types in core/types.ts (decisionOptionSchema extracted, DecisionRecord schema verified drift-free), and tools.ts section 5 (handleDecompose/handlePlan + plannerJob/rejectionReprompt/newPendingItem; PLANNER_ATTEMPTS=2; legality->derive->persist->journal->compact; closed-vocab events only: fsm/transition, fsm/guard-reject, state/item.updated, state/decision.recorded). Diff read personally. NOW: 3-lens adversarial review workflow (spec-conformance/edge-counterexample/invariants; 2 refute-biased skeptics per finding, tie-upholds) running PRE-COMMIT, per the 9.1 lesson. On completion: fix survivors test-first, commit 'conductor: 9.2 planning tools' (explicit paths: conductor/core/planning.ts conductor/core/types.ts conductor/adapter/tools.ts conductor/tests/tools-9.2.test.ts docs/build/specs/task-9.2.assertions.json + STATE/HANDOFF/GATES), then M4 red re-derivation from the commit in a scratch worktree (symlink conductor/node_modules; delete a subject to re-derive red).",
-    "implementerJudgementCalls": "size budget = config.workflow.trivialMaxFiles; acceptance clusters = leading-subject-token heuristic (documented in planning.ts); ponytail rule enforced for full AND ultra, not lite; legalRunTransition consumed before any dispatch; readQueueJson legality-checks queue.json before dispatch; sessionID? optional input for journal corr"
-  },
-  "branchBTask": {
-    "taskId": "11.2",
-    "step": "RED OBSERVED PERSONALLY: config_test.cpp moved into src/router-tests/, wired into CMakeLists router-tests target (orchestrator edit), build fails 'config.hpp' file not found — clean compile red. Implementer dispatched: HEADER-ONLY src/router/config.hpp in namespace conductor::router (CMakeLists stays orchestrator-only); parse order defaults-BEFORE-schema-validate is the linchpin; ports 1..65535 range-checked in parser (schema has no min/max); ConfigError.field() dotted path, what() contains field() verbatim; applyLoggingLevel maps error->spdlog err. Test author PROVED the suite satisfiable against a throwaway reference impl + 6 mutations each caught (reference deleted). On green: ctest observed personally, commit 'conductor: 11.2 router config' (explicit paths: src/router-tests/config_test.cpp src/router/config.hpp CMakeLists.txt docs/build/specs/task-11.2.assertions.json + ledgers).",
+    "taskId": "9.4a",
+    "step": "Phase 9 MILESTONE (SERIAL). conductor_submit_test + conductor_vet_test in adapter/tools.ts. Assertions PROMOTED + orchestrator-signed at docs/build/specs/task-9.4a.assertions.json (11 rows, 7 spec gaps resolved). Test-writer dispatched to staging/task-9.4a/ with §3.3 + Task 9.4a spec QUOTED INLINE (throttle: no agent re-reads the 3,399-line plan). Rulings already made: reuse EXISTING §2.11 origins ('implementer-blocked' for submit repair exhaustion, 'review-round-cap' for the vet cap) — NEVER widen the closed vocabulary; testWriter replies use the already-registered SCHEMAS.ImplementerResult (9.4a authors NO new schema); the 9.4a/5.3 deferred binding is ENFORCE (gates-phase legalTools must not offer a stage tool for a dependency-unready item AND the handler must refuse it too).",
     "intendedFiles": [
-      "src/router-tests/config_test.cpp",
-      "src/router/config.hpp",
-      "CMakeLists.txt"
+      "conductor/tests/tools-9.4a.test.ts",
+      "conductor/adapter/tools.ts",
+      "conductor/core/gates-phase.ts"
     ]
   },
-  "workflows": {
-    "review92": {
-      "runId": "wf_f173704e-ccb",
-      "what": "9.2 pre-commit adversarial panel: 3 blind lenses -> 2 skeptics/finding, tie-upholds; survivors fixed test-first before commit"
-    },
-    "lookahead": {
-      "runId": "wf_03c74930-46d",
-      "what": "ultracode lookahead (~30 fable agents): assertion drafts for 9.4a-9.6/11.4-11.7/10.1/12.1/12.2 -> staged red tests for 9.3-9.6 + 11.3 -> per-test adversarial critics (worktree tsc-classify). Drafts land in scratchpad staging: assertions-drafts/task-<id>.assertions.json + task-<id>/<testfile>. NOTHING from staging enters the tree without the orchestrator's own vet (tsc + read + red observation), one task at a time."
-    }
-  },
-  "commitDiscipline": "Multiple tracks on main: ALWAYS git add explicit paths (never -A). Phase 9 implementations remain strictly SERIAL (all land in adapter/tools.ts); parallelism is confined to staging drafts, critiques, and Branch B."
+  "processNotes": {
+    "throttle": "AGREED WITH USER after the C-030 burst exhausted a 5h window (~79 agents/5.7M tokens): quote spec excerpts inline instead of letting agents read the plan; skeptics for MAJOR findings only; 2 review lenses not 3; lookahead of 1-2 tasks not 8; orchestrator does implementations directly when cheaper. C-031 proved it: 16 agents/1.4M tokens still found 5 MAJORs.",
+    "reviewResultTrap": "A review workflow returning an EMPTY finding set may mean the LENSES CRASHED, not that the diff is clean. Check the run's failures list + journal.jsonl before treating empty as a pass (seen at 9.3).",
+    "firstImplementerTrap": "A subagent can return an anomalous 0-edit 'done'. ALWAYS verify the tree (git status + run the test) before trusting green (seen at 9.1).",
+    "userParallelWork": "The user commits their own work on main concurrently (llama-conductor rename, submodule pointers, presets, docs). ALWAYS git add explicit paths, never -A, and never revert their files."
+  }
 }
