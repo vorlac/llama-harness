@@ -1415,23 +1415,44 @@
     "11.4": {
       "taskId": "11.4",
       "manifest": true,
-      "tier": "A",
-      "status": "NOT_STARTED",
+      "tier": "B",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 11.4 admission",
       "planLines": [
         2803,
         2816
       ],
-      "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "canonicalTestCmd": "ctest --test-dir .out/build/clang-relwdebinfo",
+      "tap": {
+        "cases": 26,
+        "pass": 26,
+        "fail": 0,
+        "assertions": 1599
+      },
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "src/tests/admission_test.cpp:151:10: fatal error: 'router/admission.hpp' file not found (orchestrator-observed AFTER wiring the file into the router-tests source list — the test-writer correctly reported that the target build had passed WITHOUT compiling its file, since CMakeLists is orchestrator-only). The review-fix case [11.4-fix-streaming-slot-release] was separately observed red: CHECK(0 == 1) on inflight_count during a live stream."
+      },
+      "filesTouched": [
+        "src/router/admission.hpp",
+        "src/router/router.hpp",
+        "src/router/config.hpp",
+        "src/tests/admission_test.cpp",
+        "CMakeLists.txt"
+      ],
+      "revertAssertion": "deleting src/router/admission.hpp re-reds the whole TU (missing include); dropping `slot` from the chunked content provider's capture re-reds [11.4-fix-streaming-slot-release] alone; returning priorities_.interactive for the 'review' tag re-reds [11.4-priority-order] alone; sizing new_task_queue at a literal 8 instead of computeTaskQueueThreads re-reds [11.4-health-at-full-queue] alone (all four verified, not reasoned)",
+      "attempts": 1,
+      "deviations": [
+        "SUBAGENT LIMIT: the implementer died mid-task on a weekly account limit, having written a complete admission.hpp but stopping between USING admission_ and DECLARING it, and never writing sendAdmissionError — the tree did not compile. The orchestrator finished it by hand and then reviewed the whole diff as if it had come from a live agent.",
+        "C-033 (found by the orchestrator's own diff read, NOT by a review panel): the admitted slot was released mid-stream because the chunked content provider did not capture it, so maxInflightPerModel was inert for all SSE traffic. Fixed test-first with a streaming stub; the 8 authored rows could not have caught it because their stub always sets a Content-Length.",
+        "SG-2's thread budget uses config.admission.maxInflightPerModel directly rather than a sum over models: §2.2 carries ONE scalar per-model cap, not a per-model map, so the plan's 'sum(maxInflightPerModel)' reduces to that scalar. Pinned by the assertions (76 threads for the §2.2 defaults).",
+        "The clamp test holds ~248 concurrent connections, which is unavoidable rather than careless: effective-queue + inflight is always 248 by construction under a fixed 256 budget, so no rebalancing of the knobs makes it cheaper. Measured cost is small (whole suite 1.5s, stable across 3 runs), so the budget stays a fixed constant rather than becoming injectable."
+      ],
+      "startedAt": "2026-08-13T09:20:00Z",
+      "finishedAt": "2026-08-13T10:45:00Z"
     },
     "11.5": {
       "taskId": "11.5",

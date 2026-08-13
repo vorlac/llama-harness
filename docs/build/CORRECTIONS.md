@@ -835,3 +835,50 @@ catch, which is the whole reason the review exists.
   `conductor/core/gates-phase.ts` (cannotEverPublish + the report precondition), and the new
   `conductor/tests/tools-9.4a-review.test.ts` (9 defect reproductions, red before / green after).
   921/921 green, typecheck OK, bun leg OK.
+
+## C-033 — Task 11.4 (admission): the admitted slot was released mid-stream, so the cap bounded nothing that mattered
+
+**How it was found.** Not by a review panel — by the orchestrator READING THE DIFF, which is the
+step the per-task loop puts after "observe green" for exactly this reason. The 8 authored rows were
+green (25 cases / 1588 assertions) and two independent mutations confirmed the suite genuinely
+discriminates (breaking priority ordering failed [11.4-priority-order]; shrinking the listener pool
+to httplib's default failed [11.4-health-at-full-queue]). The defect was still there.
+
+- **MAJOR — `maxInflightPerModel` was unenforced for STREAMING traffic, i.e. all generation
+  traffic.** `handleProxy` claims an admitted slot into a `shared_ptr<AdmissionSlot>` whose
+  destructor returns it. On the BUFFERED path that is correct: the local pointer dies at the end of
+  `relayToUpstream`, after the body has been sent. On the INCREMENTAL path (SSE, or any answer with
+  no Content-Length) the handler REGISTERS a content provider and returns immediately — the stream
+  runs afterwards, on the connection thread. The provider captured `[relay, call]` and NOT `slot`,
+  so the slot was released the moment the handler returned. A comment three functions away asserted
+  the opposite ("a streaming relay hands a copy to its content provider so the slot outlives this
+  handler exactly as long as the stream does") — it described an intention the code did not carry
+  out. SSE is the entire point of this proxy (`set_tcp_nodelay`, the unbuffered relay, the
+  600s stream timeout all exist for it), so the cap was inert for every request it was written to
+  bound: the router would admit unlimited concurrent generations and llama-server's slots would be
+  the only backstop.
+  **Why the 8 rows missed it:** the stub upstream answers with `response.set_content(...)`, which
+  sets a Content-Length, so every authored row takes the buffered path. The streaming-plus-admission
+  combination was never exercised. This is the same shape as C-032's fixture blind spot — a fixture
+  that cannot reach the failing path makes a passing suite say nothing about it.
+  **FIX:** capture the slot in the provider (`slot = std::move(slot)`). httplib destroys the
+  provider when the response ends, normally or by the connection dying, so the slot is returned
+  exactly once on every outcome. The buffered and both error-exit paths are untouched — they return
+  before the move, so their local pointer still releases on scope exit.
+  **Pinned by** the new [11.4-fix-streaming-slot-release] case: against a stub that streams one
+  chunk and then parks, `inflight_count` must be 1 while the stream is live and a second same-model
+  request must QUEUE. Before the fix it read `0 == 1` and the second request passed straight
+  through; after it, 26 cases / 1599 assertions green.
+
+- **Recovered work, not re-done work.** Both subagents for this round (the 11.4 implementer and the
+  9.4b implementer) died on a weekly account limit. The 11.4 one had written a complete and good
+  `admission.hpp` and most of the router seam, but stopped between USING `admission_` and DECLARING
+  it, and never wrote `sendAdmissionError` — the tree did not compile. The orchestrator finished
+  both by hand rather than discarding the work, then reviewed the whole diff as if it had arrived
+  from a live agent, which is what surfaced the defect above.
+
+- **Blast radius:** `src/router/admission.hpp` (new, header-only), `src/router/router.hpp`
+  (admission seam + the fix), `src/router/config.hpp` (the SG-2 maxQueued clamp inside 11.2's
+  existing validation path), `src/tests/admission_test.cpp` (8 authored rows + 1 review-fix),
+  `CMakeLists.txt` (source list, orchestrator-only). ctest 26/26, stable across three runs
+  (1.53s / 1.54s / 1.57s); `llama-router` still links.

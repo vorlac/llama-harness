@@ -17,7 +17,10 @@
 //   3. validate the completed document against the schema read from schemaPath
 //      (nlohmann_json_schema_validator);
 //   4. range-check both ports: 1..65535 inclusive (the schema types them as
-//      plain numbers; the range is the parser's job).
+//      plain numbers; the range is the parser's job);
+//   5. reconcile admission.maxQueued with the listener's fixed thread budget
+//      (SG-2): an over-budget value is clamped and the clamp logged at warn,
+//      and a budget that cannot pay for a single queue slot is refused.
 // Any violation throws ConfigError naming the offending field.
 // =============================================================================
 
@@ -241,6 +244,53 @@ namespace conductor::router {
             return validator;
         }
 
+        // SG-2's fixed thread budget for the router listener, and the margin of
+        // the plan's threads >= maxQueued + sum(maxInflightPerModel) + 8. Every
+        // in-flight and every queued request parks one handler thread, so the
+        // admission block sizes the pool; these primitives live here because the
+        // clamp below is part of this module's validation path, and Task 11.4's
+        // admission.hpp republishes them as kAdmissionThreadBudget /
+        // kTaskQueueThreadMargin alongside computeTaskQueueThreads.
+        inline constexpr int kAdmissionThreadBudget = 256;
+        inline constexpr int kTaskQueueThreadMargin = 8;
+
+        [[nodiscard]] inline constexpr int taskQueueThreadsFor(const Admission& admission) {
+            return admission.maxQueued + admission.maxInflightPerModel + kTaskQueueThreadMargin;
+        }
+
+        // SG-2: a maxQueued the thread budget cannot pay for is reduced to the one
+        // it can, announced at warn naming BOTH values — a silent clamp is
+        // indistinguishable from a bug. When the arithmetic cannot reach a single
+        // queue slot the config is refused by name instead of being repaired into
+        // something the operator never asked for.
+        inline void clampMaxQueuedToThreadBudget(RouterConfig& config) {
+            if (taskQueueThreadsFor(config.admission) <= kAdmissionThreadBudget)
+                return;
+
+            const int effective = kAdmissionThreadBudget -
+                                  config.admission.maxInflightPerModel -
+                                  kTaskQueueThreadMargin;
+            if (effective < 1) {
+                throw ConfigError(
+                    "admission.maxQueued",
+                    "router config field 'admission.maxQueued' cannot be satisfied within the " +
+                        std::to_string(kAdmissionThreadBudget) +
+                        "-thread budget: admission.maxInflightPerModel " +
+                        std::to_string(config.admission.maxInflightPerModel) + " plus the " +
+                        std::to_string(kTaskQueueThreadMargin) +
+                        "-thread margin leaves room for " + std::to_string(effective) +
+                        " queued requests");
+            }
+
+            spdlog::warn(
+                "router config: admission.maxQueued {} exceeds the {}-thread budget with "
+                "admission.maxInflightPerModel {}; using an effective admission.maxQueued of {}",
+                config.admission.maxQueued, kAdmissionThreadBudget,
+                config.admission.maxInflightPerModel, effective);
+
+            config.admission.maxQueued = effective;
+        }
+
         inline void checkPort(const nlohmann::json& document, const std::string& block) {
             const std::string field = block + ".port";
             const nlohmann::json& port = document.at(block).at("port");
@@ -344,6 +394,10 @@ namespace conductor::router {
         config.schema.rejectOnMissing = document.at("schema").at("rejectOnMissing").get<bool>();
         config.metrics.ledgerPath = document.at("metrics").at("ledgerPath").get<std::string>();
         config.logging.level = level.get<std::string>();
+
+        // 5. Reconcile the admission block with the listener's thread budget: the
+        //    parse yields the maxQueued the router will actually run with.
+        detail::clampMaxQueuedToThreadBudget(config);
         return config;
     }
 

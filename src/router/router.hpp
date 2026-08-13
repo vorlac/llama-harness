@@ -1,13 +1,14 @@
 // =============================================================================
-// Task 11.3 — llama-router `router`: proxy pass-through.
+// Tasks 11.3 / 11.4 — llama-router `router`: proxy pass-through + admission.
 //
-// The §4.4 pass-through slice: an httplib listener in front of a separately
-// launched llama-server. /v1/* is proxied; everything outside /v1/* (and the
-// /conductor/* prefix Task 11.7 owns) is 404'd without touching the upstream.
-// Admission (11.4), affinity (11.5), the schema observer (11.6) and metrics
-// (11.7) are NOT here yet — the only thing this slice does beyond relaying is
-// normalize the four §4.4 conductor tags into one RequestTags value that those
-// later tasks consume.
+// The §4.4 proxy: an httplib listener in front of a separately launched
+// llama-server. /v1/* is proxied, POST /v1/* through Task 11.4's admission
+// first (SG-6: GET /v1/models is never admitted, so a saturated queue cannot
+// stall opencode's model listing); GET /conductor/health answers outside
+// admission entirely; everything else is 404'd without touching the upstream.
+// Affinity (11.5), the schema observer (11.6) and metrics (11.7) are NOT here
+// yet — beyond relaying and admitting, this file only normalizes the four §4.4
+// conductor tags into one RequestTags value that those later tasks consume.
 //
 // G5 fail-soft is the law this file is written to: the router never turns a
 // request the direct path would have served into an error, and performs no
@@ -46,6 +47,7 @@
 #include <thread>
 #include <utility>
 
+#include "router/admission.hpp"
 #include "router/config.hpp"
 
 namespace conductor::router {
@@ -330,7 +332,8 @@ namespace conductor::router {
             : config_(config)
             , groupHeader_(config.affinity.header.empty() ? detail::kGroupHeader : config.affinity.header)
             , schemaHeader_(config.schema.observeHeader.empty() ? detail::kSchemaHeader
-                                                                : config.schema.observeHeader) {
+                                                                : config.schema.observeHeader)
+            , admission_(config) {
             // Token-by-token SSE is the point of this proxy: Nagle would coalesce
             // single-chunk writes into 40ms batches on both legs.
             server_.set_tcp_nodelay(true);
@@ -349,6 +352,14 @@ namespace conductor::router {
         void start() {
             if (listener_.joinable())
                 return;
+
+            // Admission parks a handler thread per in-flight AND per queued
+            // request, so the listener needs a pool that can hold all of them plus
+            // the margin that keeps /conductor/health and GET /v1/models
+            // answerable. httplib's default pool would starve at a full queue.
+            server_.new_task_queue = [threads = computeTaskQueueThreads(config_)] {
+                return new httplib::ThreadPool(static_cast<std::size_t>(threads < 1 ? 1 : threads));
+            };
 
             if (config_.listen.port == 0) {
                 // The pinned test-only ephemeral-port construction; parseRouterConfig's
@@ -402,12 +413,25 @@ namespace conductor::router {
             return lastTags_;
         }
 
+        [[nodiscard]] const AdmissionController& admission() const {
+            return admission_;
+        }
+
     private:
         void installRoutes() {
             const httplib::Server::Handler proxy =
                 [this](const httplib::Request& request, httplib::Response& response) {
                     handleProxy(request, response);
                 };
+
+            // SG-5: registered OUTSIDE admission, so it answers while every slot
+            // and every queue entry is held. Task 11.7 extends the body here.
+            server_.Get(kHealthPath, [](const httplib::Request&, httplib::Response& response) {
+                nlohmann::json body;
+                body["status"] = "ok";
+                response.status = 200;
+                sendBuffered(response, "application/json", body.dump());
+            });
 
             server_.Get(detail::kProxyPathPattern, proxy);
             server_.Post(detail::kProxyPathPattern, proxy);
@@ -417,9 +441,43 @@ namespace conductor::router {
             server_.Options(detail::kProxyPathPattern, proxy);
         }
 
+        // Everything read off the incoming request before a byte is relayed: the
+        // normalized §4.4 tags, the bytes to forward, and the admission counter
+        // key.
+        struct ForwardPlan {
+            RequestTags tags;
+            std::string body;
+            // The body's `model` field. Empty when the body carries no usable one,
+            // which SG-3 buckets under that same reserved key rather than
+            // rejecting.
+            std::string model;
+        };
+
         void handleProxy(const httplib::Request& request, httplib::Response& response) {
             try {
-                proxyToUpstream(request, response);
+                ForwardPlan plan = planForward(request);
+                recordTags(plan.tags);
+
+                // SG-6: admission is for the generation calls only. A read like
+                // GET /v1/models crosses un-admitted, so a saturated queue cannot
+                // turn it into an error the direct path would have served (G5).
+                if (request.method != "POST") {
+                    relayToUpstream(request, response, std::move(plan.body), nullptr);
+                    return;
+                }
+
+                const AdmissionOutcome outcome = admission_.admit(plan.model, plan.tags.priority);
+                if (outcome != AdmissionOutcome::Admitted) {
+                    sendAdmissionError(response, outcome, plan.model);
+                    return;
+                }
+
+                // The slot is returned when the LAST holder of this pointer goes
+                // away: the buffered return and every error exit drop it here,
+                // while a streaming relay hands a copy to its content provider so
+                // the slot outlives this handler exactly as long as the stream does.
+                auto slot = std::make_shared<AdmissionSlot>(admission_, plan.model);
+                relayToUpstream(request, response, std::move(plan.body), std::move(slot));
             } catch (const std::exception& failure) {
                 // Nothing above this point rejects a request on purpose, so reaching
                 // here means the router itself broke. Answering with the same
@@ -432,40 +490,56 @@ namespace conductor::router {
             }
         }
 
-        void proxyToUpstream(const httplib::Request& request, httplib::Response& response) {
-            RequestTags tags = tagsFromHeaders(request);
-            std::string forwardBody = request.body;
+        [[nodiscard]] ForwardPlan planForward(const httplib::Request& request) const {
+            ForwardPlan plan;
+            plan.tags = tagsFromHeaders(request);
+            plan.body = request.body;
 
             // The strip is the ONLY reason to touch the body, so it is the only
             // case that re-serializes. Anything else — no key, not an object, not
             // JSON at all — forwards the caller's exact bytes.
-            if (!request.body.empty()) {
-                nlohmann::json parsed = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
-                if (parsed.is_discarded()) {
-                    spdlog::debug("router: {} {} body is not JSON — forwarded verbatim, no fallback tags",
-                                  request.method, request.path);
-                }
-                else if (parsed.is_object() && parsed.contains(std::string(kParamsFallbackField))) {
-                    const RequestTags fallback = extract_and_strip_tags(parsed);
-                    mergeFallbackTags(tags, fallback);
-                    try {
-                        forwardBody = parsed.dump();
-                    } catch (const nlohmann::json::exception& failure) {
-                        // Re-serialization is the only step that can fail here, and a
-                        // request that cannot be rewritten still has to be served:
-                        // forward the original bytes, x_conductor and all.
-                        spdlog::warn(
-                            "router: could not re-serialize the body after stripping {} ({}) — "
-                            "forwarding the original bytes",
-                            kParamsFallbackField, failure.what());
+            if (request.body.empty())
+                return plan;
 
-                        forwardBody = request.body;
-                    }
-                }
+            nlohmann::json parsed = nlohmann::json::parse(request.body, nullptr, /*allow_exceptions=*/false);
+            if (parsed.is_discarded()) {
+                spdlog::debug("router: {} {} body is not JSON — forwarded verbatim, no fallback tags",
+                              request.method, request.path);
+
+                return plan;
             }
 
-            recordTags(tags);
+            if (!parsed.is_object())
+                return plan;
 
+            const auto model = parsed.find("model");
+            if (model != parsed.end() && model->is_string())
+                plan.model = model->get<std::string>();
+
+            if (!parsed.contains(std::string(kParamsFallbackField)))
+                return plan;
+
+            const RequestTags fallback = extract_and_strip_tags(parsed);
+            mergeFallbackTags(plan.tags, fallback);
+            try {
+                plan.body = parsed.dump();
+            } catch (const nlohmann::json::exception& failure) {
+                // Re-serialization is the only step that can fail here, and a
+                // request that cannot be rewritten still has to be served:
+                // forward the original bytes, x_conductor and all.
+                spdlog::warn(
+                    "router: could not re-serialize the body after stripping {} ({}) — "
+                    "forwarding the original bytes",
+                    kParamsFallbackField, failure.what());
+
+                plan.body = request.body;
+            }
+
+            return plan;
+        }
+
+        void relayToUpstream(const httplib::Request& request, httplib::Response& response,
+                             std::string forwardBody, std::shared_ptr<AdmissionSlot> slot) {
             httplib::Headers upstreamHeaders;
             for (const auto& [name, value] : request.headers) {
                 if (!detail::isRequestHeaderDropped(name))
@@ -575,9 +649,15 @@ namespace conductor::router {
             // the connection thread. Blocking inside it is how the stream stays
             // unbuffered: the call parks until the upstream has produced something,
             // writes exactly what arrived, and returns for the next round. `call`
-            // rides along in the capture so the upstream thread outlives the handler.
+            // rides along in the capture so the upstream thread outlives the handler,
+            // and `slot` rides along for the same reason: this handler returns as
+            // soon as the provider is registered, so a slot left behind on its stack
+            // would be released mid-stream and maxInflightPerModel would bound
+            // nothing for the streaming traffic it exists to bound. httplib destroys
+            // the provider when the response ends — normally, or by the connection
+            // dying — so the slot is returned exactly once, on every outcome.
             response.set_chunked_content_provider(
-                contentType, [relay, call](std::size_t /*offset*/, httplib::DataSink& sink) {
+                contentType, [relay, call, slot = std::move(slot)](std::size_t /*offset*/, httplib::DataSink& sink) {
                     std::string chunk;
                     bool complete = false;
 
@@ -734,6 +814,30 @@ namespace conductor::router {
             sendBuffered(response, "application/json", envelope.dump());
         }
 
+        // The §4.4 capacity refusal, in the same envelope shape as every other
+        // router-origin error so one parser handles them all. `code` carries the
+        // discriminator the fan-out side acts on: a timeout means the queue moved
+        // too slowly and retrying may work, an overflow means it was already full.
+        static void sendAdmissionError(httplib::Response& response, AdmissionOutcome outcome,
+                                       const std::string& model) {
+            const bool overflowed = outcome == AdmissionOutcome::Overflowed;
+            const char* const code = overflowed ? kQueueOverflowCode : kQueueTimeoutCode;
+            const std::string message =
+                overflowed
+                    ? "llama-router queue is full for model '" + model + "'; the request was not queued"
+                    : "llama-router queue wait for model '" + model + "' exceeded queueTimeoutMs";
+
+            spdlog::warn("router: {}", message);
+
+            nlohmann::json envelope;
+            envelope["error"]["message"] = message;
+            envelope["error"]["type"] = kAdmissionErrorType;
+            envelope["error"]["code"] = code;
+
+            response.status = 503;
+            sendBuffered(response, "application/json", envelope.dump());
+        }
+
         [[nodiscard]] RequestTags tagsFromHeaders(const httplib::Request& request) const {
             RequestTags tags;
             readHeaderTag(tags.role, request, detail::kRoleHeader);
@@ -789,6 +893,11 @@ namespace conductor::router {
         RouterConfig config_;
         std::string groupHeader_;
         std::string schemaHeader_;
+
+        // Declared before server_ so it outlives every handler thread the listener
+        // owns: a request parked in admit() holds a reference to it, and server_'s
+        // destructor is what joins those threads.
+        AdmissionController admission_;
 
         httplib::Server server_;
         std::thread listener_;
