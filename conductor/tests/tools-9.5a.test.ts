@@ -2141,3 +2141,75 @@ test('[9.5a-skeptics-cover-non-major] a finding below "major" severity is adjudi
   assert.equal(res.ok, true, "the clean second round advances the item");
   assert.equal(persistedItem(bench).state, "REVIEWED", "the PERSISTED item reached REVIEWED");
 });
+
+// ===========================================================================
+// [9.5a-worktree-scopes-review-sessions] — ORCHESTRATOR ADDITION (C-053).
+//
+// Every job conductor_item_review dispatches — lens reviewers, skeptics, the
+// routed fix sessions and the re-vet critics — hardcoded `tree: STAGE_TREE`.
+// While item review was not a wave stage that was invisible: an item worked in
+// the shared tree, so "main" was the right answer by coincidence.
+//
+// C-050 put item review INTO the wave. Under parallel.writes:"worktrees" the
+// item's changes then live in ITS OWN worktree, and two things follow that the
+// coincidence was hiding:
+//
+//   * a reviewer dispatched against "main" reviews a tree WITHOUT the changes it
+//     was convened to judge — it would report on the wrong content, and a clean
+//     verdict would mean nothing;
+//   * a routed FIX session is writeCapable and would edit the MAIN tree while
+//     the item is isolated in a worktree — two items' fixes racing in one tree
+//     is the precise hazard §4.2 worktree mode exists to prevent.
+//
+// Every other stage already derives its tree from the item via sessionTreeOf
+// (submit_test, vet, mark_green, validate). Item review was the one that did
+// not, which is why the committed row above can assert tree "main" and stay
+// correct: with item.worktree null, sessionTreeOf RETURNS "main". This row pins
+// the other half of that same function.
+// ===========================================================================
+
+test("[9.5a-worktree-scopes-review-sessions] under worktree mode every session conductor_item_review dispatches — lens reviewers, skeptics AND the write-capable fix — is bound to the ITEM'S worktree, never the shared tree: a reviewer pointed at main would judge a tree without the change, and a fix pointed at main would write outside the isolation §4.2 created", async () => {
+  const F_WT = "F-WT-9053";
+  const WORKTREE = "/tmp/conductor-worktrees/r-95a/I1";
+
+  const bench = seedBench({
+    itemReviewers: 6,
+    skepticsPerFinding: 1,
+    reviewMaxRounds: 2,
+    respond: scripted({
+      sessionsPerRound: 6,
+      findingIds: [F_WT],
+      perRound: [{ [CORRECTNESS]: [{ id: F_WT, lens: CORRECTNESS, suggestedFix: `edit ${SUBJECT_REL} only` }] }, {}],
+    }),
+  });
+
+  // The item is being worked in its own worktree — exactly what the wave driver
+  // persists under parallel.writes:"worktrees".
+  const seeded = bench.store.loadItem(bench.runId, ITEM_ID);
+  seeded.worktree = WORKTREE;
+  bench.store.saveItem(bench.runId, seeded);
+
+  await review(bench);
+
+  const reviewers = bench.wiring.byRole("reviewer");
+  const skeptics = bench.wiring.byRole("skeptic");
+  const implementers = bench.wiring.byRole("implementer");
+
+  assert.ok(reviewers.length > 0, "premise: lens reviewers were dispatched");
+  assert.ok(skeptics.length > 0, "premise: a skeptic panel was dispatched");
+  assert.ok(implementers.length > 0, "premise: the surviving finding routed a fix");
+
+  for (const prompt of reviewers) {
+    assert.equal(prompt.tree, WORKTREE, "a lens reviewer judges the tree the item's change actually lives in");
+  }
+  for (const prompt of skeptics) {
+    assert.equal(prompt.tree, WORKTREE, "a skeptic adjudicates against that same tree");
+  }
+  for (const prompt of implementers) {
+    assert.equal(
+      prompt.tree,
+      WORKTREE,
+      "and the WRITE-CAPABLE fix is confined to the item's worktree — writing 'main' here would break §4.2 isolation",
+    );
+  }
+});

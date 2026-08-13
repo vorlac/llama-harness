@@ -1894,3 +1894,54 @@ item-review executor reds exactly that row.
    that the §3.5 session registry cannot express at all. It has now cost one test. It is not a
    defect today — nothing in production branches on it — but it is exactly the shape that becomes
    one.
+
+## C-053 — item review dispatched every session into the shared tree (MAJOR, activated by C-050)
+
+**How it was found.** By reading 9.6's disclosed open item after landing C-050, rather than by a
+review. 9.6 recorded: "item-review's reviewer/fix jobs still use tree 'main' under worktree mode;
+neither is a default wave stage at HEAD ... Revisit with C-050, which is what would put them in the
+wave." C-050 then put them in the wave, which turned a dormant note into a live defect within the
+hour.
+
+**The defect.** All four of `handleItemReview`'s job builders — `itemLensJob`, `itemSkepticJob`,
+`reviewFixJob` and `reviewRevetJob` — hardcoded `tree: STAGE_TREE`. Every other stage already
+derives its tree from the item through `sessionTreeOf(item)` (`item.worktree ?? "main"`). Item
+review was the one that did not.
+
+While item review was not a wave stage this was invisible, because an item worked in the shared tree
+and "main" was right by coincidence. Under `parallel.writes: "worktrees"` two consequences follow:
+
+- a lens reviewer or skeptic dispatched against "main" JUDGES A TREE WITHOUT THE CHANGE it was
+  convened to review — and a clean verdict from it would mean nothing;
+- `reviewFixJob` is `writeCapable: true`, so a routed fix would EDIT THE MAIN TREE while the item is
+  isolated in a worktree. Two items' fixes racing in one tree is the precise hazard §4.2 worktree
+  mode exists to prevent.
+
+**The fix.** The tree is derived ONCE at the top of the handler (`const itemTree =
+sessionTreeOf(stage.item)`) and threaded into all four builders. The committed row
+`[9.5a-route-implementer-filescope]`, which asserts the fix runs in tree "main", still passes
+unchanged — with `item.worktree` null, `sessionTreeOf` RETURNS "main". That row was always pinning
+one half of this function; the new row `[9.5a-worktree-scopes-review-sessions]` pins the other.
+
+VERIFIED: red before the fix (only that row), 29/29 after.
+
+**The generalisable point.** A hardcoded constant that happens to equal the derived value is
+indistinguishable from a correct derivation until the inputs change. Every other stage having
+already moved to `sessionTreeOf` was the signal; the one holdout was not flagged because nothing
+exercised the case that separates them. This is the same shape as C-052's merge.ff finding — two
+implementations agreeing under the default configuration, and diverging only under the one nobody
+had run.
+
+## Known flake — the wire-contract suite under machine load
+
+`conductor/tests/wire-contract.test.ts` (Task 0.2) spawns a real `opencode serve` and probes it for
+readiness. Under heavy concurrent load — several parallel CMake builds — that probe timed out and
+all 15 of its subtests were CANCELLED, failing the gate. Diagnosed rather than reruled: opencode
+1.18.15 starts fine by hand, but logs "server listening" and only becomes ready to answer /config
+about 7.7 seconds later, so a readiness budget tighter than that is load-sensitive.
+
+NOT changed. The suite is a committed gate leg and its timeout is a real property of the
+environment, not a defect in the code under test. Recorded so a future cancellation is recognised as
+this rather than diagnosed from scratch: re-run on a quiet machine before treating it as a
+regression. If it recurs without load, the budget is genuinely too tight and should be widened
+deliberately.

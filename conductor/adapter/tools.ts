@@ -5594,11 +5594,11 @@ function reviewRevetPrompt(
   );
 }
 
-function itemLensJob(itemId: string, group: readonly string[], prompt: string): FanoutJob {
+function itemLensJob(itemId: string, tree: string, group: readonly string[], prompt: string): FanoutJob {
   return {
     role: "reviewer",
     itemId,
-    tree: STAGE_TREE,
+    tree,
     writeCapable: false,
     prompt,
     schemaName: "Findings",
@@ -5607,11 +5607,11 @@ function itemLensJob(itemId: string, group: readonly string[], prompt: string): 
   };
 }
 
-function itemSkepticJob(itemId: string, prompt: string): FanoutJob {
+function itemSkepticJob(itemId: string, tree: string, prompt: string): FanoutJob {
   return {
     role: "skeptic",
     itemId,
-    tree: STAGE_TREE,
+    tree,
     writeCapable: false,
     prompt,
     schemaName: "Verdict",
@@ -5622,11 +5622,11 @@ function itemSkepticJob(itemId: string, prompt: string): FanoutJob {
 // Every review-fix dispatch carries the C-028 delivery signal: the fan-out engine
 // copies it onto the §3.5 registry entry, and buildSystemAppend keys the
 // receive-review.md secondary pack on exactly that mark.
-function reviewFixJob(role: "implementer" | "testWriter", itemId: string, prompt: string): FanoutJob {
+function reviewFixJob(role: "implementer" | "testWriter", itemId: string, tree: string, prompt: string): FanoutJob {
   return {
     role,
     itemId,
-    tree: STAGE_TREE,
+    tree,
     writeCapable: true,
     prompt,
     schemaName: "ImplementerResult",
@@ -5635,11 +5635,11 @@ function reviewFixJob(role: "implementer" | "testWriter", itemId: string, prompt
   };
 }
 
-function reviewRevetJob(itemId: string, prompt: string): FanoutJob {
+function reviewRevetJob(itemId: string, tree: string, prompt: string): FanoutJob {
   return {
     role: "reviewer",
     itemId,
-    tree: STAGE_TREE,
+    tree,
     writeCapable: false,
     prompt,
     schemaName: "TestVet",
@@ -5685,6 +5685,17 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   // (1) legality — the gate's own derivation; a denial throws BEFORE any dispatch.
   const stage = requireStageTool(ITEM_REVIEW_TOOL, store, runId, itemId, runDir);
   const queueItem = stage.queueItem;
+
+  // C-053. Every session this handler dispatches is bound to the tree the ITEM is
+  // being worked in — the SAME sessionTreeOf every other stage already uses. Under
+  // parallel.writes:"worktrees" that is the item's worktree; otherwise it is the
+  // shared tree, which is why the non-worktree rows keep asserting "main".
+  //
+  // Hardcoding the shared tree here was invisible until C-050 put item review into
+  // the wave: a reviewer would have judged a tree without the change it was
+  // convened for, and a write-capable fix would have edited outside the isolation
+  // §4.2 created.
+  const itemTree = sessionTreeOf(stage.item);
 
   // The §3.3 session count (the rosterSizingRule): clamp(readFanout, 3, 6), and the
   // trivial composition for a trivial-classified run. The floor is the named
@@ -5871,7 +5882,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
     }
     const jobs: FanoutJob[] = [];
     for (const entry of entries) {
-      for (let seat = 0; seat < k; seat += 1) jobs.push(itemSkepticJob(itemId, promptOf(entry)));
+      for (let seat = 0; seat < k; seat += 1) jobs.push(itemSkepticJob(itemId, itemTree, promptOf(entry)));
     }
     const results = await fanout.dispatchWave(jobs);
     const panels: Verdict[][] = entries.map(() => []);
@@ -5885,7 +5896,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
     });
     if (missing.length > 0) {
       const retry = await fanout.dispatchWave(
-        missing.map((index) => itemSkepticJob(itemId, promptOf(entries[index]))),
+        missing.map((index) => itemSkepticJob(itemId, itemTree, promptOf(entries[index]))),
       );
       retry.forEach((result, at) => {
         const verdict = result.value as Verdict | undefined;
@@ -5914,7 +5925,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
     role: "implementer" | "testWriter",
     prompt: string,
   ): Promise<{ reply: ImplementerResult; sessionID: string }> => {
-    const result = await fanout.dispatch(reviewFixJob(role, itemId, prompt));
+    const result = await fanout.dispatch(reviewFixJob(role, itemId, itemTree, prompt));
     const reply = result.value as ImplementerResult | undefined;
     if (reply === undefined) {
       throw new Error(
@@ -6004,7 +6015,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
         : "the changed test PASSES against the item's tree (exit 0) — the implementation exists";
     const jobs: FanoutJob[] = [];
     for (let i = 0; i < critics; i += 1) {
-      jobs.push(reviewRevetJob(itemId, reviewRevetPrompt(queueItem, testText, rerunLine, critics)));
+      jobs.push(reviewRevetJob(itemId, itemTree, reviewRevetPrompt(queueItem, testText, rerunLine, critics)));
     }
     const results = await fanout.dispatchWave(jobs);
     const union: string[] = [];
@@ -6069,7 +6080,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       );
     }
     const lensJobs = composition.map((group) =>
-      itemLensJob(itemId, group, itemLensPrompt(group, queueItem, diffBlock, testText, sessions)),
+      itemLensJob(itemId, itemTree, group, itemLensPrompt(group, queueItem, diffBlock, testText, sessions)),
     );
     const lensResults = await fanout.dispatchWave(lensJobs);
     const raised: ItemRaisedFinding[] = [];
