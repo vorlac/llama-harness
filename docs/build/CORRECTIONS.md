@@ -534,3 +534,50 @@ plan. Fixed test-first in one round, two commits (102802d packs, efd0f84 injecti
 - **Blast radius:** `conductor/doctrine/core.md`, `review.md`, `conductor/tests/doctrine.test.ts`
   (102802d); `conductor/core/gates-phase.ts` (optional GateItem field), `conductor/adapter/inject.ts`,
   `conductor/tests/inject.test.ts` (efd0f84). Phase 8 gate verdict: PASS after 1 fix round.
+
+## C-029 (2026-08-13) — Task 9.1 (tools MILESTONE): pre-commit adversarial review, 6 defects + 1 widening
+
+The six Phase-9 intake/question handlers (conductor_classify/status/decide/surface/answer/defer,
+added to adapter/tools.ts) passed their 10 authored tests, then a 3-lens skeptic-verified
+adversarial review (13 raw → 2 refuted → 11 confirmed) found real defects the tests missed. All
+fixed test-first (F1–F6 red → green; F7 a hardening test) BEFORE the 9.1 commit; full suite 864/864.
+
+- **MAJOR (F1) — classify hard-throw on a spec-legal escalation.** A classifier saying "question"
+  (trivialItem:null) + a skeptic correcting to "trivial" (stricter: trivial>question, §3.2) yielded
+  finalKind "trivial" with no trivialItem to synthesize → the handler threw and stranded the run at
+  INTAKE. FIX: an un-synthesizable trivial escalates FURTHER to work (classifier proposes, handler
+  disposes); the old throw is now unreachable.
+- **MAJOR (F2) — surface half-write on a bad itemId.** appendQuestion ran before confirming the
+  named items exist, so a hallucinated/typo'd id (a realistic LLM failure) left an orphan open
+  question + partially-blocked items, wedging the run. FIX: precheck every named item exists BEFORE
+  any write (§3.4 legality-before-persist) — a bad id now leaves zero writes.
+- **MAJOR (F3) — defer orphan decision on a bad itemId.** The §2.7 record + D-id counter advanced
+  before setDeferred threw ENOENT. FIX: precheck the item exists before appendDecision.
+- **MAJOR (F4) — surface trusted a caller humanTerritory flag.** §2.11 defines humanTerritory as the
+  core/decide.ts isHumanTerritory VERDICT, not a caller flag. FIX: compute isHumanTerritory(question)
+  (a caller may force true, but cannot force a human-territory question down to false).
+- **MINOR (F5) — classify correctedKind could violate "null IFF agreed".** A schema-valid
+  {agreed:false, correctedKind:null} skeptic reply produced an inconsistent result and escalated
+  nothing. FIX: normalize — escalate only on an actionable correction (!agreed && correctedKind!=null);
+  agreed/correctedKind derived so the invariant always holds; used for both the result and
+  run.classification.check.
+- **MINOR (F6) — decisions.jsonl torn-line wedge.** A crash/kill/ENOSPC mid-append left a malformed
+  line that made mintDecisionId's per-line JSON.parse throw, permanently wedging decide+defer. FIX:
+  mintDecisionId scans the raw ledger for `"id":"D-<n>"` tokens (never JSON.parse-ing a line), so a
+  torn line neither wedges the mint nor lets the next id collide with a partially-claimed one. (JSON
+  escaping of any such sequence inside a text field means only real id fields / torn lines match.)
+- **Hardening (F7) — journal-vocab test.** The 9.1 handlers use a §7.4 widening: one event
+  `decision.recorded` was ADDED to the `state` component in journal-events.ts (a decide/defer records
+  no run/item state, so it owns a grep-able name rather than misusing item.updated — sanctioned by
+  the file's own widening rule; NO §2-schema enum touched, no STOP-AND-PARK). F7 drives
+  classify/decide/defer through the REAL (throwing) journal to prove all emitted events are in the
+  closed vocab — the test journal-events.ts's rule requires for an added name.
+- **Deferred to Task 10.1 (recorded bindings, NOT fixed here):**
+  (i) conductor_classify's question path sets run.state=ANSWERED but does not archiveRun — archival
+  timing is a run-lifecycle/retention concern, not classify's; (ii) conductor_decide does not consult
+  isHumanTerritory — decide.ts documents that function "for the ask-gate (Task 10.1) and
+  conductor_decide", so a kind:derived decision on a human-territory question should be rejected/
+  surfaced by the 10.1 ask-gate. Both bound in HANDOFF.
+- **Blast radius:** `conductor/adapter/tools.ts` (6 handlers + the 6 fixes), `conductor/core/
+  journal-events.ts` (decision.recorded), `conductor/tests/tools-9.1.test.ts` (17 tests). The Phase 9
+  MILESTONE gate (after 9.6) will re-review the whole tools subsystem.

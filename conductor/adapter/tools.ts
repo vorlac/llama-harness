@@ -21,10 +21,31 @@
 // tool itself writes/advances-state/spawns) — guarded ⇒ deny, harmless read ⇒
 // allow. Every deny journals its snapshot under gates/deny (§7.4).
 
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import * as path from "node:path";
+
 import { decideGit } from "../core/gates-git.ts";
 import { decideEdit, decideSession, writeShapedPaths } from "../core/gates-edit.ts";
 import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
-import { isGitCommand, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
+import { isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
+import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
+import { validate } from "../core/types.ts";
+import type {
+  Classification,
+  ClassificationCheck,
+  ClassificationKind,
+  Config,
+  DecisionRecord,
+  Item,
+  Queue,
+  QueueItem,
+  RunState,
+  TrivialItem,
+} from "../core/types.ts";
+import { writeFileAtomicSync } from "./state.ts";
+import type { StateStore } from "./state.ts";
+import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
+import type { Fanout, FanoutJob } from "./fanout.ts";
 
 // ---------------------------------------------------------------------------
 // (1) The §3.4 tool inventory (plan lines 1307-1328) — the EXACT 22 conductor_*
@@ -318,4 +339,582 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this edit"));
     }
   }
+}
+
+// ===========================================================================
+// (4) The §3.4 Phase-9 stage-tool handlers (plan lines 2567-2582). Each follows
+// the §3.4 invariant loop — legality -> derive -> persist -> journal -> compact
+// return — and each is (with the state store and questions adapter it delegates
+// to) the ONLY writer of run/item state (G6). The two ledgers this task adds live
+// at the run dir: queue.json (a synthesized trivial item) and decisions.jsonl
+// (decide/defer). They are handler-owned, so this file writes them through the
+// crash-safe primitive (queue.json) and a plain JSONL append (decisions.jsonl) —
+// never through state.ts's private evidence appender (G6).
+// ===========================================================================
+
+// The handler journal sink: structurally the adapter/journal.ts Journal (a leveled
+// log + optional flush). GateJournal above already models it; the handlers reuse it.
+type HandlerJournal = GateJournal;
+
+// Every handler derives its run dir the same way: <root>/.conductor/runs/<runId>/.
+function handlerRunDir(store: StateStore, runId: string): string {
+  return path.join(store.root, ".conductor", "runs", runId);
+}
+
+// §3.2 kind strictness: work (2) > trivial (1) > question (0). The stricter of two
+// kinds wins a classifier/skeptic disagreement (and any handler re-check escalation).
+const KIND_STRICTNESS: Record<string, number> = { question: 0, trivial: 1, work: 2 };
+function stricterKind(a: ClassificationKind, b: ClassificationKind): ClassificationKind {
+  return (KIND_STRICTNESS[a] ?? 0) >= (KIND_STRICTNESS[b] ?? 0) ? a : b;
+}
+
+// §2.4 handler re-check (classifier proposes, handler disposes): a trivial item is
+// escalated to work when ANY objective bound is violated, even if the skeptic agreed
+// trivial. (a) more files than trivialMaxFiles; (b) a behavioral item with no test
+// scope (a behavioral change owes a test, §2.4); (c) a behavioral:false item whose
+// fileScope intersects verify.behavioralPaths — the §2.4 disjoint-path guard forbids
+// claiming untestability while editing behavioral production code.
+function trivialViolatesRecheck(trivialItem: TrivialItem, config: Config): boolean {
+  if (trivialItem.fileScope.length > config.workflow.trivialMaxFiles) return true;
+  if (trivialItem.behavioral && trivialItem.testScope.length === 0) return true;
+  if (!trivialItem.behavioral && scopesIntersect(trivialItem.fileScope, config.verify.behavioralPaths)) {
+    return true;
+  }
+  return false;
+}
+
+// --- decisions.jsonl (§2.7) — a handler-owned ledger at the run dir -----------
+
+// Mint the next §2.7 id (D-0001, D-0002, …) as max-existing-numeric + 1. The scan is
+// torn-line TOLERANT (mirror journal.ts's crash-artifact posture): it reads the raw
+// ledger and extracts every `"id":"D-<n>"` token directly, never JSON.parse-ing a line,
+// so a half-written trailing line left by a crash/kill/ENOSPC neither wedges the mint
+// (a JSON.parse throw) NOR lets the next id COLLIDE with the torn line's id — the mint
+// advances strictly PAST the highest id present, valid line or not. A leading BOM is
+// stripped as elsewhere. Over-counting (a D-<n> token in a free-text field) only skips
+// ids, never collides, so the id-field-anchored pattern stays conservative.
+function mintDecisionId(runDir: string): string {
+  const ledgerPath = path.join(runDir, "decisions.jsonl");
+  let maxNum = 0;
+  if (existsSync(ledgerPath)) {
+    let raw = readFileSync(ledgerPath, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    for (const match of raw.matchAll(/"id"\s*:\s*"D-(\d+)"/g)) {
+      const value = Number.parseInt(match[1], 10);
+      if (value > maxNum) maxNum = value;
+    }
+  }
+  return "D-" + String(maxNum + 1).padStart(4, "0");
+}
+
+// Validate (schema-subset, §2.7) then append one JSON line to decisions.jsonl.
+function appendDecision(runDir: string, record: DecisionRecord): void {
+  const result = validate("DecisionRecord", record);
+  if (!result.ok) {
+    throw new Error("tools: refusing to write an invalid DecisionRecord: " + result.errors.join("; "));
+  }
+  mkdirSync(runDir, { recursive: true });
+  appendFileSync(path.join(runDir, "decisions.jsonl"), JSON.stringify(record) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// conductor_classify (§3.2)
+// ---------------------------------------------------------------------------
+
+export interface ClassifyInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface ClassifyResult {
+  kind: ClassificationKind; // the FINAL (possibly escalated) kind
+  agreed: boolean; // the skeptic's verdict
+  correctedKind: ClassificationKind | null; // null IFF agreed
+  itemId: string | null; // the synthesized trivial item id, else null
+  runState: RunState; // ANSWERED | EXECUTING | INTAKE
+}
+
+function classifierPrompt(userPrompt: string): string {
+  return (
+    "Classify the following work request as exactly one of: question, trivial, work. " +
+    'Reply with a single JSON object matching the Classification schema (kind, rationale, ' +
+    'confidence, trivialItem). trivialItem is a complete queue item (minus id/dependsOn) and ' +
+    'is non-null ONLY for kind "trivial".\n\nREQUEST:\n' +
+    userPrompt
+  );
+}
+
+function skepticPrompt(userPrompt: string, proposed: ClassificationKind): string {
+  return (
+    'You are a skeptic cross-checking a classification. The classifier proposed kind "' +
+    proposed +
+    '". Reply with a single JSON object matching the ClassificationCheck schema ' +
+    "(agreed, correctedKind, note): if you disagree set agreed=false and correctedKind to the " +
+    "kind you would assign, otherwise agreed=true and correctedKind=null.\n\nREQUEST:\n" +
+    userPrompt
+  );
+}
+
+// Dispatch a classifier (schema Classification) then a skeptic (schema
+// ClassificationCheck) through the injected Fanout; embed the check into
+// run.classification; escalate to the stricter kind on disagreement AND on any §2.4
+// re-check failure; on a surviving trivial, synthesize queue.json + the runtime item
+// and advance to EXECUTING; work stays INTAKE; question advances to ANSWERED.
+export async function handleClassify(input: ClassifyInput): Promise<ClassifyResult> {
+  const { store, fanout, runId, config, journal } = input;
+  const runDir = handlerRunDir(store, runId);
+  const run = store.loadRun(runId);
+
+  // (1) derive: classifier proposes, skeptic checks (registry-before-prompt is the
+  //     fan-out engine's contract; structured output is prompt-shaped + independently
+  //     validated, so no native `format` field is ever set).
+  const classifierJob: FanoutJob = {
+    role: "mechanical",
+    itemId: "",
+    tree: "",
+    writeCapable: false,
+    prompt: classifierPrompt(run.prompt),
+    schemaName: "Classification",
+    priority: "interactive",
+  };
+  const classifierResult = await fanout.dispatch(classifierJob);
+  const classification = classifierResult.value as Classification | undefined;
+  if (classification === undefined) {
+    throw new Error(
+      "conductor_classify: the classifier sub-session produced no valid Classification (" +
+        JSON.stringify(classifierResult.error) +
+        ")",
+    );
+  }
+
+  const skepticJob: FanoutJob = {
+    role: "skeptic",
+    itemId: "",
+    tree: "",
+    writeCapable: false,
+    prompt: skepticPrompt(run.prompt, classification.kind),
+    schemaName: "ClassificationCheck",
+    priority: "interactive",
+  };
+  const skepticResult = await fanout.dispatch(skepticJob);
+  const check = skepticResult.value as ClassificationCheck | undefined;
+  if (check === undefined) {
+    throw new Error(
+      "conductor_classify: the skeptic sub-session produced no valid ClassificationCheck (" +
+        JSON.stringify(skepticResult.error) +
+        ")",
+    );
+  }
+
+  // An actionable disagreement = the skeptic BOTH dissents AND names a correction.
+  // Normalizing to that condition enforces the result contract "correctedKind is null
+  // IFF agreed": a schema-valid but self-contradictory {agreed:false, correctedKind:null}
+  // reply names nothing to escalate to, so it escalates NOTHING and normalizes to
+  // agreed:true (F5). The skeptic's raw note is preserved on check.note regardless.
+  const correctedKind: ClassificationKind | null =
+    !check.agreed && check.correctedKind !== null ? check.correctedKind : null;
+  const agreed = correctedKind === null;
+  let finalKind: ClassificationKind =
+    correctedKind !== null ? stricterKind(classification.kind, correctedKind) : classification.kind;
+
+  // Handler re-check (classifier proposes, handler disposes): escalate a surviving
+  // trivial to work on any §2.4 violation, even when the skeptic AGREED trivial.
+  if (finalKind === "trivial" && classification.trivialItem !== null) {
+    if (trivialViolatesRecheck(classification.trivialItem, config)) {
+      finalKind = "work";
+    }
+  }
+  // A "trivial" disposition with NOTHING to synthesize — the classifier itself did not
+  // say trivial, so there is no trivialItem (the §2.10 cross-field rule ties trivialItem
+  // non-null to kind "trivial"), and a skeptic's question→trivial correction cannot
+  // conjure one — escalates FURTHER to work rather than throwing (F1). An
+  // un-synthesizable trivial is not a legal EXECUTING run.
+  if (finalKind === "trivial" && classification.trivialItem === null) {
+    finalKind = "work";
+  }
+
+  // (2) persist: record the final kind + the embedded (normalized) skeptic check.
+  run.classification = {
+    kind: finalKind,
+    rationale: classification.rationale,
+    check: { agreed, note: check.note },
+  };
+
+  let itemId: string | null = null;
+  if (finalKind === "trivial") {
+    const trivialItem = classification.trivialItem;
+    if (trivialItem === null) {
+      // Unreachable: the escalation steps above already dispose a null-trivialItem
+      // "trivial" to work. Retained as a typed invariant guard (narrows trivialItem to
+      // non-null for the synthesis below), never a live throw path.
+      throw new Error("conductor_classify: a trivial classification must carry a trivialItem (§2.10)");
+    }
+    // Synthesize the §2.4 queue (one item; mint id; dependsOn:[]) and validate it as
+    // any decomposed queue would be validated, then write it at the run dir.
+    itemId = "I1";
+    const queueItem: QueueItem = {
+      id: itemId,
+      title: trivialItem.title,
+      rationale: trivialItem.rationale,
+      fileScope: [...trivialItem.fileScope],
+      testScope: [...trivialItem.testScope],
+      acceptance: [...trivialItem.acceptance],
+      behavioral: trivialItem.behavioral,
+      dependsOn: [],
+      ponytail: { ...trivialItem.ponytail },
+    };
+    const queue: Queue = { items: [queueItem] };
+    const queueResult = validate("Queue", queue);
+    if (!queueResult.ok) {
+      throw new Error(
+        "conductor_classify: refusing to write an invalid queue.json: " + queueResult.errors.join("; "),
+      );
+    }
+    writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(queue, null, 2));
+
+    // Create the §2.5 runtime item at the head of the item FSM (PENDING) via the store.
+    const item: Item = {
+      id: itemId,
+      state: "PENDING",
+      assignee: null,
+      worktree: null,
+      attempts: { green: 0, reviewRounds: 0, vetRounds: 0, testRepairs: 0, debugFixes: 0, overridesUsed: 0 },
+      blocked: null,
+      deferred: null,
+      debugging: null,
+      evidence: {},
+      taint: [],
+      inlineClaim: null,
+    };
+    store.saveItem(runId, item);
+    run.state = "EXECUTING";
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, state: "PENDING", origin: "trivial-synthesis" },
+      { runId, itemId },
+    );
+  } else if (finalKind === "question") {
+    run.state = "ANSWERED";
+  } else {
+    run.state = "INTAKE"; // work: decompose is the next pipeline tool.
+  }
+
+  store.saveRun(run);
+
+  // (3) journal the run FSM disposition; (4) compact return.
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    { to: run.state, classification: finalKind, agreed },
+    { runId, sessionID: input.sessionID },
+  );
+
+  return { kind: finalKind, agreed, correctedKind, itemId, runState: run.state };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_status (§3.4) — read-only.
+// ---------------------------------------------------------------------------
+
+export interface StatusInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+}
+
+export interface StatusItem {
+  id: string;
+  state: string;
+  blocked: unknown;
+  deferred: unknown;
+}
+
+export interface StatusResult {
+  runId: string;
+  state: RunState;
+  classification: { kind: ClassificationKind } | null;
+  items: StatusItem[];
+  openQuestions: Array<{ id: string; question: string }>;
+}
+
+// Render the run/item/question dispositions. READ-ONLY: it mutates no persisted
+// byte — every access is a store read (loadRun/loadItem) or a questions read.
+export function handleStatus(input: StatusInput): StatusResult {
+  const { store, runId } = input;
+  const runDir = handlerRunDir(store, runId);
+  const run = store.loadRun(runId);
+
+  const items: StatusItem[] = [];
+  const itemsDir = path.join(runDir, "items");
+  if (existsSync(itemsDir)) {
+    for (const name of readdirSync(itemsDir).sort()) {
+      if (!name.endsWith(".json")) continue;
+      const item = store.loadItem(runId, name.slice(0, -".json".length));
+      items.push({ id: item.id, state: item.state, blocked: item.blocked, deferred: item.deferred });
+    }
+  }
+
+  const openQuestions: Array<{ id: string; question: string }> = [];
+  for (const q of readQuestions(runDir)) {
+    if (q.answeredIso === null) openQuestions.push({ id: q.id, question: q.question });
+  }
+
+  const classification =
+    run.classification !== null && run.classification !== undefined
+      ? { kind: run.classification.kind }
+      : null;
+
+  return { runId, state: run.state, classification, items, openQuestions };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_decide (§2.7)
+// ---------------------------------------------------------------------------
+
+export interface DecideInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+  now?: () => number;
+  question: string;
+  options: Array<{ name: string; score?: DecisionRecord["options"][number]["score"] }>;
+  choice: string;
+  why: string;
+  kind: "derived" | "human";
+  appliedWhere: string;
+}
+
+export interface DecideResult {
+  decisionId: string;
+  record: DecisionRecord;
+}
+
+// Append the §2.7 record. Legality FIRST (requireTwoOptions rejects a kind:derived
+// record carrying <2 scored options), BEFORE any persist — a rejected decide writes
+// NO ledger line. On accept: mint id + tsIso, append one line, journal, return.
+export function handleDecide(input: DecideInput): DecideResult {
+  const { store, runId, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  const record: DecisionRecord = {
+    id: mintDecisionId(runDir),
+    tsIso: new Date(now()).toISOString(),
+    question: input.question,
+    options: input.options.map((option) =>
+      option.score === undefined ? { name: option.name } : { name: option.name, score: option.score },
+    ),
+    choice: input.choice,
+    why: input.why,
+    kind: input.kind,
+    appliedWhere: input.appliedWhere,
+  };
+
+  // (1) legality — the throw precedes persist, so a rejected decide leaves no line.
+  const gate = requireTwoOptions(record);
+  if (!gate.ok) {
+    throw new Error(gate.why);
+  }
+
+  // (2) persist the ledger line; (3) journal; (4) return.
+  appendDecision(runDir, record);
+  journal.log(
+    "info",
+    "state",
+    "decision.recorded",
+    { decisionId: record.id, kind: record.kind, choice: record.choice },
+    { runId },
+  );
+
+  return { decisionId: record.id, record };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_surface (§2.11)
+// ---------------------------------------------------------------------------
+
+export interface SurfaceInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+  now?: () => number;
+  question: string;
+  blocksItems: string[];
+  askedBy: { role: string; sessionID: string };
+  humanTerritory?: boolean;
+}
+
+export interface SurfaceResult {
+  questionId: string;
+  blockedItemIds: string[];
+}
+
+// Append the §2.11 question (origin surface-tool), set blocked:{questionId} on every
+// named item, leave un-named items actionable (the run continues on them), journal.
+export function handleSurface(input: SurfaceInput): SurfaceResult {
+  const { store, runId, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality before persist (§3.4): every named item must exist. A bad id aborts
+  //     the whole call with ZERO writes — no orphan question, no half-applied block.
+  for (const itemId of input.blocksItems) {
+    try {
+      store.loadItem(runId, itemId);
+    } catch {
+      throw new Error('conductor_surface: item "' + itemId + '" does not exist; refusing to surface');
+    }
+  }
+
+  // §2.11 makes humanTerritory the core isHumanTerritory VERDICT, not a caller flag: a
+  // caller may FORCE true, but cannot force a human-territory question down to false.
+  const humanTerritory = input.humanTerritory === true ? true : isHumanTerritory(input.question);
+
+  const question = appendQuestion(
+    runDir,
+    {
+      runId,
+      question: input.question,
+      askedBy: { role: input.askedBy.role, sessionID: input.askedBy.sessionID },
+      humanTerritory,
+      origin: "surface-tool",
+      blocksItems: [...input.blocksItems],
+    },
+    now(),
+  );
+
+  const blockedItemIds: string[] = [];
+  for (const itemId of input.blocksItems) {
+    store.setBlocked(runId, itemId, {
+      reason: "blocked on surfaced question " + question.id,
+      stage: "surface",
+      questionId: question.id,
+    });
+    blockedItemIds.push(itemId);
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: true, questionId: question.id },
+      { runId, itemId },
+    );
+  }
+
+  return { questionId: question.id, blockedItemIds };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_answer (§2.11)
+// ---------------------------------------------------------------------------
+
+export interface AnswerInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+  now?: () => number;
+  questionId: string;
+  answer: string;
+}
+
+export interface AnswerHandlerResult {
+  questionId: string;
+  clearedItemIds: string[];
+}
+
+// Clear blocked on EXACTLY the items bound to the question and mark it answered —
+// delegated to questions.answerQuestion, which owns the C-018/C-020 clear-first-
+// then-mark wedge order (never re-implemented here). Journal, return the cleared ids.
+export function handleAnswer(input: AnswerInput): AnswerHandlerResult {
+  const { store, runId, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  const result = answerQuestion(runDir, input.questionId, input.answer, now());
+
+  for (const itemId of result.clearedItemIds) {
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: null, clearedQuestionId: input.questionId },
+      { runId, itemId },
+    );
+  }
+
+  return { questionId: input.questionId, clearedItemIds: result.clearedItemIds };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_defer (§2.7 / §2.5)
+// ---------------------------------------------------------------------------
+
+export interface DeferInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+  now?: () => number;
+  itemId: string;
+  reason: string;
+}
+
+export interface DeferResult {
+  itemId: string;
+  decisionId: string;
+}
+
+// Append a §2.7 decision record explaining the deferral (kind:"human" — exempt from
+// requireTwoOptions; a deferral is a judgment, not a scored pick, so it fabricates no
+// options), then set deferred:{reason,decisionId} on the item (legalTools treats a
+// deferred item as settled). Journal, return.
+export function handleDefer(input: DeferInput): DeferResult {
+  const { store, runId, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // Legality before persist (§3.4): the item must exist, else a bad id would leave an
+  // orphan decision record (and advance the D- counter) with nothing to point at it.
+  try {
+    store.loadItem(runId, input.itemId);
+  } catch {
+    throw new Error('conductor_defer: item "' + input.itemId + '" does not exist; refusing to defer');
+  }
+
+  const decisionId = mintDecisionId(runDir);
+  const record: DecisionRecord = {
+    id: decisionId,
+    tsIso: new Date(now()).toISOString(),
+    question: "Defer item " + input.itemId + " out of this run?",
+    options: [{ name: "defer" }],
+    choice: "defer",
+    why: input.reason,
+    kind: "human",
+    appliedWhere: "item " + input.itemId,
+  };
+  appendDecision(runDir, record);
+  journal.log(
+    "info",
+    "state",
+    "decision.recorded",
+    { decisionId, kind: record.kind, itemId: input.itemId },
+    { runId, itemId: input.itemId },
+  );
+
+  store.setDeferred(runId, input.itemId, { reason: input.reason, decisionId });
+  journal.log(
+    "info",
+    "state",
+    "item.updated",
+    { itemId: input.itemId, deferred: true, decisionId },
+    { runId, itemId: input.itemId },
+  );
+
+  return { itemId: input.itemId, decisionId };
 }

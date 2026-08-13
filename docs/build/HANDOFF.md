@@ -1,6 +1,6 @@
 # HANDOFF — read this first on every start
 
-Updated: 2026-08-13 (Phases 0-8 complete + gated; next = Branch B + Phase 9)
+Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone underway — 9.1 done)
 
 ## Where we are
 
@@ -40,7 +40,13 @@ Updated: 2026-08-13 (Phases 0-8 complete + gated; next = Branch B + Phase 9)
    11.4 admission, 11.5 affinity, 11.6 schema-observer (shrunk per 0.2: request-side schemaMissing
    counter + note; responses stream so response-validation is inert), 11.7 metrics, 11.8 (live).
 2. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
-   Carries 9.1/9.4a/9.4c/9.5a/9.5b/9.6 bindings below. Then 10.1, 12, 13, 14, 15.
+   **9.1 DONE** (conductor_classify/status/decide/surface/answer/defer; §7.4 widening
+   state:decision.recorded; a 3-lens adversarial review found+fixed 4 MAJOR + 2 minor defects the
+   authored tests missed — C-029; 864/864; M4-backfill pending). **NEXT: 9.2** (conductor_decompose
+   + conductor_plan). Then 9.3-9.6. Carries 9.4a/9.4c/9.5a/9.5b/9.6 bindings below. The Phase 9
+   MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   - FIRST-IMPLEMENTER TRAP (seen at 9.1): a subagent can return an anomalous/injected 0-edit
+     "done" result — ALWAYS verify the actual tree (git status + run the test) before trusting green.
 - Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,
   overridesRemaining}; an implementer's active item with `debugging:true` (optional GateItem
   field) gets debug.md; init-failure logs via the injected logError seam (§7.1 stderr), never a
@@ -68,6 +74,10 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
 - **9.5a**: under-delivered skeptic panel must re-run or count missing verdicts as UPHOLDS.
 - **9.5b**: report handler enforces all-settled as a NON-VERIFY precondition (closing
   re-verify is defeated by the foreign-red-set exclusion). Defense-in-depth.
+- **10.1 from 9.1 review (C-029):** (a) conductor_classify's question path sets ANSWERED but does
+  NOT archiveRun — wire archival where the run lifecycle/retention is managed, not in classify;
+  (b) conductor_decide does NOT consult isHumanTerritory — the 10.1 ask-gate must reject/surface a
+  kind:derived decision on a human-territory question (decide.ts documents isHumanTerritory for it).
 - **receive-review.md delivery** (Phase 8 gate, C-028): the review-receipt / fix-round routing
   that sends surviving findings to the implementer MUST thread a "receiving-review" signal to
   `buildSystemAppend` so it appends `receive-review.md` (parallel to the debug.md/DEBUG-posture

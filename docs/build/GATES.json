@@ -463,6 +463,19 @@
       "M8": "C++ ctest PASS 1/1 (router-tests scaffold, real assertion on router_version)",
       "M9": "n/a (no bun change; TS bun leg still green)",
       "orchestratorReverify": "did the CMakeLists surgery + build files MYSELF; observed cmake configure exit 0, both router targets link, ctest 1/1 PASS, llama-router binary output, and the export-schemas TS red->847 green — all first-hand. Found+fixed the validator ::validator target name from the configure log. Step 2 (live) DEFERRED to 12.1, honestly recorded in UPSTREAM_CONTRACT.md (assets confirmed present; NOT fabricated)."
+    },
+    "9.1": {
+      "at": "2026-08-13T02:30:00Z",
+      "M1": "PASS 864/864 node + tsc + bun leg + schema export (orchestrator-run full suite)",
+      "M2": "PASS 847 -> 864 (+17: 10 authored + 7 review-fix tests)",
+      "M3": "PASS (tsc --noEmit clean incl. the optional GateItem.debugging and the new handler types)",
+      "M4": "pending post-commit (remove a handler export -> tools-9.1.test.ts missing-subject red); backfilled next docs/build touch",
+      "M5": "PASS (tools.ts + journal-events.ts scanned; no markers)",
+      "M6": "PASS (the 6 handlers imported/driven by tools-9.1.test.ts)",
+      "M7": "PASS 15 rows (8 §3.4 tool assertions + 7 C-029 review-fix rows)",
+      "M8": "n/a",
+      "M9": "PASS bun leg (8 pass)",
+      "orchestratorReverify": "MILESTONE task. Observed the missing-export red and the FINAL 864/864 green MYSELF, plus the intermediate red for the 6 review-fix tests (17 tests, 11 pass, 6 fail) BEFORE the fixes. Read all 6 handlers + all 6 fixed regions + the journal widening myself. CAUGHT the first implementer returning an anomalous/injected 0-edit result by verifying the tree (re-dispatched fresh). Ran a 3-lens skeptic-verified adversarial review that found 4 MAJOR + 2 minor real defects the 10 authored tests missed (classify hard-throw, surface/defer half-write, humanTerritory, null-iff-agreed, torn-line) — all fixed test-first pre-commit (C-029); verified the F6 torn-line mint is injection-robust (JSON escaping). 2 nits deferred to 10.1 with bindings. NOTE: the Phase 9 MILESTONE gate runs after 9.6 over the whole tools subsystem."
     }
   },
   "phaseGates": {

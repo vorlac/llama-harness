@@ -962,7 +962,7 @@
       "taskId": "9.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 9.1 intake + question tools",
       "planLines": [
@@ -970,14 +970,34 @@
         2583
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 864,
+        "pass": 864,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.1.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleAnswer' (observed by orchestrator before the 6 handlers existed). The 6 review-fix tests (F1-F6) each independently observed red against the un-fixed handlers (17 tests, 11 pass, 6 fail)."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/journal-events.ts",
+        "conductor/tests/tools-9.1.test.ts"
+      ],
+      "revertAssertion": "removing any of the 6 handler exports re-reds tools-9.1.test.ts (missing-subject); reverting F1's escalation re-reds [9.1-fix-classify-escalate-work] (hard-throw); reverting F2/F3 prechecks re-reds the surface/defer half-write tests; reverting F4 re-reds humanTerritory; reverting the decision.recorded widening reds [9.1-fix-known-events] via the real throwing journal",
+      "attempts": 2,
+      "deviations": [
+        "First implementer attempt returned an anomalous/injected-looking result with 0 tool uses (no edits); caught by orchestrator verifying the actual tree (nothing written, test still red), discarded, re-dispatched fresh.",
+        "§7.4 journal widening: added state:decision.recorded to journal-events.ts EVENTS (decide/defer record no run/item state; sanctioned by the file's widening rule; NO §2-schema enum touched, no STOP-AND-PARK). Grep-tested via the real throwing journal (F7).",
+        "queue.json + decisions.jsonl are handler-owned ledgers written directly (writeFileAtomicSync / JSONL append), not via state.ts's private evidence appender (G6 restricts that to state.ts/evidence.ts).",
+        "C-029 pre-commit adversarial review: 4 MAJOR (classify hard-throw, surface/defer half-write, surface humanTerritory) + 2 minor (correctedKind null-iff-agreed, decisions torn-line) fixed test-first. 2 nits deferred to 10.1 (classify archiveRun; decide isHumanTerritory ask-gate)."
+      ],
+      "startedAt": "2026-08-13T01:40:00Z",
+      "finishedAt": "2026-08-13T02:30:00Z"
     },
     "9.2": {
       "taskId": "9.2",

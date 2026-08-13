@@ -52,9 +52,12 @@ export const EVENTS: Record<Component, readonly string[]> = {
   inject: ["system-append"],
   // §4.4 router-facing client: request/response tagging and failover.
   "router-client": ["request", "response", "failover", "retry"],
-  // §2.3 / §4.1 state store: run creation, lock lifecycle, item mutations, and the
-  // §3.2 chat.message route of a prompt arriving during a live run (plan line 1074).
-  state: ["run.created", "lock.acquired", "lock.released", "lock.stale-break", "item.updated", "user.midrun-prompt"],
+  // §2.3 / §4.1 state store: run creation, lock lifecycle, item mutations, the
+  // §3.2 chat.message route of a prompt arriving during a live run (plan line 1074),
+  // and the §2.7 decision/deferral ledger append the Phase-9 stage tools emit
+  // (§7.4 observability widening: a decide/defer records no run/item state, so it
+  // owns its own grep-able name rather than borrowing item.updated).
+  state: ["run.created", "lock.acquired", "lock.released", "lock.stale-break", "item.updated", "user.midrun-prompt", "decision.recorded"],
 };
 
 // True iff `event` is listed under a KNOWN `component`. An unknown component or
