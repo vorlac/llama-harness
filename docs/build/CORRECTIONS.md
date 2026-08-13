@@ -1359,3 +1359,43 @@ something OTHER than a review panel — a diff read, a mutation, and a test-writ
 The Phase 9 MILESTONE gate must not merely re-check these four sites; it must ask whether the
 codebase has any remaining rule that is DERIVED twice rather than exported once, because the
 recurrence rate says the answer is yes.
+
+## C-043 — two rulings the 9.5b/9.5c reds need before either is implemented
+
+Both were surfaced by the test-writers themselves, in their own `concerns`, rather than by a review.
+
+### Ruling 1 — no-git publish is a REQUIRED input to legalTools, not an optional one
+
+The 9.5b writer pinned "an OPTIONAL fifth parameter defaulting to true, so no committed call site
+changes". **OVERRIDDEN.** An optional parameter with a default IS a compatibility shim, which
+`.claude/rules/patterns-and-conventions.md` prohibits outright ("no legacy wrappers", "update all
+call sites", "no transition periods"), and it defaults in the DANGEROUS direction: every existing
+call site would silently keep claiming publish is available, which is exactly the bug — under
+no-git §3.9:1502 disables publish and items terminate at REVIEWED, yet `nextStageTool` maps
+REVIEWED to `conductor_publish` unconditionally.
+
+`publishEnabled: boolean` is a REQUIRED fifth parameter of `legalTools`, sibling to the existing
+required `repoConfigured`, and all three committed call sites (`adapter/inject.ts:111`,
+`adapter/tools.ts:2332`, `adapter/tools.ts:4625`) must state it explicitly. A call site that has to
+name its git mode cannot forget to have one.
+
+**Verified against HEAD rather than taken from the spec**, because the spec's phrasing was loose:
+`legalTools` DOES already take a boolean, but it is `repoConfigured`, which gates `conductor_setup`
+(gates-phase.ts:246 — unconfigured ⇒ only setup and status are legal). It has nothing to do with
+git availability, so the spec's claim that legalTools "takes no git-mode input" is correct in
+substance. `GateRun` was considered as the carrier and rejected: it is the gate's subset of RUN
+STATE (state, stop, classification), and git mode is configuration.
+
+### Ruling 2 — handleReport's input surface is 9.5b's, and 9.5c's fixture yields to it
+
+9.5c's red was written before 9.5b's existed and pins `handleReport` WITHOUT the `fanout` field
+that 9.5b's red pins as required (9.5b red line 174 vs 9.5c red line 687's `reportInputFor`). Its
+author flagged this honestly: "handleReport is 9.5b's export and does NOT exist yet ... this file
+is the first artifact to pin handleReport's input surface."
+
+**9.5b owns the export, so 9.5b's surface is authoritative.** When 9.5c's red is moved into the
+tree it will fail to typecheck on the missing field, and the orchestrator will add `fanout` to
+9.5c's `reportInputFor` FIXTURE. Recorded in advance and deliberately: editing a red's fixture to
+match a surface an earlier task legitimately owns is not the same act as editing an ASSERTION to
+make it pass, and pre-authorising it here is what keeps the two distinguishable. No 9.5c assertion
+changes; if any does, that is a defect and must be re-derived.
