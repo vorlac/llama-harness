@@ -1612,22 +1612,37 @@
       "taskId": "11.7",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "41946bb",
       "commitMessage": "conductor: 11.7 metrics",
       "planLines": [
         2846,
         2854
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
+      "tap": "ctest/doctest: 66 cases, 26273 assertions, 0 failed, 0 skipped",
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "src/tests/metrics_test.cpp:163:10: fatal error: 'router/metrics.hpp' file not found"
+      },
+      "filesTouched": [
+        "src/router/metrics.hpp",
+        "src/router/router.hpp",
+        "src/tests/metrics_test.cpp",
+        "CMakeLists.txt"
+      ],
+      "revertAssertion": "remove src/router/metrics.hpp => router-tests fails to compile ('router/metrics.hpp' file not found, now from router.hpp:61 since the seam includes it). M4 RUN in the main tree with it verified clean against 41946bb (the C++ method). Restored, 66/66 green.",
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "C-049: one ROW added to the delivered red by the orchestrator ([11.7-reject-on-missing-ledgered]). The implementer disclosed that the schema.rejectOnMissing 400 exit - one of the five exit paths - was ledgered by rule but driven by no fixture, since every fixture sets rejectOnMissing:false. Closed because that exit is the only one answered before admission AND the posture is opt-in, so a missing line would stay invisible until enabled in production. Verified to discriminate: wrong status recorded => exactly 1 case fails."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": null,
+      "openItems": [
+        "Implementer-disclosed, NOT closed: the SSE usage scanner recognizes LF-delimited event boundaries and strips trailing CRs, but a fully CRLF-delimited SSE stream would not be scanned and tokens would record null. Fail-soft (never a request failure) and outside the pinned upstream contract, but worth checking against the real llama-server at 11.8's live smoke."
+      ]
     },
     "11.8": {
       "taskId": "11.8",
