@@ -36,7 +36,18 @@ set(compiler_is_msvc "$<CXX_COMPILER_ID:MSVC>")
 set(compiler_is_gnu "$<CXX_COMPILER_ID:GNU>")
 set(compiler_is_clang "$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:Clang>>")
 
+# llama.cpp pins itself to C++17 and marks it "don't bump" (extern/llama-cpp
+# src/CMakeLists.txt, ggml/src/CMakeLists.txt). CMAKE_CXX_STANDARD is inherited by
+# add_subdirectory, so leaving it at 23 compiles the vendored sources at a standard
+# upstream never builds against: under C++23 std::make_unique is constexpr, which
+# instantiates llama_model_dflash::graph<>/llama_model_eagle3::graph<> before the
+# explicit specializations further down those files and fails to compile. Our own
+# targets request cxx_std_23 individually, so scoping the submodule to 17 costs
+# nothing here.
+set(CMAKE_CXX_STANDARD 17)
 add_subdirectory(extern/llama-cpp)
+set(CMAKE_CXX_STANDARD 23)
+
 find_package(spdlog CONFIG REQUIRED)
 
 # llama-router build dependencies (vcpkg ports; spdlog already found above).
@@ -50,8 +61,8 @@ enable_testing()
 # The C++ llama-router (Task 11.x): a fail-soft proxy/scheduler in front of
 # llama-server. Sources are added per TDD task; Task 11.1 is the scaffold (main
 # only). It links the (header-only) web/JSON libraries plus spdlog and NEVER links
-# `llama` or `ftxui` — llama.cpp's build is pre-broken upstream and the router does
-# not need it (only its configure is exercised, via add_subdirectory above).
+# `llama` or `ftxui` — the router proxies to a separately-launched `llama-server`
+# and needs neither library.
 add_executable(llama-router
   "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
 )
