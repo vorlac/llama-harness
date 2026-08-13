@@ -666,13 +666,17 @@ function pidAlive(checkPid: number): boolean {
   }
 }
 
-// The scopes selected for a representative changed path: every requiredScopes entry
-// whose glob pattern matches scopePattern contributes its scope names (deduped).
-function selectScopes(config: VerifyConfig, scopePattern: string): string[] {
+// The scopes selected for the changed path(s): every requiredScopes entry whose glob
+// pattern matches ANY of them contributes its scope names (deduped). A caller may pass
+// one representative path or the item's whole path set — an item spanning two path
+// families owes the UNION of what §2.1 requires of each, and no single element of a
+// model-authored array can speak for the rest.
+function selectScopes(config: VerifyConfig, scopePattern: string | string[]): string[] {
+  const paths = typeof scopePattern === "string" ? [scopePattern] : scopePattern;
   const names: string[] = [];
   const seen = new Set<string>();
   for (const req of config.verify.requiredScopes) {
-    if (!globMatch(req.pattern, scopePattern)) continue;
+    if (!paths.some((p) => globMatch(req.pattern, p))) continue;
     for (const s of req.scopes) {
       if (!seen.has(s)) {
         seen.add(s);
@@ -685,7 +689,7 @@ function selectScopes(config: VerifyConfig, scopePattern: string): string[] {
 
 function runScopes(
   config: VerifyConfig,
-  scopePattern: string,
+  scopePattern: string | string[],
   cwd: string,
   now: () => number,
 ): Record<string, { green: boolean; exitCode: number; durationMs: number }> {
@@ -712,12 +716,16 @@ function runScopes(
  * start-stamp (before any scope ran); record HEAD/branch; write the per-tree marker;
  * run each required scope (build-before-test, timeout kills); then, on completion —
  * including on a timeout — remove the marker and restore the quarantine.
+ *
+ * `scopePattern` is the changed path the required scopes are selected against, or the
+ * item's whole path set when its paths select different scopes and the run owes their
+ * union.
  */
 export function runVerify(
   runDir: string,
   itemId: string,
   config: VerifyConfig,
-  scopePattern: string,
+  scopePattern: string | string[],
   opts: VerifyOptions,
 ): VerifyOutcome {
   const now = opts.now ?? Date.now;

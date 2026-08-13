@@ -448,12 +448,19 @@ function newPendingItem(itemId: string): Item {
   };
 }
 
-// Validate (schema-subset, §2.7) then append one JSON line to decisions.jsonl.
-function appendDecision(runDir: string, record: DecisionRecord): void {
+// The §2.7 schema half of a decision's legality, separate from the append so a caller
+// that persists something else first can establish it BEFORE that write — appendDecision
+// throwing after the fact would leave the other write standing.
+function assertDecisionValid(record: DecisionRecord): void {
   const result = validate("DecisionRecord", record);
   if (!result.ok) {
     throw new Error("tools: refusing to write an invalid DecisionRecord: " + result.errors.join("; "));
   }
+}
+
+// Validate (schema-subset, §2.7) then append one JSON line to decisions.jsonl.
+function appendDecision(runDir: string, record: DecisionRecord): void {
+  assertDecisionValid(record);
   mkdirSync(runDir, { recursive: true });
   appendFileSync(path.join(runDir, "decisions.jsonl"), JSON.stringify(record) + "\n");
 }
@@ -2366,14 +2373,12 @@ function assertContainedPaths(
 // Running the item test (delegated whole to adapter/evidence.ts)
 // ---------------------------------------------------------------------------
 
-// The §2.1 verify scope this item's test runs under: every requiredScopes entry
-// whose pattern matches one of the item's own paths contributes its scopes, and a
-// scope carrying an itemTest template (the TARGETED run §3.3 depends on) wins over
-// one that only has a full-scope command. An item no scope covers has no
-// constructible test command — a named legality failure, never a silent full-suite
-// fallback.
-function itemVerifyScope(config: Config, queueItem: QueueItem, tool: string): ScopeSpec {
-  const paths = [...queueItem.testScope, ...queueItem.fileScope];
+// The §2.1 scope names an item's paths require: every requiredScopes entry whose
+// pattern matches ANY of them contributes its scopes, deduped in declaration order.
+// The item's paths are its testScope UNION its fileScope — an item spanning two path
+// families owes what §2.1 requires of each, and one array element cannot speak for
+// the rest.
+function requiredScopeNames(config: Config, paths: string[]): string[] {
   const names: string[] = [];
   for (const req of config.verify.requiredScopes) {
     if (!paths.some((p) => globMatch(req.pattern, p))) continue;
@@ -2381,6 +2386,22 @@ function itemVerifyScope(config: Config, queueItem: QueueItem, tool: string): Sc
       if (!names.includes(name)) names.push(name);
     }
   }
+  return names;
+}
+
+// The paths an item's required scopes are resolved over: everything it declares.
+function itemScopePaths(queueItem: QueueItem): string[] {
+  return [...queueItem.testScope, ...queueItem.fileScope];
+}
+
+// The §2.1 verify scope this item's test runs under: every requiredScopes entry
+// whose pattern matches one of the item's own paths contributes its scopes, and a
+// scope carrying an itemTest template (the TARGETED run §3.3 depends on) wins over
+// one that only has a full-scope command. An item no scope covers has no
+// constructible test command — a named legality failure, never a silent full-suite
+// fallback.
+function itemVerifyScope(config: Config, queueItem: QueueItem, tool: string): ScopeSpec {
+  const names = requiredScopeNames(config, itemScopePaths(queueItem));
   const candidates: Array<{ name: string; spec: Config["verify"]["scopes"][string] }> = [];
   for (const name of names) {
     const spec = config.verify.scopes[name];
@@ -3583,6 +3604,14 @@ async function dispatchImplementer(
   return { reply, sessionID: result.sessionID };
 }
 
+// One spelling per file. A repo-relative path is collapsed ("./tests/a.test.mjs",
+// "tests//a.test.mjs" and "tests/./a.test.mjs" all become "tests/a.test.mjs") and
+// spelled with forward slashes, so two authors naming the same file compare equal.
+// A traversing path keeps its leading "..", which the quarantine still refuses.
+function normalizeRepoRel(rel: string): string {
+  return path.normalize(rel).split(path.sep).join("/");
+}
+
 // §4.2's foreign red set: the testScope files of every OTHER queue item below
 // GREEN, UNION every path in the workspace stale-red registry — which survives
 // runs, and is the only witness to a red test an EARLIER run abandoned. The
@@ -3592,13 +3621,24 @@ function foreignRedSet(store: StateStore, runId: string, queue: Queue, itemId: s
   const belowGreen = ITEM_STATES.indexOf("GREEN");
   const own = new Set<string>();
   for (const entry of queue.items) {
-    if (entry.id === itemId) for (const file of entry.testScope) own.add(file);
+    if (entry.id === itemId) for (const file of entry.testScope) own.add(normalizeRepoRel(file));
   }
 
   const foreign: string[] = [];
   const seen = new Set<string>();
-  const add = (file: string): void => {
+  const add = (raw: string): void => {
+    // The own-tests guard compares NORMALIZED paths: the queue and the workspace
+    // stale-red registry are written by different authors at different times, so the
+    // same file arrives as "tests/a.test.mjs", "./tests/a.test.mjs" or
+    // "tests//a.test.mjs". On a raw-string comparison a second spelling walks past the
+    // guard and quarantines the item's own red — a false green.
+    const file = normalizeRepoRel(raw);
     if (own.has(file) || seen.has(file)) return;
+    // A file that is not in the tree cannot poison a verify, and handing it to the §4.2
+    // quarantine would ENOENT out of renameSync and sink the whole run. A sibling still
+    // at PENDING has not had its test WRITTEN yet (conductor_submit_test writes it), so
+    // this is the ordinary case, not the exotic one.
+    if (!existsSync(path.join(store.root, file))) return;
     seen.add(file);
     foreign.push(file);
   };
@@ -3625,13 +3665,14 @@ function foreignRedSet(store: StateStore, runId: string, queue: Queue, itemId: s
   return foreign;
 }
 
-// The scope pattern the full verify selects its required scopes with. §2.1 maps
-// path patterns to scope names and runVerify takes ONE pattern, so an item whose
-// fileScope entries select DIFFERENT scopes cannot express their union in a
-// single call — the first entry's scopes are the ones that run. Raised at the
-// Phase 9 gate alongside itemVerifyScope's sibling limitation.
-function verifyScopePatternOf(queueItem: QueueItem): string {
-  return queueItem.fileScope[0] ?? queueItem.testScope[0] ?? "**";
+// The paths the full verify selects its required scopes with: the item's WHOLE
+// declared path set, exactly as itemVerifyScope resolves the item-test scope.
+// runVerify unions the scopes every matching §2.1 entry names, so an item whose
+// paths select different scopes runs all of them — and the order a model happened
+// to write its fileScope in decides nothing.
+function verifyScopePathsOf(queueItem: QueueItem): string[] {
+  const paths = itemScopePaths(queueItem);
+  return paths.length > 0 ? paths : ["**"];
 }
 
 function implementerPrompt(queueItem: QueueItem): string {
@@ -3796,15 +3837,19 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
     );
   }
 
-  // (3a) a non-behavioral item: PENDING->GREEN with NO item test.
+  // (3a) a non-behavioral item: PENDING->GREEN with NO item test. The §3.3 annotation
+  //      rule is judged against the item AS IT IS AT THE PERSIST, not against the
+  //      snapshot taken before the implementer sub-session ran: anything that blocked
+  //      the item during that window stops the advance, and the check and the write see
+  //      one state.
   if (!queueItem.behavioral) {
+    const item = store.loadItem(runId, itemId);
     const edge = legalItemTransition(from, "GREEN", {
-      item: { behavioral: queueItem.behavioral, blocked: stage.item.blocked },
+      item: { behavioral: queueItem.behavioral, blocked: item.blocked },
     });
     if (!edge.ok) {
       throw new Error(MARK_GREEN_TOOL + ": " + (edge.why ?? from + "->GREEN is not legal for this item"));
     }
-    const item = store.loadItem(runId, itemId);
     item.state = "GREEN";
     item.attempts.green += 1;
     store.saveItem(runId, item);
@@ -3857,8 +3902,12 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
   }
   const record: ItemTestEvidence = outcome.record;
 
+  // The §3.3 annotation rule reads the item AS IT IS AT THE PERSIST. `stage.item` was
+  // loaded before the implementer sub-session ran, so judging the block against it would
+  // let a GREEN be written over an item something blocked during that window.
+  const item = store.loadItem(runId, itemId);
   const edge = legalItemTransition(from, "GREEN", {
-    item: { behavioral: queueItem.behavioral, blocked: stage.item.blocked },
+    item: { behavioral: queueItem.behavioral, blocked: item.blocked },
     testExit: record.exitCode,
   });
   if (!edge.ok) {
@@ -3882,7 +3931,6 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
     };
   }
 
-  const item = store.loadItem(runId, itemId);
   item.state = "GREEN";
   item.attempts.green += 1;
   item.evidence.green = { ledger: "evidence.jsonl", seq: record.seq };
@@ -3969,13 +4017,30 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
   const stage = requireStageTool(VALIDATE_TOOL, store, runId, itemId, runDir);
   const queueItem = stage.queueItem;
   const excluded = foreignRedSet(store, runId, stage.queue, itemId);
-  const scopePattern = verifyScopePatternOf(queueItem);
+  const scopePaths = verifyScopePathsOf(queueItem);
+  // An item no requiredScopes entry covers selects NO scope, and `every` over an empty
+  // scope map is vacuously true — the verify would report green having executed nothing
+  // and take the item to VALIDATED on no evidence at all. On a behavioral:false item
+  // this verify is the item's ONLY evidence, so the same named §2.1 legality failure
+  // itemVerifyScope raises for the item test is raised here: never a silent fallback.
+  if (requiredScopeNames(config, scopePaths).length === 0) {
+    throw new Error(
+      VALIDATE_TOOL +
+        ': no verify.requiredScopes entry covers item "' +
+        itemId +
+        '" (testScope ' +
+        JSON.stringify(queueItem.testScope) +
+        ", fileScope " +
+        JSON.stringify(queueItem.fileScope) +
+        "), so the full verify would run no scope at all (§2.1)",
+    );
+  }
   // Floored for the same reason as every other budget knob: the §2.1 schema types
   // it `number`, and a fractional cap would round the fix budget UP.
   const cap = Math.max(0, Math.floor(config.workflow.debugFixCap));
 
   const verify = (): VerifyEvidence => {
-    const outcome = runVerify(runDir, itemId, config, scopePattern, {
+    const outcome = runVerify(runDir, itemId, config, scopePaths, {
       cwd: store.root,
       excludeTestFiles: excluded,
       journal: evidenceJournalOf(journal),
@@ -4000,7 +4065,20 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
           ")",
       );
     }
-    return outcome.record as VerifyEvidence;
+    const record = outcome.record as VerifyEvidence;
+    // Belt-and-braces on the same vacuity: the item IS covered, but every scope its
+    // §2.1 entries name is missing from verify.scopes, so the run executed nothing. An
+    // empty scope map is not admissible evidence for the GREEN->VALIDATED edge.
+    if (Object.keys(record.scopes).length === 0) {
+      throw new Error(
+        VALIDATE_TOOL +
+          ': the full verify for item "' +
+          itemId +
+          '" ran no scope (its §2.1 required scopes name nothing verify.scopes defines), ' +
+          "so there is no evidence to advance on",
+      );
+    }
+    return record;
   };
 
   // (2) derive: the first verify, then the bounded DEBUG loop.
@@ -4207,6 +4285,11 @@ export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
         " — nothing was written",
     );
   }
+  // requireTwoOptions covers the options rule ALONE. The §2.7 schema is the other half,
+  // and it must be established here rather than at the append: a record that fails it
+  // after queue.json has been swapped tells the caller the amendment failed while the run
+  // executes the amended queue.
+  assertDecisionValid(decision);
 
   // (2) persist: the queue the run will execute, then the record of why.
   writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(input.queue, null, 2));

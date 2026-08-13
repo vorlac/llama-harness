@@ -1169,6 +1169,10 @@ function seedValidateBench(opts: {
   ownTestPasses: boolean;
   probe?: (tree: string) => GateProbe;
   debugFixCap?: number;
+  // The §2.1 path-pattern -> scope-name map. Defaults to makeConfig's single "**"
+  // entry, which covers every path; a row that cares WHICH paths select a scope
+  // supplies its own.
+  requiredScopes?: Config["verify"]["requiredScopes"];
 }): ValidateBench {
   const root = committedRepo();
   const stateHome = freshStateHome();
@@ -1184,6 +1188,12 @@ function seedValidateBench(opts: {
     itemTest: [process.execPath, "--test", "{files}"],
     ...(opts.debugFixCap !== undefined ? { debugFixCap: opts.debugFixCap } : {}),
   });
+  if (opts.requiredScopes !== undefined) {
+    config.verify.requiredScopes = opts.requiredScopes.map((entry) => ({
+      pattern: entry.pattern,
+      scopes: [...entry.scopes],
+    }));
+  }
   const journal = makeJournal();
   const store = openStore(root, journal.sink, config);
   const runId = createRunFor(store);
@@ -2169,4 +2179,458 @@ test("[9.4b-fix-stale-red-never-quarantines-own-test] a stale-red entry naming T
     "the item's own test was PRESENT in the repo for every verify run",
   );
   assert.ok(existsSync(bench.ownWitness), "and it EXECUTED");
+});
+
+// ===========================================================================
+// [9.4b-fix-verify-runs-the-required-scope] — D1(a).
+//
+// The 13 authored rows all run under a fixture config whose requiredScopes is a
+// single {pattern:"**"} entry, which matches every path — so none of them can
+// see WHICH path the verify resolves its scopes from. With a config that maps
+// two path families to scopes, deriving the selection from ONE array element
+// makes a model-authored array ORDER decide whether the config's required scope
+// executes at all: the two sub-cases below are the same item over the same two
+// files, differing only in the order of fileScope.
+// ===========================================================================
+
+test("[9.4b-fix-verify-runs-the-required-scope] the full verify resolves its §2.1 required scopes over the item's WHOLE path set (testScope ∪ fileScope, as itemVerifyScope already does), so an item whose FIRST fileScope entry matches no pattern still runs the scope its other paths require — the same outcome under either array order, never a green resting on an empty scope map", async (t) => {
+  const orders: string[][] = [
+    ["package.json", "docs/offsets.md"],
+    ["docs/offsets.md", "package.json"],
+  ];
+
+  for (const order of orders) {
+    await t.test(`fileScope order ${JSON.stringify(order)}`, async () => {
+      const bench = seedValidateBench({
+        queue: { items: [makeQueueItem("I1", { fileScope: [...order], testScope: ["tests/a.test.mjs"] })] },
+        states: { I1: "GREEN" },
+        watchRels: ["tests/a.test.mjs"],
+        // The item's own test is RED, so a scope that actually runs cannot be green.
+        ownTestPasses: false,
+        debugFixCap: 0,
+        // Neither entry matches "package.json": only the item's docs/ path selects a scope.
+        requiredScopes: [
+          { pattern: "src/**", scopes: [SCOPE] },
+          { pattern: "docs/**", scopes: [SCOPE] },
+        ],
+      });
+      const wiring = makeWiring(bench.runId, bench.config, bench.journal.sink, { implementer: [] });
+
+      const res: ValidateResult = await handleValidate({
+        store: bench.store,
+        fanout: wiring.fanout,
+        runId: bench.runId,
+        itemId: "I1",
+        config: bench.config,
+        journal: bench.journal.sink,
+        stateHome: bench.stateHome,
+        workspaceKey: "wkey",
+        packs: PACKS,
+        now: () => START_MS,
+      });
+
+      // The scope the config requires RAN — proven from inside the child, and named on
+      // the §2.6 record. An empty scopes map would be `every` over nothing: green by
+      // vacuity, on evidence nobody gathered.
+      const records = verifyRecords(bench.runDir);
+      assert.ok(records.length >= 1, "a §2.6 verify record was appended");
+      assert.deepEqual(
+        Object.keys(records[0].scopes),
+        [SCOPE],
+        "the scope the item's docs/ path requires RAN and is reported by name, whatever the fileScope order",
+      );
+      assert.ok(readWitness(bench.witness).length >= 1, "the scope command really executed");
+      assert.ok(existsSync(bench.ownWitness), "the item's own test executed inside it");
+      assert.equal(records[0].green, false, "and it went RED on the item's own failing test");
+
+      assert.equal(res.green, false, "the compact return reports the red verify");
+      assert.equal(res.ok, false, "so the item does not advance");
+      const item = bench.store.loadItem(bench.runId, "I1");
+      assert.equal(item.state, "GREEN", "the persisted item stays at GREEN");
+      assert.equal(item.evidence.validated, undefined, "no §2.6 validated pointer was written");
+    });
+  }
+});
+
+// ===========================================================================
+// [9.4b-fix-verify-refuses-uncovered-item] — D1(b).
+// ===========================================================================
+
+test("[9.4b-fix-verify-refuses-uncovered-item] an item NO verify.requiredScopes entry covers is REFUSED BY NAME before anything runs — the same §2.1 legality failure itemVerifyScope raises for the item test — because a verify with nothing to run must never report green", async () => {
+  const bench = seedValidateBench({
+    queue: { items: [makeQueueItem("I1", { fileScope: ["docs/offsets.md"], testScope: ["tests/a.test.mjs"] })] },
+    states: { I1: "GREEN" },
+    watchRels: ["tests/a.test.mjs"],
+    ownTestPasses: true,
+    // Covers src/ only: neither the item's fileScope nor its testScope is covered.
+    requiredScopes: [{ pattern: "src/**", scopes: [SCOPE] }],
+  });
+  const wiring = makeWiring(bench.runId, bench.config, bench.journal.sink, { implementer: [] });
+  const itemBefore = itemFileBytes(bench.runDir, "I1");
+
+  await assert.rejects(
+    handleValidate({
+      store: bench.store,
+      fanout: wiring.fanout,
+      runId: bench.runId,
+      itemId: "I1",
+      config: bench.config,
+      journal: bench.journal.sink,
+      stateHome: bench.stateHome,
+      workspaceKey: "wkey",
+      packs: PACKS,
+      now: () => START_MS,
+    }),
+    (error: Error) => {
+      assert.match(error.message, /requiredScopes/, "the deny names the §2.1 knob that does not cover the item");
+      assert.match(error.message, /I1/, "the deny names the item it refused");
+      return true;
+    },
+    "a silent pass is the defect; a named refusal is the contract (§2.1)",
+  );
+
+  assert.equal(readEvidence(bench.runDir).length, 0, "no §2.6 record was appended — the refusal precedes the verify");
+  assert.equal(readWitness(bench.witness).length, 0, "no scope command ran");
+  assert.equal(existsSync(bench.ownWitness), false, "the item's own test never executed");
+  assert.equal(itemFileBytes(bench.runDir, "I1"), itemBefore, "the item file is BYTE-IDENTICAL");
+  assert.equal(bench.store.loadItem(bench.runId, "I1").state, "GREEN", "the item did not advance");
+  assert.equal(wiring.prompted.length, 0, "no sub-session was dispatched");
+});
+
+// ===========================================================================
+// [9.4b-fix-verify-refuses-empty-scope-map] — D1(c), belt-and-braces: the
+// requiredScopes entry COVERS the item, but names a scope verify.scopes does not
+// define, so the run still executes nothing.
+// ===========================================================================
+
+test("[9.4b-fix-verify-refuses-empty-scope-map] an EMPTY scope map is not admissible evidence for GREEN→VALIDATED: a requiredScopes entry naming a scope verify.scopes never defines runs nothing, and `every` over no scope is vacuously true — the handler refuses instead of advancing the item on a verify that executed nothing", async () => {
+  const bench = seedValidateBench({
+    queue: { items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] })] },
+    states: { I1: "GREEN" },
+    watchRels: ["tests/a.test.mjs"],
+    ownTestPasses: true,
+    // Covers the item, but names a scope that has no spec under verify.scopes.
+    requiredScopes: [{ pattern: "**", scopes: ["absent-scope-5527"] }],
+  });
+  const wiring = makeWiring(bench.runId, bench.config, bench.journal.sink, { implementer: [] });
+  assert.equal(
+    Object.hasOwn(bench.config.verify.scopes, "absent-scope-5527"),
+    false,
+    "premise: the required scope name has no spec, so there is nothing to run",
+  );
+
+  await assert.rejects(
+    handleValidate({
+      store: bench.store,
+      fanout: wiring.fanout,
+      runId: bench.runId,
+      itemId: "I1",
+      config: bench.config,
+      journal: bench.journal.sink,
+      stateHome: bench.stateHome,
+      workspaceKey: "wkey",
+      packs: PACKS,
+      now: () => START_MS,
+    }),
+    (error: Error) => {
+      assert.match(error.message, /no scope/i, "the deny says the verify ran no scope");
+      assert.match(error.message, /I1/, "the deny names the item it refused");
+      return true;
+    },
+    "a verify that executed nothing is not evidence of anything (§2.6)",
+  );
+
+  assert.equal(readWitness(bench.witness).length, 0, "no scope command ran");
+  assert.equal(existsSync(bench.ownWitness), false, "the item's own test never executed");
+  const item = bench.store.loadItem(bench.runId, "I1");
+  assert.equal(item.state, "GREEN", "the item does NOT advance on a vacuous green");
+  assert.equal(item.evidence.validated, undefined, "no §2.6 validated pointer was written");
+});
+
+// ===========================================================================
+// [9.4b-fix-foreign-red-set-skips-absent-files] — D2.
+// ===========================================================================
+
+test("[9.4b-fix-foreign-red-set-skips-absent-files] the §4.2 foreign red set names only files that EXIST: a sibling still at PENDING has not had its test written yet (conductor_submit_test writes it), and handing that declared-but-absent path to the quarantine would ENOENT out of the whole verify — while a sibling red that DOES exist is still quarantined", async () => {
+  const bench = seedValidateBench({
+    queue: {
+      items: [
+        makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+        makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }),
+        makeQueueItem("I3", { fileScope: ["src/c.mjs"], testScope: ["tests/c.test.mjs"] }),
+      ],
+    },
+    // I2 is PENDING — its test has not been written yet; I3 is RED with a real red on disk.
+    states: { I1: "GREEN", I2: "PENDING", I3: "RED" },
+    watchRels: ["tests/a.test.mjs", "tests/b.test.mjs", "tests/c.test.mjs"],
+    ownTestPasses: true,
+  });
+  const foreignWitness = path.join(bench.stateHome, "ran-foreign.txt");
+  const foreignAbs = path.join(bench.root, "tests", "c.test.mjs");
+  writeFileSync(foreignAbs, failingTest(foreignWitness, SIBLING_RED_MARKER));
+  assert.equal(
+    existsSync(path.join(bench.root, "tests", "b.test.mjs")),
+    false,
+    "premise: the PENDING sibling's declared test path does not exist on disk",
+  );
+  const wiring = makeWiring(bench.runId, bench.config, bench.journal.sink, { implementer: [] });
+
+  const res: ValidateResult = await handleValidate({
+    store: bench.store,
+    fanout: wiring.fanout,
+    runId: bench.runId,
+    itemId: "I1",
+    config: bench.config,
+    journal: bench.journal.sink,
+    stateHome: bench.stateHome,
+    workspaceKey: "wkey",
+    packs: PACKS,
+    now: () => START_MS,
+  });
+
+  assert.equal(res.ok, true, "the verify ran and item A advanced — a file that does not exist cannot poison it");
+  assert.equal(res.green, true, "the verify itself is green");
+  assert.equal(
+    res.excluded.includes("tests/b.test.mjs"),
+    false,
+    "the PENDING sibling's absent path is NOT in the foreign red set",
+  );
+  assert.ok(res.excluded.includes("tests/c.test.mjs"), "the sibling red that exists is STILL quarantined");
+  assert.equal(existsSync(foreignWitness), false, "the quarantined sibling red never executed");
+  assert.ok(existsSync(bench.ownWitness), "the item's own test DID execute");
+  assert.ok(existsSync(foreignAbs), "the quarantined file is restored when the verify completes");
+  assert.equal(bench.store.loadItem(bench.runId, "I1").state, "VALIDATED", "the persisted item advanced");
+
+  const record = verifyRecords(bench.runDir)[0];
+  assert.equal(record.excluded.includes("tests/b.test.mjs"), false, "the §2.6 record lists no absent path");
+  assert.ok(record.excluded.includes("tests/c.test.mjs"), "the §2.6 record lists the exclusion in force");
+});
+
+// ===========================================================================
+// [9.4b-fix-amend-validates-record-before-persist] — D3.
+// ===========================================================================
+
+test("[9.4b-fix-amend-validates-record-before-persist] conductor_queue_amend validates the §2.7 record COMPLETELY — the schema, not only the two-options rule — BEFORE it writes anything: a decision that fails the DecisionRecord schema leaves queue.json byte-identical, never a caller told the amendment failed while the run executes the amended queue", () => {
+  const bench = seedAmendBench();
+  const amended: Queue = {
+    items: [
+      makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+      makeQueueItem("I1b", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"], dependsOn: ["I1"] }),
+    ],
+  };
+  assert.equal(validateQueue(amended, bench.config).ok, true, "premise: the amended QUEUE is legal, so only the record is at fault");
+
+  // A score missing one ladder-5 criterion: requireTwoOptions checks that a score is
+  // PRESENT, never its shape, so the options rule passes and the §2 schema rejects it.
+  const partialScore = {
+    capability: 4,
+    testability: 4,
+    movingParts: 3,
+    validationEarliness: 4,
+  } as unknown as DecisionRecord["options"][number]["score"];
+  const probe: DecisionRecord = {
+    id: "D-0001",
+    tsIso: new Date(START_MS).toISOString(),
+    question: "Split I1 into two items?",
+    options: [
+      { name: "split-I1-into-I1-and-I1b", score: partialScore },
+      { name: "leave-as-is", score: SCORE },
+    ],
+    choice: "split-I1-into-I1-and-I1b",
+    why: "I1 spans two acceptance clusters, so it is two items",
+    kind: "derived",
+    appliedWhere: "queue.json",
+  };
+  assert.equal(requireTwoOptions(probe).ok, true, "premise: core requireTwoOptions ACCEPTS it (it reads presence, not shape)");
+  assert.equal(validate("DecisionRecord", probe).ok, false, "premise: the §2.7 schema REJECTS it");
+
+  const beforeQueue = readFileSync(path.join(bench.runDir, "queue.json"), "utf8");
+  assert.throws(
+    () =>
+      handleQueueAmend({
+        store: bench.store,
+        runId: bench.runId,
+        config: bench.config,
+        journal: bench.journal.sink,
+        now: () => START_MS,
+        queue: amended,
+        question: probe.question,
+        options: [
+          { name: "split-I1-into-I1-and-I1b", score: partialScore },
+          { name: "leave-as-is", score: SCORE },
+        ],
+        choice: probe.choice,
+        why: probe.why,
+        appliedWhere: probe.appliedWhere,
+      }),
+    /DecisionRecord/,
+    "the refusal names the record it would not write",
+  );
+
+  assert.equal(
+    readFileSync(path.join(bench.runDir, "queue.json"), "utf8"),
+    beforeQueue,
+    "queue.json is BYTE-IDENTICAL: legality precedes persist, so a refused amendment changes nothing",
+  );
+  assert.deepEqual(
+    (JSON.parse(beforeQueue) as Queue).items.map((entry) => entry.id),
+    ["I1"],
+    "the run is still executing the ORIGINAL queue",
+  );
+  assert.equal(readDecisions(bench.runDir).length, 0, "no §2.7 record was appended");
+  assert.equal(existsSync(path.join(bench.runDir, "decisions.jsonl")), false, "decisions.jsonl was never created");
+});
+
+// ===========================================================================
+// [9.4b-fix-mark-green-rechecks-blocked] — D4.
+// ===========================================================================
+
+test("[9.4b-fix-mark-green-rechecks-blocked] conductor_mark_green judges the §3.3 blocked rule against the item AS IT IS AT THE PERSIST, not against the snapshot taken before the implementer sub-session ran: an item blocked while that sub-session was in flight is not marked GREEN, even though its test now passes", async () => {
+  const root = committedRepo();
+  const stateHome = freshStateHome();
+  const ownWitness = path.join(stateHome, "ran-own.txt");
+  const config = makeConfig({
+    command: wrapperCmd({ witness: path.join(stateHome, "w.json"), runsDir: runsDirOf(root), rels: [] }),
+    itemTest: [process.execPath, "--test", "{files}"],
+  });
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const runDir = runDirOf(store, runId);
+  const queue: Queue = {
+    items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] })],
+  };
+  seedExecuting(store, runId, queue, { I1: "TEST_VETTED" });
+  writeFileSync(path.join(root, "tests", "a.test.mjs"), greenfieldTest(ownWitness, "../src/a.mjs"));
+
+  // The implementer does its job — the test really does pass afterwards — and MEANWHILE
+  // the item is blocked, the way an unanswered §2.11 question lands on an item while its
+  // sub-session is still in flight.
+  const wiring = makeWiring(runId, config, journal.sink, {
+    implementer: [
+      (): string => {
+        writeFileSync(path.join(root, "src", "a.mjs"), SUBJECT_MODULE);
+        store.setBlocked(runId, "I1", {
+          reason: "blocked on an unanswered question raised while the implementer was in flight",
+          stage: "GREEN",
+          questionId: "Q-0001",
+        });
+        return implJson();
+      },
+    ],
+  });
+
+  const res: MarkGreenResult = await handleMarkGreen({
+    store,
+    fanout: wiring.fanout,
+    runId,
+    itemId: "I1",
+    config,
+    journal: journal.sink,
+    stateHome,
+    workspaceKey: "wkey",
+    now: () => START_MS,
+  });
+
+  assert.ok(existsSync(ownWitness), "premise: the handler ran the item test");
+  assert.equal(res.exitCode, 0, "premise: the item test PASSES — the refusal is about the block and nothing else");
+  assert.equal(res.ok, false, "a blocked item makes no transition (§3.3), so the stage does not advance it");
+  assert.equal(res.itemState, "TEST_VETTED", "the compact return reports the persisted state");
+
+  const item = store.loadItem(runId, "I1");
+  assert.equal(validate("Item", item).ok, true, "the unmoved item file still satisfies the §2.5 schema");
+  assert.equal(item.state, "TEST_VETTED", "GREEN is NOT written over an item blocked during the window");
+  assert.ok(item.blocked !== null, "the item is still blocked");
+  assert.equal(item.evidence.green, undefined, "no §2.6 green pointer was written over a blocked item");
+  assert.equal(
+    journal.records.filter((r) => r.component === "fsm" && r.event === "transition").length,
+    0,
+    "no transition was journaled — the item never advanced",
+  );
+  assert.ok(
+    journal.records.some(
+      (r) => r.component === "fsm" && r.event === "guard-reject" && JSON.stringify(r.data).includes("blocked"),
+    ),
+    "the stage journaled the guard rejection, naming the block that caused it",
+  );
+});
+
+// ===========================================================================
+// [9.4b-fix-own-test-spelling-never-quarantined] — D5. The C-034 row pins the
+// stale-red case for the EXACT spelling; the guard it added compares raw
+// queue.json strings, so a second spelling of the same file walks past it.
+// ===========================================================================
+
+test("[9.4b-fix-own-test-spelling-never-quarantined] the 'never quarantine the item's own tests' guard compares NORMALIZED repo-relative paths: a stale-red entry and a testScope entry that spell the SAME file differently are still recognised as one file, whichever side carries the odd spelling, so a second spelling cannot hand back a false green", async (t) => {
+  // BOTH sides of the comparison get a sub-case: the odd spelling arrives on the
+  // REGISTRY side, and on the QUEUE side. A guard normalised on only one side passes one
+  // sub-case and fails the other (the C-034 lesson: mutate every branch of a guard).
+  const spellings: Array<{ label: string; queue: string; registry: string }> = [
+    { label: "the REGISTRY spells it './tests/a.test.mjs'", queue: "tests/a.test.mjs", registry: "./tests/a.test.mjs" },
+    { label: "the QUEUE spells it './tests/a.test.mjs'", queue: "./tests/a.test.mjs", registry: "tests/a.test.mjs" },
+  ];
+
+  for (const spelling of spellings) {
+    await t.test(spelling.label, async () => {
+      const bench = seedValidateBench({
+        queue: { items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: [spelling.queue] })] },
+        states: { I1: "GREEN" },
+        watchRels: ["tests/a.test.mjs"],
+        ownTestPasses: false,
+        debugFixCap: 0,
+      });
+
+      // The queue and the workspace registry are written by different authors at
+      // different times — the registry SURVIVES runs — so the same file reaches the §4.2
+      // union under two spellings.
+      bench.store.addStaleRed({
+        path: spelling.registry,
+        itemId: "I9",
+        runId: "r-earlier-run",
+        sinceMs: START_MS - 86_400_000,
+        reason: "item blocked at RED in an earlier run (test-repair exhausted)",
+      });
+      assert.ok(
+        bench.store.readStaleRed().entries.some((e) => e.path === spelling.registry),
+        "premise: the registry names the item's own test under the other spelling",
+      );
+      assert.notEqual(spelling.registry, spelling.queue, "premise: the two spellings really differ as strings");
+
+      const wiring = makeWiring(bench.runId, bench.config, bench.journal.sink, { implementer: [] });
+      const res: ValidateResult = await handleValidate({
+        store: bench.store,
+        fanout: wiring.fanout,
+        runId: bench.runId,
+        itemId: "I1",
+        config: bench.config,
+        journal: bench.journal.sink,
+        stateHome: bench.stateHome,
+        workspaceKey: "wkey",
+        packs: PACKS,
+        now: () => START_MS,
+      });
+
+      assert.deepEqual(
+        res.excluded,
+        [],
+        "the differently-spelled entry names the item's OWN test, so NOTHING is quarantined (§4.2)",
+      );
+
+      // The tree during the run is the proof, not the returned list.
+      const snaps = readWitness(bench.witness);
+      assert.ok(snaps.length >= 1, "the scope ran");
+      assert.ok(
+        snaps.every((s) => s.present.includes("tests/a.test.mjs")),
+        "the item's own test was PRESENT in the repo for every verify run",
+      );
+      assert.ok(existsSync(bench.ownWitness), "and it EXECUTED");
+      assert.equal(res.green, false, "so the item's own red still fails its verify");
+      assert.equal(res.ok, false, "the compact return reports the failure to advance");
+      assert.equal(
+        bench.store.loadItem(bench.runId, "I1").state,
+        "GREEN",
+        "and the item does NOT advance on a false green",
+      );
+    });
+  }
 });

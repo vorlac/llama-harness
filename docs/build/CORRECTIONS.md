@@ -967,7 +967,7 @@ where mine merges two — but the draft's spec-gap list caught something mine di
   **Deferred by one step on purpose:** the 9.4c test-writer is reading adapter/tools.ts right now,
   so the edit lands after it reports rather than racing it.
 
-- **MINOR (open, same fix batch) — validate's scopePattern.** C-034 recorded that `runVerify` takes
+- **MINOR (CLOSED by C-039's D1(a) — the union resolution removed the single-element rule entirely) — validate's scopePattern.** C-034 recorded that `runVerify` takes
   ONE scopePattern while an item may carry several fileScope entries selecting different §2.1
   scopes, and settled for the first entry with the limitation raised at the Phase 9 gate. The
   independent draft proposes deriving the pattern from the item's fileScope as a UNION instead,
@@ -1124,3 +1124,64 @@ taking the count on faith.
 
 - **Blast radius:** `src/router/config.hpp` (+106/-9), `src/tests/admission_test.cpp` (+182/-0, purely
   additive — no existing assertion touched). ctest 36/36 (21072 assertions), stable across three runs.
+
+## C-039 — retroactive adversarial review, TypeScript half (Task 9.4b): a verify that ran NOTHING reported green
+
+Companion to C-038 (same review round: 7 lenses, 3 refute-biased skeptics per major, 19 majors
+surviving across lenses and deduping to ~9 distinct defects). Five landed on 9.4b; all fixed
+test-first, each pinned by a mutation.
+
+- **MAJOR — the false green.** `handleValidate` derived the whole verify from `queueItem.fileScope[0]`.
+  When that ONE path matched no `verify.requiredScopes` pattern, `selectScopes` returned [],
+  `runScopes` returned {}, and `green = Object.values({}).every(...)` is VACUOUSLY TRUE — so the §2.6
+  ledger recorded `green:true, scopes:{}` and the item advanced GREEN->VALIDATED having executed
+  nothing. On a behavioral:false item that verify is the item's ONLY evidence (plan line 1198).
+  The control that makes it undeniable: same config, same two files, and merely REORDERING the
+  fileScope array flips it between a vacuous green and a real red — model-authored array order decided
+  whether the config's own required scope ran. The 13 committed rows could not see it because the
+  fixture config is `requiredScopes:[{pattern:"**"}]`, which matches every path.
+  The deeper cause, which one lens named exactly: `handleValidate` RE-DERIVED scope selection with its
+  own one-line rule instead of the rule `itemVerifyScope` already owned, and the two disagreed.
+  FIX, three layers: (a) one shared `requiredScopeNames(config, paths)` resolves the union over
+  testScope ∪ fileScope for BOTH paths, with `evidence.ts` `selectScopes`/`runScopes`/`runVerify`
+  widened to `string | string[]` (backward compatible — every committed caller passes a string);
+  (b) a NAMED refusal when no entry covers the item, before anything runs; (c) an empty `scopes` map
+  is not admissible for the edge. **This also CLOSES C-034's recorded limitation and C-035's minor open
+  item** — the "only the first entry's scopes run" partial-coverage problem is gone, because there is
+  no longer a first entry.
+
+- **MAJOR — the foreign red set quarantined files that do not exist.** `foreignRedSet` emitted every
+  below-GREEN sibling's DECLARED testScope paths without checking existence; `quarantineFiles` calls
+  `renameSync`, which throws ENOENT (not EXDEV, so it rethrows), the rollback re-raises, and
+  `handleValidate` dies. Trivially reachable: a sibling at PENDING has not had its test WRITTEN yet.
+  FIX: skip paths absent under `store.root`, in the one place that feeds both the validate and the
+  mark_green item-test paths. quarantine.ts untouched. The test also pins that an EXISTING sibling red
+  is still quarantined, so the filter cannot disable the mechanism it guards.
+
+- **MAJOR — queue.json was swapped before the decision was validated.** `handleQueueAmend` wrote
+  queue.json first and called `appendDecision` second, but `appendDecision` performs the §2.7 SCHEMA
+  check — so a record failing it threw AFTER the queue was replaced: the caller is told the amendment
+  failed while the run now executes the amended queue. FIX: the schema half was extracted as
+  `assertDecisionValid` (reused, not duplicated) and runs before any write.
+
+- **MAJOR — mark_green judged the blocked rule against a stale snapshot.** Legality was evaluated
+  against the item loaded BEFORE the implementer sub-session ran, then GREEN was persisted onto a
+  freshly loaded item — so anything that blocked the item during that window was overwritten. FIX:
+  re-load immediately before the check and persist that same object. The fixer found the identical
+  hole two lines up on the non-behavioral path and fixed both.
+
+- **MAJOR — the own-tests guard was exact string equality.** C-034's guard compared raw queue.json
+  strings, so `./tests/a.test.mjs` walked straight past it and the item's own red got quarantined —
+  a false green. FIX: normalize both sides (`path.normalize` + forward slashes; a traversing `..` is
+  preserved so the quarantine still refuses it).
+
+- **The fixer applied C-034's own lesson to its own fix, and it paid.** After fixing D5 it mutated the
+  SECOND half of the new guard (the queue-side normalization) and found 952/952 still green —
+  unpinned. It split the row into two sub-cases (odd spelling on the registry side, odd spelling on
+  the queue side) and confirmed each mutation now fails exactly one. This is the discipline C-034
+  introduced propagating to a different task and a different author.
+
+- **Blast radius:** `conductor/adapter/evidence.ts` (+14/-6, signature widened compatibly),
+  `conductor/adapter/tools.ts` (+110/-27), `conductor/tests/tools-9.4b.test.ts` (+464/-0, purely
+  additive). 954/954 green, typecheck and bun legs clean. Orchestrator independently re-ran the D1(a)
+  mutation: reverting the union resolution fails 2 rows and nothing else.
