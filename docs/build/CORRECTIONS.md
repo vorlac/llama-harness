@@ -1399,3 +1399,62 @@ tree it will fail to typecheck on the missing field, and the orchestrator will a
 match a surface an earlier task legitimately owns is not the same act as editing an ASSERTION to
 make it pass, and pre-authorising it here is what keeps the two distinguishable. No 9.5c assertion
 changes; if any does, that is a defect and must be re-derived.
+
+## C-044 — the tool surface and the handler surface disagree in more places than C-035 (MAJOR)
+
+**How it was found.** The 13.1 spec-promotion pass reported SG-1 as a MAJOR: "the plugin
+composition root has no owning task". That prompted a SYSTEMATIC audit rather than a spot check —
+every tool's declared `args` extracted from `plugin/index.ts`, every `*Input` interface extracted
+from `adapter/tools.ts`, infrastructure fields subtracted, and the two lists compared mechanically.
+C-035 was found by comparing ONE handler against ONE tool. Comparing all 22 at once found more.
+
+### Finding 1 — the composition root IS assigned, but to two words
+
+VERIFIED AT HEAD: `plugin/index.ts` binds every one of its 22 tools to `handlerNotBound` (:203),
+which throws. It imports exactly three things from `adapter/tools.ts` — `classifyTool`,
+`CONDUCTOR_TOOL_NAMES`, `gateBeforeToolCall` (:34) — and not a single `handleX`. Nothing outside
+`conductor/tests/` calls any handler. At HEAD the product is INERT: nine phases of handler work are
+reachable only from tests.
+
+13.1's spec is right that no bullet EXPLICITLY claims the composition root, but it is not
+unassigned: plan:2917 requires "REAL plugin hooks + REAL handlers" and plan:2958 says "Red → **glue
+fixes** → green (this is the harness proving itself)". "Glue fixes" IS the assignment. No plan
+change is needed and none is made.
+
+What IS wrong is the timing. Leaving every tool-to-handler correspondence unverified until the last
+coding task means each of Phases 9-12 can add another mismatch, and 13.1 discovers them all at once
+in the task least able to absorb surprises. C-035 already proved the drift is real.
+
+### Finding 2 — two committed mismatches the audit found
+
+- **`conductor_decide`.** Plan:1322 and the plugin both declare `{question, options[], choice,
+  why}`, but `DecideInput` (tools.ts:723) additionally requires `kind: "derived" | "human"` and
+  `appliedWhere: string`. RULING: `kind` is FIXED by the composition root, not a tool arg — §2.7
+  (plan:865) defines `"human"` as "was asked", and a decision the orchestrator records through a
+  tool call was by definition not asked of a human, so it is always `"derived"` (the path that
+  carries a human's answer is `conductor_answer`). `appliedWhere` cannot be synthesized and becomes
+  a declared arg.
+- **`conductor_queue_amend`.** Declares `{ops}` alone, but `QueueAmendInput` requires the whole
+  §2.7 record — `question, options, choice, why, appliedWhere`. This is the OTHER HALF of C-035,
+  which fixed only the `ops` half. RULING: the tool declares them. §2.7 demands ≥2 SCORED options
+  and a rationale for a derived decision; no code can invent a rationale, and templating the
+  options would mean fabricating scores. Plan:1323's `{ops[]}` is shorthand — its own effect column
+  says "+ decision record", and §2.7 is what a decision record costs.
+
+### The fix: make the correspondence a construction, not a convention
+
+Patching two instances would leave the third to be found at 13.1. Instead, following the precedent
+`conductor/tests/single-source.test.ts` already sets for the FSM vocabularies:
+
+1. ONE exported binding table — tool name → {handler, infrastructure fields the root supplies,
+   fixed values like `kind: "derived"`}. This is data the composition root will CONSUME at 13.1,
+   so it is written once rather than derived twice (the Phase 9 theme, again).
+2. A structural test asserting, for every tool that has a handler, that the handler's required
+   input fields are exactly covered by the tool's declared args ∪ infrastructure ∪ fixed values.
+   Any future handler whose input drifts from its tool goes RED at the gate that adds it, not at
+   13.1.
+
+**SEQUENCING:** deliberately NOT landed in this round — the 9.5a implementer is editing
+`adapter/tools.ts` right now and a new test file would change the suite count under it. Lands
+immediately after 9.5a commits, before 9.5b starts, so 9.5b's and 9.5c's new handlers are the
+first to be born under the guard rather than retrofitted into it.
