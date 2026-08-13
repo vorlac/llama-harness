@@ -974,3 +974,28 @@ where mine merges two — but the draft's spec-gap list caught something mine di
   which is better if it can be expressed. Re-examine when the queue_amend fix lands: if a single
   runVerify call genuinely cannot express the union, the limitation stands and stays a gate item;
   if it can, take it.
+
+## C-036 — the roster-sizing rule, decided once (closes C-032's parked finding E14)
+
+**The question.** C-032's E14 observed that two stages in one file disagree: `handlePlanReview` floors
+its roster at its lens set (`Math.max(readFanout(...), PLAN_REVIEW_LENSES.length)`) while
+`handleVetTest` sizes purely by `readFanout`, so a low `parallel.maxReaders` silently reduces critic
+COVERAGE. It was parked as "decide the rule once and apply it to both stages". Promoting 9.5a forced
+the decision, because item review has FIVE lenses §3.3 calls "never truncated by configuration".
+
+**The rule.** FLOOR AT THE SET WHERE THE SPEC NAMES A COVERAGE SET; CLAMP TO `readFanout` WHERE THE
+SPEC NAMES ONLY A COUNT. A named coverage set is a correctness requirement — dropping a lens means a
+plan or an item "passed review" on evidence nobody gathered. A bare count is a throughput knob, and
+clamping it costs breadth of opinion, not coverage.
+
+| stage | what the spec names | rule | committed state |
+|---|---|---|---|
+| planReview | FOUR lenses (§3.2) — a SET | floor | 9.3 already floors; its recorded deviation is hereby JUSTIFIED, not merely noted |
+| itemReview | FIVE mandatory lenses (§3.3), "never truncated by configuration" — a SET | floor, via clamp(.,3,6) + pairwise merge so three sessions still cover five lenses | 9.5a must implement |
+| vet | "vetCritics parallel critics" — a COUNT, no named set | clamp | 9.4a already clamps; nothing to change |
+| skeptics | skepticsPerFinding — a COUNT | clamp | unchanged |
+
+**Consequence:** `parallel.maxReaders` is a wall-clock concurrency ceiling the fan-out engine enforces
+internally, and is NEVER a coverage truncation. **No committed code changes** — the rule ratifies what
+9.3 and 9.4a already do and tells 9.5a what to do. E14 can be closed at the Phase 9 gate rather than
+carried into it.
