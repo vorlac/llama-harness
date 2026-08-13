@@ -1179,8 +1179,8 @@
     "9.4c": {
       "taskId": "9.4c",
       "manifest": true,
-      "tier": "A",
-      "status": "NOT_STARTED",
+      "tier": "B",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 9.4c wave driver",
       "planLines": [
@@ -1188,14 +1188,36 @@
         2651
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 979,
+        "pass": 979,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.4c.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleDispatchWave' (orchestrator-observed; tsc showed EXACTLY that one TS2305 and nothing else). The test file was written and vetted while two review-fix rounds held the tree, and was PARKED in staging until they landed so their green-gate definition of done was not broken by an unrelated red."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/gates-phase.ts",
+        "conductor/tests/tools-9.4c.test.ts",
+        "docs/build/specs/task-9.4c.assertions.json"
+      ],
+      "revertAssertion": "removing handleDispatchWave re-reds tools-9.4c.test.ts (missing-export); reverting the Gap-1 gate offer re-reds [9.4c-gate-offers-wave-while-schedulable] AND [9.4c-first-call-executing] (the repeat call is denied without it) while gates-phase.test.ts stays 16/16 green; reverting the missing-stage envError re-reds [9.4c-missing-stage-stops-honestly] alone; removing the treeState.notifyClear call re-reds [9.4c-binding-p7-stale-marker-onclear] alone; reverting write serialization re-reds [9.4c-writes-serialize] AND [9.4c-publish-order], which share the mechanism (all verified by running the revert)",
+      "attempts": 1,
+      "deviations": [
+        "DEFERRED BINDING P3 DISCHARGED: PLAN_REVIEWED->EXECUTING goes through core legalRunTransition with context derived from PERSISTED planReviewRounds (Run carries no survivingMajors) — < max means the review exited clean (survivingMajors:0), else {round,max}. Both shapes advance; an empty first wave still transitions, so a fully-blocked run cannot wedge at PLAN_REVIEWED.",
+        "DEFERRED BINDING P7 DISCHARGED: the driver calls treeState.notifyClear(tree) after EVERY stage execution (verified to be genuine production wiring, not a test-only seam), so a job the engine holds on a marker that stage broke is released. A write stage dispatched into a frozen tree races its settlement against config.parallel.subSessionTimeoutMs — the operator's OWN sub-session budget, not a new knob and not the engine's watchdog, which is never armed for a held job.",
+        "GAP-1 (C-040 theme): core/gates-phase legalTools now offers conductor_dispatch_wave in EXECUTING while the wave it already computes is non-empty. As committed it was legal ONLY at PLAN_REVIEWED, which denied every call after the first and broke multi-wave runs. `recommended` is untouched, and gates-phase.test.ts passes unchanged.",
+        "GAP-2 (G4 honesty): the default executor table wires ONLY handlers committed at HEAD; there is no item_review or publish entry until 9.5a/9.5b land. A member reaching an unserved stage STOPS with a disposition naming it — never a 'not implemented' throw, never a silent skip.",
+        "PINNED SEMANTICS: each stage tool is entered ONCE PER dispatch_wave CALL (the assertions' stage-by-stage rendezvous rule). A member arriving at a stage the wave already passed waits for the next call — which is exactly why GAP-1 is required for a run to finish."
+      ],
+      "startedAt": "2026-08-13T13:30:00Z",
+      "finishedAt": "2026-08-13T15:10:00Z"
     },
     "9.5a": {
       "taskId": "9.5a",

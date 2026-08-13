@@ -370,6 +370,14 @@ export function legalTools(
           workflow: { planReviewers: 1, itemReviewers: 1, vetCritics: 1, skepticsPerFinding: 1 },
         },
       );
+      // §3.4/§4.2: conductor_dispatch_wave is the run's WORK ENGINE, not a
+      // one-shot entry edge — a run with more items than one wave can hold needs
+      // a second call, and a call the gate denies is a run that cannot proceed.
+      // It is offered exactly while the wave it would compute has members; the
+      // recommendation stays the per-item stage tool below, so the injection and
+      // the continuation engine read the same next step they always did.
+      if (wave.parallel.length > 0) legal.set(DISPATCH_WAVE, {});
+
       const firstId = wave.parallel[0];
       const firstItem = firstId === undefined ? undefined : itemById.get(firstId);
       const firstTool = firstItem === undefined ? null : nextStageTool(firstItem);

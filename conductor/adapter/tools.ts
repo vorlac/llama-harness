@@ -34,7 +34,7 @@ import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
-import { readFanout } from "../core/schedule.ts";
+import { nextWave, readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
 import { SCHEMAS, validate } from "../core/types.ts";
 import type {
@@ -63,7 +63,7 @@ import type {
 import { writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
-import type { Fanout, FanoutJob } from "./fanout.ts";
+import type { Fanout, FanoutJob, TreeState } from "./fanout.ts";
 import { runTest, runVerify } from "./evidence.ts";
 import type { RunTestResult, ScopeSpec } from "./evidence.ts";
 import type { Journal } from "./journal.ts";
@@ -4305,4 +4305,565 @@ export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
   );
 
   return { ok: true, decisionId: decision.id, itemIds };
+}
+
+// ===========================================================================
+// (9) conductor_dispatch_wave — the §4.2 wave DRIVER (Task 9.4c, plan lines
+// 2640-2651, §4.2 lines 1544-1618). The run's work engine: it computes the wave
+// through core/schedule nextWave, runs ONE async pipeline per wave member
+// through the SHARED fan-out engine (so the orchestrator model never interleaves
+// items by hand), and performs PLAN_REVIEWED->EXECUTING on its first call.
+//
+// The driver REACHES the committed per-item stage handlers rather than
+// reimplementing them (§4.2: one implementation, one set of gates, whether the
+// model or the driver is calling). It therefore owns exactly the three ordering
+// guarantees a per-item tool cannot see from inside its own item:
+//
+//   BATCHING. The wave advances stage by stage: every active member owing the
+//   same stage enters it together as one group, and a stage is entered ONCE per
+//   call. A member that drops out (blocked, deferred, env-failed, or stopped by
+//   a stage that ran without advancing it) leaves every later group and delays
+//   nobody; a member that arrives at a stage the wave has already passed stops
+//   there for the next call rather than opening a second group behind it.
+//
+//   WRITES SERIALIZE PER TREE (§4.3). Read stages overlap freely; the stages
+//   whose dispatch is write-capable — plus conductor_publish, whose git index is
+//   a singleton — run strictly one at a time, in §4.2 wave order.
+//
+//   FREEZE (§3.5's freeze-as-scheduling rule). The hold itself is the fan-out
+//   engine's and is not re-implemented here: a write-capable job for a frozen
+//   tree is HELD and released through TreeState.onClear. The driver owns the two
+//   halves the engine cannot own — the NOTIFICATION (it calls notifyClear after
+//   every stage execution, so a tree a stage released, or a stale marker the
+//   evidence layer broke, deterministically releases the held jobs with no timer
+//   and no polling) and the BOUND (a held job nothing will ever release is
+//   env-failed rather than awaited forever).
+//
+// Stages this build does not carry yet — conductor_item_review lands at 9.5a and
+// conductor_publish at 9.5b — are reached through an INJECTABLE executor table,
+// the same dependency injection as the Fanout, the clock and VerifyOptions. The
+// DEFAULT table wires ONLY handlers committed here, and a member that reaches a
+// stage no executor serves STOPS there with an envError naming that stage: at
+// 9.4c a wave genuinely cannot publish, and the driver says so rather than
+// throwing "not implemented", skipping the stage, or advancing an item past work
+// that never happened.
+// ===========================================================================
+
+const DISPATCH_WAVE_TOOL = "conductor_dispatch_wave";
+const PUBLISH_TOOL = "conductor_publish";
+
+// The stages that may not overlap in one tree: the two whose sub-session is
+// write-capable (testWriter, implementer) and publish, whose git index is a
+// singleton. Every other stage is a read group and overlaps freely (§4.2).
+const SERIAL_STAGES: readonly string[] = [SUBMIT_TEST_TOOL, MARK_GREEN_TOOL, PUBLISH_TOOL];
+
+// The journal a stage executor is handed: the leveled handler sink plus the
+// flush the evidence layer needs. Deliberately the WIDE level/corr shape, so an
+// injected executor (a test's recorder, a later stage's handler) can consume it
+// without knowing this module's leveled union.
+export interface StageJournal {
+  log: (
+    level: string,
+    component: string,
+    event: string,
+    data: Record<string, unknown>,
+    corr: { runId?: string; itemId?: string; sessionID?: string },
+  ) => void;
+  flushSync: () => void;
+}
+
+// Everything a stage executor needs to run ONE stage for ONE item. `tool` is the
+// §3.4 conductor_* name the §3.3 item FSM says advances the item — the same
+// vocabulary core/gates-phase offers per item, so the table key and the gate's
+// offer are one string.
+export interface StageExecutorContext {
+  tool: string;
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: StageJournal;
+  stateHome: string;
+  workspaceKey: string;
+  packs: Record<string, string>;
+  now: () => number;
+}
+
+// What a stage execution reports back: whether it ADVANCED the item, and the
+// item's persisted state after it. `ok:false` stops the member — the driver
+// never advances an item past work that did not happen (§3.3).
+export interface StageOutcome {
+  ok: boolean;
+  itemState: ItemState;
+}
+
+export type StageExecutor = (ctx: StageExecutorContext) => Promise<StageOutcome>;
+
+// The §3.5 tree view the driver drives: the one the Fanout was built over, plus
+// the release notification the driver owns.
+export interface WaveTreeState extends TreeState {
+  notifyClear: (tree: string) => void;
+}
+
+export interface DispatchWaveInput {
+  store: StateStore;
+  fanout: Fanout;
+  treeState: WaveTreeState;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  stateHome: string;
+  workspaceKey: string;
+  packs: Record<string, string>;
+  now?: () => number;
+  // Merged OVER the default table, never replacing it: an injected entry serves
+  // one stage, and every other stage keeps the handler this build committed.
+  executors?: Record<string, StageExecutor>;
+}
+
+// One wave member's disposition. Compact by construction: the block/defer
+// REASONS rather than the §2.5 annotation objects, and no §2.4 queue-item or
+// §2.5 item JSON anywhere.
+export interface WaveDisposition {
+  itemId: string;
+  state: ItemState; // the PERSISTED item state after the call
+  blocked: string | null; // the §2.5 block reason
+  deferred: string | null; // the §2.5 defer reason
+  envError: string | null; // an environment failure that stopped this member
+  stoppedAt: string | null; // the conductor_* stage the member stopped at
+  anomaly: string | null; // something abnormal this member rode (a freeze hold)
+}
+
+export interface DispatchWaveResult {
+  runState: RunState; // the PERSISTED run state after the call
+  wave: { parallel: string[]; rationale: string }; // nextWave's OWN plan
+  items: WaveDisposition[];
+}
+
+// The driver's per-member bookkeeping, kept beside the item rather than in it:
+// none of it is §2.5 state, and none of it is persisted.
+interface WaveMember {
+  itemId: string;
+  active: boolean;
+  stoppedAt: string | null;
+  envError: string | null;
+  anomaly: string | null;
+}
+
+// A stage execution's fate, captured so a rejection is a VALUE the driver can
+// dispose of rather than a throw that would abandon the wave's other members.
+type StageSettlement = { kind: "done"; outcome: StageOutcome } | { kind: "failed"; error: unknown };
+
+// The executor-facing sink, forwarded to the handler's own sink verbatim. Built
+// rather than cast so the executors' records land in the SAME journal as the
+// rest of the wave (the evidenceJournalOf convention), and so a sink without a
+// flush still satisfies the seam.
+function stageJournalOf(journal: HandlerJournal): StageJournal {
+  const sink = journal as HandlerJournal & { flushSync?: () => void };
+  return {
+    log: (level, component, event, data, corr): void => {
+      // The seam takes the wide `string` level; the handler sink takes the §7.1
+      // union, and every caller inside this module emits one of its members.
+      journal.log(level as LogLevel, component, event, data, {
+        runId: corr.runId ?? "",
+        ...(corr.itemId === undefined ? {} : { itemId: corr.itemId }),
+        ...(corr.sessionID === undefined ? {} : { sessionID: corr.sessionID }),
+      });
+    },
+    flushSync: (): void => {
+      if (typeof sink.flushSync === "function") sink.flushSync();
+    },
+  };
+}
+
+// The DEFAULT stage-executor table: ONLY the handlers this build carries. There
+// is deliberately NO entry for conductor_item_review (9.5a) or conductor_publish
+// (9.5b) — a placeholder would take an item past work that never happened, and a
+// throw would make a wave that legitimately cannot publish look broken.
+function defaultStageExecutors(): Record<string, StageExecutor> {
+  return {
+    [SUBMIT_TEST_TOOL]: async (ctx): Promise<StageOutcome> => {
+      const result = await handleSubmitTest({
+        store: ctx.store,
+        fanout: ctx.fanout,
+        runId: ctx.runId,
+        itemId: ctx.itemId,
+        config: ctx.config,
+        journal: ctx.journal,
+        now: ctx.now,
+      });
+      return { ok: result.ok, itemState: result.itemState };
+    },
+    [VET_TEST_TOOL]: async (ctx): Promise<StageOutcome> => {
+      const result = await handleVetTest({
+        store: ctx.store,
+        fanout: ctx.fanout,
+        runId: ctx.runId,
+        itemId: ctx.itemId,
+        config: ctx.config,
+        journal: ctx.journal,
+        now: ctx.now,
+      });
+      return { ok: result.ok, itemState: result.itemState };
+    },
+    [MARK_GREEN_TOOL]: async (ctx): Promise<StageOutcome> => {
+      const result = await handleMarkGreen({
+        store: ctx.store,
+        fanout: ctx.fanout,
+        runId: ctx.runId,
+        itemId: ctx.itemId,
+        config: ctx.config,
+        journal: ctx.journal,
+        stateHome: ctx.stateHome,
+        workspaceKey: ctx.workspaceKey,
+        now: ctx.now,
+      });
+      return { ok: result.ok, itemState: result.itemState };
+    },
+    [VALIDATE_TOOL]: async (ctx): Promise<StageOutcome> => {
+      const result = await handleValidate({
+        store: ctx.store,
+        fanout: ctx.fanout,
+        runId: ctx.runId,
+        itemId: ctx.itemId,
+        config: ctx.config,
+        journal: ctx.journal,
+        stateHome: ctx.stateHome,
+        workspaceKey: ctx.workspaceKey,
+        packs: ctx.packs,
+        now: ctx.now,
+      });
+      return { ok: result.ok, itemState: result.itemState };
+    },
+  };
+}
+
+// The gate's verdict over the run's CURRENT persisted facts. Every legality
+// question the driver asks — its own offer, and each member's next stage — is
+// answered from this ONE derivation, so the driver and the stage handlers can
+// never disagree about what may run (§3.2).
+function waveVerdict(store: StateStore, runId: string, runDir: string, queue: Queue): LegalToolsResult {
+  const run = store.loadRun(runId);
+  const gateRun: GateRun = {
+    state: run.state,
+    stop: run.stop === null ? null : { kind: run.stop.kind },
+    classification: { kind: run.classification.kind },
+  };
+  let questions: Array<{ id: string; answeredIso: string | null }>;
+  try {
+    questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
+  } catch (error) {
+    throw new Error(
+      DISPATCH_WAVE_TOOL +
+        ": cannot read questions.jsonl in " +
+        runDir +
+        " (a torn or invalid §2.11 record — repair the file to resume): " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
+  return legalTools(gateRun, gateItemsOf(store, runId, queue), questions, true);
+}
+
+// The §3.3 stage tool the gate offers THIS item right now, or null when it
+// offers none (PUBLISHED, blocked, deferred, dependency-unready). Read out of
+// the verdict rather than re-derived from the item's FSM position: the item FSM
+// table lives in core, and this file reads its answer.
+function offeredStageTool(verdict: LegalToolsResult, itemId: string): string | null {
+  for (const [tool, hint] of verdict.legal) {
+    const ids = hint.itemIds;
+    if (ids !== undefined && ids.includes(itemId)) return tool;
+  }
+  return null;
+}
+
+// The scheduler's view of the run's items: FSM position plus the two annotations
+// that veto scheduling, for every queue item that has a runtime file.
+function scheduleItemsOf(
+  store: StateStore,
+  runId: string,
+  queue: Queue,
+): Array<{ id: string; state: string; blocked: { reason: string } | null; deferred: { reason: string } | null }> {
+  const items: Array<{
+    id: string;
+    state: string;
+    blocked: { reason: string } | null;
+    deferred: { reason: string } | null;
+  }> = [];
+  for (const qi of queue.items) {
+    let item: Item;
+    try {
+      item = store.loadItem(runId, qi.id);
+    } catch {
+      continue; // no runtime facts — nextWave cannot schedule it either
+    }
+    items.push({
+      id: qi.id,
+      state: item.state,
+      blocked: item.blocked === null ? null : { reason: item.blocked.reason },
+      deferred: item.deferred === null ? null : { reason: item.deferred.reason },
+    });
+  }
+  return items;
+}
+
+/**
+ * conductor_dispatch_wave (§3.2, §4.2). Computes the wave through core/schedule
+ * nextWave, performs PLAN_REVIEWED->EXECUTING on its first call (unconditionally
+ * — an empty first wave still transitions, or conductor_report is unreachable and
+ * the run wedges), and drives one pipeline per wave member through the shared
+ * fan-out engine until the wave is drained-or-blocked. Returns the compact
+ * per-item disposition summary; persists nothing of its own.
+ */
+export async function handleDispatchWave(input: DispatchWaveInput): Promise<DispatchWaveResult> {
+  const { store, fanout, treeState, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+  const executors: Record<string, StageExecutor> = {
+    ...defaultStageExecutors(),
+    ...(input.executors ?? {}),
+  };
+  const stageJournal = stageJournalOf(journal);
+  // A held write-capable job has no watchdog of its own — the engine arms one
+  // only for a job it has admitted — so the driver bounds the wait with the
+  // operator's OWN sub-session budget rather than inventing a second knob.
+  const heldBudgetMs = Math.max(1, Math.floor(config.parallel.subSessionTimeoutMs));
+
+  // (1) legality — the driver's own offer, from the gate's derivation, before it
+  //     transitions, computes or dispatches anything (§3.2).
+  const queue = readQueueJson(runDir, DISPATCH_WAVE_TOOL);
+  const entryVerdict = waveVerdict(store, runId, runDir, queue);
+  if (!entryVerdict.legal.has(DISPATCH_WAVE_TOOL)) {
+    throw new Error(DISPATCH_WAVE_TOOL + " is not legal right now: " + entryVerdict.why);
+  }
+
+  // (2) the run edge, on the FIRST call. Run carries planReviewRounds and NOT
+  //     survivingMajors, so the context is DERIVED from what was persisted:
+  //     below the cap the review exited on a clean round; at the cap it exited
+  //     with its majors surfaced as questions. core/fsm-run owns which of the two
+  //     admits the edge — this handler re-derives neither arm.
+  const run = store.loadRun(runId);
+  if (run.state === "PLAN_REVIEWED") {
+    const max = config.workflow.planReviewMaxRounds;
+    const context =
+      run.planReviewRounds < max ? { survivingMajors: 0 } : { round: run.planReviewRounds, max };
+    const edge = legalRunTransition(run.state, "EXECUTING", context);
+    if (!edge.ok) {
+      throw new Error(
+        DISPATCH_WAVE_TOOL + ": " + (edge.why ?? "this run may not advance to EXECUTING"),
+      );
+    }
+    const from = run.state;
+    run.state = "EXECUTING";
+    store.saveRun(run);
+    journal.log(
+      "info",
+      "fsm",
+      "transition",
+      { from, to: run.state, why: edge.why, planReviewRounds: run.planReviewRounds, tsMs: now() },
+      { runId },
+    );
+  }
+
+  // (3) the wave — nextWave's OWN plan over the persisted facts and the config
+  //     caps. Membership, order and rationale are all its; nothing here filters
+  //     the set it returned or restates why it chose it.
+  const wave = nextWave({ items: queue.items }, scheduleItemsOf(store, runId, queue), config);
+  const members: WaveMember[] = wave.parallel.map((itemId) => ({
+    itemId,
+    active: true,
+    stoppedAt: null,
+    envError: null,
+    anomaly: null,
+  }));
+
+  // A member stops: it runs no further stage in THIS call, and the disposition
+  // names the stage it stopped at.
+  const stop = (member: WaveMember, tool: string, envError: string | null): void => {
+    member.active = false;
+    member.stoppedAt = tool;
+    if (envError !== null) {
+      member.envError = envError;
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: tool, itemId: member.itemId, reason: envError },
+        { runId, itemId: member.itemId },
+      );
+    }
+  };
+
+  // Await a HELD stage under the budget. Resolves to null when the budget
+  // expires with the job still held: a leaked marker becomes an env-fail, never
+  // a silent wave hang, and the wave's other members are never made to wait on
+  // a tree nothing is going to release.
+  const awaitHeld = async (settle: Promise<StageSettlement>): Promise<StageSettlement | null> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        resolve(null);
+      }, heldBudgetMs);
+    });
+    try {
+      return await Promise.race([settle, expiry]);
+    } finally {
+      // The wave must never leave a live timer behind: a released job would
+      // otherwise keep the process alive for the whole budget.
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
+  // One member's ONE stage.
+  const runStage = async (member: WaveMember, tool: string): Promise<void> => {
+    const executor = executors[tool];
+    if (executor === undefined) {
+      stop(
+        member,
+        tool,
+        'item "' +
+          member.itemId +
+          '" reached ' +
+          tool +
+          ", which no stage executor in this build serves; the member stops here rather than " +
+          "skipping the stage or advancing past work that did not happen",
+      );
+      return;
+    }
+
+    // §3.5: the engine HOLDS a write-capable job whose tree is frozen. Noting it
+    // here is what turns a hold into an observable anomaly rather than a wave
+    // that merely takes a long time.
+    const frozen = SERIAL_STAGES.includes(tool) && treeState.isFrozen(STAGE_TREE);
+    if (frozen) {
+      member.anomaly =
+        'tree "' +
+        STAGE_TREE +
+        '" was frozen by a live verify marker when ' +
+        tool +
+        " dispatched, so the fan-out engine HELD this member's write-capable job until the " +
+        "marker cleared (§3.5)";
+    }
+
+    const settle: Promise<StageSettlement> = executor({
+      tool,
+      store,
+      fanout,
+      runId,
+      itemId: member.itemId,
+      config,
+      journal: stageJournal,
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+      packs: input.packs,
+      now,
+    }).then(
+      (outcome): StageSettlement => ({ kind: "done", outcome }),
+      (error): StageSettlement => ({ kind: "failed", error }),
+    );
+
+    const settlement = frozen ? await awaitHeld(settle) : await settle;
+    if (settlement === null) {
+      stop(
+        member,
+        tool,
+        "the write-capable sub-session for " +
+          tool +
+          ' was HELD out of tree "' +
+          STAGE_TREE +
+          '": its verify marker never cleared within parallel.subSessionTimeoutMs=' +
+          String(heldBudgetMs) +
+          "ms, so the member is env-failed rather than awaited forever (§3.5)",
+      );
+      return;
+    }
+
+    // The stage ran, so whatever it did to the tree is done: notify the §3.5
+    // view, which is what releases any write-capable job the engine is holding
+    // on a marker this stage broke or a verify this stage finished (P6).
+    treeState.notifyClear(STAGE_TREE);
+
+    if (settlement.kind === "failed") {
+      const error = settlement.error;
+      stop(member, tool, tool + " failed: " + (error instanceof Error ? error.message : String(error)));
+      return;
+    }
+    // A stage that RAN without advancing the item stops the member — a failing
+    // item test, a red verify, a blocked member. That is not an environment
+    // failure, and it is never re-run inside one dispatch_wave call.
+    if (!settlement.outcome.ok) stop(member, tool, null);
+  };
+
+  // One stage GROUP: the members owing a read stage go together and overlap
+  // freely; the write stages run strictly one at a time in wave order. The first
+  // job of each is started in this ONE synchronous pass, so the order sub-session
+  // traffic reaches the engine is §4.2's and not the event loop's.
+  const runGroup = async (scheduled: Array<{ member: WaveMember; tool: string }>): Promise<void> => {
+    const running: Array<Promise<void>> = [];
+    let serial: Promise<void> | null = null;
+    for (const entry of scheduled) {
+      if (SERIAL_STAGES.includes(entry.tool)) {
+        serial =
+          serial === null
+            ? runStage(entry.member, entry.tool)
+            : serial.then(() => runStage(entry.member, entry.tool));
+      } else {
+        running.push(runStage(entry.member, entry.tool));
+      }
+    }
+    if (serial !== null) running.push(serial);
+    await Promise.all(running);
+  };
+
+  // (4) drive the wave stage by stage until it is drained-or-blocked. Each round
+  //     re-asks the gate over the freshly PERSISTED facts, so a member that
+  //     blocked, deferred or finished in the previous round simply stops being
+  //     offered a stage tool and leaves the wave without delaying anybody.
+  const entered = new Set<string>();
+  for (;;) {
+    const verdict = waveVerdict(store, runId, runDir, queue);
+    const scheduled: Array<{ member: WaveMember; tool: string }> = [];
+    for (const member of members) {
+      if (!member.active) continue;
+      const tool = offeredStageTool(verdict, member.itemId);
+      if (tool === null) {
+        // Drained (PUBLISHED) or dropped out (blocked/deferred): the gate offers
+        // this item nothing, so the member is simply done for this call.
+        member.active = false;
+        continue;
+      }
+      if (entered.has(tool)) {
+        // The wave has already passed this stage in this call. A second group
+        // behind the first would re-open a stage the batch already closed, so
+        // the member stops and the NEXT dispatch_wave call carries it.
+        stop(member, tool, null);
+        continue;
+      }
+      scheduled.push({ member, tool });
+    }
+    if (scheduled.length === 0) break;
+    for (const entry of scheduled) entered.add(entry.tool);
+    await runGroup(scheduled);
+  }
+
+  // (5) compact return: one disposition per member, in wave order, read back
+  //     through the store — never out of what a handler said it did.
+  const items: WaveDisposition[] = members.map((member) => {
+    const item = store.loadItem(runId, member.itemId);
+    return {
+      itemId: member.itemId,
+      state: item.state,
+      blocked: item.blocked === null ? null : item.blocked.reason,
+      deferred: item.deferred === null ? null : item.deferred.reason,
+      envError: member.envError,
+      stoppedAt: member.stoppedAt,
+      anomaly: member.anomaly,
+    };
+  });
+
+  return {
+    runState: store.loadRun(runId).state,
+    wave: { parallel: [...wave.parallel], rationale: wave.rationale },
+    items,
+  };
 }

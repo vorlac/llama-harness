@@ -580,6 +580,19 @@
       "M8": "n/a (stub upstream; no live llama-server)",
       "M9": "n/a (bun leg is the TS package's)",
       "orchestratorReverify": "observed the missing-header red MYSELF after wiring CMakeLists; the implementer then died on a transient connection error with the work COMPLETE but unverified, so I verified it end to end: built it, ran the suite, MUTATION-TESTED all three ordering laws (burst-outranks-priority, toggle-not-inert, ceiling-removed — each failed exactly one row and no others), and read the whole seam diff, which is where I found the policies_ lifetime minor now recorded in STATE."
+    },
+    "9.4c": {
+      "at": "2026-08-13T15:10:00Z",
+      "M1": "PASS 979/979 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
+      "M2": "PASS 954 -> 979 (12 rows, 25 tests with subtests)",
+      "M3": "PASS (tsc clean; pre-implementation tsc showed EXACTLY one error, the missing handleDispatchWave export)",
+      "M4": "PENDING",
+      "M5": "PASS (production-scoped marker scan)",
+      "M6": "PASS (the driver REACHES the committed 9.4a/9.4b stage handlers rather than reimplementing them; the Gap-1 change is exercised through the pure gate AND end to end)",
+      "M7": "PASS 12 assertion rows each with a row-id-prefixed test",
+      "M8": "n/a (fake SDK drives every dispatch; the item test and full verify run REAL child processes)",
+      "M9": "PASS (bun leg green)",
+      "orchestratorReverify": "observed the missing-export red MYSELF after moving the parked file in; verified treeState.notifyClear is called from the DRIVER after every stage execution (tools.ts:4784) rather than being a test-only seam, which was my standing concern about that binding; independently re-ran the Gap-1 mutation — it re-reds two 9.4c rows while gates-phase.test.ts stays 16/16, confirming no committed gate row depended on the old behaviour."
     }
   },
   "phaseGates": {
