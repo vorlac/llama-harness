@@ -1,29 +1,33 @@
 {
-  "asOf": "2026-08-13, after C-035 landed (ee254a8). Suite 994/994 GATE PASS; ctest 36 cases / 21072 assertions.",
+  "asOf": "2026-08-13. 38 of 54 manifest tasks COMMITTED. Conductor suite 1029/1029 GATE PASS; C++ ctest 49 cases / 21883 assertions (plus 11.7's red, currently in the tree and failing to compile by design).",
   "spineTask": {
-    "taskId": "9.5a",
-    "step": "conductor_item_review. Assertions promoted (14 rows). The red IS IN THE TREE at conductor/tests/tools-9.5a.test.ts and the ORCHESTRATOR OBSERVED IT: tsc gives exactly one error (TS2305, no exported member 'handleItemReview') and node --test gives the matching missing-export SyntaxError. An implementer is running. On its return: verify the tree myself (git status + full gate), read the diff, re-run at least one of its mutations independently, then commit + M4.",
-    "intendedFiles": ["conductor/adapter/tools.ts", "conductor/tests/tools-9.5a.test.ts"],
-    "twoBindingsLandingHere": "(1) an under-delivered skeptic panel counts missing verdicts as UPHOLDS (Phase 1 gate deferral); (2) receive-review.md is actually injected into the sessions that receive findings (Phase 8 gate / C-028 deferral)."
+    "taskId": "9.5b",
+    "step": "conductor_publish + conductor_report, 30 rows — the largest task left in Phase 9. The red IS IN THE TREE at conductor/tests/tools-9.5b.test.ts and the ORCHESTRATOR OBSERVED IT: tsc gives exactly 7 missing-subject errors (demoteReviewedToGreen, foreignRedSet not exported, handlePublish, handleReport, registerStaleRed, gates-phase settledForReport, and core/commit-message.ts as a missing MODULE — TS2307, a different error class from the usual missing export). An implementer is running. On its return: git status, full gate, read the diff, re-run at least one of its mutations independently, then commit + M4.",
+    "intendedFiles": ["conductor/adapter/tools.ts", "conductor/core/gates-phase.ts", "conductor/core/commit-message.ts", "conductor/core/tool-bindings.ts", "conductor/adapter/inject.ts"],
+    "rulingsItCarries": "C-043/1 publishEnabled is a REQUIRED 5th param of legalTools (all 3 call sites must state it); C-037/1 settledForReport is ONE exported derivation used by BOTH gate and handler; C-018 the report precondition is a NON-VERIFY presence check (the closing verify is defeated by the foreign-red-set exclusion, so it passes vacuously); C-044/C-047 handlePublish and handleReport must declare bindings in core/tool-bindings.ts or the guard reds."
   },
   "branchB": {
-    "taskId": "11.6",
-    "step": "schema-observer. Specs for 11.6 (13 rows), 11.7 (16 rows) and 11.8 (12 rows) are PROMOTED to docs/build/specs/. A test-writer is producing the red at staging/task-11.6/schema_observer_test.cpp. Scope was SHRUNK by Task 0.2's wire findings: responses stream, so response-side validation is inert and 11.6 is a request-side schemaMissing counter + note.",
-    "known11_8Gap": "SG-A, recorded in the 11.8 spec and NOT yet resolved: src/main.cpp is still the 11.1 scaffold — no argc/argv, no config load, no Router — so the binary cannot actually be run. 11.8 is a LIVE smoke task, so either 11.8 carries the main() wiring or it has nothing to smoke. Decide before starting 11.8."
+    "taskId": "11.7",
+    "step": "metrics ledger, 16 rows. The red IS IN THE TREE at src/tests/metrics_test.cpp, wired into CMakeLists, and OBSERVED: one fatal error, 'router/metrics.hpp' file not found. An implementer is running. 11.6 committed at f142745 with M4 PASS.",
+    "timingFactEstablishedByRunning": "The ledger append fires at response completion (content-provider destruction), which trails the client's last byte by a scheduling instant EVEN ON THE BUFFERED PATH. The fixtures poll via awaitLedgerLines(). Do not 'fix' a test by trying to make the append synchronous with the last byte."
+  },
+  "openDecisions": {
+    "handleReportFanout": "9.5b's red pins `fanout: Fanout` as REQUIRED on handleReport's input; 9.5c's red omits it entirely and its Bench carries no fanout at all — a stop-report dispatches nothing. C-043 ruling 2 said 9.5b owns the surface and 9.5c's FIXTURE yields. SETTLE ON DELIVERY instead of pre-applying: if handleReport does not actually USE the fanout, a required-but-unused parameter is itself the defect and the fix belongs on 9.5b's side, not 9.5c's. Check the delivered handler before touching 9.5c.",
+    "waveDriverStageTable": "handleDispatchWave's default executor table still has NO entry for conductor_item_review (9.5a) or conductor_publish (9.5b). 9.4c's committed row [9.4c-missing-stage-stops-honestly] deliberately PINS the current incomplete table, so wiring the executors must land TOGETHER with that row's revision. Without it the wave driver cannot drive the last three stages. PHASE 9 GATE ITEM."
   },
   "readyToStart": {
-    "9.5c": "red PARKED at staging/task-9.5c/tools-9.5c.test.ts (12 rows). Do NOT move it in while the 9.5a implementer is editing adapter/tools.ts — one red at a time, or a failure cannot be attributed.",
-    "9.5b": "30 rows promoted; its red test-writer was dispatched with 9.5a's and 9.5c's.",
-    "9.6": "21 rows promoted. Its test-writer was deliberately HELD until C-035 landed, because 9.6 wires tool calls to handlers and would have read the queue_amend surface mid-rewrite. That block is now clear."
+    "9.5c": "red PARKED at staging/task-9.5c/tools-9.5c.test.ts (12 rows, full coverage). Move in only after 9.5b commits — one red at a time or a failure cannot be attributed.",
+    "9.6": "21 rows promoted, red NOT yet written. Its writer needs the FULL handler surface (9.5a done, 9.5b/9.5c pending), so dispatch it only after 9.5c commits.",
+    "11.8": "12 rows promoted. Tier moved C->B per C-041: it now carries the router CLI (NEW src/router/cli.hpp pure parseCli + NEW src/tests/cli_test.cpp + src/main.cpp as a thin adapter), because no plan task makes the binary runnable and 11.8 Step 1 runs it."
   },
   "processNotes": {
-    "serialLanes": "Every Phase 9 task lands in adapter/tools.ts, so IMPLEMENTERS are strictly serial. TEST-WRITERS can run in parallel (they only write their own file) but must be parked in staging/ and moved in one at a time. Branch B (C++) is an independent tree and runs as a SECOND lane concurrently — but 11.6/11.7/11.8 are serial among themselves since each wires into router.hpp.",
-    "mutationRevertTrap": "2026-08-13, cost a recovery: a mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. It threw away the tools.ts half of C-035 mid-round. Snapshot with `cp` before the first mutation and restore from the snapshot. Never git checkout a file with uncommitted work.",
-    "agentStrayFileTrap": "2026-08-13: a test-writer left its typecheck copy at conductor/tests/tools-9.5a.test.ts instead of only staging/. It reddened the gate and looked exactly like a flake (the TEST COUNT changed, 994 -> 995, which is the tell). After ANY agent returns, run git status before trusting a gate result.",
-    "mutationFindsWhatReviewMisses": "Third time banked: C-035's 14 authored rows were all green and a mutation still found a load-bearing hole (an `add` must cancel a prior `remove` of the same id, or the handler creates the reborn item file and then deletes it). Always mutate, and always read the diff afterwards anyway.",
-    "readTheInterface": "Read the exported SIGNATURE, never infer it from one call site. Declaring a surface missing on call-site evidence has already cost this build one correction round (excludeTestFiles at 9.4b).",
-    "reviewResultTrap": "A review workflow returning an EMPTY finding set can mean the LENSES CRASHED, not that the diff is clean. Check the run's failures list + journal.jsonl before treating empty as a pass (seen at 9.3).",
-    "firstImplementerTrap": "A subagent can return an anomalous 0-edit 'done', and a dead subagent can leave a NON-COMPILING tree (seen at 11.4). ALWAYS git status + build/run before trusting anything.",
+    "theRecurringDEFECTCLASS": "C-044, C-045, C-046 and C-047 were ALL the same shape: a check that PASSED while inspecting less than it appeared to. A name-level equation blind to types; a grep blind to a binary file; an assertion satisfiable by two independent mechanisms so it pinned neither; a green suite over a product whose tools all throw. LESSON, now standing: a construction that enforces an invariant must ALSO assert that it actually ran — a floor on how much it inspected, an explicit allowlist instead of a silent skip, a premise that fails when the fixture becomes unverifiable.",
+    "mutationRevertTrap": "A mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. It threw away half of C-035 mid-round. Snapshot with `cp` before the first mutation; restore from the snapshot; verify with `cmp`.",
+    "agentStrayFileTrap": "Test-writers told to typecheck by copying into conductor/tests/ and deleting have twice left or removed files at a path the orchestrator was also using. A CHANGED TEST COUNT (994 -> 995) is the tell that something arrived or vanished. After ANY agent returns, run git status before trusting a gate result.",
+    "autoformatIsNotAnAgentEdit": "AUTOFORMAT_SRC_ON_CONFIGURE runs clang-format over src/ at cmake configure time. A delivered C++ test file will DIFFER from its parked copy on formatting alone. Compare whitespace-normalized before suspecting an agent edited a test.",
+    "disclosedSurvivorsArePayingOff": "Three consecutive implementers disclosed a surviving mutation rather than hiding it, and every disclosure became a real fix (C-042, C-046, C-047). Keep asking for the mutation table and keep treating a survivor as information rather than a failure.",
+    "readTheInterface": "Read the exported SIGNATURE, never infer it from one call site. That mistake cost one correction round already.",
+    "reviewResultTrap": "A review workflow returning an EMPTY finding set can mean the LENSES CRASHED, not that the diff is clean. Check the run's failures + journal.jsonl before treating empty as a pass.",
     "userParallelWork": "The user commits their own work on main concurrently. ALWAYS git add explicit paths, never -A, and never revert their files."
   }
 }
