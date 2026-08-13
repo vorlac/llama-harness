@@ -16,8 +16,9 @@
 //      the exported schema, which marks every key required;
 //   3. validate the completed document against the schema read from schemaPath
 //      (nlohmann_json_schema_validator);
-//   4. range-check both ports: 1..65535 inclusive (the schema types them as
-//      plain numbers; the range is the parser's job);
+//   4. range-check the numbers the schema can only type as bare numbers: both
+//      ports 1..65535 inclusive, and the three admission integers against the
+//      bounds below (kMaxAdmissionSlots / kMaxQueueTimeoutMs);
 //   5. reconcile admission.maxQueued with the listener's fixed thread budget
 //      (SG-2): an over-budget value is clamped and the clamp logged at warn,
 //      and a budget that cannot pay for a single queue slot is refused.
@@ -33,6 +34,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -254,8 +256,45 @@ namespace conductor::router {
         inline constexpr int kAdmissionThreadBudget = 256;
         inline constexpr int kTaskQueueThreadMargin = 8;
 
+        // The largest admission.maxQueued and admission.maxInflightPerModel the
+        // parser accepts. Both are addends of the listener sizing sum, so bounding
+        // them keeps that sum provably inside `int`: 2 * kMaxAdmissionSlots plus
+        // the margin is three orders of magnitude short of INT_MAX. A million is
+        // some 4000x the whole thread budget, so no number an operator MEANT is
+        // refused by it — anything above is a typo or a unit mistake, and the
+        // parse says so by name rather than wrapping.
+        inline constexpr int kMaxAdmissionSlots = 1000000;
+
+        // The longest admission.queueTimeoutMs the parser accepts: 24 hours. It
+        // bounds how long one handler thread parks holding a queue entry, and
+        // keeps steady_clock::now() + milliseconds{value} clear of overflow. No
+        // client waits a day for a completion.
+        inline constexpr std::int64_t kMaxQueueTimeoutMs = 86400000;
+
+        // The listener sizing sum, computed WIDE. maxQueued and
+        // maxInflightPerModel are independent knobs, so their sum does not fit an
+        // `int` in general, and signed overflow is UB that wraps NEGATIVE — a
+        // negative sum reads as "inside the budget", skips the clamp below, and
+        // sizes the listener's pool from a thread count nobody configured. 64 bits
+        // holds int + int + margin exactly.
+        [[nodiscard]] inline constexpr std::int64_t taskQueueThreadsExactFor(const Admission& admission) {
+            return static_cast<std::int64_t>(admission.maxQueued) +
+                   static_cast<std::int64_t>(admission.maxInflightPerModel) +
+                   static_cast<std::int64_t>(kTaskQueueThreadMargin);
+        }
+
+        // The listener-facing thread count: the exact sum, saturated into what a
+        // thread pool can actually be built from. parseRouterConfig refuses every
+        // admission block whose sum could leave `int`, so the saturation is
+        // reachable only from a RouterConfig built in code; it is there so that
+        // path cannot hand Router::start a pool size smaller than the config asks
+        // for, which is what the wrap used to do.
         [[nodiscard]] inline constexpr int taskQueueThreadsFor(const Admission& admission) {
-            return admission.maxQueued + admission.maxInflightPerModel + kTaskQueueThreadMargin;
+            const std::int64_t threads = taskQueueThreadsExactFor(admission);
+            if (threads > static_cast<std::int64_t>(std::numeric_limits<int>::max()))
+                return std::numeric_limits<int>::max();
+
+            return threads < 1 ? 1 : static_cast<int>(threads);
         }
 
         // SG-2: a maxQueued the thread budget cannot pay for is reduced to the one
@@ -264,12 +303,28 @@ namespace conductor::router {
         // queue slot the config is refused by name instead of being repaired into
         // something the operator never asked for.
         inline void clampMaxQueuedToThreadBudget(RouterConfig& config) {
-            if (taskQueueThreadsFor(config.admission) <= kAdmissionThreadBudget)
+            if (taskQueueThreadsExactFor(config.admission) <= kAdmissionThreadBudget)
                 return;
 
-            const int effective = kAdmissionThreadBudget -
-                                  config.admission.maxInflightPerModel -
-                                  kTaskQueueThreadMargin;
+            // What the in-flight side alone costs. Once that exceeds the budget no
+            // maxQueued makes the config fit — not even zero — so maxQueued is not
+            // the knob the operator has to change, and naming it would point them
+            // at the wrong one.
+            const std::int64_t inflightCost =
+                static_cast<std::int64_t>(config.admission.maxInflightPerModel) +
+                static_cast<std::int64_t>(kTaskQueueThreadMargin);
+            if (inflightCost > kAdmissionThreadBudget) {
+                throw ConfigError(
+                    "admission.maxInflightPerModel",
+                    "router config field 'admission.maxInflightPerModel' " +
+                        std::to_string(config.admission.maxInflightPerModel) +
+                        " cannot be satisfied within the " +
+                        std::to_string(kAdmissionThreadBudget) + "-thread budget: it plus the " +
+                        std::to_string(kTaskQueueThreadMargin) + "-thread margin needs " +
+                        std::to_string(inflightCost) + " threads");
+            }
+
+            const std::int64_t effective = kAdmissionThreadBudget - inflightCost;
             if (effective < 1) {
                 throw ConfigError(
                     "admission.maxQueued",
@@ -288,7 +343,7 @@ namespace conductor::router {
                 config.admission.maxQueued, kAdmissionThreadBudget,
                 config.admission.maxInflightPerModel, effective);
 
-            config.admission.maxQueued = effective;
+            config.admission.maxQueued = static_cast<int>(effective);
         }
 
         inline void checkPort(const nlohmann::json& document, const std::string& block) {
@@ -307,6 +362,42 @@ namespace conductor::router {
                     field,
                     "router config field '" + field +
                         "' must be in 1..65535, got " + std::to_string(value));
+            }
+        }
+
+        // The admission integers get exactly what the ports get, for exactly the
+        // same reason: the exported schema types them as bare numbers, so their
+        // range is the parser's job. Out of range is not a nuance here — a cap
+        // below 1 means hasFreeSlot() is never true and every request queues until
+        // it times out, a negative queue depth or timeout is not a quantity, and a
+        // fractional value is one get<int>() would truncate into a config the file
+        // never stated. `low` is non-negative for all three fields.
+        inline void checkAdmissionInteger(const nlohmann::json& document, const std::string& key,
+                                          std::int64_t low, std::int64_t high) {
+            const std::string field = "admission." + key;
+            const std::string range = std::to_string(low) + ".." + std::to_string(high);
+            const nlohmann::json& value = document.at("admission").at(key);
+            if (!value.is_number_integer()) {
+                throw ConfigError(
+                    field,
+                    "router config field '" + field + "' must be an integer in " + range +
+                        ", got " + value.dump());
+            }
+
+            // A non-negative JSON integer arrives unsigned, and one past INT64_MAX
+            // read back as signed would wrap INTO range — the failure this check
+            // exists to close.
+            const bool inRange =
+                value.is_number_unsigned()
+                    ? (value.get<std::uint64_t>() >= static_cast<std::uint64_t>(low) &&
+                       value.get<std::uint64_t>() <= static_cast<std::uint64_t>(high))
+                    : (value.get<std::int64_t>() >= low && value.get<std::int64_t>() <= high);
+
+            if (!inRange) {
+                throw ConfigError(
+                    field,
+                    "router config field '" + field + "' must be in " + range + ", got " +
+                        value.dump());
             }
         }
 
@@ -359,9 +450,15 @@ namespace conductor::router {
                     "' rejected: " + violation.message);
         }
 
-        // 4. Range-check both ports; the schema types them as bare numbers.
+        // 4. Range-check the numbers the schema can only type as bare numbers:
+        //    both ports, and the three admission integers that size the listener's
+        //    thread pool and bound every queued request.
         detail::checkPort(document, "listen");
         detail::checkPort(document, "upstream");
+        detail::checkAdmissionInteger(document, "maxInflightPerModel", 1,
+                                      detail::kMaxAdmissionSlots);
+        detail::checkAdmissionInteger(document, "maxQueued", 0, detail::kMaxAdmissionSlots);
+        detail::checkAdmissionInteger(document, "queueTimeoutMs", 0, detail::kMaxQueueTimeoutMs);
 
         // logging.level must be a level this router can actually apply — never a
         // silent fallback. Checked here at parse time; the schema only constrains

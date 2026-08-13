@@ -1530,3 +1530,185 @@ TEST_CASE(
         return router.admission().inflight_count(kModelA) == 0;
     }));
 }
+
+TEST_CASE(
+    "[11.4-fix-thread-sizing-overflow] an admission integer too large for the listener sizing "
+    "arithmetic is refused BY NAME, never wrapped into a one-thread listener") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    constexpr int kIntMax = std::numeric_limits<int>::max();
+    constexpr int kBudget = conductor::router::kAdmissionThreadBudget;
+    constexpr int kMargin = conductor::router::kTaskQueueThreadMargin;
+
+    // maxQueued + maxInflightPerModel + margin in plain `int` OVERFLOWS here.
+    // Signed overflow is UB and wraps NEGATIVE under optimization; a negative sum
+    // reads as "inside the budget", so the clamp returns early, nothing is
+    // clamped, and Router::start sizes its pool from that negative count — a
+    // ONE-thread listener that a single blocked handler wedges, health included.
+    // The value is out of range, so the parse refuses it, naming the field.
+    const Rejection queuedTooLarge = parseExpectingRejection(
+        admissionDocument(/*maxInflightPerModel=*/4, kIntMax, /*queueTimeoutMs=*/30000).dump(),
+        schemaPath.string());
+
+    INFO("maxQueued rejection field='", queuedTooLarge.field, "' message='",
+         queuedTooLarge.message, "'");
+    REQUIRE(queuedTooLarge.thrown);
+    CHECK(queuedTooLarge.field == "admission.maxQueued");
+    CHECK(mentions(queuedTooLarge.message, queuedTooLarge.field));
+
+    // The same arithmetic, overflowed from the other addend.
+    const Rejection inflightTooLarge = parseExpectingRejection(
+        admissionDocument(kIntMax, /*maxQueued=*/64, /*queueTimeoutMs=*/30000).dump(),
+        schemaPath.string());
+
+    INFO("maxInflightPerModel rejection field='", inflightTooLarge.field, "' message='",
+         inflightTooLarge.message, "'");
+    REQUIRE(inflightTooLarge.thrown);
+    CHECK(inflightTooLarge.field == "admission.maxInflightPerModel");
+    CHECK(mentions(inflightTooLarge.message, inflightTooLarge.field));
+
+    // Past `int` entirely: 2^32 is a schema-legal number that get<int>() would
+    // narrow to 0 — a maxQueued the operator never wrote.
+    {
+        json beyondInt = section22Document();
+        beyondInt["admission"]["maxQueued"] = std::int64_t{ 4294967296 };
+        const Rejection wide = parseExpectingRejection(beyondInt.dump(), schemaPath.string());
+        INFO("2^32 rejection field='", wide.field, "' message='", wide.message, "'");
+        REQUIRE(wide.thrown);
+        CHECK(wide.field == "admission.maxQueued");
+    }
+
+    // A large but in-range maxQueued is still CLAMPED, not waved through by a
+    // wrapped sum: 1000000 + 4 + 8 is over budget, so the effective value is 244.
+    conductor::router::RouterConfig clamped;
+    {
+        const CaptureWarnings warnings;
+        clamped = conductor::router::parseRouterConfig(
+            admissionDocument(/*maxInflightPerModel=*/4, /*maxQueued=*/1000000,
+                              /*queueTimeoutMs=*/30000)
+                .dump(),
+            schemaPath.string());
+
+        CHECK(warnings.anyMentions({ "1000000", "244" }));
+    }
+
+    CHECK(clamped.admission.maxQueued == kBudget - 4 - kMargin);
+    CHECK(conductor::router::computeTaskQueueThreads(clamped) == kBudget);
+
+    // And the sizing arithmetic is TOTAL: a config built in code — the parser
+    // bypassed, which is how every Router test and Router::start's own caller
+    // reach it — can never report a pool smaller than one request needs.
+    const conductor::router::RouterConfig overflowing =
+        makeConfig(/*upstreamPort=*/1, kIntMax, kIntMax, /*queueTimeoutMs=*/30000);
+
+    CHECK(conductor::router::computeTaskQueueThreads(overflowing) >= kBudget);
+}
+
+TEST_CASE(
+    "[11.4-fix-admission-range-check] the three admission integers are range-checked at parse "
+    "time and refused by their dotted name, exactly as both ports already are") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    // A cap of zero or less means hasFreeSlot() can never be true: every request
+    // queues until it times out, and the router serves nothing at all.
+    for (const int cap : { 0, -1, -1000 }) {
+        const Rejection rejection = parseExpectingRejection(
+            admissionDocument(cap, /*maxQueued=*/64, /*queueTimeoutMs=*/30000).dump(),
+            schemaPath.string());
+
+        INFO("maxInflightPerModel=", cap, " field='", rejection.field, "' message='",
+             rejection.message, "'");
+        REQUIRE(rejection.thrown);
+        CHECK(rejection.field == "admission.maxInflightPerModel");
+        CHECK(mentions(rejection.message, rejection.field));
+    }
+
+    for (const int depth : { -1, -64 }) {
+        const Rejection rejection = parseExpectingRejection(
+            admissionDocument(/*maxInflightPerModel=*/4, depth, /*queueTimeoutMs=*/30000).dump(),
+            schemaPath.string());
+
+        INFO("maxQueued=", depth, " field='", rejection.field, "' message='", rejection.message,
+             "'");
+        REQUIRE(rejection.thrown);
+        CHECK(rejection.field == "admission.maxQueued");
+        CHECK(mentions(rejection.message, rejection.field));
+    }
+
+    for (const std::int64_t timeout : { std::int64_t{ -1 }, std::int64_t{ -30000 } }) {
+        const Rejection rejection = parseExpectingRejection(
+            admissionDocument(/*maxInflightPerModel=*/4, /*maxQueued=*/64, timeout).dump(),
+            schemaPath.string());
+
+        INFO("queueTimeoutMs=", timeout, " field='", rejection.field, "' message='",
+             rejection.message, "'");
+        REQUIRE(rejection.thrown);
+        CHECK(rejection.field == "admission.queueTimeoutMs");
+        CHECK(mentions(rejection.message, rejection.field));
+    }
+
+    // A fractional value silently truncates through get<int>(): 4.9 slots is
+    // not 4 slots, it is a config file the operator has to be told about.
+    for (const char* field : { "maxInflightPerModel", "maxQueued", "queueTimeoutMs" }) {
+        json fractional = section22Document();
+        fractional["admission"][field] = 4.9;
+
+        const Rejection rejection = parseExpectingRejection(fractional.dump(), schemaPath.string());
+        const std::string dotted = std::string("admission.") + field;
+
+        INFO(dotted, "=4.9 field='", rejection.field, "' message='", rejection.message, "'");
+        REQUIRE(rejection.thrown);
+        CHECK(rejection.field == dotted);
+        CHECK(mentions(rejection.message, rejection.field));
+    }
+
+    // The in-range edges are configs, not violations: one slot, no queue at all,
+    // and a timeout of zero all parse and survive the clamp untouched.
+    const auto edges = conductor::router::parseRouterConfig(
+        admissionDocument(/*maxInflightPerModel=*/1, /*maxQueued=*/0, /*queueTimeoutMs=*/0).dump(),
+        schemaPath.string());
+
+    CHECK(edges.admission.maxInflightPerModel == 1);
+    CHECK(edges.admission.maxQueued == 0);
+    CHECK(edges.admission.queueTimeoutMs == 0);
+    CHECK(conductor::router::computeTaskQueueThreads(edges) ==
+          1 + conductor::router::kTaskQueueThreadMargin);
+}
+
+TEST_CASE(
+    "[11.4-fix-clamp-names-inflight] when maxInflightPerModel ALONE exhausts the thread budget the "
+    "refusal names maxInflightPerModel, the knob that cannot be satisfied") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    constexpr int kBudget = conductor::router::kAdmissionThreadBudget;
+    constexpr int kMargin = conductor::router::kTaskQueueThreadMargin;
+
+    // 300 + 8 = 308 > 256: no maxQueued, not even 0, makes this config fit, so
+    // maxQueued is not what the operator has to change.
+    const Rejection inflightSide = parseExpectingRejection(
+        admissionDocument(/*maxInflightPerModel=*/300, /*maxQueued=*/1000,
+                          /*queueTimeoutMs=*/30000)
+            .dump(),
+        schemaPath.string());
+
+    INFO("field='", inflightSide.field, "' message='", inflightSide.message, "'");
+    REQUIRE(inflightSide.thrown);
+    CHECK(inflightSide.field == "admission.maxInflightPerModel");
+    CHECK(mentions(inflightSide.message, inflightSide.field));
+    CHECK(mentions(inflightSide.message, "300"));
+
+    // The boundary the committed suite pins is unmoved: at 248 the in-flight
+    // side FITS exactly (248 + 8 == 256) and it is the queue that cannot be
+    // given a single slot, so that refusal still names maxQueued.
+    const Rejection queueSide = parseExpectingRejection(
+        admissionDocument(kBudget - kMargin, /*maxQueued=*/1000, /*queueTimeoutMs=*/30000).dump(),
+        schemaPath.string());
+
+    INFO("field='", queueSide.field, "' message='", queueSide.message, "'");
+    REQUIRE(queueSide.thrown);
+    CHECK(queueSide.field == "admission.maxQueued");
+    CHECK(mentions(queueSide.message, queueSide.field));
+}

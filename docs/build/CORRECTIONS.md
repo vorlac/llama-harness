@@ -1072,3 +1072,55 @@ Publish is SERIAL IN ITEM ORDER (§4.2:1572, §4.3:1633) — no row asserted it.
 push leg (§3.3:1296) — no row. And §3.2:1144-1148's fuller report content (per-item red proof and
 review rounds, the decision-ledger summary, the newly-registered stale-red files) — the 9.5b bullet
 abbreviates it and the draft followed the abbreviation.
+
+## C-038 — retroactive adversarial review, C++ half (Task 11.4): the thread budget could wrap negative
+
+**How it was found.** The review panel I owed on the two tasks built while subagents were unavailable:
+7 blind lenses across the committed 9.4b and 11.4 diffs, 3 refute-biased skeptics per major.
+19 majors survived across the lenses, deduping to ~9 distinct defects. This entry covers the three
+C++ ones; the TypeScript half follows separately. NOTE: 7 skeptic sessions died on transient
+connection errors, so 5 findings had UNDER-DELIVERED panels — per the 9.5a rule their missing verdicts
+counted as UPHOLDS, and the orchestrator re-verified each of those in source before acting rather than
+taking the count on faith.
+
+- **MAJOR — signed overflow in the listener sizing yielded a ONE-THREAD listener.**
+  `taskQueueThreadsFor` was plain `int` arithmetic over two schema-unconstrained knobs:
+  `maxQueued + maxInflightPerModel + 8`. A large-but-schema-legal value OVERFLOWS it; signed overflow
+  is UB and clang -O2 wraps NEGATIVE. A negative sum is `<= 256`, so the clamp returned EARLY and never
+  clamped, and `Router::start` then built `ThreadPool(threads < 1 ? 1 : threads)` — a ONE-THREAD
+  listener. That silently INVERTS the exact pool-exhaustion property [11.4-health-at-full-queue]
+  exists to prove: one blocked handler would wedge the whole router, health endpoint included.
+  A probe against the committed header at the target's own flags: `maxQueued=2147483647` gave
+  `computeTaskQueueThreads = -2147483637` and `ThreadPool(1)`.
+  FIX: the sum is computed WIDE (`std::int64_t`, each addend widened before the addition) so it cannot
+  wrap; the int-returning entry point saturates into `[1, INT_MAX]`; and the clamp compares the EXACT
+  sum, so an enormous maxQueued can no longer masquerade as "inside the budget".
+
+- **MAJOR — the admission integers had NO range validation.** The schema types them as bare `number`
+  with no integer/minimum, and unlike the two PORTS — which the parser range-checks 1..65535 precisely
+  because the schema cannot — admission got nothing. Zero or negative `maxInflightPerModel` makes
+  `hasFreeSlot`永 false so every request queues until it times out; fractional values truncate.
+  FIX: `checkAdmissionInteger`, written in the same shape as the existing `checkPort`, refusing
+  non-integral first and then the range, throwing ConfigError NAMING the dotted field. Bounds:
+  `maxInflightPerModel 1..1000000`, `maxQueued 0..1000000`, `queueTimeoutMs 0..86400000`. The slot
+  ceiling is what makes the sizing sum PROVABLY representable, and at ~4000x the whole thread budget
+  it refuses nothing an operator meant.
+
+- **MINOR — the clamp named the wrong knob.** When `maxInflightPerModel` ALONE exhausted the budget,
+  the refusal named `admission.maxQueued` — a field no value of which would have helped. FIX: compute
+  the in-flight side's cost first and name the field that is actually unsatisfiable; the existing
+  `effective < 1` branch still names maxQueued, so the committed boundary at 248 is unmoved.
+
+- **Mutation discipline, and an honest coupling the fixer surfaced.** Reverting the widening fails
+  exactly one case (orchestrator-verified independently). Removing all three range checks fails TWO
+  cases — because the chosen remedy for an out-of-range value IS the named refusal — so the fixer ran
+  a SECOND mutation keeping the upper bounds and dropping only integrality and the lower bounds, which
+  isolates the halves cleanly. Reporting that coupling rather than hiding it behind a green mutation
+  table is the right instinct.
+
+- **Residual, reported not fixed:** a RouterConfig built IN CODE (parser bypassed) with absurd values
+  now saturates to INT_MAX threads, so `Router::start` fails loudly instead of silently running one
+  thread. No parsed config can reach it, and a loud failure beats a wedged router.
+
+- **Blast radius:** `src/router/config.hpp` (+106/-9), `src/tests/admission_test.cpp` (+182/-0, purely
+  additive — no existing assertion touched). ctest 36/36 (21072 assertions), stable across three runs.
