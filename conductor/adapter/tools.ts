@@ -25,7 +25,7 @@
 // allow. Every deny journals its snapshot under gates/deny (§7.4).
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { decideGit } from "../core/gates-git.ts";
@@ -71,6 +71,7 @@ import { readJsonFileSync, writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import { headSha, indexMtimeMs, isRepo, worktreeMtimes } from "./gitio.ts";
+import { createWorktree, mergeBack } from "./worktrees.ts";
 import { verifyFreshFor } from "../core/freshness.ts";
 import type { MetricsSummary } from "./router-client.ts";
 import { buildCommitMessage, denylistedTrailerToken } from "../core/commit-message.ts";
@@ -2195,6 +2196,30 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
 // tree (§3.5) — named once so the two dispatch sites cannot drift.
 const STAGE_TREE = "main";
 
+// The §3.5 tree an item's sub-sessions dispatch into: the item's persisted
+// worktree path under parallel.writes "worktrees" (set by the wave driver at wave
+// setup), else the main tree. The registry entry's tree is a PATH the edit gate
+// compares by string equality, which is what scopes a worktree implementer's
+// edits to its own tree.
+function sessionTreeOf(item: Item): string {
+  return item.worktree ?? STAGE_TREE;
+}
+
+/**
+ * The C-037 ruling 5 slug->path translation. The evidence layer's tree is an
+ * ITEM-ID SLUG ("main" or "<itemId>": markerPathOf runs assertSafeId, which
+ * rejects "/"), while the gate's tree is a PATH compared by string equality — so
+ * the wiring layer MUST translate a live marker's slug before it fills
+ * GateHookInput.verifyInFlightTree, or a worktree freeze silently never fires.
+ * "main" -> the workspace root; "<itemId>" -> the item's persisted worktree
+ * (null when the item has no worktree — no path can be frozen for it).
+ * assertSafeId is NOT relaxed: the slug stays authoritative for the marker.
+ */
+export function verifyInFlightTreeFor(store: StateStore, runId: string, markerTree: string): string | null {
+  if (markerTree === STAGE_TREE) return store.root;
+  return store.loadItem(runId, markerTree).worktree;
+}
+
 // The §2.10 TEST_VET criteria, READ OUT OF THE REGISTERED SCHEMA rather than
 // restated here (G6 single source): the compact return's tally rows are exactly
 // the criteria the fan-out engine validates each critic receipt against, in
@@ -2757,13 +2782,14 @@ function vetRepairPrompt(
   );
 }
 
-// Every testWriter dispatch in this stage: write-capable, on the main tree, with
-// the already-registered ImplementerResult schema (9.4a authors NO schema).
-function testWriterJob(itemId: string, prompt: string): FanoutJob {
+// Every testWriter dispatch in this stage: write-capable, on the item's own tree
+// (its worktree under §4.2 worktree mode, else main), with the already-registered
+// ImplementerResult schema (9.4a authors NO schema).
+function testWriterJob(itemId: string, tree: string, prompt: string): FanoutJob {
   return {
     role: "testWriter",
     itemId,
-    tree: STAGE_TREE,
+    tree,
     writeCapable: true,
     prompt,
     schemaName: "ImplementerResult",
@@ -2777,9 +2803,10 @@ async function dispatchTestWriter(
   tool: string,
   fanout: Fanout,
   itemId: string,
+  tree: string,
   prompt: string,
 ): Promise<{ reply: ImplementerResult; sessionID: string }> {
-  const result = await fanout.dispatch(testWriterJob(itemId, prompt));
+  const result = await fanout.dispatch(testWriterJob(itemId, tree, prompt));
   const reply = result.value as ImplementerResult | undefined;
   if (reply === undefined) {
     throw new Error(
@@ -2949,7 +2976,7 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
   };
 
   for (;;) {
-    const writer = await dispatchTestWriter(SUBMIT_TEST_TOOL, fanout, itemId, prompt);
+    const writer = await dispatchTestWriter(SUBMIT_TEST_TOOL, fanout, itemId, sessionTreeOf(stage.item), prompt);
     const reply = writer.reply;
     dispatches += 1;
     writerSessionID = writer.sessionID;
@@ -3435,7 +3462,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       jobs.push({
         role: "reviewer",
         itemId,
-        tree: STAGE_TREE,
+        tree: sessionTreeOf(stage.item),
         writeCapable: false,
         prompt: vetCriticPrompt(queueItem, testText, red, critics, rounds, max),
         schemaName: "TestVet",
@@ -3599,6 +3626,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       VET_TEST_TOOL,
       fanout,
       itemId,
+      sessionTreeOf(stage.item),
       vetRepairPrompt(queueItem, testText, red, union, rounds, max),
     );
     if (writer.reply.status === "BLOCKED") {
@@ -3653,11 +3681,11 @@ const QUEUE_AMEND_TOOL = "conductor_queue_amend";
 // The §3.3 write-capable implementer: doctrine tdd.md's minimal-code section, the
 // item's fileScope, the SAME ImplementerResult receipt every other write-capable
 // role replies with (9.4b registers no schema).
-function implementerJob(itemId: string, prompt: string): FanoutJob {
+function implementerJob(itemId: string, tree: string, prompt: string): FanoutJob {
   return {
     role: "implementer",
     itemId,
-    tree: STAGE_TREE,
+    tree,
     writeCapable: true,
     prompt,
     schemaName: "ImplementerResult",
@@ -3669,9 +3697,10 @@ async function dispatchImplementer(
   tool: string,
   fanout: Fanout,
   itemId: string,
+  tree: string,
   prompt: string,
 ): Promise<{ reply: ImplementerResult; sessionID: string }> {
-  const result = await fanout.dispatch(implementerJob(itemId, prompt));
+  const result = await fanout.dispatch(implementerJob(itemId, tree, prompt));
   const reply = result.value as ImplementerResult | undefined;
   if (reply === undefined) {
     throw new Error(
@@ -3964,6 +3993,7 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
     MARK_GREEN_TOOL,
     fanout,
     itemId,
+    sessionTreeOf(stage.item),
     implementerPrompt(queueItem),
   );
   const attempts = 1;
@@ -4354,6 +4384,7 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
       VALIDATE_TOOL,
       fanout,
       itemId,
+      sessionTreeOf(stage.item),
       debugFixPrompt(queueItem, packs, failure, debugFixes, cap),
     );
     fixerSessionID = fixer.sessionID;
@@ -4921,6 +4952,33 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
     anomaly: null,
   }));
 
+  // (3b) §4.2 worktree mode: ONE worktree per wave member, created at wave SETUP —
+  //      before any stage dispatch — so every member's sub-sessions are born bound
+  //      to their own tree. item.worktree is the committed §2.5 field; setting it
+  //      IS an item update, so the lifecycle rides the existing `state:
+  //      item.updated` event with the path in the record (G6 — journal-events.ts
+  //      is not widened). Under the default "off" this block runs no git command
+  //      at all and item.worktree stays null.
+  if (config.parallel.writes === "worktrees") {
+    for (const member of members) {
+      const item = store.loadItem(runId, member.itemId);
+      if (item.worktree !== null && existsSync(item.worktree)) continue; // an earlier call's tree stands
+      const worktree = createWorktree(store.root, runId, member.itemId, {
+        stateHome: input.stateHome,
+        workspaceKey: input.workspaceKey,
+      });
+      item.worktree = worktree;
+      store.saveItem(runId, item);
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId: member.itemId, worktree },
+        { runId, itemId: member.itemId },
+      );
+    }
+  }
+
   // A member stops: it runs no further stage in THIS call, and the disposition
   // names the stage it stopped at.
   const stop = (member: WaveMember, tool: string, envError: string | null): void => {
@@ -4977,12 +5035,15 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
 
     // §3.5: the engine HOLDS a write-capable job whose tree is frozen. Noting it
     // here is what turns a hold into an observable anomaly rather than a wave
-    // that merely takes a long time.
-    const frozen = SERIAL_STAGES.includes(tool) && treeState.isFrozen(STAGE_TREE);
+    // that merely takes a long time. The tree is the MEMBER's own — its worktree
+    // under §4.2 worktree mode, else main — so a worktree implementer is never
+    // held by another tree's validate.
+    const memberTree = sessionTreeOf(store.loadItem(runId, member.itemId));
+    const frozen = SERIAL_STAGES.includes(tool) && treeState.isFrozen(memberTree);
     if (frozen) {
       member.anomaly =
         'tree "' +
-        STAGE_TREE +
+        memberTree +
         '" was frozen by a live verify marker when ' +
         tool +
         " dispatched, so the fan-out engine HELD this member's write-capable job until the " +
@@ -5014,7 +5075,7 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
         "the write-capable sub-session for " +
           tool +
           ' was HELD out of tree "' +
-          STAGE_TREE +
+          memberTree +
           '": its verify marker never cleared within parallel.subSessionTimeoutMs=' +
           String(heldBudgetMs) +
           "ms, so the member is env-failed rather than awaited forever (§3.5)",
@@ -5025,7 +5086,7 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
     // The stage ran, so whatever it did to the tree is done: notify the §3.5
     // view, which is what releases any write-capable job the engine is holding
     // on a marker this stage broke or a verify this stage finished (P6).
-    treeState.notifyClear(STAGE_TREE);
+    treeState.notifyClear(memberTree);
 
     if (settlement.kind === "failed") {
       const error = settlement.error;
@@ -6323,6 +6384,43 @@ function formatRuleFor(config: Config, rel: string): Config["format"]["rules"][n
   return null;
 }
 
+// A §2.4 scope entry is either a literal path or a glob ("src/parser/**"). A
+// literal passes through untouched — the staging filter judges its existence
+// exactly where it always did — while a glob expands to the files that exist
+// under the publish tree, because `git add` takes paths, not this glob dialect.
+// The walk skips the trees that are never publishable content.
+const GLOB_META = /[*?[\]{]/;
+function expandScopeEntry(treeRoot: string, rel: string): string[] {
+  if (!GLOB_META.test(rel)) return [rel];
+  const found: string[] = [];
+  const walk = (dirRel: string): void => {
+    const absDir = dirRel.length === 0 ? treeRoot : path.join(treeRoot, dirRel);
+    let names: string[];
+    try {
+      names = readdirSync(absDir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (name === ".git" || name === ".conductor" || name === "node_modules") continue;
+      const childRel = dirRel.length === 0 ? name : dirRel + "/" + name;
+      let info;
+      try {
+        info = statSync(path.join(treeRoot, childRel));
+      } catch {
+        continue;
+      }
+      if (info.isDirectory()) {
+        walk(childRel);
+      } else if (globMatch(rel, childRel)) {
+        found.push(childRel);
+      }
+    }
+  };
+  walk("");
+  return found.sort();
+}
+
 export async function handlePublish(input: PublishInput): Promise<PublishResult> {
   const { store, runId, itemId, config, journal } = input;
   const now = input.now ?? Date.now;
@@ -6362,11 +6460,23 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   const gitMode = config.git.mode;
   const readOnly = gitMode === "read-only";
 
+  // §4.2 worktree mode: config says worktrees AND the item carries a persisted
+  // worktree. The input surface is unchanged — the mode is read off the same
+  // §2.1/§2.5 facts every other handler reads. Steps 1-6 then run with cwd =
+  // item.worktree (the commit lands on conductor/<runId>/<itemId>, and the
+  // workspace is a bystander until merge-back), and PUBLISHED is gated on an
+  // integrated-tree re-validate in the workspace afterwards.
+  const treeRoot = config.parallel.writes === "worktrees" && item.worktree !== null ? item.worktree : root;
+  const worktreeMode = treeRoot !== root;
+
   // ---- step 1: the branch/HEAD check -------------------------------------
   // The verify this publish rests on was produced against ONE tree. A branch
   // switch moves HEAD without necessarily touching any staged file's mtime, so
   // the mtime terms cannot see it — which is exactly why §2.6's freshness rule
   // carries a head term at all, and why it is checked before anything is staged.
+  // In worktree mode both sides are the WORKTREE's: the record was produced with
+  // cwd = the worktree and tree = the item id (G10), and the integrated tree gets
+  // its own tree:"main" record after merge-back.
   const validatedRef = item.evidence.validated ?? item.evidence.green ?? null;
   const record =
     validatedRef === null ? null : (readEvidenceAt(runDir, validatedRef.seq) as VerifyEvidence | null);
@@ -6377,7 +6487,7 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     );
   }
 
-  const currentHead = headSha(root) ?? "";
+  const currentHead = headSha(treeRoot) ?? "";
   if (record.head !== currentHead) {
     return publishDenial(
       item.state,
@@ -6394,7 +6504,11 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   // ---- step 2: stage fileScope ∪ testScope MINUS the user's pre-existing WIP
   const run = store.loadRun(runId);
   const preexisting = new Set((run.startDirty ?? []).map((entry) => normalizeRepoRel(entry)));
-  const wanted = [...new Set(itemScopePaths(queueItem).map((entry) => normalizeRepoRel(entry)))].sort();
+  const wanted = [
+    ...new Set(
+      itemScopePaths(queueItem).flatMap((entry) => expandScopeEntry(treeRoot, normalizeRepoRel(entry))),
+    ),
+  ].sort();
 
   const conflicts = wanted.filter((rel) => preexisting.has(rel));
   const skipped: string[] = [];
@@ -6439,17 +6553,19 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     skipped.push(...conflicts);
   }
 
-  const staged = wanted.filter((rel) => !preexisting.has(rel)).filter((rel) => existsSync(path.join(root, rel)));
+  const staged = wanted
+    .filter((rel) => !preexisting.has(rel))
+    .filter((rel) => existsSync(path.join(treeRoot, rel)));
 
   // ---- step 3: format ----------------------------------------------------
   for (const rel of staged) {
     const rule = formatRuleFor(config, rel);
     if (rule === null) continue;
-    const abs = path.join(root, rel);
+    const abs = path.join(treeRoot, rel);
     const before = readFileSync(abs, "utf8");
 
     const out = spawnSync(rule.command[0] as string, rule.command.slice(1), {
-      cwd: root,
+      cwd: treeRoot,
       encoding: "utf8",
       input: rule.mode === "stdin" ? before : undefined,
       stdio: rule.mode === "stdin" ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
@@ -6493,20 +6609,20 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   }
 
   if (!readOnly) {
-    const add = runReviewGit(root, ["add", "--", ...staged]);
+    const add = runReviewGit(treeRoot, ["add", "--", ...staged]);
     if (add.status !== 0) {
       return publishDenial(item.state, PUBLISH_TOOL + ": git add failed for " + staged.join(", "));
     }
   }
 
   // ---- step 4: freshness, and at most ONE auto re-verify ------------------
-  const behavioral = staged.filter((rel) => existsSync(path.join(root, rel)));
-  const mtimes = [...worktreeMtimes(root, behavioral).values()];
+  const behavioral = staged.filter((rel) => existsSync(path.join(treeRoot, rel)));
+  const mtimes = [...worktreeMtimes(treeRoot, behavioral).values()];
   const fresh = verifyFreshFor(
     { startedMs: record.startedMs, head: record.head },
     {
       stagedMtimes: mtimes,
-      indexMtimeMs: indexMtimeMs(root),
+      indexMtimeMs: indexMtimeMs(treeRoot),
       hasStagedDeletion: false,
       currentHead,
       noGit: false,
@@ -6521,13 +6637,15 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     reverified = true;
     excluded = foreignRedSet(store, runId, queue, itemId);
     const outcome = runVerify(runDir, itemId, config, verifyScopePathsOf(queueItem), {
-      cwd: root,
+      cwd: treeRoot,
       excludeTestFiles: excluded,
       journal: evidenceJournalOf(journal),
       stateHome: input.stateHome,
       workspaceKey: input.workspaceKey,
       runId,
-      tree: STAGE_TREE,
+      // Per-tree marker + honest record identity (§2.6): the tree the verify
+      // judges is the item's own worktree in worktree mode, else main.
+      tree: worktreeMode ? itemId : STAGE_TREE,
       now,
     });
     if (outcome.refused) {
@@ -6589,13 +6707,13 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   // Against HEAD rather than the index: in read-only mode nothing is staged, and
   // a batch whose diff is empty because of the MODE would make the report claim
   // the item changed nothing.
-  const diff = runReviewGit(root, ["diff", "HEAD", "--", ...staged]).stdout;
+  const diff = runReviewGit(treeRoot, ["diff", "HEAD", "--", ...staged]).stdout;
 
   let commit: string | null = null;
   let pushed = false;
 
   if (!readOnly) {
-    const made = runReviewGit(root, ["commit", "--cleanup=default", "-m", message]);
+    const made = runReviewGit(treeRoot, ["commit", "--cleanup=default", "-m", message]);
     if (made.status !== 0) {
       return publishDenial(item.state, PUBLISH_TOOL + ": git commit failed", {
         staged,
@@ -6605,18 +6723,122 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
         excluded,
       });
     }
-    commit = headSha(root);
+    commit = headSha(treeRoot);
 
-    if (gitMode === "commit-and-push") {
+    if (gitMode === "commit-and-push" && !worktreeMode) {
       // §3.3:1296. argv discipline, never a shell string — core/gates-git.ts
       // denies a SESSION's `git push`, so the handler is the only thing that may
-      // perform it, and it performs it directly.
+      // perform it, and it performs it directly. In worktree mode the push waits
+      // for merge-back: what ships is the WORKSPACE branch, after integration.
       const push = runReviewGit(root, ["push"]);
       pushed = push.status === 0;
       if (!pushed) {
         // The commit STANDS. Denying after a successful commit would leave
         // conductor's state disagreeing with git, and no later step can repair
         // that; a push that failed is an operator problem, loudly journaled.
+        journal.log(
+          "error",
+          "state",
+          "item.updated",
+          { itemId, push: "failed", commit },
+          { runId, itemId },
+        );
+      }
+    }
+  }
+
+  // ---- worktree mode: merge back, then re-validate the INTEGRATED tree -----
+  if (worktreeMode && commit !== null) {
+    // §4.2 merge-back, serial in item order by construction (the driver's publish
+    // stage is serial and this call is synchronous; the workspace index is a
+    // singleton, §4.3). mergeBack verifies the branch identity, tries --ff-only
+    // first, falls back to a normal merge, and aborts a conflicted merge before
+    // returning — the workspace is never left mid-merge.
+    const merged = mergeBack(root, runId, itemId, {
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+    });
+    if (merged.conflict) {
+      // §4.2: a conflict drops the LATER item to GREEN for re-validation through
+      // the SHARED administrative helper (C-037 ruling 7) — never an fsm edge.
+      // The earlier items' completed merges stand; this item's commit stays on
+      // its own branch, untouched by the abort.
+      demoteReviewedToGreen({
+        store,
+        runId,
+        itemId,
+        journal,
+        reason:
+          "the merge-back of branch conductor/" + runId + "/" + itemId + " conflicted with the integrated tree",
+        hypothesis:
+          "an earlier item's merge changed the same lines this item's branch changes; " +
+          "re-validate against the integrated tree",
+        now,
+      });
+      return publishDenial(
+        "GREEN",
+        PUBLISH_TOOL +
+          ': the merge-back of item "' +
+          itemId +
+          '" conflicted with the integrated tree; the merge was aborted and the item is back at GREEN ' +
+          "for re-validation (§4.2)",
+        { staged, skipped, reverified, verifySeq, excluded, message },
+      );
+    }
+
+    // §4.2 integration honesty: the item reaches PUBLISHED only after a green
+    // verify of the INTEGRATED tree (cwd = the workspace, tree "main") — a green
+    // in isolation is not a green in company. The completed merge STANDS either
+    // way (the push-failure precedent: conductor's state never disagrees with
+    // git history it cannot rewrite); a red holds back the ITEM, not the merge.
+    const integratedExcluded = foreignRedSet(store, runId, queue, itemId);
+    const integrated = runVerify(runDir, itemId, config, verifyScopePathsOf(queueItem), {
+      cwd: root,
+      excludeTestFiles: integratedExcluded,
+      journal: evidenceJournalOf(journal),
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+      runId,
+      tree: STAGE_TREE,
+      now,
+    });
+    if (integrated.refused) {
+      return publishDenial(
+        item.state,
+        PUBLISH_TOOL +
+          ': item "' +
+          itemId +
+          '" merged back but cannot re-validate the integrated tree: ' +
+          integrated.reason,
+        { staged, skipped, reverified, verifySeq, excluded, commit, message },
+      );
+    }
+    const integratedRecord = integrated.record as VerifyEvidence;
+    verifySeq = integratedRecord.seq;
+    if (!integratedRecord.green) {
+      demoteReviewedToGreen({
+        store,
+        runId,
+        itemId,
+        journal,
+        reason: "the integrated-tree re-validate after merge-back went red",
+        hypothesis:
+          "the integrated tree fails where the worktree passed: " + verifyFailureText(integratedRecord),
+        now,
+      });
+      return publishDenial(
+        "GREEN",
+        PUBLISH_TOOL +
+          ": the integrated-tree re-validate failed after merge-back; the merge stands and the item " +
+          "is back at GREEN for debugging (§4.2)",
+        { staged, skipped, reverified, verifySeq, excluded, commit, message },
+      );
+    }
+
+    if (!readOnly && gitMode === "commit-and-push") {
+      const push = runReviewGit(root, ["push"]);
+      pushed = push.status === 0;
+      if (!pushed) {
         journal.log(
           "error",
           "state",

@@ -1796,3 +1796,55 @@ what makes a misconfiguration diagnosable instead of a silent failure to start.
 
 The remaining half of 11.8 — the live smoke against a real llama-server with a model, recorded as
 an M8 artifact — is separate and still owed.
+
+## C-052 — Task 9.6: a shape assertion that could not see the rule it was pinning; plus a latent publish bug
+
+### The survivor, and why it mattered
+
+The 9.6 implementer ran ten mutations, killed nine, and DISCLOSED the tenth: collapsing the
+`--ff-only`-first-then-fallback sequence into a single plain `git merge` passed all 21 rows.
+
+Its analysis was right and worth preserving. The row asserts the resulting HISTORY SHAPE — a
+fast-forward leaves no merge commit, an advanced workspace leaves exactly one — and under git's
+DEFAULT `merge.ff=true` a plain `git merge` fast-forwards on its own, producing byte-identical
+shapes. The assertion was true of both implementations, so it pinned neither.
+
+§4.2:1613 states a SEQUENCE ("ff-only first, else a normal merge"), and the configuration that
+separates the two is `merge.ff=false` — a common repo-level setting for teams who want every
+integration recorded. Under it, a plain merge mints a merge commit even where a fast-forward was
+possible. A router that skipped the ff-only attempt would therefore rewrite a linear item
+integration into a merge commit, and §4.2's serial merge-back would litter exactly the history it
+exists to keep readable.
+
+A third half now sets `merge.ff=false` on the fixture repo and requires the integration to STILL be
+a fast-forward with zero merge commits. Re-running the mutation kills it: 20/21 with only
+`[9.6-mergeback-ff-first-else-merge]` red. The implementer had already kept the explicit sequence as
+the robust reading; this makes that reading enforceable rather than conventional.
+
+This is the fourth member of the family C-045/C-046/C-047/C-051 belong to — a check that passes
+while inspecting less than its name claims. The distinguishing move each time is the same: find the
+input under which the two candidate implementations DIVERGE, and assert on that.
+
+### A committed behaviour changed, deliberately, and it is not a regression
+
+`handlePublish`'s staging gained glob expansion (`expandScopeEntry`). The 9.6 bench declares a
+`fileScope` of `src/i1/**` and pins the staged set to exactly the expanded files; the committed
+literal-path staging could not satisfy that, because it filtered scope entries through `existsSync`
+and a glob pattern is not a file.
+
+The old behaviour was a LATENT BUG, not a contract: §2.4 permits a glob `fileScope` — `validateQueue`
+already reasons about glob intersections — so a run whose items used patterns would have published
+EMPTY COMMITS, silently. Expansion is guarded by a meta-character test, so literal entries take the
+identical path they always did; the full gate (including 9.5b's 50 committed rows) confirms nothing
+else moved.
+
+Recorded rather than absorbed silently, because it changes what a committed handler does.
+
+### The C-021 fix landed here as its own row
+
+`registerConductorExclude` did `mkdir <root>/.git/info` and threw ENOTDIR inside a LINKED WORKTREE,
+where `<worktree>/.git` is a FILE, not a directory. It now resolves `git rev-parse --git-common-dir`
+(against the root when relative) and writes its single `.conductor/` line there. The read was added
+to `adapter/gitio.ts` rather than spawned from `state.ts`, whose own header contract says every git
+read goes through gitio and that it spawns nothing itself — so the fix lands in the function the
+spec names while both modules keep their stated roles.

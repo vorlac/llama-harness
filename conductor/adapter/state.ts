@@ -29,7 +29,7 @@ import {
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 
-import { currentBranch, dirtyFiles, headSha, isRepo } from "./gitio.ts";
+import { currentBranch, dirtyFiles, gitCommonDir, headSha, isRepo } from "./gitio.ts";
 import { validate } from "../core/types.ts";
 import type { Config, Item, Run, StaleRedRegistry } from "../core/types.ts";
 
@@ -207,13 +207,23 @@ export function assertSafeId(id: string, kind: string): string {
 // .git/info/exclude registration (§1.2 / §3.9)
 // ---------------------------------------------------------------------------
 
-// Ensure a single `.conductor/` line in <root>/.git/info/exclude so the harness
-// never dirties the target's tracked files with its own presence. Idempotent: a
-// second call adds nothing. Returns false and writes nothing when <root> is not a
-// git repo (§3.9 no-git mode simply skips the registration).
+// Ensure a single `.conductor/` line in the repository's info/exclude so the
+// harness never dirties the target's tracked files with its own presence.
+// Idempotent: a second call adds nothing. Returns false and writes nothing when
+// <root> is not a git repo (§3.9 no-git mode simply skips the registration).
+//
+// C-021: the exclude file lives under the COMMON gitdir, resolved through
+// `git rev-parse --git-common-dir` (resolved against root when git answers the
+// relative ".git") — NEVER composed as <root>/.git/info. In a LINKED worktree
+// <root>/.git is a FILE, so the literal composition throws ENOTDIR, and the
+// isRepo guard cannot catch it (rev-parse --is-inside-work-tree reports true
+// there). The per-worktree gitdir is not the target either: an exclude written
+// there is empirically inert — only the common dir's info/exclude takes effect.
 export function registerConductorExclude(root: string): boolean {
   if (!isRepo(root)) return false;
-  const infoDir = path.join(root, ".git", "info");
+  const commonDir = gitCommonDir(root);
+  if (commonDir === null) return false;
+  const infoDir = path.join(commonDir, "info");
   const excludePath = path.join(infoDir, "exclude");
   mkdirSync(infoDir, { recursive: true });
   let content = "";

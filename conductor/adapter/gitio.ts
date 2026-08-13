@@ -32,6 +32,7 @@
 //   headSha(cwd)                    -> string | null   (freshness §2.6 HEAD term; run.startHead)
 //   currentBranch(cwd)              -> string | null
 //   isRepo(cwd)                     -> boolean
+//   gitCommonDir(cwd)               -> string | null  (the effective exclude target, C-021)
 
 import { execFileSync } from "node:child_process";
 import { statSync } from "node:fs";
@@ -282,4 +283,18 @@ export function currentBranch(cwd: string): string | null {
 export function isRepo(cwd: string): boolean {
   const out = tryGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
   return out !== null && out.trim() === "true";
+}
+
+// Absolute path to the repository's COMMON gitdir — `rev-parse --git-common-dir`,
+// resolved against `cwd` when git answers with a relative path (a main repo
+// answers the literal ".git"). Inside a linked worktree this names the MAIN
+// repository's .git directory, which is the only place an info/exclude entry is
+// effective — an exclude written into the per-worktree gitdir is inert (C-021).
+// Null outside any repository.
+export function gitCommonDir(cwd: string): string | null {
+  const out = tryGit(cwd, ["rev-parse", "--git-common-dir"]);
+  if (out === null) return null;
+  const dir = out.trim();
+  if (dir.length === 0) return null;
+  return path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
 }
