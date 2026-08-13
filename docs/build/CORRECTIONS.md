@@ -1731,3 +1731,68 @@ against the current driver right now. The round must:
 
 Until then the driver's coverage is recorded here rather than discovered at Task 13.1's end-to-end,
 which drives a full run through the driver and is where this would otherwise have surfaced.
+
+## C-051 — Task 11.8 CLI: a case whose own NAME claimed more than it tested; plus two harness notes
+
+### The surviving mutation
+
+The 11.8 CLI implementer was cut off by a network error just as it began mutation testing, so the
+orchestrator ran the mutations. Three died on the row that owns them (repeated-flag last-wins,
+eating the next token as a value, making `--schema` optional). **One survived:** deleting the
+`--help must be given alone` refusal outright left all 73 cases green.
+
+The cause is worth naming because it is subtle. The test case is titled "--help and --version are
+ACCEPTED ALONE", and every subcase passes the flag by itself. That tests the POSITIVE half — that a
+lone `--help` parses — and never the word "alone" itself. The case's own name asserted a
+restriction its body did not check. This is the same family as C-046 (an assertion satisfiable by
+two independent mechanisms) and C-045 (a grep that silently read nothing): a check appearing to
+cover more than it does.
+
+The behaviour is the IMPLEMENTER'S INVENTION — C-041 pins the exit codes and the required flags and
+says nothing about combining `--help` with real arguments. It is RATIFIED here rather than silently
+inherited, and the reason is that partial obedience is the bad outcome: `--help --config x` means
+one of two incompatible things, and printing usage while ALSO accepting the config would obey
+neither reading. Two subcases now pin the refusal for `--help` and `--version`. Re-running the
+mutation kills it: 72/73 with only that case red.
+
+### Harness note 1 — a mutation whose target string does not exist is not a survivor
+
+An earlier attempt at the `--schema` mutation targeted a string the implementation never contained
+(`options.schemaPath.empty()`; the code phrases the check as `!haveSchema`). The substitution
+asserted and made NO edit — and the suite then reported 73/73, which reads exactly like a survivor.
+It was the unmutated build.
+
+This is the second instance of the C-049 family in one session, and the first where the harness
+failed OPEN rather than closed. The rule needs both halves:
+  - the mutation must COMPILE (C-049), **and**
+  - the mutation must have APPLIED — assert the target string occurs exactly once and fail loudly
+    when it does not.
+
+The Python helper used here already asserts `count(old) == 1`, which is what surfaced it. Keep that
+assertion; a `sed`-style substitution that silently no-ops would have recorded a false green.
+
+### Harness note 2 — shell word-splitting produced a false defect report
+
+Measuring the exit-code contract with `for args in "--config X --schema Y"; do "$BIN" $args; done`
+reported exit 2 where the contract pins 3. The shell here is **zsh**, which — unlike bash — does
+NOT word-split an unquoted parameter expansion, so the whole string arrived as ONE argument and the
+binary correctly refused it as an unknown flag. The implementation was right; the measurement was
+wrong, and it was briefly reported as a defect before being checked.
+
+Exit codes must be measured by passing arguments as SEPARATE words (`check 3 --config X --schema Y`
+with `"$@"`), never by expanding a single string variable. Verified afterwards against the real
+contract: 2 for every usage error, 0 for `--help`/`--version`, 3 for an unreadable config.
+
+### What the CLI half discharges
+
+C-041's premise is now satisfied: the binary RUNS. Verified live, not reasoned —
+`llama-router --config .data/configs/conductor-router.json --schema src/tests/schemas/RouterConfig.schema.json`
+listens on 127.0.0.1:8088, answers `GET /conductor/health` with
+`{"status":"ok","version":"0.0.1"}` and `GET /conductor/metrics` with the aggregate JSON, and exits
+0 on SIGTERM. The exit-3 path also proved itself in passing: a hand-written config using
+`affinity.groupHeader` was refused with `router config field 'affinity.header' rejected: required
+property 'header' not found` — ConfigError::field() verbatim, which is exactly what SG-I pins and
+what makes a misconfiguration diagnosable instead of a silent failure to start.
+
+The remaining half of 11.8 — the live smoke against a real llama-server with a model, recorded as
+an M8 artifact — is separate and still owed.
