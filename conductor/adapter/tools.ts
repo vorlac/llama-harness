@@ -4811,6 +4811,44 @@ function defaultStageExecutors(): Record<string, StageExecutor> {
       });
       return { ok: result.ok, itemState: result.itemState };
     },
+    // C-050. These two stages had no handler when the driver shipped, and the
+    // driver's honest-stop covered for their absence. 9.5a and 9.5b built them;
+    // without the entries below, a run driven entirely through
+    // conductor_dispatch_wave could not advance any item past VALIDATED — which
+    // defeats §4.2, whose whole purpose is that the model does not interleave
+    // items by hand.
+    [ITEM_REVIEW_TOOL]: async (ctx): Promise<StageOutcome> => {
+      const result = await handleItemReview({
+        store: ctx.store,
+        fanout: ctx.fanout,
+        runId: ctx.runId,
+        itemId: ctx.itemId,
+        config: ctx.config,
+        journal: ctx.journal,
+        stateHome: ctx.stateHome,
+        workspaceKey: ctx.workspaceKey,
+        packs: ctx.packs,
+        now: ctx.now,
+      });
+      return { ok: result.ok, itemState: result.itemState };
+    },
+    // conductor_publish is already in SERIAL_STAGES — the git index is a
+    // singleton (§4.3) — so the driver runs this one strictly alone, in §4.2
+    // wave order, exactly as it does submit_test and mark_green.
+    [PUBLISH_TOOL]: async (ctx): Promise<StageOutcome> => {
+      const result = await handlePublish({
+        store: ctx.store,
+        fanout: ctx.fanout,
+        runId: ctx.runId,
+        itemId: ctx.itemId,
+        config: ctx.config,
+        journal: ctx.journal,
+        stateHome: ctx.stateHome,
+        workspaceKey: ctx.workspaceKey,
+        now: ctx.now,
+      });
+      return { ok: result.ok, itemState: result.itemState };
+    },
   };
 }
 

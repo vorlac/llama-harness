@@ -1537,7 +1537,17 @@ test("[9.4c-stage-batching] like stages BATCH across members: when both members 
       workspaceKey: "wkey",
       packs: PACKS,
       now: () => START_MS,
-      executors: { conductor_mark_green: recorder({ sdk: bench.wiring.sdk, log: stageLog, advanceTo: "GREEN" }) },
+      executors: {
+        conductor_mark_green: recorder({ sdk: bench.wiring.sdk, log: stageLog, advanceTo: "GREEN" }),
+        // C-050. This recorder ADVANCES to GREEN, so once the default table gained
+        // item-review and publish executors the wave flowed on into them — and
+        // conductor_item_review dispatches under the SAME role "reviewer" the vet
+        // critics use, so the critic COUNT below picked up lens reviewers too
+        // (2 became 11). This row is about batching WITHIN the vet stage and the
+        // barrier between stages; confining the wave to those stages keeps its
+        // subject intact rather than counting traffic from a stage it never studied.
+        conductor_validate: undefined,
+      } as unknown as Record<string, StageExecutor>,
     }) as Promise<DispatchWaveResult>;
 
     // RENDEZVOUS: every critic prompt of BOTH members has been ISSUED (I1's already
@@ -1875,7 +1885,7 @@ test("[9.4c-publish-order] publish is SERIAL in item order: the REVIEWED->PUBLIS
 // [9.4c-missing-stage-stops-honestly] — the G4 half of the Gap-2 resolution
 // ===========================================================================
 
-test("[9.4c-missing-stage-stops-honestly] with the DEFAULT executor table (only handlers committed at HEAD), a member that reaches a stage no committed handler serves STOPS there and is reported with a disposition NAMING the missing stage: the driver neither throws 'not implemented', nor silently skips the stage, nor advances the item past work that never happened — and it names EACH member's OWN missing stage", async () => {
+test("[9.4c-missing-stage-stops-honestly] a member that reaches a stage NO EXECUTOR SERVES stops there and is reported with a disposition NAMING that stage: the driver neither throws 'not implemented', nor silently skips the stage, nor advances the item past work that never happened — and it names EACH member's OWN missing stage", async () => {
   const root = committedRepo();
   const stateHome = freshStateHome();
   const config = makeConfig();
@@ -1883,8 +1893,21 @@ test("[9.4c-missing-stage-stops-honestly] with the DEFAULT executor table (only 
   const store = openStore(root, journal.sink, config);
   const runId = createRunFor(store);
   const runDir = runDirOf(store, runId);
-  // I1 owes conductor_item_review (9.5a); I2 owes conductor_publish (9.5b). Two DIFFERENT
-  // missing stages, so a hardcoded stage name cannot satisfy both rows.
+  // I1 owes conductor_item_review; I2 owes conductor_publish. Two DIFFERENT missing
+  // stages, so a hardcoded stage name cannot satisfy both halves.
+  //
+  // C-050 REVISION. This row originally leaned on the DEFAULT table being
+  // incomplete — those two stages had no handler when 9.4c shipped. Tasks 9.5a
+  // and 9.5b then built them, and the default table now serves both, so the old
+  // construction could no longer produce the condition it was about.
+  //
+  // The PROPERTY being pinned was never "the default table lacks these two"; it
+  // was "the driver stops honestly at a stage nothing serves". That is a fact
+  // about the DRIVER, so the row now creates the condition explicitly — an
+  // executors override that un-serves a stage (the map is spread over the
+  // defaults, so an explicit undefined removes an entry). The row is now
+  // independent of which stages the table happens to contain, which is what it
+  // should have been from the start.
   const queue: Queue = { items: [docsItem("I1", "docs/a.md"), docsItem("I2", "docs/b.md")] };
   seedPlanReviewed(store, runId, queue, { I1: "VALIDATED", I2: "REVIEWED" });
   const beforeI1 = itemFileBytes(runDir, "I1");
@@ -1892,7 +1915,13 @@ test("[9.4c-missing-stage-stops-honestly] with the DEFAULT executor table (only 
 
   const wiring = makeWiring(runId, runDir, config, journal.sink, () => ({ kind: "reply", text: implJson() }));
 
-  // NO `executors` override at all: the DEFAULT table is the subject.
+  // Un-serve exactly the two stages this row is about. Everything else keeps its
+  // default executor, so the wave is otherwise a normal one.
+  const unserved = {
+    conductor_item_review: undefined,
+    conductor_publish: undefined,
+  } as unknown as Record<string, StageExecutor>;
+
   const result: DispatchWaveResult = await handleDispatchWave({
     store,
     fanout: wiring.fanout,
@@ -1904,6 +1933,7 @@ test("[9.4c-missing-stage-stops-honestly] with the DEFAULT executor table (only 
     workspaceKey: "wkey",
     packs: PACKS,
     now: () => START_MS,
+    executors: unserved,
   });
 
   assert.deepEqual(result.wave.parallel, ["I1", "I2"], "both items were scheduled");
@@ -2224,4 +2254,82 @@ test("[9.4c-binding-p7-stale-marker-onclear] MANDATORY DEFERRED BINDING (P7, fro
     assert.equal(wiring.byRole("implementer").length, 0, "the held job never reached the model");
     assert.equal(result.runState, "EXECUTING", "dispatch_wave RETURNED: a leaked marker is an env-fail, never a silent hang");
   });
+});
+
+// ===========================================================================
+// [9.4c-default-table-serves-every-stage] — C-050.
+//
+// The row above proves the driver stops honestly at a stage nothing serves.
+// This one proves that, in the shipped configuration, there is no such stage.
+//
+// Those are different claims and the build needed both. Between 9.4c and 9.5b
+// the default table genuinely lacked conductor_item_review and conductor_publish
+// — the driver was honest about it, but a run driven entirely through
+// conductor_dispatch_wave could not advance any item past VALIDATED. §4.2's whole
+// purpose is that the orchestrator model does not interleave items by hand, and
+// a driver that hands back an env error for the last two stages of every item
+// forces exactly that. Nothing failed; the driver simply stopped being useful at
+// the point the work got interesting.
+//
+// The gap was invisible because the honest-stop row ASSERTED it as correct
+// behaviour. A test that pins today's incompleteness will keep passing after the
+// incompleteness stops being acceptable.
+// ===========================================================================
+
+test("[9.4c-default-table-serves-every-stage] the DEFAULT executor table serves EVERY stage the §3.3 item FSM can ask for, so no item is stranded mid-pipeline by the driver: a VALIDATED member advances through item review and a REVIEWED member through publish, with NO executors override in sight", async () => {
+  const root = committedRepo();
+  const stateHome = freshStateHome();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const queue: Queue = { items: [docsItem("I1", "docs/a.md"), docsItem("I2", "docs/b.md")] };
+  seedPlanReviewed(store, runId, queue, { I1: "VALIDATED", I2: "REVIEWED" });
+
+  const wiring = makeWiring(runId, runDirOf(store, runId), config, journal.sink, () => ({
+    kind: "reply",
+    text: implJson(),
+  }));
+
+  // NO `executors` override: the shipped default table is the subject.
+  const result: DispatchWaveResult = await handleDispatchWave({
+    store,
+    fanout: wiring.fanout,
+    treeState: wiring.treeState,
+    runId,
+    config,
+    journal: journal.sink,
+    stateHome,
+    workspaceKey: "wkey",
+    packs: PACKS,
+    now: () => START_MS,
+  });
+
+  const d1 = dispositionOf(result, "I1");
+  const d2 = dispositionOf(result, "I2");
+
+  // The load-bearing assertion is NOT that the stages SUCCEEDED — publishing needs
+  // a real staged git tree these fixtures do not build — but that neither member
+  // was stranded by a MISSING EXECUTOR. Those are different outcomes and only one
+  // of them is this row's business: a served stage may fail on its own merits,
+  // while an unserved one never runs at all.
+  //
+  // The discriminator is the driver's own missing-executor message, quoted from
+  // the source rather than paraphrased. An earlier version of this row tested
+  // `stoppedAt !== "conductor_item_review"`, which conflates the two: a served
+  // stage that legitimately declines to advance ALSO stops there.
+  const MISSING_EXECUTOR = "no stage executor in this build serves";
+  for (const [id, d] of [["I1", d1], ["I2", d2]] as const) {
+    const why = typeof d.envError === "string" ? d.envError : "";
+    assert.equal(
+      why.includes(MISSING_EXECUTOR),
+      false,
+      `${id} must NOT be stranded by a missing executor — the default table has to serve its stage (got: ${why})`,
+    );
+  }
+
+  // And the stages really ran: item review dispatches reviewer sub-sessions, so a
+  // served item_review shows fake-SDK traffic where an unserved one showed
+  // exactly zero (the row above pins that zero for the unserved case).
+  assert.ok(wiring.sdk.calls.length > 0, "the served stages dispatched real work rather than stopping before it");
 });

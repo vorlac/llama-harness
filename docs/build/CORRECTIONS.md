@@ -1848,3 +1848,49 @@ where `<worktree>/.git` is a FILE, not a directory. It now resolves `git rev-par
 to `adapter/gitio.ts` rather than spawned from `state.ts`, whose own header contract says every git
 read goes through gitio and that it spawns nothing itself — so the fix lands in the function the
 spec names while both modules keep their stated roles.
+
+### C-050 — RESOLVED
+
+Landed test-first. Two changes, one of them to a committed test row, and the reasoning for each:
+
+**The driver's default table now serves all six item stages.** `conductor_item_review` and
+`conductor_publish` were added as thin adapters over the committed handlers, exactly like the four
+already there. `conductor_publish` was already in `SERIAL_STAGES` (the git index is a singleton,
+§4.3), so the driver runs it strictly alone in wave order with no further change.
+
+**`[9.4c-missing-stage-stops-honestly]` was REVISED, not deleted.** It leaned on the default table
+being incomplete — those two stages had no handler when 9.4c shipped — so completing the table
+destroyed the condition it was about. But the PROPERTY it pinned was never "the table lacks these
+two"; it was "the driver stops honestly at a stage nothing serves", which is a fact about the
+DRIVER. The row now creates that condition explicitly via an executors override that un-serves a
+stage (the override is spread over the defaults, so an explicit `undefined` removes an entry), and
+is independent of which stages the table happens to contain — which is what it should have been
+from the start. A test that pins today's incompleteness keeps passing after the incompleteness
+stops being acceptable.
+
+**NEW row `[9.4c-default-table-serves-every-stage]`** asserts the complementary claim: in the
+shipped configuration there IS no unserved stage. Verified to discriminate — removing the
+item-review executor reds exactly that row.
+
+**Two things this exposed that were not the point of the round.**
+
+1. My first version of the new row asserted `stoppedAt !== "conductor_item_review"`, which conflates
+   "the stage was unserved" with "the stage ran and declined to advance". It also grepped the
+   envError for `/no executor/` while the driver's actual wording is "no stage executor in this
+   build serves" — so that half matched nothing and was vacuous. The row now quotes the driver's
+   own message as a constant. Same family as C-045/C-046/C-047/C-051, this time in a test I wrote
+   myself minutes after describing the family.
+
+2. `[9.4c-stage-batching]` broke for a real reason worth recording: it counts sub-sessions by role
+   `"reviewer"`, and BOTH `conductor_vet_test` (§2.10 critics) and `conductor_item_review` (§3.3
+   lens reviewers) dispatch under that role. They are distinguishable only by prompt content — the
+   `LENSES:` line, per `adapter/tools.ts`'s own comment: "a reviewer-role prompt WITHOUT it is a
+   §2.10 TEST_VET critic, never a lens session". Once the wave flowed past vet, the critic count
+   went from 2 to 11. The row was confined to the stages it studies rather than taught the
+   discriminator, because it is about batching within a stage, not about roles.
+
+   **ROLE-NAME COLLISION, raised for the Phase 9 gate:** two stages sharing a dispatch role, told
+   apart only by a substring of the prompt, is a distinction no consumer can make cheaply and one
+   that the §3.5 session registry cannot express at all. It has now cost one test. It is not a
+   defect today — nothing in production branches on it — but it is exactly the shape that becomes
+   one.
