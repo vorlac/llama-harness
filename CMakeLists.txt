@@ -89,6 +89,7 @@ add_executable(router-tests
   "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/proxy_test.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/admission_test.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/affinity_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/schema_observer_test.cpp"
 )
 target_compile_features(router-tests PRIVATE cxx_std_23)
 target_include_directories(router-tests

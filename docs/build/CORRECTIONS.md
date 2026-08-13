@@ -1499,3 +1499,37 @@ VERIFIED TO DISCRIMINATE: reintroducing the NUL turns it red; restoring turns it
 **A standing lesson for every audit in this build, mine included.** An empty grep result is not
 evidence of absence until you have confirmed grep actually read the file. Prefer a reader that
 fails loudly on undecodable input over one that skips quietly.
+
+## C-046 — Task 11.6: a pinned rule that passed for a masked reason (closed at delivery)
+
+**How it was found.** The 11.6 implementer mutation-tested its own work eight ways, reported seven
+kills, and DISCLOSED THE ONE SURVIVOR rather than quietly dropping it from the table. That is the
+behaviour this build wants and it is worth naming: a surviving mutation is information, and an
+implementer that hides it converts a suite hole into a silent one.
+
+**The hole.** `observe_response` opens with a gate that returns an empty verdict when the response
+was streamed — §4.4's "streamed implies unobservable". Removing `|| isStream` from that gate left
+the whole 49-case suite GREEN. The reason is masking, not deadness: every `isStream=true` fixture
+hands SSE bytes (`data: {...}` frames), which are not a JSON envelope and therefore fail the
+envelope-parse gate a few lines later. The empty verdict arrived for two independent reasons, so
+the suite could not tell which one produced it.
+
+The gate is not redundant. It is the pinned rule, and it is the only protection when a caller hands
+`isStream=true` together with a body that DOES parse — a buffered copy of a streamed response.
+Task 11.7 is the very next task and is exactly such a caller, which is why this was closed on
+delivery instead of being carried to the Phase 11 gate.
+
+**The fix (orchestrator, added to `[11.6-stream-verdict-null]`).** The discriminating input is a
+body that WOULD have produced a verdict, presented as a stream: a well-formed `chat.completion`
+envelope whose `choices[0].message.content` conforms to the declared schema. The row now asserts
+BOTH directions over identical bytes — `isStream=false` yields an engaged, true verdict (the
+premise, so the test cannot pass because the fixture was simply unverifiable), and `isStream=true`
+yields an empty one. The only difference between the two calls is the flag.
+
+VERIFIED TO DISCRIMINATE: with `|| isStream` removed the suite is 48/49 with
+`[11.6-stream-verdict-null]` red, and only that row; restored, 49/49 at 21,883 assertions.
+
+**The general lesson, which is the same one C-045 taught in a different costume.** A green
+assertion proves the outcome, not the mechanism. When two independent gates can each produce the
+expected result, the test pins neither — so a fixture must be chosen that only ONE of them can
+explain. Mutation testing is what surfaces this; nothing else in the build would have.

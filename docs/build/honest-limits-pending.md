@@ -66,3 +66,26 @@ writer not on the list would classify as a read — documented G7 limit, disclos
   hard-fails skipped/todo tests and SKIP/TODO TAP directives, and M5's PAT_SKIP/PAT_TRIV/
   PAT_CATCH remain universal. This is the same detection-over-prevention posture as the
   gate header's "empty function bodies are eyeballed in the diff read, not regexed."
+
+## Router schema observation is request-side only on real fan-out traffic (Task 11.6)
+
+Task 11.6's response-conformance half observes nothing on the real fan-out path. Both
+reasons are verified records in conductor/adapter/wire-notes.md, cited here rather than
+re-derived:
+
+- **Responses stream** (DISCOVERY (i)): opencode 1.18.15's `session.prompt` issues
+  STREAMING provider requests (`stream:true`, SSE `chat.completion.chunk` frames
+  terminated by `data: [DONE]`). The router relays streamed bytes exactly as 11.3
+  ships them — no SSE parse, no buffering, no reassembly, no validation — so every
+  fan-out response records `schemaConformed` as unobservable (empty), never
+  true/false.
+- **Requests declare no schema** (the prompt-format DRIFT): no schema'd body field
+  is emitted at all, so every fan-out request tagged `X-Conductor-Schema: required`
+  is expected to observe `schemaMissing: true`.
+
+The router's schema-conformance dataset is therefore the request-side `schemaMissing`
+counter alone; the non-stream validation path in router/schema-observer.hpp is
+implemented for completeness and exercised only against stub traffic in src/tests.
+The router is justified by scheduling and metrics alone.
+No claim above rests on live llama-server behaviour — src/router/UPSTREAM_CONTRACT.md
+records Step 2 as DEFERRED to Task 12.1.

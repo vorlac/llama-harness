@@ -6,9 +6,11 @@
 // first (SG-6: GET /v1/models is never admitted, so a saturated queue cannot
 // stall opencode's model listing); GET /conductor/health answers outside
 // admission entirely; everything else is 404'd without touching the upstream.
-// The schema observer (11.6) and metrics (11.7) are NOT here — beyond relaying
-// and admitting, this file only normalizes the four §4.4 conductor tags into one
-// RequestTags value that those later tasks consume. Two of those tags leave
+// Metrics (11.7) are NOT here — beyond relaying and admitting, this file
+// normalizes the four §4.4 conductor tags into one RequestTags value that later
+// tasks consume, and hands that value plus the forwarded body to Task 11.6's
+// pure schema observer (router/schema-observer.hpp), whose per-request
+// SchemaObservation and schemaMissing counter it records. Two of the tags leave
 // here: priority and group both go to admission, where 11.5's affinity policy
 // does the ordering; this file reads neither back.
 //
@@ -38,6 +40,7 @@
 #include <cctype>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -311,8 +314,20 @@ namespace conductor::router {
         return tags;
     }
 
-    // The §4.4 pass-through slice plus the admission hand-off — the schema
-    // observer and metrics are Tasks 11.6-11.7 and are NOT part of this class.
+}  // namespace conductor::router
+
+// Included HERE, between RequestTags and class Router, because the two headers
+// include each other: schema-observer.hpp needs RequestTags (and
+// detail::equalsIgnoreCase) above this line for observe_request's definition,
+// while class Router below stores a SchemaObservation and calls the observe_*
+// functions. schema-observer.hpp mirrors this by declaring everything Router
+// needs before ITS router.hpp include, so either header can be included first.
+#include "router/schema-observer.hpp"
+
+namespace conductor::router {
+
+    // The §4.4 pass-through slice plus the admission hand-off and Task 11.6's
+    // observation seam — metrics are Task 11.7 and are NOT part of this class.
     //   - Constructed from Task 11.2's parsed RouterConfig (listen + upstream
     //     endpoints). cfg.listen.port == 0 binds an OS-assigned ephemeral port.
     //     Construction and start() need NO live upstream: the upstream
@@ -328,6 +343,14 @@ namespace conductor::router {
     //     x_conductor; a body-only key still fills its tag; the field is stripped
     //     regardless. This is the single normalized tag seam that Tasks 11.4+
     //     consume; 11.3 attaches no behaviour to the tags.
+    //   - last_schema_observation() / schema_missing_count(): Task 11.6's
+    //     observers, mirroring last_request_tags(). Observation runs for EVERY
+    //     /v1/* request (GET included); the counter increments on every
+    //     tagged-and-missing request WHATEVER schema.rejectOnMissing says — the
+    //     refusal is a posture, the count an observation. The opt-in 400
+    //     (rejectOnMissing:true, never the shipped default) applies to POST
+    //     /v1/* only and answers before admission, so it consumes no slot and
+    //     no queue entry.
     class Router {
     public:
         explicit Router(const RouterConfig& config)
@@ -415,6 +438,21 @@ namespace conductor::router {
             return lastTags_;
         }
 
+        // The most recent /v1/* request's schema observation — std::nullopt
+        // until one has been handled. A buffered response that produced a
+        // conformance verdict is reflected here with schemaConformed engaged.
+        [[nodiscard]] std::optional<SchemaObservation> last_schema_observation() const {
+            const std::lock_guard<std::mutex> lock(observationMutex_);
+            return lastObservation_;
+        }
+
+        // Monotonic count of tagged-and-missing requests since construction,
+        // never reset. Per Router instance, not process-global.
+        [[nodiscard]] std::uint64_t schema_missing_count() const {
+            const std::lock_guard<std::mutex> lock(observationMutex_);
+            return schemaMissingCount_;
+        }
+
         [[nodiscard]] const AdmissionController& admission() const {
             return admission_;
         }
@@ -460,11 +498,37 @@ namespace conductor::router {
                 ForwardPlan plan = planForward(request);
                 recordTags(plan.tags);
 
+                // Task 11.6: observation runs for EVERY /v1/* request over the
+                // already-normalized tags and the FORWARDED (post-strip) body —
+                // no header is re-read and no second body parse pass is added
+                // beyond the observer's own.
+                const SchemaObservation observation = observe_request(plan.tags, plan.body);
+                recordObservation(observation);
+                if (observation.tagged && observation.schemaMissing) {
+                    // §4.4 "journaled": one warn line per tagged-schema-missing
+                    // request naming the role and group tags and the path.
+                    spdlog::warn(
+                        "router: {} {} carries '{}: required' but declares no schema — counted "
+                        "schemaMissing (role '{}', group '{}')",
+                        request.method, request.path, schemaHeader_,
+                        plan.tags.role.value_or(""), plan.tags.group.value_or(""));
+                }
+
                 // SG-6: admission is for the generation calls only. A read like
                 // GET /v1/models crosses un-admitted, so a saturated queue cannot
                 // turn it into an error the direct path would have served (G5).
                 if (request.method != "POST") {
-                    relayToUpstream(request, response, std::move(plan.body), nullptr);
+                    relayToUpstream(request, response, std::move(plan.body), nullptr, observation);
+                    return;
+                }
+
+                // The opt-in refusal posture, POST-only for the same G5 reason
+                // SG-6 keeps GET out of admission: a bodyless read can never
+                // carry a schema field. Answered before admission — no upstream
+                // contact, no slot consumed, no queue entry.
+                if (config_.schema.rejectOnMissing && observation.tagged &&
+                    observation.schemaMissing) {
+                    sendSchemaMissingError(response);
                     return;
                 }
 
@@ -483,7 +547,8 @@ namespace conductor::router {
                 // while a streaming relay hands a copy to its content provider so
                 // the slot outlives this handler exactly as long as the stream does.
                 auto slot = std::make_shared<AdmissionSlot>(admission_, plan.model);
-                relayToUpstream(request, response, std::move(plan.body), std::move(slot));
+                relayToUpstream(request, response, std::move(plan.body), std::move(slot),
+                                observation);
             } catch (const std::exception& failure) {
                 // Nothing above this point rejects a request on purpose, so reaching
                 // here means the router itself broke. Answering with the same
@@ -545,7 +610,8 @@ namespace conductor::router {
         }
 
         void relayToUpstream(const httplib::Request& request, httplib::Response& response,
-                             std::string forwardBody, std::shared_ptr<AdmissionSlot> slot) {
+                             std::string forwardBody, std::shared_ptr<AdmissionSlot> slot,
+                             const SchemaObservation& observation) {
             httplib::Headers upstreamHeaders;
             for (const auto& [name, value] : request.headers) {
                 if (!detail::isRequestHeaderDropped(name))
@@ -642,6 +708,10 @@ namespace conductor::router {
                     body.swap(relay->pending);
                 }
 
+                // Task 11.6's response half runs on the buffered path only —
+                // the verdict is recorded off these exact bytes BEFORE they are
+                // handed to sendBuffered, which returns them untouched.
+                recordResponseVerdict(observation, body);
                 sendBuffered(response, contentType, std::move(body));
                 return;
             }
@@ -844,6 +914,28 @@ namespace conductor::router {
             sendBuffered(response, "application/json", envelope.dump());
         }
 
+        // Task 11.6's opt-in 400, in the committed envelope shape with the
+        // 11.4-convention string code. The message names the resolved
+        // observe-header AND the literal "schema.rejectOnMissing" so an
+        // operator reading it learns which config key produced a refusal the
+        // base build never makes.
+        void sendSchemaMissingError(httplib::Response& response) const {
+            const std::string message =
+                "llama-router refused the request: it is tagged '" + schemaHeader_ +
+                ": required' but its body declares no schema (response_format json_schema, "
+                "grammar or json_schema), and schema.rejectOnMissing is true";
+
+            spdlog::warn("router: {}", message);
+
+            nlohmann::json envelope;
+            envelope["error"]["message"] = message;
+            envelope["error"]["type"] = kSchemaErrorType;
+            envelope["error"]["code"] = kSchemaMissingCode;
+
+            response.status = 400;
+            sendBuffered(response, "application/json", envelope.dump());
+        }
+
         [[nodiscard]] RequestTags tagsFromHeaders(const httplib::Request& request) const {
             RequestTags tags;
             readHeaderTag(tags.role, request, detail::kRoleHeader);
@@ -896,6 +988,33 @@ namespace conductor::router {
             lastTags_ = tags;
         }
 
+        // Stores the request-side observation and advances the schemaMissing
+        // counter. Called once per /v1/* request, before any admission or
+        // posture decision, so the count is an observation of the traffic and
+        // never a consequence of what the router answered.
+        void recordObservation(const SchemaObservation& observation) {
+            const std::lock_guard<std::mutex> lock(observationMutex_);
+            lastObservation_ = observation;
+            if (observation.tagged && observation.schemaMissing)
+                ++schemaMissingCount_;
+        }
+
+        // Completes the stored observation with the buffered response's
+        // conformance verdict. An unobservable verdict (empty optional) leaves
+        // the request-time record as it stands — schemaConformed unset —
+        // rather than re-storing an identical value.
+        void recordResponseVerdict(SchemaObservation observation, const std::string& body) {
+            std::optional<bool> verdict =
+                observe_response(observation, config_.schema.validateResponses,
+                                 /*isStream=*/false, body);
+            if (!verdict)
+                return;
+
+            observation.schemaConformed = std::move(verdict);
+            const std::lock_guard<std::mutex> lock(observationMutex_);
+            lastObservation_ = std::move(observation);
+        }
+
         RouterConfig config_;
         std::string groupHeader_;
         std::string schemaHeader_;
@@ -911,6 +1030,12 @@ namespace conductor::router {
 
         mutable std::mutex tagsMutex_;
         std::optional<RequestTags> lastTags_;
+
+        // Task 11.6's per-instance observation state, guarded together so the
+        // counter and the last observation can never disagree mid-read.
+        mutable std::mutex observationMutex_;
+        std::optional<SchemaObservation> lastObservation_;
+        std::uint64_t schemaMissingCount_{ 0 };
     };
 
 }  // namespace conductor::router
