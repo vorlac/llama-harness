@@ -938,3 +938,39 @@ at 11.4: MUTATION-TEST the green suite, then read the diff. Four mutations were 
 - **Blast radius:** `conductor/adapter/tools.ts` section (8) (+~640 lines: handleMarkGreen,
   handleValidate, handleQueueAmend and their helpers), `conductor/tests/tools-9.4b.test.ts`
   (13 authored rows + 1 mutation-fix row). 943/943 green, typecheck OK, bun leg OK.
+
+## C-035 — Task 9.4b: handleQueueAmend's signature contradicts the tool it implements (OPEN, fix queued)
+
+**How it was found.** Not by a review — by comparing my own orchestrator-authored 9.4b assertions
+against an INDEPENDENT lookahead draft of the same task that I had wrongly concluded did not exist.
+(My `find` for it ran against the repo root; the draft was in the scratchpad. The task still landed
+correctly and its coverage matches the draft's row-for-row — the draft splits DEBUG into three rows
+where mine merges two — but the draft's spec-gap list caught something mine did not.)
+
+- **MAJOR (open) — the handler cannot be reached by its own tool.** Plan §3.4 line 1323 registers
+  `conductor_queue_amend | {ops[]}`, and the COMMITTED plugin surface agrees:
+  `conductor/plugin/index.ts:165` declares `args: { ops: S.array(S.string()) }`. My
+  `handleQueueAmend` instead takes `queue: Queue` — a whole replacement queue — plus the decision
+  fields. Nothing can get from `{ops: string[]}` to a complete `Queue`, so when Task 9.6 wires tool
+  calls to handlers there is no honest binding to write. This is the same class of defect as the
+  9.4a/5.3 gate-vs-handler disagreement that the build treats as blocking: two committed surfaces
+  that describe the same tool differently.
+  The tests do not catch it because they call the handler directly with a queue they built.
+  **FIX (queued, test-first):** `handleQueueAmend` takes the ops, APPLIES them to the run's current
+  queue, and re-validates the RESULT through core validateQueue — which is strictly closer to the
+  bullet's "re-validates DAG/scopes/behavioral and records a decision" than replacing the queue
+  wholesale, and keeps legality-before-persist intact. The op vocabulary must be a CLOSED union
+  (add / update / remove), and the draft's two companion gaps get resolved with it: which item
+  states are amendable (only PENDING/RED/TEST_VETTED/GREEN — nothing of theirs is integrated), and
+  what an update does to a blocked item (§2.5's `blocked` comment names conductor_queue_amend as a
+  legal clearer, so an update clears it through store.clearBlocked).
+  **Deferred by one step on purpose:** the 9.4c test-writer is reading adapter/tools.ts right now,
+  so the edit lands after it reports rather than racing it.
+
+- **MINOR (open, same fix batch) — validate's scopePattern.** C-034 recorded that `runVerify` takes
+  ONE scopePattern while an item may carry several fileScope entries selecting different §2.1
+  scopes, and settled for the first entry with the limitation raised at the Phase 9 gate. The
+  independent draft proposes deriving the pattern from the item's fileScope as a UNION instead,
+  which is better if it can be expressed. Re-examine when the queue_amend fix lands: if a single
+  runVerify call genuinely cannot express the union, the limitation stands and stays a gate item;
+  if it can, take it.
