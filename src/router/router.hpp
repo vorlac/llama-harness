@@ -111,7 +111,8 @@ namespace conductor::router {
             return true;
         }
 
-        inline bool isOneOfIgnoreCase(std::string_view name, const std::string_view* names, std::size_t count) {
+        inline bool isOneOfIgnoreCase(
+            std::string_view name, const std::string_view* names, std::size_t count) {
             for (std::size_t i = 0; i < count; ++i) {
                 if (equalsIgnoreCase(name, names[i]))
                     return true;
@@ -140,6 +141,7 @@ namespace conductor::router {
                 "expect",
                 "accept-encoding",
             };
+
             return isOneOfIgnoreCase(name, dropped, std::size(dropped));
         }
 
@@ -188,9 +190,9 @@ namespace conductor::router {
         // the kind of silent reinterpretation §4.4 tagging must not do.
         inline void assignStringTag(std::optional<std::string>& slot, const nlohmann::json& payload, const char* key) {
             const auto found = payload.find(key);
-            if (found == payload.end()) {
+            if (found == payload.end())
                 return;
-            }
+
             if (!found->is_string()) {
                 spdlog::debug(
                     "router: '{}' in the {} body field is {}, not a string — tag not set",
@@ -278,14 +280,12 @@ namespace conductor::router {
     // left untouched and yields all-empty tags.
     inline RequestTags extract_and_strip_tags(nlohmann::json& body) {
         RequestTags tags;
-        if (!body.is_object()) {
+        if (!body.is_object())
             return tags;
-        }
 
         const auto found = body.find(kParamsFallbackField);
-        if (found == body.end()) {
+        if (found == body.end())
             return tags;
-        }
 
         // Copy before erasing: `payload` has to outlive the key it came from, and
         // the strip happens whatever the payload turns out to be.
@@ -379,14 +379,16 @@ namespace conductor::router {
             // back down before we returned.
             server_.wait_until_ready();
 
-            spdlog::info("router: listening on {}:{}, proxying /v1/* to {}:{}", config_.listen.host,
-                         listenPort_, config_.upstream.host, config_.upstream.port);
+            spdlog::info(
+                "router: listening on {}:{}, proxying /v1/* to {}:{}",
+                config_.listen.host, listenPort_,
+                config_.upstream.host, config_.upstream.port);
         }
 
         void stop() {
-            if (!listener_.joinable()) {
+            if (!listener_.joinable())
                 return;
-            }
+
             server_.stop();
             listener_.join();
         }
@@ -402,10 +404,11 @@ namespace conductor::router {
 
     private:
         void installRoutes() {
-            const httplib::Server::Handler proxy = [this](const httplib::Request& request,
-                                                          httplib::Response& response) {
-                handleProxy(request, response);
-            };
+            const httplib::Server::Handler proxy =
+                [this](const httplib::Request& request, httplib::Response& response) {
+                    handleProxy(request, response);
+                };
+
             server_.Get(detail::kProxyPathPattern, proxy);
             server_.Post(detail::kProxyPathPattern, proxy);
             server_.Put(detail::kProxyPathPattern, proxy);
@@ -422,8 +425,10 @@ namespace conductor::router {
                 // here means the router itself broke. Answering with the same
                 // parseable envelope the fan-out side already understands beats
                 // httplib's bare 500, and the cause is on the log.
-                sendRouterError(response, std::string("llama-router failed to relay the request: ") +
-                                              failure.what());
+                sendRouterError(
+                    response,
+                    std::string("llama-router failed to relay the request: ") +
+                        failure.what());
             }
         }
 
@@ -453,6 +458,7 @@ namespace conductor::router {
                             "router: could not re-serialize the body after stripping {} ({}) — "
                             "forwarding the original bytes",
                             kParamsFallbackField, failure.what());
+
                         forwardBody = request.body;
                     }
                 }
@@ -462,16 +468,16 @@ namespace conductor::router {
 
             httplib::Headers upstreamHeaders;
             for (const auto& [name, value] : request.headers) {
-                if (!detail::isRequestHeaderDropped(name)) {
+                if (!detail::isRequestHeaderDropped(name))
                     upstreamHeaders.emplace(name, value);
-                }
             }
 
             auto relay = std::make_shared<detail::UpstreamRelay>();
             auto client = std::make_shared<httplib::Client>(config_.upstream.host, config_.upstream.port);
+
+            // The request target arrives already percent-encoded,
+            // re-encoding it would rewrite bytes the caller chose.
             client->set_tcp_nodelay(true);
-            // The request target arrives already percent-encoded; re-encoding it
-            // would rewrite bytes the caller chose.
             client->set_path_encode(false);
             client->set_keep_alive(false);
             client->set_connection_timeout(detail::kUpstreamConnectTimeoutSeconds, 0);
@@ -481,28 +487,39 @@ namespace conductor::router {
             // req.target is the raw request line target (path + query); req.path is
             // the decoded path only.
             const std::string target = request.target.empty() ? request.path : request.target;
-
             auto call = std::make_shared<detail::UpstreamCall>(relay, client);
+
             try {
-                call->run([relay, client, method = request.method, target,
-                           headers = std::move(upstreamHeaders), body = std::move(forwardBody)]() mutable {
-                    runUpstreamCall(relay, client, method, target, std::move(headers), std::move(body));
-                });
+                call->run(
+                    [relay, client, method = request.method, target, headers = std::move(upstreamHeaders), body = std::move(forwardBody)]() mutable {
+                        runUpstreamCall(
+                            relay, client, method, target,
+                            std::move(headers), std::move(body));
+                    });
             } catch (const std::system_error& failure) {
-                sendRouterError(response, upstreamMessage(std::string("could not start a relay thread: ") +
-                                                          failure.what()));
+                sendRouterError(
+                    response,
+                    upstreamMessage(
+                        std::string("could not start a relay thread: ") +
+                        failure.what()));
+
                 return;
             }
 
             bool haveResponse = false;
             int status = 0;
+
             httplib::Headers responseHeaders;
             httplib::Error error = httplib::Error::Success;
+
             {
                 std::unique_lock<std::mutex> lock(relay->mutex);
-                relay->cv.wait(lock, [&relay] {
-                    return relay->headersReady || relay->finished;
-                });
+                relay->cv.wait(
+                    lock, [&relay] {
+                        return relay->headersReady ||
+                               relay->finished;
+                    });
+
                 haveResponse = relay->headersReady;
                 status = relay->status;
                 responseHeaders = relay->headers;
@@ -520,9 +537,8 @@ namespace conductor::router {
 
             response.status = status;
             for (const auto& [name, value] : responseHeaders) {
-                if (!detail::isResponseHeaderDropped(name)) {
+                if (!detail::isResponseHeaderDropped(name))
                     response.set_header(name, value);
-                }
             }
 
             const std::string contentType = detail::headerValue(responseHeaders, "Content-Type");
@@ -530,18 +546,22 @@ namespace conductor::router {
             // it as one message with that same length. No length (chunked / read
             // until close) or an SSE content type means the upstream is producing
             // incrementally, and so must we.
-            const bool incremental =
-                detail::isEventStream(contentType) || !detail::hasHeader(responseHeaders, "Content-Length");
+            const bool incremental = detail::isEventStream(contentType) ||
+                                     !detail::hasHeader(responseHeaders, "Content-Length");
 
             if (!incremental) {
                 std::string body;
+
                 {
                     std::unique_lock<std::mutex> lock(relay->mutex);
-                    relay->cv.wait(lock, [&relay] {
-                        return relay->finished;
-                    });
+                    relay->cv.wait(
+                        lock, [&relay] {
+                            return relay->finished;
+                        });
+
                     body.swap(relay->pending);
                 }
+
                 sendBuffered(response, contentType, std::move(body));
                 return;
             }
@@ -560,14 +580,19 @@ namespace conductor::router {
                 contentType, [relay, call](std::size_t /*offset*/, httplib::DataSink& sink) {
                     std::string chunk;
                     bool complete = false;
+
                     {
                         std::unique_lock<std::mutex> lock(relay->mutex);
                         relay->cv.wait(lock, [&relay] {
-                            return !relay->pending.empty() || relay->finished || relay->cancelled;
+                            return !relay->pending.empty() ||
+                                   relay->finished ||
+                                   relay->cancelled;
                         });
+
                         chunk.swap(relay->pending);
                         complete = relay->finished || relay->cancelled;
                     }
+
                     relay->cv.notify_all();
 
                     // A zero-length write would tell httplib the body ended, so the
@@ -577,13 +602,14 @@ namespace conductor::router {
                             const std::lock_guard<std::mutex> lock(relay->mutex);
                             relay->cancelled = true;
                         }
+
                         relay->cv.notify_all();
                         return false;
                     }
 
-                    if (complete) {
+                    if (complete)
                         sink.done();
-                    }
+
                     return true;
                 });
         }
@@ -591,53 +617,58 @@ namespace conductor::router {
         // Drives one upstream request to completion on its own thread, publishing
         // the response line/headers the instant they land and every payload byte as
         // it arrives, so the handler can start relaying before the upstream is done.
-        static void runUpstreamCall(const std::shared_ptr<detail::UpstreamRelay>& relay,
-                                    const std::shared_ptr<httplib::Client>& client, const std::string& method,
-                                    const std::string& target, httplib::Headers&& headers, std::string&& body) {
+        static void runUpstreamCall(
+            const std::shared_ptr<detail::UpstreamRelay>& relay,
+            const std::shared_ptr<httplib::Client>& client, const std::string& method,
+            const std::string& target, httplib::Headers&& headers, std::string&& body) {
             httplib::Request upstreamRequest;
             upstreamRequest.method = method;
             upstreamRequest.path = target;
             upstreamRequest.headers = std::move(headers);
             upstreamRequest.body = std::move(body);
-
             upstreamRequest.response_handler = [relay](const httplib::Response& upstreamResponse) {
                 bool proceed = true;
+
                 {
                     const std::lock_guard<std::mutex> lock(relay->mutex);
-                    if (relay->cancelled) {
+                    if (relay->cancelled)
                         proceed = false;
-                    }
                     else {
                         relay->status = upstreamResponse.status;
                         relay->headers = upstreamResponse.headers;
                         relay->headersReady = true;
                     }
                 }
+
                 relay->cv.notify_all();
                 return proceed;
             };
 
-            upstreamRequest.content_receiver = [relay](const char* data, std::size_t length,
-                                                       std::size_t /*offset*/, std::size_t /*total*/) {
-                std::unique_lock<std::mutex> lock(relay->mutex);
-                if (relay->cancelled) {
-                    return false;
-                }
-                relay->pending.append(data, length);
-                relay->cv.notify_all();
-                // Back-pressure only applies once a content provider is actually
-                // draining; the buffered path collects the whole body itself and
-                // would deadlock against a high-water mark.
-                relay->cv.wait(lock, [&relay] {
-                    return relay->cancelled || !relay->streaming ||
-                           relay->pending.size() <= detail::kRelayHighWaterBytes;
-                });
-                return !relay->cancelled;
-            };
+            upstreamRequest.content_receiver =
+                [relay](const char* data, std::size_t length, std::size_t /*offset*/, std::size_t /*total*/) {
+                    std::unique_lock<std::mutex> lock(relay->mutex);
+                    if (relay->cancelled)
+                        return false;
+
+                    relay->pending.append(data, length);
+                    relay->cv.notify_all();
+                    // Back-pressure only applies once a content provider is actually
+                    // draining; the buffered path collects the whole body itself and
+                    // would deadlock against a high-water mark.
+                    relay->cv.wait(
+                        lock, [&relay] {
+                            return relay->cancelled ||
+                                   !relay->streaming ||
+                                   relay->pending.size() <= detail::kRelayHighWaterBytes;
+                        });
+
+                    return !relay->cancelled;
+                };
 
             httplib::Response upstreamResponse;
             httplib::Error error = httplib::Error::Success;
             const bool succeeded = client->send(upstreamRequest, upstreamResponse, error);
+
             {
                 const std::lock_guard<std::mutex> lock(relay->mutex);
                 // 204s and HEAD replies never reach the response handler, so recover
@@ -647,10 +678,12 @@ namespace conductor::router {
                     relay->headers = upstreamResponse.headers;
                     relay->headersReady = true;
                 }
+
                 relay->succeeded = succeeded;
                 relay->error = error;
                 relay->finished = true;
             }
+
             relay->cv.notify_all();
         }
 
@@ -658,14 +691,14 @@ namespace conductor::router {
         // provider of known length is written straight through, whereas a plain
         // res.body would be gzip/brotli'd whenever the caller sent Accept-Encoding,
         // changing bytes the upstream chose and adding headers it never sent.
-        static void sendBuffered(httplib::Response& response, const std::string& contentType,
-                                 std::string&& body) {
+        static void sendBuffered(httplib::Response& response, const std::string& contentType, std::string&& body) {
             if (contentType.empty()) {
                 // No Content-Type to attach; httplib derives Content-Length from the
                 // body and compresses nothing it cannot classify.
                 response.body = std::move(body);
                 return;
             }
+
             if (body.empty()) {
                 response.set_header("Content-Type", contentType);
                 return;
@@ -712,15 +745,14 @@ namespace conductor::router {
 
         // An absent header and a present-but-empty one both mean "no tag": an empty
         // value carries nothing for 11.4+ to route on.
-        static void readHeaderTag(std::optional<std::string>& slot, const httplib::Request& request,
-                                  const std::string& name) {
-            if (!request.has_header(name)) {
+        static void readHeaderTag(std::optional<std::string>& slot, const httplib::Request& request, const std::string& name) {
+            if (!request.has_header(name))
                 return;
-            }
+
             std::string value = request.get_header_value(name);
-            if (value.empty()) {
+            if (value.empty())
                 return;
-            }
+
             slot = std::move(value);
         }
 
@@ -733,18 +765,19 @@ namespace conductor::router {
 
         // Per-tag the header wins, so 11.4+ never see two disagreeing sources; a
         // body-only key still fills its own tag.
-        static void applyFallbackTag(std::optional<std::string>& slot,
-                                     const std::optional<std::string>& fallback, const char* name) {
-            if (!fallback) {
+        static void applyFallbackTag(std::optional<std::string>& slot, const std::optional<std::string>& fallback, const char* name) {
+            if (!fallback)
                 return;
-            }
+
             if (!slot) {
                 slot = fallback;
                 return;
             }
+
             if (*slot != *fallback) {
-                spdlog::debug("router: header tag '{}' = '{}' wins over the {} field's '{}'", name, *slot,
-                              kParamsFallbackField, *fallback);
+                spdlog::debug(
+                    "router: header tag '{}' = '{}' wins over the {} field's '{}'",
+                    name, *slot, kParamsFallbackField, *fallback);
             }
         }
 

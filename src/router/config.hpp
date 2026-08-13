@@ -136,11 +136,13 @@ namespace conductor::router {
                         segment += pointer[i++];
                     }
                 }
-                if (!dotted.empty()) {
+
+                if (!dotted.empty())
                     dotted += '.';
-                }
+
                 dotted += segment;
             }
+
             return dotted;
         }
 
@@ -152,14 +154,14 @@ namespace conductor::router {
         inline std::string quotedPropertyName(const std::string& message) {
             static constexpr const char* kMarker = "property '";
             const std::size_t at = message.find(kMarker);
-            if (at == std::string::npos) {
+            if (at == std::string::npos)
                 return {};
-            }
+
             const std::size_t begin = at + std::string(kMarker).size();
             const std::size_t end = message.find('\'', begin);
-            if (end == std::string::npos) {
+            if (end == std::string::npos)
                 return {};
-            }
+
             return message.substr(begin, end - begin);
         }
 
@@ -178,21 +180,17 @@ namespace conductor::router {
 
         // The §2.2 logging.level vocabulary. spdlog names the last one `err`.
         inline std::optional<spdlog::level::level_enum> spdlogLevelFor(const std::string& name) {
-            if (name == "trace") {
+            if (name == "trace")
                 return spdlog::level::trace;
-            }
-            if (name == "debug") {
+            if (name == "debug")
                 return spdlog::level::debug;
-            }
-            if (name == "info") {
+            if (name == "info")
                 return spdlog::level::info;
-            }
-            if (name == "warn") {
+            if (name == "warn")
                 return spdlog::level::warn;
-            }
-            if (name == "error") {
+            if (name == "error")
                 return spdlog::level::err;
-            }
+
             return std::nullopt;
         }
 
@@ -203,11 +201,10 @@ namespace conductor::router {
             std::string field;
             std::string message;
 
-            void error(const nlohmann::json::json_pointer& pointer, const nlohmann::json& /*instance*/,
-                       const std::string& validatorMessage) override {
-                if (failed) {
+            void error(const nlohmann::json::json_pointer& pointer, const nlohmann::json& /*instance*/, const std::string& validatorMessage) override {
+                if (failed)
                     return;
-                }
+
                 failed = true;
                 field = offendingField(pointer, validatorMessage);
                 message = validatorMessage;
@@ -221,8 +218,11 @@ namespace conductor::router {
             {
                 std::ifstream in(schemaPath, std::ios::binary);
                 if (!in.is_open()) {
-                    throw ConfigError("", "cannot read router config schema file: " + schemaPath);
+                    throw ConfigError(
+                        "", "cannot read router config schema file: " +
+                                schemaPath);
                 }
+
                 try {
                     schemaJson = nlohmann::json::parse(in);
                 } catch (const nlohmann::json::parse_error& error) {
@@ -234,8 +234,9 @@ namespace conductor::router {
             try {
                 validator.set_root_schema(std::move(schemaJson));
             } catch (const std::exception& error) {
-                throw ConfigError("", "router config schema file " + schemaPath +
-                                          " is not a usable JSON Schema: " + error.what());
+                throw ConfigError(
+                    "", "router config schema file " + schemaPath +
+                            " is not a usable JSON Schema: " + error.what());
             }
             return validator;
         }
@@ -244,13 +245,18 @@ namespace conductor::router {
             const std::string field = block + ".port";
             const nlohmann::json& port = document.at(block).at("port");
             if (!port.is_number_integer()) {
-                throw ConfigError(field, "router config field '" + field +
-                                             "' must be an integer TCP port in 1..65535");
+                throw ConfigError(
+                    field,
+                    "router config field '" + field +
+                        "' must be an integer TCP port in 1..65535");
             }
+
             const auto value = port.get<std::int64_t>();
             if (value < 1 || value > 65535) {
-                throw ConfigError(field, "router config field '" + field +
-                                             "' must be in 1..65535, got " + std::to_string(value));
+                throw ConfigError(
+                    field,
+                    "router config field '" + field +
+                        "' must be in 1..65535, got " + std::to_string(value));
             }
         }
 
@@ -262,7 +268,9 @@ namespace conductor::router {
         try {
             document = nlohmann::json::parse(json);
         } catch (const nlohmann::json::parse_error& error) {
-            throw ConfigError("", std::string("router config is not valid JSON: ") + error.what());
+            throw ConfigError(
+                "", std::string("router config is not valid JSON: ") +
+                        error.what());
         }
 
         // 2. Fill the three documented-optional keys with their §2.2 defaults, so
@@ -270,13 +278,14 @@ namespace conductor::router {
         //    every key required). Blocks of the wrong type are left for the schema
         //    to reject by name.
         if (document.is_object()) {
-            if (!document.contains("logging")) {
+            if (!document.contains("logging"))
                 document["logging"] = nlohmann::json{ { "level", "info" } };
-            }
+
             if (document.contains("schema") && document["schema"].is_object() &&
                 !document["schema"].contains("rejectOnMissing")) {
                 document["schema"]["rejectOnMissing"] = false;
             }
+
             if (document.contains("affinity") && document["affinity"].is_object() &&
                 !document["affinity"].contains("contiguousDequeue")) {
                 document["affinity"]["contiguousDequeue"] = true;
@@ -289,10 +298,15 @@ namespace conductor::router {
         validator.validate(document, violation);
         if (violation.failed) {
             if (violation.field.empty()) {
-                throw ConfigError("", "router config failed schema validation: " + violation.message);
+                throw ConfigError(
+                    "", "router config failed schema validation: " +
+                            violation.message);
             }
-            throw ConfigError(violation.field, "router config field '" + violation.field +
-                                                   "' rejected: " + violation.message);
+
+            throw ConfigError(
+                violation.field,
+                "router config field '" + violation.field +
+                    "' rejected: " + violation.message);
         }
 
         // 4. Range-check both ports; the schema types them as bare numbers.
@@ -304,40 +318,32 @@ namespace conductor::router {
         // the value's type.
         const nlohmann::json& level = document.at("logging").at("level");
         if (!level.is_string() || !detail::spdlogLevelFor(level.get<std::string>())) {
-            throw ConfigError("logging.level",
-                              "router config field 'logging.level' must be one of trace, debug, "
-                              "info, warn, error; got " +
-                                  level.dump());
+            throw ConfigError(
+                "logging.level",
+                "router config field 'logging.level' must be one of trace, debug, "
+                "info, warn, error; got " +
+                    level.dump());
         }
 
         RouterConfig config;
         config.version = document.at("version").get<int>();
-
         config.listen.host = document.at("listen").at("host").get<std::string>();
         config.listen.port = document.at("listen").at("port").get<int>();
         config.upstream.host = document.at("upstream").at("host").get<std::string>();
         config.upstream.port = document.at("upstream").at("port").get<int>();
-
-        config.admission.maxInflightPerModel =
-            document.at("admission").at("maxInflightPerModel").get<int>();
+        config.admission.maxInflightPerModel = document.at("admission").at("maxInflightPerModel").get<int>();
         config.admission.maxQueued = document.at("admission").at("maxQueued").get<int>();
-        config.admission.queueTimeoutMs =
-            document.at("admission").at("queueTimeoutMs").get<std::int64_t>();
-
+        config.admission.queueTimeoutMs = document.at("admission").at("queueTimeoutMs").get<std::int64_t>();
         config.priorities.interactive = document.at("priorities").at("interactive").get<int>();
         config.priorities.review = document.at("priorities").at("review").get<int>();
         config.priorities.batch = document.at("priorities").at("batch").get<int>();
-
         config.affinity.header = document.at("affinity").at("header").get<std::string>();
         config.affinity.contiguousDequeue = document.at("affinity").at("contiguousDequeue").get<bool>();
-
         config.schema.observeHeader = document.at("schema").at("observeHeader").get<std::string>();
         config.schema.validateResponses = document.at("schema").at("validateResponses").get<bool>();
         config.schema.rejectOnMissing = document.at("schema").at("rejectOnMissing").get<bool>();
-
         config.metrics.ledgerPath = document.at("metrics").at("ledgerPath").get<std::string>();
         config.logging.level = level.get<std::string>();
-
         return config;
     }
 
@@ -350,11 +356,13 @@ namespace conductor::router {
         const std::optional<spdlog::level::level_enum> level =
             detail::spdlogLevelFor(cfg.logging.level);
         if (!level) {
-            throw ConfigError("logging.level",
-                              "router config field 'logging.level' must be one of trace, debug, "
-                              "info, warn, error; got \"" +
-                                  cfg.logging.level + "\"");
+            throw ConfigError(
+                "logging.level",
+                "router config field 'logging.level' must be one of trace, debug, "
+                "info, warn, error; got \"" +
+                    cfg.logging.level + "\"");
         }
+
         spdlog::set_level(*level);
     }
 
