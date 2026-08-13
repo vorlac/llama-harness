@@ -1632,3 +1632,54 @@ against the actual type-assignability rules and the actual cost of the call. Whe
 contract contradicts an earlier ruling, the contract is evidence — check whether the ruling was
 reasoning from something it could not see, and say so plainly instead of forcing the code to match
 a decision that has been overtaken.
+
+## C-049 — Task 11.7: an unasserted exit path, closed; and a mutation-harness trap worth naming
+
+### The gap, disclosed by the implementer
+
+11.7 threads a ledger line onto FIVE exit paths of `handleProxy`. The implementer reported, in its
+own `concerns` and unprompted, that one of them — the `schema.rejectOnMissing` 400 — was ledgered
+by the "every request entering the handler" rule but that NO fixture drives that posture with a
+ledger attached, because every fixture in the file sets `rejectOnMissing:false`. Its line shape was
+therefore reasoned from the spec, not executed.
+
+That is worth closing rather than parking, for a reason specific to this path: the 400 is the only
+exit answered BEFORE admission and before any upstream contact, and the posture is OPT-IN. A
+missing line there would stay invisible until an operator enabled the posture in production, at
+which point the shed tail of their refusals would simply be absent from the §4.4 dataset that
+exists to explain exactly that.
+
+NEW row `11.7-reject-on-missing-ledgered` drives the posture, asserts one line at status 400 with
+NULL upstream and token columns (null rather than zero — zero would assert a measurement never
+taken), and asserts the stub saw no request at all. It also sends a CONFORMING request under the
+SAME config and requires it to proxy and ledger: without that half, an implementation that 400s
+everything would pass the row.
+
+VERIFIED TO DISCRIMINATE: recording the wrong status at that exit fails exactly one case (66 -> 65)
+and restoring returns 66/66.
+
+### The trap: a failed build plus a stale binary reads as a surviving mutation
+
+While independently re-running the implementer's C-033-class mutation (drop `ledgerGuard` from the
+chunked content provider's capture list), the edit did not COMPILE — the guard is also referenced
+inside the lambda body. The build failed, the previously-built binary was still on disk, and
+running it reported **65/65 SUCCESS**. Read casually, that is "the mutation survived and the suite
+has a hole". It was neither: the mutant never existed.
+
+This is the same family as C-045 and C-047 — a check quietly measuring something other than what it
+claims — and it is the FIRST time the build has seen it in the mutation harness itself, which is
+the tool being used to find that family. A harness that can silently report a stale result
+undermines every conclusion drawn from it.
+
+**STANDING RULE, now applied in this session's later mutations:** a mutation run must ASSERT THE
+BUILD SUCCEEDED before the binary's output means anything. In shell:
+
+    BUILD=$(cmake --build ... --target router-tests 2>&1)
+    if echo "$BUILD" | grep -qE "error:"; then echo "INVALID MUTATION"; else ./router-tests; fi
+
+A mutation that does not compile is not evidence of anything and must be replaced by one that does,
+never recorded as a survivor. The same hazard exists on the TypeScript side in weaker form — a
+type error does not stop `node --test` from running the previous module graph — so mutations there
+should be confirmed against the typecheck leg too.
+
+A compiling variant of the same decision was run instead and the implementer's finding stands.

@@ -6,7 +6,10 @@
 // first (SG-6: GET /v1/models is never admitted, so a saturated queue cannot
 // stall opencode's model listing); GET /conductor/health answers outside
 // admission entirely; everything else is 404'd without touching the upstream.
-// Metrics (11.7) are NOT here — beyond relaying and admitting, this file
+// Task 11.7's ledger threads through here: every request that enters the
+// /v1/.* handler yields exactly one MetricsLedger line, written when the
+// RESPONSE completes, and GET /conductor/metrics serves the in-memory
+// aggregate outside admission. Beyond relaying and admitting, this file
 // normalizes the four §4.4 conductor tags into one RequestTags value that later
 // tasks consume, and hands that value plus the forwarded body to Task 11.6's
 // pure schema observer (router/schema-observer.hpp), whose per-request
@@ -38,6 +41,7 @@
 #include <spdlog/spdlog.h>
 
 #include <cctype>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -54,6 +58,8 @@
 
 #include "router/admission.hpp"
 #include "router/config.hpp"
+#include "router/metrics.hpp"
+#include "router/version.hpp"
 
 namespace conductor::router {
     // Task 0.2's pinned body-field fallback name (conductor/tests/fixtures/
@@ -277,6 +283,162 @@ namespace conductor::router {
             std::thread worker_;
         };
 
+        // Task 11.7's aggregate endpoint, registered OUTSIDE admission exactly
+        // like kHealthPath so it answers at a full queue, and never ledgered.
+        inline constexpr auto kMetricsPath = "/conductor/metrics";
+
+        // Reads token counts and timings out of a BUFFERED response body: the
+        // single JSON object's `usage` (prompt_tokens/completion_tokens) and
+        // its `timings`, copied verbatim. Anything unparseable or absent
+        // leaves the columns null — observation only, never a touched relay.
+        inline void readUsageFromBody(const std::string& body, RequestRecord& entry) {
+            const nlohmann::json parsed =
+                nlohmann::json::parse(body, nullptr, /*allow_exceptions=*/false);
+            if (parsed.is_discarded() || !parsed.is_object())
+                return;
+
+            const auto usage = parsed.find("usage");
+            if (usage != parsed.end() && usage->is_object()) {
+                const auto prompt = usage->find("prompt_tokens");
+                if (prompt != usage->end() && prompt->is_number())
+                    entry.promptTokens = prompt->get<std::int64_t>();
+
+                const auto completion = usage->find("completion_tokens");
+                if (completion != usage->end() && completion->is_number())
+                    entry.completionTokens = completion->get<std::int64_t>();
+            }
+
+            const auto timings = parsed.find("timings");
+            if (timings != parsed.end() && !timings->is_null())
+                entry.timings = *timings;
+        }
+
+        // Inspects SSE bytes AS THEY PASS on the chunked relay — never
+        // buffering the stream, only the event in flight — for the `data:`
+        // chunk carrying a non-null `usage` object, which under Task 0.2's
+        // stream_options:{include_usage:true} arrives before `data: [DONE]`.
+        // `timings` is taken verbatim from that same event object.
+        class SseUsageScanner {
+        public:
+            void feed(const std::string& bytes, RequestRecord& entry) {
+                buffer_.append(bytes);
+
+                std::size_t boundary;
+                while ((boundary = buffer_.find("\n\n")) != std::string::npos) {
+                    handleEvent(std::string_view(buffer_).substr(0, boundary), entry);
+                    buffer_.erase(0, boundary + 2);
+                }
+
+                // An unbounded partial event would grow without limit on a
+                // stream that never closes one; a usage chunk is tiny, so an
+                // event past the relay's high-water mark carries nothing worth
+                // chasing.
+                if (buffer_.size() > kRelayHighWaterBytes)
+                    buffer_.clear();
+            }
+
+        private:
+            static void handleEvent(std::string_view event, RequestRecord& entry) {
+                // Per the SSE grammar an event's payload is its `data:` lines
+                // joined with newlines; llama-server emits exactly one.
+                std::string payload;
+                std::size_t start = 0;
+                while (start <= event.size()) {
+                    const std::size_t end = event.find('\n', start);
+                    std::string_view line = event.substr(
+                        start, end == std::string_view::npos ? std::string_view::npos
+                                                             : end - start);
+                    if (!line.empty() && line.back() == '\r')
+                        line.remove_suffix(1);
+
+                    if (line.substr(0, 5) == "data:") {
+                        std::string_view rest = line.substr(5);
+                        if (!rest.empty() && rest.front() == ' ')
+                            rest.remove_prefix(1);
+
+                        if (!payload.empty())
+                            payload.push_back('\n');
+
+                        payload.append(rest);
+                    }
+
+                    if (end == std::string_view::npos)
+                        break;
+
+                    start = end + 1;
+                }
+
+                if (payload.empty() || payload == "[DONE]")
+                    return;
+
+                const nlohmann::json parsed =
+                    nlohmann::json::parse(payload, nullptr, /*allow_exceptions=*/false);
+                if (parsed.is_discarded() || !parsed.is_object())
+                    return;
+
+                const auto usage = parsed.find("usage");
+                if (usage == parsed.end() || !usage->is_object())
+                    return;
+
+                const auto prompt = usage->find("prompt_tokens");
+                if (prompt != usage->end() && prompt->is_number())
+                    entry.promptTokens = prompt->get<std::int64_t>();
+
+                const auto completion = usage->find("completion_tokens");
+                if (completion != usage->end() && completion->is_number())
+                    entry.completionTokens = completion->get<std::int64_t>();
+
+                const auto timings = parsed.find("timings");
+                if (timings != parsed.end() && !timings->is_null())
+                    entry.timings = *timings;
+            }
+
+            std::string buffer_;
+        };
+
+        // Carries ONE request's RequestRecord to response completion and fires
+        // MetricsLedger::record exactly once, when the LAST holder lets go:
+        // the buffered return and every error exit drop it at handler return,
+        // while a streaming relay's content provider carries a copy so the
+        // line lands when httplib destroys the provider — normal end or a
+        // dying connection — exactly the AdmissionSlot idiom (the C-033
+        // defect class: recording at handler return would ledger a streamed
+        // line before any usage chunk existed).
+        class LedgerGuard {
+        public:
+            explicit LedgerGuard(MetricsLedger& ledger)
+                : ledger_(ledger) {
+            }
+
+            LedgerGuard(const LedgerGuard&) = delete;
+            LedgerGuard& operator=(const LedgerGuard&) = delete;
+
+            ~LedgerGuard() {
+                if (upstreamStart) {
+                    record.upstreamMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - *upstreamStart)
+                                            .count();
+                }
+
+                try {
+                    ledger_.record(record);
+                } catch (...) {
+                    // record() is designed never to throw (G5); a destructor
+                    // must not let anything escape regardless.
+                }
+            }
+
+            RequestRecord record;
+            // Engaged the moment the upstream call starts, so upstreamMs is
+            // non-null exactly when the upstream was attempted — a shed
+            // request never engages it.
+            std::optional<std::chrono::steady_clock::time_point> upstreamStart;
+            SseUsageScanner scanner;
+
+        private:
+            MetricsLedger& ledger_;
+        };
+
     }  // namespace detail
 
     // Body-field fallback extraction + stripping. ALWAYS removes a top-level
@@ -326,8 +488,10 @@ namespace conductor::router {
 
 namespace conductor::router {
 
-    // The §4.4 pass-through slice plus the admission hand-off and Task 11.6's
-    // observation seam — metrics are Task 11.7 and are NOT part of this class.
+    // The §4.4 pass-through slice plus the admission hand-off, Task 11.6's
+    // observation seam and Task 11.7's ledger threading: one MetricsLedger,
+    // built from RouterConfig::metrics.ledgerPath, records exactly one line
+    // per request that enters the /v1/.* handler, at response completion.
     //   - Constructed from Task 11.2's parsed RouterConfig (listen + upstream
     //     endpoints). cfg.listen.port == 0 binds an OS-assigned ephemeral port.
     //     Construction and start() need NO live upstream: the upstream
@@ -358,7 +522,8 @@ namespace conductor::router {
             , groupHeader_(config.affinity.header.empty() ? detail::kGroupHeader : config.affinity.header)
             , schemaHeader_(config.schema.observeHeader.empty() ? detail::kSchemaHeader
                                                                 : config.schema.observeHeader)
-            , admission_(config) {
+            , admission_(config)
+            , metrics_(config) {
             // Token-by-token SSE is the point of this proxy: Nagle would coalesce
             // single-chunk writes into 40ms batches on both legs.
             server_.set_tcp_nodelay(true);
@@ -465,13 +630,26 @@ namespace conductor::router {
                 };
 
             // SG-5: registered OUTSIDE admission, so it answers while every slot
-            // and every queue entry is held. Task 11.7 extends the body here.
+            // and every queue entry is held. The body is 11.7's extended shape;
+            // `status` keeps 11.4's committed value and `version` is
+            // router_version(), never a second version constant.
             server_.Get(kHealthPath, [](const httplib::Request&, httplib::Response& response) {
                 nlohmann::json body;
                 body["status"] = "ok";
+                body["version"] = router_version();
                 response.status = 200;
                 sendBuffered(response, "application/json", body.dump());
             });
+
+            // Task 11.7's aggregate, registered OUTSIDE admission exactly like
+            // health so it answers at a full queue. Serving it is never
+            // ledgered and never counted — polling the endpoint cannot inflate
+            // the dataset it reports.
+            server_.Get(detail::kMetricsPath,
+                        [this](const httplib::Request&, httplib::Response& response) {
+                            response.status = 200;
+                            sendBuffered(response, "application/json", metrics_.summary().dump());
+                        });
 
             server_.Get(detail::kProxyPathPattern, proxy);
             server_.Post(detail::kProxyPathPattern, proxy);
@@ -494,9 +672,20 @@ namespace conductor::router {
         };
 
         void handleProxy(const httplib::Request& request, httplib::Response& response) {
+            // Every request that enters this handler gets exactly ONE ledger
+            // line — the buffered return, the streamed completion, the 503
+            // refusals, the 502s — written when the response completes (the
+            // guard's destructor), never when the handler returns.
+            const auto ledgerGuard = std::make_shared<detail::LedgerGuard>(metrics_);
+
             try {
                 ForwardPlan plan = planForward(request);
                 recordTags(plan.tags);
+
+                ledgerGuard->record.model = plan.model;
+                ledgerGuard->record.role = plan.tags.role;
+                ledgerGuard->record.group = plan.tags.group;
+                ledgerGuard->record.priority = resolvedPriorityClass(plan.tags.priority);
 
                 // Task 11.6: observation runs for EVERY /v1/* request over the
                 // already-normalized tags and the FORWARDED (post-strip) body —
@@ -504,6 +693,12 @@ namespace conductor::router {
                 // beyond the observer's own.
                 const SchemaObservation observation = observe_request(plan.tags, plan.body);
                 recordObservation(observation);
+                // The ledger's schema columns are 11.6's observation verbatim:
+                // an untagged request made NO observation, so the column is
+                // null, never false.
+                if (observation.tagged)
+                    ledgerGuard->record.schemaMissing = observation.schemaMissing;
+
                 if (observation.tagged && observation.schemaMissing) {
                     // §4.4 "journaled": one warn line per tagged-schema-missing
                     // request naming the role and group tags and the path.
@@ -517,8 +712,10 @@ namespace conductor::router {
                 // SG-6: admission is for the generation calls only. A read like
                 // GET /v1/models crosses un-admitted, so a saturated queue cannot
                 // turn it into an error the direct path would have served (G5).
+                // Never having reached admit(), it records queueWaitMs 0.
                 if (request.method != "POST") {
-                    relayToUpstream(request, response, std::move(plan.body), nullptr, observation);
+                    relayToUpstream(request, response, std::move(plan.body), nullptr, observation,
+                                    ledgerGuard);
                     return;
                 }
 
@@ -529,16 +726,29 @@ namespace conductor::router {
                 if (config_.schema.rejectOnMissing && observation.tagged &&
                     observation.schemaMissing) {
                     sendSchemaMissingError(response);
+                    ledgerGuard->record.status = 400;
                     return;
                 }
 
                 // The group rides along with the priority: 11.5's affinity policy
                 // orders the queue with it, and it can never make a request that
                 // would have been admitted anything other than admitted (G5).
+                // queueWaitMs is measured ACROSS admit(), which parks this thread
+                // for exactly the queue wait — one measurement covers Admitted,
+                // TimedOut and Overflowed alike, and 11.4's surface is untouched.
+                const auto admitStarted = std::chrono::steady_clock::now();
                 const AdmissionOutcome outcome =
                     admission_.admit(plan.model, plan.tags.priority, plan.tags.group);
+                ledgerGuard->record.queueWaitMs =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - admitStarted)
+                        .count();
+
                 if (outcome != AdmissionOutcome::Admitted) {
                     sendAdmissionError(response, outcome, plan.model);
+                    // The shed tail stays visible in the dataset: status 503,
+                    // upstreamMs null (never attempted), token counts null.
+                    ledgerGuard->record.status = 503;
                     return;
                 }
 
@@ -548,7 +758,7 @@ namespace conductor::router {
                 // the slot outlives this handler exactly as long as the stream does.
                 auto slot = std::make_shared<AdmissionSlot>(admission_, plan.model);
                 relayToUpstream(request, response, std::move(plan.body), std::move(slot),
-                                observation);
+                                observation, ledgerGuard);
             } catch (const std::exception& failure) {
                 // Nothing above this point rejects a request on purpose, so reaching
                 // here means the router itself broke. Answering with the same
@@ -558,7 +768,21 @@ namespace conductor::router {
                     response,
                     std::string("llama-router failed to relay the request: ") +
                         failure.what());
+
+                ledgerGuard->record.status = 502;
             }
+        }
+
+        // SG-4's RESOLVED class, mirroring admission's priorityValue collapse:
+        // the ledger records what the queue DID, not what the tag said — a
+        // column saying "urgent" for a request queued as interactive would make
+        // the POC's wait analysis lie.
+        [[nodiscard]] static std::string resolvedPriorityClass(
+            const std::optional<std::string>& priority) {
+            if (priority && (*priority == "review" || *priority == "batch"))
+                return *priority;
+
+            return "interactive";
         }
 
         [[nodiscard]] ForwardPlan planForward(const httplib::Request& request) const {
@@ -611,7 +835,8 @@ namespace conductor::router {
 
         void relayToUpstream(const httplib::Request& request, httplib::Response& response,
                              std::string forwardBody, std::shared_ptr<AdmissionSlot> slot,
-                             const SchemaObservation& observation) {
+                             const SchemaObservation& observation,
+                             const std::shared_ptr<detail::LedgerGuard>& ledgerGuard) {
             httplib::Headers upstreamHeaders;
             for (const auto& [name, value] : request.headers) {
                 if (!detail::isRequestHeaderDropped(name))
@@ -635,6 +860,11 @@ namespace conductor::router {
             const std::string target = request.target.empty() ? request.path : request.target;
             auto call = std::make_shared<detail::UpstreamCall>(relay, client);
 
+            // From here the upstream IS attempted, so upstreamMs is non-null on
+            // every exit below — the connect-failure 502 included, unlike a
+            // shed request that never got this far.
+            ledgerGuard->upstreamStart = std::chrono::steady_clock::now();
+
             try {
                 call->run(
                     [relay, client, method = request.method, target, headers = std::move(upstreamHeaders), body = std::move(forwardBody)]() mutable {
@@ -649,6 +879,7 @@ namespace conductor::router {
                         std::string("could not start a relay thread: ") +
                         failure.what()));
 
+                ledgerGuard->record.status = 502;
                 return;
             }
 
@@ -678,10 +909,14 @@ namespace conductor::router {
                 // and never latched — the client is rebuilt on the next request, so
                 // the moment something listens again the relay resumes.
                 sendRouterError(response, upstreamMessage(httplib::to_string(error)));
+                ledgerGuard->record.status = 502;
                 return;
             }
 
             response.status = status;
+            // The status column records what the CLIENT gets: the upstream's
+            // own answer, non-2xx included, crossing back untouched.
+            ledgerGuard->record.status = status;
             for (const auto& [name, value] : responseHeaders) {
                 if (!detail::isResponseHeaderDropped(name))
                     response.set_header(name, value);
@@ -710,8 +945,14 @@ namespace conductor::router {
 
                 // Task 11.6's response half runs on the buffered path only —
                 // the verdict is recorded off these exact bytes BEFORE they are
-                // handed to sendBuffered, which returns them untouched.
-                recordResponseVerdict(observation, body);
+                // handed to sendBuffered, which returns them untouched. The
+                // ledger's token columns read the same single body's `usage`
+                // and copy its `timings` verbatim.
+                detail::readUsageFromBody(body, ledgerGuard->record);
+                const std::optional<bool> verdict = recordResponseVerdict(observation, body);
+                if (verdict)
+                    ledgerGuard->record.schemaConformed = *verdict;
+
                 sendBuffered(response, contentType, std::move(body));
                 return;
             }
@@ -732,8 +973,11 @@ namespace conductor::router {
             // nothing for the streaming traffic it exists to bound. httplib destroys
             // the provider when the response ends — normally, or by the connection
             // dying — so the slot is returned exactly once, on every outcome.
+            // `ledgerGuard` rides along under the SAME idiom: the streamed line is
+            // written when the provider is destroyed, exactly once, AFTER any
+            // usage chunk has crossed — never at handler return (C-033).
             response.set_chunked_content_provider(
-                contentType, [relay, call, slot = std::move(slot)](std::size_t /*offset*/, httplib::DataSink& sink) {
+                contentType, [relay, call, slot = std::move(slot), ledgerGuard](std::size_t /*offset*/, httplib::DataSink& sink) {
                     std::string chunk;
                     bool complete = false;
 
@@ -750,6 +994,13 @@ namespace conductor::router {
                     }
 
                     relay->cv.notify_all();
+
+                    // Usage/timings are read from the chunks AS THEY PASS —
+                    // the relay below writes these same bytes unchanged. The
+                    // provider runs serially on one connection thread, so the
+                    // guard's scanner needs no lock of its own.
+                    if (!chunk.empty())
+                        ledgerGuard->scanner.feed(chunk, ledgerGuard->record);
 
                     // A zero-length write would tell httplib the body ended, so the
                     // empty-chunk wake-ups (finished, cancelled) skip it.
@@ -1000,19 +1251,22 @@ namespace conductor::router {
         }
 
         // Completes the stored observation with the buffered response's
-        // conformance verdict. An unobservable verdict (empty optional) leaves
-        // the request-time record as it stands — schemaConformed unset —
-        // rather than re-storing an identical value.
-        void recordResponseVerdict(SchemaObservation observation, const std::string& body) {
-            std::optional<bool> verdict =
+        // conformance verdict, and returns that verdict so the caller can put
+        // it on the ledger line. An unobservable verdict (empty optional)
+        // leaves the request-time record as it stands — schemaConformed
+        // unset — rather than re-storing an identical value.
+        std::optional<bool> recordResponseVerdict(SchemaObservation observation,
+                                                  const std::string& body) {
+            const std::optional<bool> verdict =
                 observe_response(observation, config_.schema.validateResponses,
                                  /*isStream=*/false, body);
             if (!verdict)
-                return;
+                return verdict;
 
-            observation.schemaConformed = std::move(verdict);
+            observation.schemaConformed = verdict;
             const std::lock_guard<std::mutex> lock(observationMutex_);
             lastObservation_ = std::move(observation);
+            return verdict;
         }
 
         RouterConfig config_;
@@ -1023,6 +1277,12 @@ namespace conductor::router {
         // owns: a request parked in admit() holds a reference to it, and server_'s
         // destructor is what joins those threads.
         AdmissionController admission_;
+
+        // Same ordering law as admission_: a LedgerGuard riding a content
+        // provider fires on a connection thread server_'s destructor joins, so
+        // the ledger must still be alive then. The location comes ONLY from
+        // config.metrics.ledgerPath.
+        MetricsLedger metrics_;
 
         httplib::Server server_;
         std::thread listener_;
