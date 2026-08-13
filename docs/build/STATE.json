@@ -1223,22 +1223,38 @@
       "taskId": "9.5a",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "ef06717",
       "commitMessage": "conductor: 9.5a item review",
       "planLines": [
         2652,
         2666
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
+      "tap": "tests=1022 pass=1022 fail=0 (suite); 9.5a file 28/28",
+      "redEvidence": {
+        "cmd": "conductor/node_modules/.bin/tsc -p conductor/tsconfig.json --noEmit",
+        "exitCode": 2,
+        "class": "missing-subject",
+        "excerpt": "conductor/tests/tools-9.5a.test.ts(171,10): error TS2305: Module '\"../adapter/tools.ts\"' has no exported member 'handleItemReview'."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/adapter/fanout.ts",
+        "conductor/adapter/inject.ts",
+        "conductor/adapter/chat-message.ts",
+        "conductor/tests/tools-9.5a.test.ts"
+      ],
+      "revertAssertion": "un-export handleItemReview from adapter/tools.ts => the 9.5a suite re-derives the missing-export red (tests=1 pass=0). M4 RUN in a detached worktree at ef06717: baseline 28/28 green, mutated 1/0. VERIFIED, not reasoned.",
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "C-042: one row ADDED to the red at orchestrator ruling ([9.5a-skeptics-cover-non-major]) because the delivered suite could not discriminate majors-only from all-findings skeptic panels. Diff vs the parked red: 67 lines added, 0 changed or removed - verified by the orchestrator, not taken on report."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": null,
+      "openItems": [
+        "No default stage-executor entry for conductor_item_review in handleDispatchWave: 9.4c's committed default-table row pins the current behaviour, so wiring it must land WITH that row's revision. Phase 9 gate item."
+      ]
     },
     "9.5b": {
       "taskId": "9.5b",
@@ -1544,20 +1560,33 @@
       "taskId": "11.6",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "f142745",
       "commitMessage": "conductor: 11.6 schema observer",
       "planLines": [
         2829,
         2845
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
+      "tap": "ctest/doctest: 49 cases, 21883 assertions, 0 failed, 0 skipped",
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "src/tests/schema_observer_test.cpp:170:10: fatal error: 'router/schema-observer.hpp' file not found"
+      },
+      "filesTouched": [
+        "src/router/schema-observer.hpp",
+        "src/router/router.hpp",
+        "src/tests/schema_observer_test.cpp",
+        "CMakeLists.txt",
+        "docs/build/honest-limits-pending.md"
+      ],
+      "revertAssertion": "remove src/router/schema-observer.hpp => the router-tests target fails to compile ('router/schema-observer.hpp' file not found, now from router.hpp:325 since the seam includes it). M4 RUN in the main tree with the tree verified clean against f142745 (the C++ method: the build dir is bound to this source path, so a detached worktree would need its own ~45min vcpkg configure). Restored, 49/49 green.",
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "C-046: one ASSERTION added to the delivered red by the orchestrator, inside the existing row [11.6-stream-verdict-null]. The implementer disclosed a SURVIVING mutation - removing the isStream gate from observe_response left all 49 cases green, because every isStream fixture hands SSE bytes that independently fail the envelope-parse gate. Closed with a body that DOES parse, asserted both directions over identical bytes. Verified to discriminate: 48/49 with the gate removed, only that row red."
+      ],
       "startedAt": null,
       "finishedAt": null
     },
