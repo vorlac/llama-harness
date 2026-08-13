@@ -1324,3 +1324,38 @@ buffering to shutdown. Checked rather than assumed: 11.7's promoted spec already
 (`11.7-streamed-line-once` requires the line to be present after the stream completes and before
 shutdown, and `11.7-ledger-line-per-request` requires one line per request). No change needed —
 recorded so the Phase 11 gate does not re-litigate it.
+
+## C-042 — Task 9.5a: item review adjudicates EVERY finding; plan review adjudicates majors only
+
+**How it was found.** Not by a review — by the 9.5a test-writer reporting, unprompted, that its own
+suite could not decide the question. That is the behaviour worth reinforcing: it delivered 27
+green-under-stub tests, mutation-tested all eight of its load-bearing rows, and then said which
+assertion its fixtures could not discriminate.
+
+**The ambiguity.** Spec row `9.5a-skeptics-findingsurvives` says "every finding gets exactly
+workflow.skepticsPerFinding skeptic sub-sessions". Committed `handlePlanReview` does something
+else — `adapter/tools.ts:1743` filters `severity === "major"` and only majors get panels. Every
+finding in every 9.5a fixture is severity `major`, so a majors-only implementation and an
+all-findings implementation BOTH pass the suite. An untestable row is not coverage.
+
+**RULING: at item review every finding gets a panel; plan review keeps its majors filter.** The
+difference is structural rather than stylistic, and both halves are right for their own site:
+
+- Plan review answers ONE binary question — does this plan pass. Only majors bear on it, so
+  adjudicating a minor would be waste with no consumer.
+- Item review's OUTPUT IS ROUTED FIXES. A finding that reaches a fix dispatch unadjudicated is a
+  fix demand nobody checked. And `9.5a-adjudication-ordering` acts explicitly on the quality lenses
+  (test-adequacy, minimality, perf), which are routinely not major — under a majors-only rule their
+  survival would never be decided at all and that row would describe a path that cannot occur.
+
+`handlePlanReview` is NOT changed. A new row `9.5a-skeptics-cover-non-major` was commissioned to
+close the hole: it must fail against a majors-only implementation and pass against the delivered
+one, proven by mutation rather than asserted.
+
+**THIS IS THE FOURTH INSTANCE OF THE PHASE 9 THEME and it is now the gate's headline item.** One
+rule living in two places has drifted at: the 9.4a dependency rule, C-037's report predicate,
+C-040's no-git publish gate, and now the skeptic-panel scope. Three of those four were caught by
+something OTHER than a review panel — a diff read, a mutation, and a test-writer's own honesty.
+The Phase 9 MILESTONE gate must not merely re-check these four sites; it must ask whether the
+codebase has any remaining rule that is DERIVED twice rather than exported once, because the
+recurrence rate says the answer is yes.
