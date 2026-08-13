@@ -1333,22 +1333,39 @@
       "taskId": "9.6",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "d2bf346",
       "commitMessage": "conductor: 9.6 worktree mode",
       "planLines": [
         2700,
         2728
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
+      "tap": "tests=1124 pass=1124 fail=0 (suite); 9.6 file 21/21",
+      "redEvidence": {
+        "cmd": "conductor/node_modules/.bin/tsc -p conductor/tsconfig.json --noEmit",
+        "exitCode": 2,
+        "class": "missing-subject",
+        "excerpt": "TS2307 Cannot find module '../adapter/worktrees.ts'; TS2305 no exported member 'verifyInFlightTreeFor'"
+      },
+      "filesTouched": [
+        "conductor/adapter/worktrees.ts",
+        "conductor/adapter/gitio.ts",
+        "conductor/adapter/state.ts",
+        "conductor/adapter/tools.ts",
+        "conductor/tests/tools-9.6.test.ts"
+      ],
+      "revertAssertion": "delete conductor/adapter/worktrees.ts => the 9.6 suite re-derives the missing-module red (ERR_MODULE_NOT_FOUND, tests=1 pass=0). M4 RUN in a detached worktree at d2bf346: baseline 21/21 green, mutated 1/0.",
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "C-052: a third half added by the orchestrator to [9.6-mergeback-ff-first-else-merge]. The implementer DISCLOSED a surviving mutation - collapsing the ff-only-first sequence into one plain `git merge` passed all 21 rows, because the row pins history SHAPE and git's default merge.ff produces identical shapes. The new half sets merge.ff=false on the fixture, under which a plain merge would mint a merge commit where a fast-forward was possible. Verified: the mutation now fails 20/21 on exactly that row.",
+        "handlePublish's staging gained GLOB EXPANSION, changing committed behaviour deliberately. A glob fileScope (which \u00a72.4 permits and validateQueue already reasons about) previously staged NOTHING, so such a run would have published empty commits silently. Guarded by a meta-character test so literal entries take the identical path; 9.5b's 50 committed rows still pass."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": null,
+      "openItems": [
+        "Implementer-disclosed, NOT closed: item-review's reviewer/fix jobs and conductor_report's closing verify still use tree 'main' under worktree mode; neither is a default wave stage at HEAD and no 9.6 row pins them. Revisit with C-050 (the wave driver's missing stage executors), which is what would put them in the wave."
+      ]
     },
     "10.1": {
       "taskId": "10.1",
