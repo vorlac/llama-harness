@@ -489,6 +489,19 @@
    "M8": "PASS ctest observed by orchestrator directly (7/7, 119/119)",
    "M9": "n/a (C++-only; TS untouched)",
    "orchestratorReverify": "moved the staged test in MYSELF, wired CMakeLists MYSELF (orchestrator-only file), observed the compile red before implementation and the 7/7 green + M4 red re-derivation after, and read the full config.hpp. Known nit ledgered in STATE (empty-field() ConfigError on input-JSON parse errors vs the class-comment contract) for the Phase 11 gate."
+  },
+  "9.2": {
+   "at": "2026-08-13T04:40:00Z",
+   "M1": "PASS 887/887 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
+   "M2": "PASS 864 -> 873 (9 authored) -> 887 (14 review-fix)",
+   "M3": "PASS (tsc --noEmit clean; pre-implementation tsc showed ONLY the 2 missing-export errors)",
+   "M4": "PENDING post-commit re-derivation (scratch worktree from the 9.2 commit)",
+   "M5": "PASS (production-scoped marker scan over planning.ts/tools.ts/types.ts)",
+   "M6": "PASS (planning.ts imported by tools.ts + the test; both handlers exported and exercised)",
+   "M7": "PASS 9 assertion rows, each with a name-prefixed test, + 14 review-fix rows",
+   "M8": "n/a (no live-model observation in this task; the fake SDK drives every dispatch)",
+   "M9": "PASS (bun leg green, 8 pass)",
+   "orchestratorReverify": "observed the missing-export red MYSELF before implementation and the 887/887 green after; read the ENTIRE diff (planning.ts in full, the tools.ts diff, the types.ts diff); ran a 3-lens skeptic-verified adversarial panel PRE-COMMIT which found 19 real defects the 873-test suite missed, including 2 MAJORs that would break runs under the DEFAULT config; wrote all 14 fix-tests myself, observed 12 of them red, and fixed them myself. Honestly recorded: R13 passed pre-fix (guard, not red-driven), and 9 skeptics died on a session limit so their findings were counted as upheld rather than dropped."
   }
  },
  "phaseGates": {

@@ -581,3 +581,87 @@ fixed test-first (F1–F6 red → green; F7 a hardening test) BEFORE the 9.1 com
 - **Blast radius:** `conductor/adapter/tools.ts` (6 handlers + the 6 fixes), `conductor/core/
   journal-events.ts` (decision.recorded), `conductor/tests/tools-9.1.test.ts` (17 tests). The Phase 9
   MILESTONE gate (after 9.6) will re-review the whole tools subsystem.
+
+## C-030 — Task 9.2 pre-commit adversarial review (3 lenses, skeptic-verified)
+
+**Panel:** 3 blind lenses (spec-conformance / edge-counterexample / invariants) over the uncommitted
+9.2 diff -> 27 findings -> 2 refute-biased skeptics each (tie-upholds, k=2). 19 survived. The session
+limit killed 9 skeptics mid-panel; per the plan's own under-delivered-panel rule (the 9.5a binding)
+the findings whose panel under-delivered (F5, F6, F8, plus one refuter each on F4/F7/E9) were counted
+as UPHELD rather than silently dropped — the workflow's own filter would have dropped the three with
+zero returned verdicts, which is exactly the defect that binding exists to prevent.
+
+- **MAJOR (F1/I1) — the §3.2 item size budget was wired to `workflow.trivialMaxFiles`.** That field is
+  the §2.1 TRIVIAL-classification ceiling (shipped default **2**, plan line 560); §3.2's size row says
+  "~5 files" and names no config knob. Under the DEFAULT config every decomposed item touching 3+ files
+  was rejected as "too large" — the run burns its one re-prompt and then wedges in INTAKE — and tuning
+  the trivial ceiling silently retuned decompose. The authored tests masked it by fixing
+  trivialMaxFiles:5. FIX: `ITEM_MAX_FILES = 5` owned by core/planning.ts; trivialMaxFiles is left to the
+  trivial path alone.
+- **MAJOR (F2/I3/E4) — acceptance clustering broke on ordinary English, both directions.** The cluster
+  subject was the raw leading token, so every criterion opening with an article collapsed to the subject
+  "the" (two genuinely different subjects counted as ONE cluster — the exact two-things smell the row
+  targets, under-rejected), while one subject phrased with and without an article counted as TWO and was
+  rejected with the nonsense reason "spans 2 clusters (parser, the)". FIX: skip determiners/stop-words
+  when choosing the subject token.
+- **MINOR (F3/E11) — `make it <observable outcome>` was rejected as a quality wish.** The pattern
+  `/\bmake\s+it\s+\w+/i` fired on "make it return 404 on a missing id", contradicting the module's own
+  stated narrowness rule. FIX: require a quality-adjective continuation.
+- **MINOR (F4/E6) — the placeholder scan condemned plans for DISCUSSING placeholders.** Bare-word rules
+  rejected a plan describing an HTML `placeholder` attribute, an item "remove the TODO comments in
+  src/x.ts", a sentence ending "/etc.", and a bare `...` line inside a fenced code block (idiomatic in
+  Python stubs/YAML). FIX: shape-matched rules (comment-marker `TODO:`, `<placeholder>`/"placeholder
+  for", list-trailing ", etc."), and the elision rule judged against the document with fenced code
+  stripped. Added the TBD expansions ("to be determined/decided").
+- **MINOR (E2) — duplicate item ids made the cycle detector judge a DIFFERENT graph.** The deps map was
+  last-writer-wins, so a cycle routed through an earlier duplicate vanished; the single re-prompt omitted
+  it and attempt 2 died for a defect the planner was never shown. FIX: duplicate ids UNION their edges.
+- **MINOR (E3) — only the FIRST cycle was reported.** Two disjoint cycles meant the one re-prompt carried
+  half the truth. FIX: `findDependsOnCycles` returns every distinct cycle (de-duplicated by node set).
+- **MINOR (E5) — the disjoint-path guard false-rejected root-level-only globs.** `scopesIntersect`
+  reduces a glob to its literal head and a leading wildcard yields an EMPTY head that overlaps
+  everything — the right conservative bias for the wave scheduler (a false overlap only serialises work)
+  but a hard false REJECTION here, so a docs item scoped `*.md` was rejected as editing behavioral
+  production code. FIX: a glob naming no directory and no `**` matches root-level files only and is
+  disjoint from a directory-rooted path; `**/*.md` genuinely does reach under it and is still rejected.
+  shell-parse.ts is UNTOUCHED (the scheduler keeps its conservative rule).
+- **MINOR (E8/F8) — the placeholder doctrine covered plan.md only.** A decision proposal carrying "TBD"
+  in question/why/choice/appliedWhere was minted into the PERMANENT §2.7 ledger, while the identical
+  string in the markdown rejected the whole plan. §3.2 makes the recorded decisions part of the same plan
+  output. FIX: `planDefects` scans the decision prose too.
+- **MINOR (E9) — the one bounded re-prompt named only ONE defect class.** A reply that was both
+  placeholder-laden and carried a <2-option derived decision was re-prompted about placeholders only, so
+  a compliant attempt 2 died terminally for an unshown defect. FIX: placeholder + decision-gate defects
+  are collected in ONE pass and the re-prompt carries all of them.
+- **NIT (I5) — the decision-gate rejection journaled nothing** before throwing, while every other
+  rejection emitted `fsm/guard-reject`. FIX: unified into the same guard-reject path.
+- **NIT (I2) — a corrupt queue.json leaked a raw SyntaxError** naming neither tool nor file, and the read
+  was not BOM-tolerant. FIX: named error + BOM strip.
+- **NIT (I6) — planDecisionSchema hand-re-listed the §2.7 fields** while the TS type was already
+  `Omit<DecisionRecord,"id"|"tsIso">`; drift would have surfaced only as the fan-out schema-rejecting
+  well-formed plans. FIX: the schema is DERIVED from decisionRecordSchema. (Guard test R13 passed
+  pre-fix — recorded honestly as a regression guard, not red-driven evidence.)
+- **NIT (E13) — an empty-string id was excluded from `seen` but INCLUDED as a graph node,** producing the
+  incoherent reason "cycle ( -> )". FIX: empty ids are not nodes.
+- **MINOR (F6) — decomposePrompt stated a ponytail law the handler does not enforce.** Under `lite` it
+  told the planner a minimal-code rung with an empty reuse note "is rejected" (false — §6.3 lite is
+  advisory and validateQueue correctly does not enforce it), and `ultra`'s additional
+  challenge-the-requirements instruction appeared nowhere. FIX: `ponytailLaw(config)` states the law at
+  the configured intensity.
+- **REFUTED by their panels (no change):** E1 (claimed concurrent handleDecompose invocations both
+  persist — refuted 2/2: the workspace lock plus the single-orchestrator model), E7 (placeholder
+  false-negatives on TBD expansions — refuted 2/2, though the two literal expansions were added anyway
+  as a cheap strict improvement), E12 (the file budget counts fileScope ENTRIES so one broad glob evades
+  it — refuted 2/2; the same claim as F7, whose panel under-delivered, so the stronger panel governs).
+- **DEFERRED to Task 10.1 (recorded binding, NOT fixed here):** E10 — a crash INSIDE the persist phase
+  leaves half-written state a re-run compounds rather than reconciles (orphaned decisions.jsonl records
+  from a never-accepted plan; orphaned PENDING item files absent from queue.json). Reconciliation belongs
+  with the run lifecycle/continuation engine, not in these two handlers.
+- **Documented deviation (F5, not a defect):** the handlers grant ONE re-prompt uniformly to every §3.2
+  row, while the plan's table reserves the bounded round for the size row and 9.2's bullet for the cycle
+  case. Uniform-one is strictly MORE forgiving and still ends in "a rejection with a named reason";
+  recorded for the Phase 9 milestone gate rather than silently kept.
+- **Blast radius:** `conductor/core/planning.ts` (rewritten pure half), `conductor/core/types.ts`
+  (derived planDecisionSchema), `conductor/adapter/tools.ts` (readQueueJson, planDefects, unified
+  re-prompt, ponytailLaw), `conductor/tests/tools-9.2.test.ts` (9 authored + 14 review-fix = 23 tests).
+  887/887 green.

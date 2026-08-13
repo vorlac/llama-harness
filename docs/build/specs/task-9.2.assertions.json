@@ -1,0 +1,55 @@
+{
+  "taskId": "9.2",
+  "planLines": [
+    2584,
+    2594
+  ],
+  "kind": "code (tools MILESTONE, Phase 9 SERIAL — adapter/tools.ts). Tools: conductor_decompose (INTAKE work -> DECOMPOSED; validates the fake planner's queue per §3.2's table), conductor_plan (DECOMPOSED -> PLANNED; writes plan.md, extracts >=2-option decisions). Driven through the FAKE SDK. Subagents read §9 Task 9.2 (2584-2594), §2.4 (queue item + DAG + disjoint behavioralPaths guard + ponytail block), §3.2 (decompose validation table), §6.3 (ponytail full-mode), and the Queue/Item/DecisionRecord schemas.",
+  "assertions": [
+    {
+      "id": "9.2-decompose-dag",
+      "text": "conductor_decompose dispatches a planner (fake, schema Queue), validates the returned queue as a DAG; a queue with a dependsOn CYCLE is rejected and the fake is re-prompted (returns a cycle then a fix, bounded re-prompt); the accepted acyclic queue persists as queue.json + creates the §2.5 PENDING items + advances INTAKE->DECOMPOSED",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-decompose-size",
+      "text": "an oversized item (fileScope beyond ~5 files or spanning more than one acceptance cluster per §3.2's table) is rejected with one bounded re-split re-prompt; a validly-sized decomposition is accepted",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-decompose-behavioral-false-reject",
+      "text": "an item with behavioral:false whose fileScope INTERSECTS config.verify.behavioralPaths is REJECTED, and the rejection NAMES the intersecting glob (the §2.4 disjoint-path guard: cannot claim untestability while editing behavioral production code)",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-decompose-behavioral-false-docs-ok",
+      "text": "the SAME behavioral:false item with a docs-only fileScope (disjoint from behavioralPaths) is ACCEPTED and may carry an empty testScope",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-decompose-behavioral-testscope",
+      "text": "a behavioral:true item with an EMPTY testScope is rejected (a behavioral change owes a test scope, §2.4)",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-decompose-ponytail",
+      "text": "ponytail FULL mode rejects an item whose ladderRung is 'minimal-code' with an empty reuse note (§6.3: you must show you looked before writing new code)",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-plan-writes",
+      "text": "conductor_plan dispatches a planner (fake), writes plan.md at the run dir, advances DECOMPOSED->PLANNED, journals",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-plan-decisions",
+      "text": "conductor_plan extracts the plan's consequential forks into the §2.7 decisions ledger; a kind:derived decision carrying <2 scored options is rejected (requireTwoOptions, consistent with conductor_decide)",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.2-plan-placeholder",
+      "text": "placeholder strings (to-be-determined / 'add error handling' / 'similar to task N') in the fake's plan output are rejected with ONE bounded re-prompt (fake returns a placeholder-laden plan then a clean one); the placeholder scan mirrors plan.md doctrine",
+      "coveredByTest": null
+    }
+  ]
+}

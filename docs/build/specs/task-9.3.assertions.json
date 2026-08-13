@@ -1,0 +1,58 @@
+{
+  "taskId": "9.3",
+  "planLines": [
+    2596,
+    2604
+  ],
+  "kind": "code (tools MILESTONE, Phase 9 SERIAL — adapter/tools.ts). conductor_plan_review: the plan-level adversarial loop. PLANNED -> PLAN_REVIEWED (or a bounded round cap that converts surviving majors into human questions + item blocks). Driven through the FAKE SDK. Subagents read §9 Task 9.3 (2596-2604), §3.2 PLAN_REVIEWED (1119-1131), §2.10 review schemas (919-932), §2.11 questions (984-993).",
+  "reusesExisting": [
+    "core/verdict.ts findingSurvives(verdicts, k) — the ceil(k/2) uphold rule with TIE-UPHOLDS; do NOT reimplement",
+    "SCHEMAS.Findings / SCHEMAS.Verdict (§2.10) — already registered",
+    "QUESTION_ORIGINS already contains 'plan-review-cap' and QuestionRecord already carries blocksItems — NO closed-vocabulary widening is needed",
+    "adapter/questions.ts appendQuestion; store.setBlocked(runId,itemId,{reason,stage,questionId})",
+    "core/schedule.ts readFanout('planReview', config) for the reviewer count"
+  ],
+  "specGapResolved": "PLAN GAP: §2.10 FINDINGS carries id/severity/lens/claim/evidence/suggestedFix and NO item reference, yet §3.2 requires 'every item its blocksItems names' to be blocked at the round cap. The plan never says how a plan-level finding maps to items. PINNED DECISION (no schema widening): the handler derives blocksItems by scanning the finding's claim+evidence for (a) known queue item ids and (b) file paths that intersect an item's fileScope via core scopesIntersect. A finding that names neither still becomes a question record with blocksItems:[] and blocks nothing — the run then proceeds on all items, which is consistent with §3.2's 'the run proceeds on the remaining items'. This gap and its resolution MUST be raised at the Phase 9 milestone gate and logged in CORRECTIONS.md.",
+  "assertions": [
+    {
+      "id": "9.3-four-lenses",
+      "text": "conductor_plan_review fans out exactly the §3.2 FOUR lenses as fresh sub-sessions in role 'reviewer' — (a) correctness/design soundness, (b) completeness vs the user's prompt (placeholder scan folded in), (c) decomposition quality (item size, scope disjointness, DAG honesty), (d) minimality/ponytail — each carrying ONE lens-specific prompt, asserted on the fake's recorded prompts: the four prompts are pairwise DIFFERENT and each names its own lens, and every dispatch sees the plan AND the queue",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-skeptics-per-major",
+      "text": "every finding of severity 'major' gets exactly config.workflow.skepticsPerFinding skeptic sub-sessions dispatched (schema Verdict), and minors/nits get NONE — asserted by counting the fake's dispatches per finding id",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-refuted-major-dies",
+      "text": "a major whose skeptics refute it (upholds below the findingSurvives ceil(k/2) threshold) does NOT survive: it triggers no planner re-prompt and, at the cap, produces no question and blocks nothing",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-surviving-major-reprompts",
+      "text": "a SURVIVING major causes the planner to be re-prompted with the findings (the re-prompt text names the surviving claim), the plan is revised and re-written, and run.planReviewRounds increments by exactly one per round",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-zero-majors-planned",
+      "text": "a review round yielding zero surviving majors exits the loop and advances the run to PLAN_REVIEWED, journaling the transition through the existing fsm/transition event",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-round-cap-questions",
+      "text": "when planReviewMaxRounds is reached with majors still surviving, EACH surviving major is written to questions.jsonl as a §2.11 record with origin exactly 'plan-review-cap', a non-empty question text carrying the claim, and a schema-valid QuestionRecord shape",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-round-cap-blocks-items",
+      "text": "every item named by a cap-question's blocksItems is set blocked:{questionId, reason, stage:'plan-review'} — asserted by READING THE PERSISTED ITEM FILES via store.loadItem, never by inspecting a journal/log line (the plan calls this out explicitly)",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.3-round-cap-proceeds",
+      "text": "items NOT named by any surviving major are left unblocked and the run still advances (the run proceeds on the remaining items rather than halting) — a partially-blocked queue is a legal, asserted outcome",
+      "coveredByTest": null
+    }
+  ]
+}

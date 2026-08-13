@@ -305,6 +305,16 @@ export interface DecisionRecord {
   appliedWhere: string;
 }
 
+// §3.2 PLANNED receipt (Task 9.2). A plan decision is a DecisionRecord minus the
+// two fields the handler mints (`id`, `tsIso`) — derived from DecisionRecord by
+// Omit so the proposal shape can never drift from the ledger shape.
+export type PlanDecision = Omit<DecisionRecord, "id" | "tsIso">;
+
+export interface Plan {
+  markdown: string;
+  decisions: PlanDecision[];
+}
+
 // §2.8 `runs/<runId>/anomalies.jsonl`, plan lines 877-883.
 export type AnomalyRecord =
   | {
@@ -933,6 +943,37 @@ const evidenceRecordSchema = {
   additionalProperties: false,
 };
 
+// §2.7 scored option, plan lines 856-862. Shared verbatim by the persisted
+// DecisionRecord and by §3.2's Plan decision PROPOSALS (single source: the two
+// must agree on what a scored option is, or conductor_plan could mint a record
+// its own ledger schema rejects).
+const decisionOptionSchema = {
+  type: "object",
+  properties: {
+    name: stringSchema,
+    score: {
+      type: "object",
+      properties: {
+        capability: numberSchema,
+        testability: numberSchema,
+        movingParts: numberSchema,
+        validationEarliness: numberSchema,
+        singleSource: numberSchema,
+      },
+      required: [
+        "capability",
+        "testability",
+        "movingParts",
+        "validationEarliness",
+        "singleSource",
+      ],
+      additionalProperties: false,
+    },
+  },
+  required: ["name"],
+  additionalProperties: false,
+};
+
 // §2.7, plan lines 854-867. `score` is optional per record: options may omit
 // numeric scores for kind:"human" questions (plan lines 872-874).
 const decisionRecordSchema = {
@@ -943,32 +984,7 @@ const decisionRecordSchema = {
     question: stringSchema,
     options: {
       type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: stringSchema,
-          score: {
-            type: "object",
-            properties: {
-              capability: numberSchema,
-              testability: numberSchema,
-              movingParts: numberSchema,
-              validationEarliness: numberSchema,
-              singleSource: numberSchema,
-            },
-            required: [
-              "capability",
-              "testability",
-              "movingParts",
-              "validationEarliness",
-              "singleSource",
-            ],
-            additionalProperties: false,
-          },
-        },
-        required: ["name"],
-        additionalProperties: false,
-      },
+      items: decisionOptionSchema,
     },
     choice: stringSchema,
     why: stringSchema,
@@ -976,6 +992,37 @@ const decisionRecordSchema = {
     appliedWhere: stringSchema,
   },
   required: ["id", "tsIso", "question", "options", "choice", "why", "kind", "appliedWhere"],
+  additionalProperties: false,
+};
+
+// §3.2 PLANNED receipt (Task 9.2, plan lines 1112-1117 + 2584-2594): the
+// planner's plan document plus the ≥2-option forks it wants recorded. These are
+// PROPOSALS — no `id`, no `tsIso`; conductor_plan mints those when it appends
+// each accepted proposal to decisions.jsonl, exactly as conductor_decide does.
+// DERIVED from decisionRecordSchema rather than re-listed, so a field added to
+// §2.7 cannot drift the proposal shape away from the ledger shape (the TS type
+// is already Omit<DecisionRecord, "id" | "tsIso">). A hand-copied list would
+// surface its drift only as the fan-out engine schema-rejecting well-formed
+// plans, which is the worst place to discover it.
+const PLAN_DECISION_MINTED = ["id", "tsIso"];
+const planDecisionSchema = {
+  type: "object",
+  properties: Object.fromEntries(
+    Object.entries(decisionRecordSchema.properties).filter(
+      ([field]) => !PLAN_DECISION_MINTED.includes(field),
+    ),
+  ),
+  required: decisionRecordSchema.required.filter((field) => !PLAN_DECISION_MINTED.includes(field)),
+  additionalProperties: false,
+};
+
+const planSchema = {
+  type: "object",
+  properties: {
+    markdown: stringSchema,
+    decisions: { type: "array", items: planDecisionSchema },
+  },
+  required: ["markdown", "decisions"],
   additionalProperties: false,
 };
 
@@ -1211,6 +1258,7 @@ export const SCHEMAS: Record<string, unknown> = {
   TestVet: testVetSchema,
   ImplementerResult: implementerResultSchema,
   JournalRecord: journalRecordSchema,
+  Plan: planSchema,
 };
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,8 @@ import { decideEdit, decideSession, writeShapedPaths } from "../core/gates-edit.
 import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
 import { isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
+import { legalRunTransition } from "../core/fsm-run.ts";
+import { scanPlaceholders, validateQueue } from "../core/planning.ts";
 import { validate } from "../core/types.ts";
 import type {
   Classification,
@@ -37,6 +39,8 @@ import type {
   Config,
   DecisionRecord,
   Item,
+  Plan,
+  PlanDecision,
   Queue,
   QueueItem,
   RunState,
@@ -407,6 +411,26 @@ function mintDecisionId(runDir: string): string {
   return "D-" + String(maxNum + 1).padStart(4, "0");
 }
 
+// A fresh §2.5 runtime item at the head of the item FSM (plan lines 760-791).
+// Shared by every handler that CREATES items — the trivial synthesis in
+// conductor_classify and the decomposed queue in conductor_decompose — so the
+// birth shape of an item is written down exactly once.
+function newPendingItem(itemId: string): Item {
+  return {
+    id: itemId,
+    state: "PENDING",
+    assignee: null,
+    worktree: null,
+    attempts: { green: 0, reviewRounds: 0, vetRounds: 0, testRepairs: 0, debugFixes: 0, overridesUsed: 0 },
+    blocked: null,
+    deferred: null,
+    debugging: null,
+    evidence: {},
+    taint: [],
+    inlineClaim: null,
+  };
+}
+
 // Validate (schema-subset, §2.7) then append one JSON line to decisions.jsonl.
 function appendDecision(runDir: string, record: DecisionRecord): void {
   const result = validate("DecisionRecord", record);
@@ -578,20 +602,7 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
     writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(queue, null, 2));
 
     // Create the §2.5 runtime item at the head of the item FSM (PENDING) via the store.
-    const item: Item = {
-      id: itemId,
-      state: "PENDING",
-      assignee: null,
-      worktree: null,
-      attempts: { green: 0, reviewRounds: 0, vetRounds: 0, testRepairs: 0, debugFixes: 0, overridesUsed: 0 },
-      blocked: null,
-      deferred: null,
-      debugging: null,
-      evidence: {},
-      taint: [],
-      inlineClaim: null,
-    };
-    store.saveItem(runId, item);
+    store.saveItem(runId, newPendingItem(itemId));
     run.state = "EXECUTING";
     journal.log(
       "info",
@@ -917,4 +928,474 @@ export function handleDefer(input: DeferInput): DeferResult {
   );
 
   return { itemId: input.itemId, decisionId };
+}
+
+// ===========================================================================
+// (5) The §3.2 PLANNING-stage handlers (Task 9.2, plan lines 2584-2594). Same
+// §3.4 invariant loop as the Task-9.1 handlers — legality -> derive -> persist ->
+// journal -> compact return — with the §3.2 tables applied by the PURE core
+// (core/planning.ts) so this file stays a thin adapter: dispatch, re-prompt,
+// persist, journal.
+//
+// The re-prompt budget is ONE, uniformly (plan lines 1104-1110 give the bounded
+// re-split round for size; §3.2's other rows are rejections outright, and one
+// re-prompt is strictly more forgiving than each row demands). A reply that
+// still violates any rule is REJECTED: the handler throws with the named
+// reason and — because legality precedes persist — leaves NOTHING behind: no
+// queue.json, no plan.md, no decisions.jsonl line, no item, and the run in the
+// state it started in.
+// ===========================================================================
+
+// One initial dispatch + exactly ONE bounded re-prompt.
+const PLANNER_ATTEMPTS = 2;
+
+// Every planner dispatch in this stage: a fresh read-only sub-session (the
+// engine registers it BEFORE its first prompt), prompt-shaped structured output
+// independently validated against `schemaName` (Task 0.2 DRIFT — no native
+// `format` field is ever set), at interactive priority.
+function plannerJob(prompt: string, schemaName: string): FanoutJob {
+  return {
+    role: "planner",
+    itemId: "",
+    tree: "",
+    writeCapable: false,
+    prompt,
+    schemaName,
+    priority: "interactive",
+  };
+}
+
+// The bounded re-prompt: the ORIGINAL instruction plus the concrete defects the
+// reply was rejected for, and the plain statement that no further round follows
+// (the same shape the fan-out engine uses for its schema retries).
+function rejectionReprompt(basePrompt: string, heading: string, reasons: string[]): string {
+  return (
+    basePrompt +
+    "\n\n" +
+    heading +
+    "\n" +
+    reasons.map((reason) => "- " + reason).join("\n") +
+    "\nFix EVERY defect above and reply again with a single valid JSON object. This is the " +
+    "ONLY re-prompt: a reply that still violates any of these rules is rejected outright."
+  );
+}
+
+// ---------------------------------------------------------------------------
+// conductor_decompose (§3.2)
+// ---------------------------------------------------------------------------
+
+export interface DecomposeInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface DecomposeResult {
+  itemIds: string[]; // every created item, in queue order
+  runState: RunState; // DECOMPOSED on acceptance (a rejection throws instead)
+}
+
+// The `decompose.md` doctrine, inlined: the queue shape plus every §3.2 rule the
+// handler will REJECT on, stated up front (and parameterised by the config the
+// handler judges with) so the planner is told the law before it guesses at it.
+function decomposePrompt(userPrompt: string, config: Config): string {
+  const behavioralPaths =
+    config.verify.behavioralPaths.length > 0
+      ? config.verify.behavioralPaths.join(", ")
+      : "(none configured)";
+  return (
+    "Decompose the following work request into a queue of independently implementable items. " +
+    "Reply with a single JSON object matching the Queue schema (items: id, title, rationale, " +
+    "fileScope, testScope, acceptance, behavioral, dependsOn, ponytail).\n" +
+    "The handler REJECTS a decomposition that breaks any of these (§3.2):\n" +
+    "- dependsOn names other item ids and must form a DAG: no cycle, no dangling id.\n" +
+    "- every item declares a non-empty fileScope; an item that writes nothing is not an item.\n" +
+    "- testScope is non-empty IF AND ONLY IF behavioral is true.\n" +
+    "- behavioral:false is legal ONLY when every fileScope glob is DISJOINT from the " +
+    "configured behavioral paths: " +
+    behavioralPaths +
+    ".\n" +
+    "- acceptance criteria are observable checks an assertion can run, never quality wishes.\n" +
+    "- each item stays at or under " +
+    String(config.workflow.trivialMaxFiles) +
+    " files and one acceptance cluster; split anything bigger.\n" +
+    ponytailLaw(config) +
+    "\nREQUEST:\n" +
+    userPrompt
+  );
+}
+
+// The ponytail law AS IT WILL BE ENFORCED at the configured intensity (§6.3).
+// `lite` records the ladder but is advisory, so telling the planner a lite rung
+// "is rejected" states a law validateQueue does not apply; `ultra` additionally
+// instructs the planner to challenge the requirements themselves.
+function ponytailLaw(config: Config): string {
+  if (config.ponytail === "lite") {
+    return (
+      '- every item records its ponytail ladder rung and reuse note; under intensity "lite" the ' +
+      "ladder is advisory — recorded for the reader, not enforced by the handler.\n"
+    );
+  }
+  const enforced =
+    '- every item records its ponytail ladder rung and reuse note; under intensity "' +
+    config.ponytail +
+    '" a "minimal-code" rung with an empty reuse note is rejected.\n';
+  if (config.ponytail === "ultra") {
+    return (
+      enforced +
+      "- challenge the requirements themselves: propose the smallest version that satisfies the " +
+      "request, and say plainly when a requested piece is unnecessary (§6.3 ultra).\n"
+    );
+  }
+  return enforced;
+}
+
+// Dispatch the `planner` role (schema "Queue") through the injected Fanout,
+// judge the reply against the §3.2 table with the pure core, re-prompt ONCE with
+// the named defects, and on acceptance persist queue.json + the §2.5 PENDING
+// items and advance INTAKE->DECOMPOSED. A reply that still fails is REJECTED —
+// the Promise rejects with the named reason and nothing is written.
+export async function handleDecompose(input: DecomposeInput): Promise<DecomposeResult> {
+  const { store, fanout, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+  const run = store.loadRun(runId);
+
+  // (1) legality FIRST, before a single sub-session is spent: only an INTAKE run
+  //     classified `work` decomposes (§3.1's classification-selected exit).
+  const edge = legalRunTransition(run.state, "DECOMPOSED", {
+    classification: run.classification.kind,
+  });
+  if (!edge.ok) {
+    throw new Error(
+      "conductor_decompose: " + (edge.why ?? "this run may not advance to DECOMPOSED"),
+    );
+  }
+
+  // (2) derive: the planner proposes, the §3.2 table disposes.
+  const basePrompt = decomposePrompt(run.prompt, config);
+  let promptText = basePrompt;
+  let accepted: Queue | null = null;
+  let violations: string[] = [];
+  for (let attempt = 1; attempt <= PLANNER_ATTEMPTS; attempt += 1) {
+    const result = await fanout.dispatch(plannerJob(promptText, "Queue"));
+    const candidate = result.value as Queue | undefined;
+    if (candidate === undefined) {
+      throw new Error(
+        "conductor_decompose: the planner sub-session produced no valid Queue (" +
+          JSON.stringify(result.error) +
+          ")",
+      );
+    }
+    const verdict = validateQueue(candidate, config);
+    if (verdict.ok) {
+      accepted = candidate;
+      break;
+    }
+    violations = verdict.violations;
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "decompose", attempt, violations },
+      { runId, sessionID: input.sessionID },
+    );
+    if (attempt < PLANNER_ATTEMPTS) {
+      promptText = rejectionReprompt(
+        basePrompt,
+        "Your decomposition was REJECTED for these defects:",
+        violations,
+      );
+    }
+  }
+  if (accepted === null) {
+    throw new Error(
+      "conductor_decompose: the decomposition is REJECTED — it still violates §3.2 after the " +
+        "one bounded re-prompt: " +
+        violations.join("; "),
+    );
+  }
+
+  // (3) persist. Nothing unvalidated reaches the disk: the fan-out engine already
+  //     checked the receipt against SCHEMAS.Queue, and validateQueue judged the
+  //     whole §3.2 table above.
+  writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(accepted, null, 2));
+
+  const itemIds: string[] = [];
+  for (const queueItem of accepted.items) {
+    store.saveItem(runId, newPendingItem(queueItem.id));
+    itemIds.push(queueItem.id);
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId: queueItem.id, state: "PENDING", origin: "decompose" },
+      { runId, itemId: queueItem.id },
+    );
+  }
+
+  run.state = "DECOMPOSED";
+  store.saveRun(run);
+
+  // (4) journal the run FSM transition; (5) compact return.
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    { to: run.state, items: itemIds.length, tsMs: now() },
+    { runId, sessionID: input.sessionID },
+  );
+
+  return { itemIds, runState: run.state };
+}
+
+// ---------------------------------------------------------------------------
+// conductor_plan (§3.2)
+// ---------------------------------------------------------------------------
+
+export interface PlanInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface PlanResult {
+  planPath: string; // the written plan.md
+  decisionIds: string[]; // the §2.7 ids minted for the plan's forks, in plan order
+  runState: RunState; // PLANNED on acceptance (a rejection throws instead)
+}
+
+// Read the run's decomposed queue back for the plan prompt. A DECOMPOSED run
+// that has no (or a malformed) queue.json is corrupt, not plannable — and that
+// is a legality failure, so it throws BEFORE any sub-session is spent.
+function readQueueJson(runDir: string, tool: string): Queue {
+  const queuePath = path.join(runDir, "queue.json");
+  if (!existsSync(queuePath)) {
+    throw new Error(
+      tool + ": this run has no queue.json at " + queuePath + "; decompose must run first (§3.2)",
+    );
+  }
+  // BOM-tolerant like every other §2 read, and a torn/corrupt file is a NAMED
+  // legality failure — a raw SyntaxError names neither the tool nor the file.
+  const raw = readFileSync(queuePath, "utf8").replace(/^﻿/, "");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new Error(
+      tool + ": queue.json at " + queuePath + " is not valid JSON: " + (error as Error).message,
+    );
+  }
+  const result = validate("Queue", parsed);
+  if (!result.ok) {
+    throw new Error(
+      tool + ": queue.json does not satisfy the §2.4 Queue schema: " + result.errors.join("; "),
+    );
+  }
+  return parsed as Queue;
+}
+
+// The `plan.md` doctrine, inlined: the writing-plans rules (exact paths,
+// bite-sized steps, complete code for non-obvious steps, NO placeholders — the
+// three §3.2 defects named), the §2.7 >=2-scored-options rule, and the §6.3
+// ponytail guardrails at the configured intensity, over the decomposed queue the
+// plan must cover item by item.
+function planPrompt(userPrompt: string, queue: Queue, config: Config): string {
+  const itemLines = queue.items
+    .map(
+      (item) =>
+        "- " +
+        item.id +
+        " (" +
+        (item.behavioral ? "behavioral" : "non-behavioral") +
+        "): " +
+        item.title +
+        " | fileScope: " +
+        item.fileScope.join(", ") +
+        " | testScope: " +
+        (item.testScope.length > 0 ? item.testScope.join(", ") : "(none)") +
+        " | acceptance: " +
+        item.acceptance.join("; "),
+    )
+    .join("\n");
+  return (
+    "Write the execution plan for the decomposed queue below. Reply with a single JSON object " +
+    'matching the Plan schema (markdown, decisions).\n"markdown" IS plan.md: per-item test ' +
+    "strategy, the design alternatives considered, the risks, and the execution order proposal " +
+    "— exact paths, bite-sized steps, complete code for every non-obvious step. NO " +
+    'placeholders: "TBD", "add error handling" and "similar to task N" are plan defects BY ' +
+    'NAME and the handler rejects the whole plan for them.\n"decisions" records every ' +
+    "consequential fork: at least 2 real options, EACH scored on the five criteria " +
+    "(capability, testability, movingParts, validationEarliness, singleSource), plus the " +
+    'choice, the why, the kind ("derived" for anything derivable; "human" only for taste, ' +
+    'money, irreversible commitments or secrets) and appliedWhere. A "derived" fork carrying ' +
+    "fewer than 2 scored options is rejected.\nPonytail intensity is \"" +
+    config.ponytail +
+    '": plan the minimal thing that satisfies the request, and never lazy on the ' +
+    "intensity-independent guardrails — security, input validation at trust boundaries, " +
+    "data-loss handling and accessibility (§6.3).\n\nQUEUE:\n" +
+    itemLines +
+    "\n\nREQUEST:\n" +
+    userPrompt
+  );
+}
+
+// The ledger fields of a plan's decision proposal — everything but the `id` and
+// `tsIso` this handler mints. `score` is re-attached only when the proposal
+// carried one, so an unscored option never lands an explicit `score: undefined`
+// key in a record the §2.7 schema forbids extra properties on.
+function planDecisionFields(proposal: PlanDecision): PlanDecision {
+  return {
+    question: proposal.question,
+    options: proposal.options.map((option) =>
+      option.score === undefined ? { name: option.name } : { name: option.name, score: option.score },
+    ),
+    choice: proposal.choice,
+    why: proposal.why,
+    kind: proposal.kind,
+    appliedWhere: proposal.appliedWhere,
+  };
+}
+
+// EVERY defect in a candidate plan, collected in ONE pass so the single bounded
+// re-prompt carries the whole truth. Two classes: the plan.md placeholder
+// doctrine, applied to the document AND to each decision proposal's prose —
+// §3.2 makes the recorded decisions part of the same plan output, so a "TBD" in
+// a decision would otherwise be minted into the PERMANENT §2.7 ledger while the
+// identical string in the markdown rejects the whole plan — and the §2.7
+// >=2-scored-options gate, the same one conductor_decide applies. The id/tsIso
+// stand-ins are empty because requireTwoOptions reads only `kind` and `options`.
+function planDefects(candidate: Plan, proposals: readonly PlanDecision[]): string[] {
+  const defects: string[] = [];
+  for (const defect of scanPlaceholders(candidate.markdown)) {
+    defects.push("plan.md placeholder defect: " + defect);
+  }
+  for (const fields of proposals) {
+    const prose = [fields.question, fields.choice, fields.why, fields.appliedWhere]
+      .concat(fields.options.map((option) => option.name))
+      .join("\n");
+    if (prose.trim().length > 0) {
+      for (const defect of scanPlaceholders(prose)) {
+        defects.push('decision "' + fields.question + '" placeholder defect: ' + defect);
+      }
+    }
+    const gate = requireTwoOptions({ id: "", tsIso: "", ...fields });
+    if (!gate.ok) {
+      defects.push('decision "' + fields.question + '" is REJECTED: ' + gate.why);
+    }
+  }
+  return defects;
+}
+
+// Dispatch the `planner` role (schema "Plan") through the injected Fanout, scan
+// the returned document for the plan.md placeholder defects (ONE bounded
+// re-prompt), gate every decision proposal through core requireTwoOptions, then
+// — and only then — write plan.md, append the minted §2.7 records, and advance
+// DECOMPOSED->PLANNED. Legality precedes persist exactly as in conductor_decide:
+// a rejected plan leaves no plan.md, no ledger line, and the run in DECOMPOSED.
+export async function handlePlan(input: PlanInput): Promise<PlanResult> {
+  const { store, fanout, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+  const run = store.loadRun(runId);
+
+  // (1) legality: only a DECOMPOSED run plans, and it plans over its queue.
+  const edge = legalRunTransition(run.state, "PLANNED", {});
+  if (!edge.ok) {
+    throw new Error("conductor_plan: " + (edge.why ?? "this run may not advance to PLANNED"));
+  }
+  const queue = readQueueJson(runDir, "conductor_plan");
+
+  // (2) derive: the planner writes plan.md; the plan.md doctrine disposes.
+  const basePrompt = planPrompt(run.prompt, queue, config);
+  let promptText = basePrompt;
+  let accepted: Plan | null = null;
+  let acceptedProposals: PlanDecision[] = [];
+  let defects: string[] = [];
+  for (let attempt = 1; attempt <= PLANNER_ATTEMPTS; attempt += 1) {
+    const result = await fanout.dispatch(plannerJob(promptText, "Plan"));
+    const candidate = result.value as Plan | undefined;
+    if (candidate === undefined) {
+      throw new Error(
+        "conductor_plan: the planner sub-session produced no valid Plan (" +
+          JSON.stringify(result.error) +
+          ")",
+      );
+    }
+    const candidateProposals = candidate.decisions.map(planDecisionFields);
+    const found = planDefects(candidate, candidateProposals);
+    if (found.length === 0) {
+      accepted = candidate;
+      acceptedProposals = candidateProposals;
+      break;
+    }
+    defects = found;
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "plan", attempt, defects: found },
+      { runId, sessionID: input.sessionID },
+    );
+    if (attempt < PLANNER_ATTEMPTS) {
+      promptText = rejectionReprompt(
+        basePrompt,
+        "Your plan was REJECTED for these defects:",
+        defects,
+      );
+    }
+  }
+  if (accepted === null) {
+    throw new Error(
+      "conductor_plan: the plan is REJECTED — these defects survive the one bounded re-prompt: " +
+        defects.join("; "),
+    );
+  }
+  const proposals = acceptedProposals;
+
+  // (4) persist: plan.md through the crash-safe primitive, then one ledger line
+  //     per decision. Each id is minted immediately BEFORE its own append, so
+  //     two decisions never collide on the max-existing-numeric+1 mint.
+  const planPath = path.join(runDir, "plan.md");
+  writeFileAtomicSync(planPath, accepted.markdown);
+
+  const decisionIds: string[] = [];
+  for (const fields of proposals) {
+    const record: DecisionRecord = {
+      id: mintDecisionId(runDir),
+      tsIso: new Date(now()).toISOString(),
+      ...fields,
+    };
+    appendDecision(runDir, record);
+    decisionIds.push(record.id);
+    journal.log(
+      "info",
+      "state",
+      "decision.recorded",
+      { decisionId: record.id, kind: record.kind, choice: record.choice, origin: "plan" },
+      { runId },
+    );
+  }
+
+  run.state = "PLANNED";
+  store.saveRun(run);
+
+  // (5) journal the run FSM transition; (6) compact return.
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    { to: run.state, planPath, decisions: decisionIds.length, tsMs: now() },
+    { runId, sessionID: input.sessionID },
+  );
+
+  return { planPath, decisionIds, runState: run.state };
 }

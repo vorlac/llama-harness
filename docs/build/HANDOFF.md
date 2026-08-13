@@ -43,11 +43,24 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone un
    schema-observer (shrunk per 0.2: request-side schemaMissing counter + note; responses stream
    so response-validation is inert), 11.7 metrics, 11.8 (live).
 2. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
-   **9.1 DONE** (conductor_classify/status/decide/surface/answer/defer; §7.4 widening
-   state:decision.recorded; a 3-lens adversarial review found+fixed 4 MAJOR + 2 minor defects the
-   authored tests missed — C-029; 864/864; M4-backfill pending). **NEXT: 9.2** (conductor_decompose
-   + conductor_plan). Then 9.3-9.6. Carries 9.4a/9.4c/9.5a/9.5b/9.6 bindings below. The Phase 9
-   MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   **9.1 DONE** (C-029: 4 MAJOR + 2 minor found by a 3-lens review; 864/864).
+   **9.2 DONE** (conductor_decompose + conductor_plan; NEW pure core/planning.ts; NEW SCHEMAS.Plan —
+   forced, fanout's schemaName is mandatory; 887/887). C-030: a 3-lens skeptic-verified panel found
+   **19** surviving defects incl. 2 MAJOR the 873-test suite missed — the size row was wired to
+   trivialMaxFiles (default 2, spec says ~5) so every 3-file item was rejected under the DEFAULT
+   config, and acceptance clustering broke on any criterion starting with "the". All fixed test-first
+   (14 R-tests). M4 pending. **NEXT: 9.3** (a staged test exists at scratchpad staging/task-9.3/ from
+   the lookahead burst — its writer died on a session limit, so VERIFY COMPLETENESS before trusting
+   it). Then 9.4a-9.6. The Phase 9 MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   - **Assertion drafts exist in scratchpad staging/assertions-drafts/ for 9.4a, 9.4b, 9.4c, 9.5a,
+     9.5b, 9.6, 10.1, 11.3, 11.4, 11.5, 11.6, 11.7, 12.1, 12.2** (14 files, each with a specGaps
+     section + verified reusesExisting). They are DRAFTS: review each before promoting it to
+     docs/build/specs/.
+   - **SUBAGENT BUDGET LESSON (see the burst that produced those drafts):** ~79 agents / ~5.7M tokens
+     in ~22 min exhausted a 5-hour account window. Fan-out multiplies cost — each agent re-read the
+     3399-line plan independently. Throttle: skeptics for MAJOR findings only, pass plan EXCERPTS
+     instead of letting each agent read the plan, batch findings per verifier, and prefer a
+     lookahead of 1-2 tasks over 8.
    - FIRST-IMPLEMENTER TRAP (seen at 9.1): a subagent can return an anomalous/injected 0-edit
      "done" result — ALWAYS verify the actual tree (git status + run the test) before trusting green.
 - Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,

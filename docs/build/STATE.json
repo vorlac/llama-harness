@@ -1003,22 +1003,46 @@
    "taskId": "9.2",
    "manifest": true,
    "tier": "B",
-   "status": "NOT_STARTED",
+   "status": "COMMITTED",
    "commitSha": null,
    "commitMessage": "conductor: 9.2 planning tools",
    "planLines": [
     2584,
-    2595
+    2594
    ],
    "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
+   "tap": {
+    "tests": 887,
+    "pass": 887,
+    "fail": 0,
+    "skipped": 0,
+    "todo": 0
+   },
+   "redEvidence": {
+    "cmd": "node --test 'conductor/tests/tools-9.2.test.ts'",
+    "exitCode": 1,
+    "class": "missing-subject",
+    "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleDecompose' (observed by orchestrator before the handlers existed; tsc showed ONLY those 2 TS2305 errors, proving every other API assumption in the test was already correct). The 14 review-fix tests (R1-R14) were each observed red against the un-fixed implementation: 23 tests, 11 pass, 12 fail."
+   },
+   "filesTouched": [
+    "conductor/adapter/tools.ts",
+    "conductor/core/planning.ts",
+    "conductor/core/types.ts",
+    "conductor/tests/tools-9.2.test.ts",
+    "docs/build/specs/task-9.2.assertions.json"
+   ],
+   "revertAssertion": "removing handleDecompose/handlePlan re-reds tools-9.2.test.ts (missing-subject); reverting ITEM_MAX_FILES to config.workflow.trivialMaxFiles re-reds [9.2-fix-size-budget]; reverting the determiner skip re-reds [9.2-fix-acceptance-clusters]; reverting the union-edges deps map re-reds [9.2-fix-duplicate-id-cycle]; reverting findDependsOnCycles to first-cycle-only re-reds [9.2-fix-all-cycles]; reverting the rootLevelOnly guard re-reds [9.2-fix-rootless-glob]; reverting planDefects re-reds [9.2-fix-decision-placeholders] + [9.2-fix-journal-decision-reject]",
+   "attempts": 1,
+   "deviations": [
+    "SCHEMAS.Plan is a NEW 18th schema in core/types.ts. Not optional: fanout's schemaName is mandatory and validate() resolves it from SCHEMAS at call time, so conductor_plan cannot dispatch without one. export-schemas.test.ts derives from Object.keys(SCHEMAS), so the addition is safe by construction.",
+    "The pure \u00a73.2 validation table lives in a NEW core/planning.ts (G3 pure-core/thin-adapter); tools.ts stays dispatch/re-prompt/persist/journal.",
+    "Re-prompt budget is ONE uniformly for every \u00a73.2 row (the plan reserves the bounded round for the size row and 9.2's bullet for the cycle case). Strictly more forgiving; still ends in a named rejection. Raised at the Phase 9 gate (C-030 F5).",
+    "'> 1 acceptance cluster' has no spec definition; approximated by the criterion's subject token after skipping determiners, documented in planning.ts. No authored test exercises this row directly.",
+    "C-030 pre-commit adversarial review: 19 surviving findings (2 MAJOR) fixed test-first across 14 R-tests; 3 refuted; E10 (crash-mid-persist reconciliation) deferred to 10.1. 9 skeptics died on a session limit and their findings were counted as UPHELD per the plan's under-delivered-panel rule.",
+    "R13 (derived plan-decision schema) PASSED pre-fix \u2014 it is a regression guard, not red-driven TDD evidence. Recorded rather than presented as a red."
+   ],
+   "startedAt": "2026-08-13T02:45:00Z",
+   "finishedAt": "2026-08-13T04:40:00Z"
   },
   "9.3": {
    "taskId": "9.3",
@@ -1265,7 +1289,7 @@
    "manifest": true,
    "tier": "C",
    "status": "COMMITTED",
-   "commitSha": null,
+   "commitSha": "efdffc5",
    "commitMessage": "conductor: 11.2 router config",
    "planLines": [
     2784,
