@@ -567,6 +567,19 @@
       "M8": "n/a (fake SDK drives every dispatch; the item test and the full verify run REAL child processes)",
       "M9": "PASS (bun leg green)",
       "orchestratorReverify": "observed the missing-export red and the 942/942 then 943/943 greens MYSELF; with no subagents available for a review panel, substituted FOUR mutations against the green suite — three failed the right rows and the fourth (deleting the never-quarantine-the-item's-own-tests guard) failed NOTHING, exposing that the guard is load-bearing only for the stale-red REGISTRY half because the queue half already skips the subject item. Wrote the missing row, verified it reds under that exact mutation and greens with the guard restored. Also read the diff and fixed a blank §2.11 askedBy.sessionID and an inconsistent attempts.green."
+    },
+    "11.5": {
+      "at": "2026-08-13T13:05:00Z",
+      "M1": "PASS ctest 33/33 (21016 assertions), stable across 3 runs (1.61s/1.68s/1.58s); llama-router still links; the TypeScript gate is unaffected at 943/943",
+      "M2": "PASS 26 -> 33 cases (7 authored rows)",
+      "M3": "n/a for C++ (the compiler is the typecheck; the declarations-only build was -Wall -Wextra clean)",
+      "M4": "PENDING",
+      "M5": "PASS (production-scoped marker scan)",
+      "M6": "PASS (AffinityPolicy reached through the real AdmissionController::grantNext and, for the header row, through the live Router — never called only in isolation)",
+      "M7": "PASS 7 assertion rows each with a row-id-prefixed TEST_CASE",
+      "M8": "n/a (stub upstream; no live llama-server)",
+      "M9": "n/a (bun leg is the TS package's)",
+      "orchestratorReverify": "observed the missing-header red MYSELF after wiring CMakeLists; the implementer then died on a transient connection error with the work COMPLETE but unverified, so I verified it end to end: built it, ran the suite, MUTATION-TESTED all three ordering laws (burst-outranks-priority, toggle-not-inert, ceiling-removed — each failed exactly one row and no others), and read the whole seam diff, which is where I found the policies_ lifetime minor now recorded in STATE."
     }
   },
   "phaseGates": {

@@ -6,9 +6,11 @@
 // first (SG-6: GET /v1/models is never admitted, so a saturated queue cannot
 // stall opencode's model listing); GET /conductor/health answers outside
 // admission entirely; everything else is 404'd without touching the upstream.
-// Affinity (11.5), the schema observer (11.6) and metrics (11.7) are NOT here
-// yet — beyond relaying and admitting, this file only normalizes the four §4.4
-// conductor tags into one RequestTags value that those later tasks consume.
+// The schema observer (11.6) and metrics (11.7) are NOT here — beyond relaying
+// and admitting, this file only normalizes the four §4.4 conductor tags into one
+// RequestTags value that those later tasks consume. Two of those tags leave
+// here: priority and group both go to admission, where 11.5's affinity policy
+// does the ordering; this file reads neither back.
 //
 // G5 fail-soft is the law this file is written to: the router never turns a
 // request the direct path would have served into an error, and performs no
@@ -309,8 +311,8 @@ namespace conductor::router {
         return tags;
     }
 
-    // The §4.4 pass-through slice only — admission/affinity/schema-observer/
-    // metrics are Tasks 11.4-11.7 and are NOT part of this class yet.
+    // The §4.4 pass-through slice plus the admission hand-off — the schema
+    // observer and metrics are Tasks 11.6-11.7 and are NOT part of this class.
     //   - Constructed from Task 11.2's parsed RouterConfig (listen + upstream
     //     endpoints). cfg.listen.port == 0 binds an OS-assigned ephemeral port.
     //     Construction and start() need NO live upstream: the upstream
@@ -466,7 +468,11 @@ namespace conductor::router {
                     return;
                 }
 
-                const AdmissionOutcome outcome = admission_.admit(plan.model, plan.tags.priority);
+                // The group rides along with the priority: 11.5's affinity policy
+                // orders the queue with it, and it can never make a request that
+                // would have been admitted anything other than admitted (G5).
+                const AdmissionOutcome outcome =
+                    admission_.admit(plan.model, plan.tags.priority, plan.tags.group);
                 if (outcome != AdmissionOutcome::Admitted) {
                     sendAdmissionError(response, outcome, plan.model);
                     return;

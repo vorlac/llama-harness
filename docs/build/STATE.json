@@ -1478,23 +1478,44 @@
     "11.5": {
       "taskId": "11.5",
       "manifest": true,
-      "tier": "C",
-      "status": "NOT_STARTED",
+      "tier": "B",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 11.5 group affinity",
       "planLines": [
         2817,
-        2828
+        2827
       ],
-      "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "canonicalTestCmd": "ctest --test-dir .out/build/clang-relwdebinfo",
+      "tap": {
+        "cases": 33,
+        "pass": 33,
+        "fail": 0,
+        "assertions": 21016
+      },
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "src/tests/affinity_test.cpp:147:10: fatal error: 'router/affinity.hpp' file not found (orchestrator-observed AFTER wiring the file into the router-tests source list; the test-writer correctly reported that its own target build had NOT compiled the file, since CMakeLists is orchestrator-only)"
+      },
+      "filesTouched": [
+        "src/router/affinity.hpp",
+        "src/router/admission.hpp",
+        "src/router/router.hpp",
+        "src/tests/affinity_test.cpp",
+        "CMakeLists.txt"
+      ],
+      "revertAssertion": "deleting src/router/affinity.hpp re-reds the TU; letting a burst outrank strict priority (dropping the burst_->priority == eligible guard) re-reds [11.5-priority-precedence] alone; removing the contiguousDequeue:false early return re-reds [11.5-toggle-off-plain-order] alone; removing the queuedThrough ceiling so a burst absorbs mid-drain arrivals re-reds [11.5-fair-interleave] alone (all four VERIFIED by running the mutation, not reasoned)",
+      "attempts": 1,
+      "deviations": [
+        "SUBAGENT DIED (transient 'Connection refused', not the account limit) with the implementation COMPLETE but before it ran ctest. The orchestrator verified it instead: built, ran the suite, mutation-tested the three ordering laws, and read the whole seam diff.",
+        "C-036's roster-sizing rule does not apply here (affinity orders a queue, it does not size a roster).",
+        "KNOWN MINOR, raised at the Phase 11 gate: AdmissionController::policies_ is erased only in grantNext (when a model's queue empties or its last entry is granted), so a model whose CONTENDED queue drains entirely by queueTimeout rather than by grant leaves one AffinityPolicy behind. Bounded by distinct model names ever contended; G13 pins one model, so it is inert today. The fix would need an O(n) scan in the timeout path, which is why it was not taken now.",
+        "The policy is PURE (no clock, no randomness, no global state) and is consulted from grantNext under the mutex admission already holds — no second queue, no second lock. 'Queued at selection time' is derived from the monotonic arrival ordinal (a per-burst ceiling), so the policy needs neither a clock nor an extra parameter."
+      ],
+      "startedAt": "2026-08-13T12:30:00Z",
+      "finishedAt": "2026-08-13T13:05:00Z"
     },
     "11.6": {
       "taskId": "11.6",

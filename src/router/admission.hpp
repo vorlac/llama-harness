@@ -15,6 +15,12 @@
 // ones — a wait longer than admission.queueTimeoutMs and a queue already
 // holding admission.maxQueued entries.
 //
+// Which of the queued entries a freed slot goes to is Task 11.5's call:
+// grantNext projects the queue for one model into AffinityEntry values and asks
+// affinity.hpp's AffinityPolicy for an index, under this module's existing
+// mutex. Strict priority is unchanged by that — the policy only reorders within
+// the highest-priority class still queued.
+//
 // Header-only, matching Task 11.2's config.hpp and Task 11.3's router.hpp.
 // =============================================================================
 
@@ -32,7 +38,9 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include "router/affinity.hpp"
 #include "router/config.hpp"
 
 namespace conductor::router {
@@ -80,6 +88,11 @@ namespace conductor::router {
      *        any value outside interactive|review|batch (SG-4) both order as
      *        interactive. Ordering is by the §2.2 priorities VALUE, lower first,
      *        FIFO within a class.
+     * @param group 11.3's RequestTags.group verbatim, carried to the queue so
+     *        Task 11.5's AffinityPolicy can order same-group entries
+     *        contiguously WITHIN a class. G5 still governs: a group tag can only
+     *        move an entry later in its class, never turn it into a refusal and
+     *        never delay it past what the capacity rules above already do.
      */
     class AdmissionController {
     public:
@@ -89,13 +102,18 @@ namespace conductor::router {
                              ? 0u
                              : static_cast<std::size_t>(config.admission.maxQueued))
             , queueTimeout_(config.admission.queueTimeoutMs)
-            , priorities_(config.priorities) {
+            , priorities_(config.priorities)
+            , affinity_(config.affinity) {
         }
 
         AdmissionController(const AdmissionController&) = delete;
         AdmissionController& operator=(const AdmissionController&) = delete;
 
-        AdmissionOutcome admit(const std::string& model, const std::optional<std::string>& priority) {
+        // An omitted `group` is an untagged request: it queues by priority and
+        // arrival alone, which is the whole of the ordering when no caller tags
+        // anything.
+        AdmissionOutcome admit(const std::string& model, const std::optional<std::string>& priority,
+                               const std::optional<std::string>& group = std::nullopt) {
             std::unique_lock<std::mutex> lock(mutex_);
 
             if (hasFreeSlot(model)) {
@@ -109,7 +127,7 @@ namespace conductor::router {
             // The waiter lives on this blocked thread's stack: it is reachable
             // from the queue for exactly as long as this call is parked on it, and
             // every field is read and written under mutex_.
-            Waiter waiter{ model };
+            Waiter waiter{ model, group };
             const QueueKey key{ priorityValue(priority), nextSequence_++ };
             queue_.emplace(key, &waiter);
 
@@ -132,9 +150,10 @@ namespace conductor::router {
             return AdmissionOutcome::TimedOut;
         }
 
-        // Returns one in-flight slot and hands it straight to the highest-priority
-        // FIFO head waiting on the same model, so a freed slot can never be
-        // claimed out of order by an arrival that came later.
+        // Returns one in-flight slot and hands it straight to the entry Task
+        // 11.5's affinity policy picks out of the highest-priority class waiting
+        // on the same model, so a freed slot can never be claimed out of order by
+        // an arrival that came later.
         void release(const std::string& model) {
             const std::lock_guard<std::mutex> lock(mutex_);
             const auto counted = inflight_.find(model);
@@ -160,6 +179,9 @@ namespace conductor::router {
     private:
         struct Waiter {
             std::string model;
+            // 11.3's RequestTags.group, parked here so grantNext can ask the
+            // affinity policy about this entry without a second tag seam.
+            std::optional<std::string> group;
             std::condition_variable woken;
             bool granted{ false };
         };
@@ -167,6 +189,7 @@ namespace conductor::router {
         // Priority value first, arrival sequence second: that IS the dequeue
         // order, so std::map's ordering does the queueing.
         using QueueKey = std::pair<int, std::uint64_t>;
+        using QueueMap = std::map<QueueKey, Waiter*>;
 
         [[nodiscard]] std::size_t inflightFor(const std::string& model) const {
             const auto counted = inflight_.find(model);
@@ -197,17 +220,48 @@ namespace conductor::router {
             if (inflightFor(model) >= static_cast<std::size_t>(maxInflightPerModel_))
                 return;
 
+            // The affinity policy PROJECTS this queue, it does not duplicate it:
+            // one pass turns this model's slice of queue_ into what the policy
+            // reads, under the mutex this call already holds. The parallel
+            // iterator vector is how the chosen index gets back to its waiter.
+            std::vector<AffinityEntry> entries;
+            std::vector<QueueMap::iterator> waiting;
             for (auto entry = queue_.begin(); entry != queue_.end(); ++entry) {
                 if (entry->second->model != model)
                     continue;
 
-                Waiter* const waiter = entry->second;
-                queue_.erase(entry);
-                waiter->granted = true;
-                ++inflight_[model];
-                waiter->woken.notify_one();
+                entries.push_back(
+                    AffinityEntry{ entry->first.first, entry->second->group, entry->first.second });
+                waiting.push_back(entry);
+            }
+
+            if (entries.empty()) {
+                policies_.erase(model);
                 return;
             }
+
+            const std::optional<std::size_t> chosen = policyFor(model).selectNext(entries);
+            if (!chosen)
+                return;
+
+            const QueueMap::iterator selected = waiting[*chosen];
+            Waiter* const waiter = selected->second;
+            queue_.erase(selected);
+            waiter->granted = true;
+            ++inflight_[model];
+            waiter->woken.notify_one();
+
+            // A model with nothing left queued carries no burst worth keeping:
+            // every later arrival gets an ordinal past the burst's ceiling, so a
+            // restart is what the policy would decide anyway. Dropping the entry
+            // bounds this table by the models actually waiting.
+            if (entries.size() == 1)
+                policies_.erase(model);
+        }
+
+        // One policy per counter key, so two models can never share a burst.
+        [[nodiscard]] AffinityPolicy& policyFor(const std::string& model) {
+            return policies_.try_emplace(model, affinity_).first->second;
         }
 
         // SG-4: an unrecognized tag is not an error, it is an interactive
@@ -233,10 +287,14 @@ namespace conductor::router {
         const std::size_t maxQueued_;
         const std::chrono::milliseconds queueTimeout_;
         const Priorities priorities_;
+        const Affinity affinity_;
 
         mutable std::mutex mutex_;
         std::unordered_map<std::string, std::size_t> inflight_;
-        std::map<QueueKey, Waiter*> queue_;
+        QueueMap queue_;
+        // Guarded by mutex_ like every other queue state: the policy is consulted
+        // only from grantNext, which is only ever reached holding it.
+        std::map<std::string, AffinityPolicy> policies_;
         std::uint64_t nextSequence_{ 0 };
     };
 
