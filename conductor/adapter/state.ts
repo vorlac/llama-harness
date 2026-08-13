@@ -99,6 +99,7 @@ export interface StateStore {
   archiveRun(runId: string): void;
   loadItem(runId: string, itemId: string): Item;
   saveItem(runId: string, item: Item): void;
+  removeItem(runId: string, itemId: string): void;
   setBlocked(
     runId: string,
     itemId: string,
@@ -570,6 +571,19 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     writeFileAtomicSync(itemJsonPath(runId, item.id), JSON.stringify(item, null, 2));
   }
 
+  // Retire an item the queue no longer names (conductor_queue_amend's `remove`). An
+  // item file with no queue entry is an orphan that a later amendment re-adding the
+  // same id would RESURRECT, handing the reborn item another run's state, evidence
+  // and attempts. Absent is not an error: the caller's job is that the file is gone.
+  function removeItem(runId: string, itemId: string): void {
+    if (readOnly) {
+      throw new Error(
+        "state: this conductor is read-only (a live foreign lock holds the workspace); cannot remove an item",
+      );
+    }
+    rmSync(itemJsonPath(runId, itemId), { force: true });
+  }
+
   function setBlocked(
     runId: string,
     itemId: string,
@@ -716,6 +730,7 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     archiveRun,
     loadItem,
     saveItem,
+    removeItem,
     setBlocked,
     clearBlocked,
     setDeferred,

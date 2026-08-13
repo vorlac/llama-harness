@@ -34,6 +34,8 @@ import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
+import { applyAmendOps } from "../core/queue-amend.ts";
+import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { nextWave, readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
 import { SCHEMAS, validate } from "../core/types.ts";
@@ -60,7 +62,7 @@ import type {
   TrivialItem,
   Verdict,
 } from "../core/types.ts";
-import { writeFileAtomicSync } from "./state.ts";
+import { readJsonFileSync, writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import type { Fanout, FanoutJob, TreeState } from "./fanout.ts";
@@ -4228,7 +4230,9 @@ export interface QueueAmendInput {
   config: Config;
   journal: HandlerJournal;
   now?: () => number;
-  queue: Queue;
+  // The §3.4 tool's own argument. The run's current queue supplies everything the
+  // ops do not mention, so an amendment cannot drop an item by omission.
+  ops: QueueAmendOp[];
   question: string;
   options: Array<{ name: string; score?: DecisionRecord["options"][number]["score"] }>;
   choice: string;
@@ -4240,13 +4244,23 @@ export interface QueueAmendResult {
   ok: boolean;
   decisionId: string;
   itemIds: string[];
+  added: string[];
+  updated: string[];
+  removed: string[];
 }
 
 /**
- * conductor_queue_amend (§2.4/§2.7). Re-runs core validateQueue over the AMENDED
- * queue and refuses any violation, and gates its §2.7 record through the same core
- * requireTwoOptions every other decision site runs. Both refusals precede every
- * write, so a rejected amendment leaves queue.json byte-identical.
+ * conductor_queue_amend (§2.4/§2.7). Applies the §3.4 ops to the queue the run is
+ * executing, re-runs core validateQueue over the RESULT and refuses any violation,
+ * and gates its §2.7 record through the same core requireTwoOptions every other
+ * decision site runs. Every refusal precedes every write, so a rejected amendment
+ * leaves queue.json byte-identical.
+ *
+ * It also reconciles §2.5: an added id gets a runtime item at the head of the FSM
+ * (without one, the next handler to load it throws), a removed id loses its item
+ * file (without that, re-adding the id later resurrects the dropped item's state),
+ * and an updated id is released from `blocked` — which §2.5 names this tool as a
+ * legal clearer of.
  *
  * Synchronous: it dispatches nothing.
  */
@@ -4255,8 +4269,23 @@ export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
   const now = input.now ?? Date.now;
   const runDir = handlerRunDir(store, runId);
 
-  // (1) legality, in both halves, BEFORE anything is persisted.
-  const verdict = validateQueue(input.queue, config);
+  // (1) legality, in every half, BEFORE anything is persisted.
+  //
+  // (1a) the ops against the queue the run is ACTUALLY executing. Re-reading
+  // queue.json rather than trusting a caller-supplied queue is the point of the
+  // §3.4 shape: the amendment states the change, the run states the rest.
+  const current = readJsonFileSync(path.join(runDir, "queue.json")) as Queue;
+  const states: Record<string, ItemState | undefined> = {};
+  for (const entry of current.items) {
+    states[entry.id] = store.loadItem(runId, entry.id).state;
+  }
+  const applied = applyAmendOps(current, input.ops, states);
+  if (!applied.ok) {
+    throw new Error(QUEUE_AMEND_TOOL + ": " + applied.why + " — nothing was written");
+  }
+
+  // (1b) the RESULT against §2.4, through the same pure function 9.2 planning uses.
+  const verdict = validateQueue(applied.queue, config);
   if (!verdict.ok) {
     throw new Error(
       QUEUE_AMEND_TOOL +
@@ -4291,20 +4320,51 @@ export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
   // executes the amended queue.
   assertDecisionValid(decision);
 
-  // (2) persist: the queue the run will execute, then the record of why.
-  writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(input.queue, null, 2));
+  // (2) persist. The order is chosen so that the only state a crash can leave behind
+  // is a runtime item no queue entry names — an orphan nothing reads, which the next
+  // amendment overwrites. The opposite order would leave queue.json naming an item
+  // whose file is absent, and every later loadItem would throw on it.
+  for (const itemId of applied.added) {
+    store.saveItem(runId, newPendingItem(itemId));
+    journal.log("info", "state", "item.updated", { itemId, state: "PENDING", origin: "queue-amend" }, { runId, itemId });
+  }
+  writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(applied.queue, null, 2));
+  for (const itemId of applied.removed) {
+    store.removeItem(runId, itemId);
+  }
+  // §2.5: conductor_queue_amend is a legal clearer of `blocked`. An update re-scopes
+  // the entry the block was raised against, so the item is released — and only that:
+  // the FSM position and the item's history are the amendment's to keep, not reset.
+  for (const itemId of applied.updated) {
+    if (store.loadItem(runId, itemId).blocked !== null) store.clearBlocked(runId, itemId);
+  }
   appendDecision(runDir, decision);
 
-  const itemIds = input.queue.items.map((entry) => entry.id);
+  const itemIds = applied.queue.items.map((entry) => entry.id);
   journal.log(
     "info",
     "state",
     "decision.recorded",
-    { decisionId: decision.id, kind: decision.kind, choice: decision.choice, items: itemIds.length },
+    {
+      decisionId: decision.id,
+      kind: decision.kind,
+      choice: decision.choice,
+      items: itemIds.length,
+      added: applied.added.length,
+      updated: applied.updated.length,
+      removed: applied.removed.length,
+    },
     { runId },
   );
 
-  return { ok: true, decisionId: decision.id, itemIds };
+  return {
+    ok: true,
+    decisionId: decision.id,
+    itemIds,
+    added: applied.added,
+    updated: applied.updated,
+    removed: applied.removed,
+  };
 }
 
 // ===========================================================================

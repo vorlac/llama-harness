@@ -939,7 +939,7 @@ at 11.4: MUTATION-TEST the green suite, then read the diff. Four mutations were 
   handleValidate, handleQueueAmend and their helpers), `conductor/tests/tools-9.4b.test.ts`
   (13 authored rows + 1 mutation-fix row). 943/943 green, typecheck OK, bun leg OK.
 
-## C-035 — Task 9.4b: handleQueueAmend's signature contradicts the tool it implements (OPEN, fix queued)
+## C-035 — Task 9.4b: handleQueueAmend's signature contradicts the tool it implements (CLOSED)
 
 **How it was found.** Not by a review — by comparing my own orchestrator-authored 9.4b assertions
 against an INDEPENDENT lookahead draft of the same task that I had wrongly concluded did not exist.
@@ -966,6 +966,37 @@ where mine merges two — but the draft's spec-gap list caught something mine di
   legal clearer, so an update clears it through store.clearBlocked).
   **Deferred by one step on purpose:** the 9.4c test-writer is reading adapter/tools.ts right now,
   so the edit lands after it reports rather than racing it.
+
+  **LANDED, test-first, 15 R-tests (994/994).** NEW pure `core/queue-amend.ts`: the closed
+  `AMEND_OP_KINDS` (add/update/remove) union, `parseAmendOps` (the string→union widening Task 9.6
+  binds `ops: S.array(S.string())` through, refusing by POSITION so a long list is diagnosable),
+  `applyAmendOps` (ordered application over a structuredClone, so a refused amendment cannot have
+  mutated anything), and `AMENDABLE_ITEM_STATES`. `handleQueueAmend` now RE-READS the run's
+  queue.json rather than accepting one, which is the substantive half: an amendment states the
+  change and the run supplies the rest, so no caller can drop an item by omission.
+  `StateStore` gains `removeItem`.
+
+  Resolutions recorded with the fix: amendable = PENDING/RED/TEST_VETTED/GREEN (nothing integrated);
+  an update CLEARS `blocked` (§2.5 names this tool as a clearer) and touches neither the FSM
+  position nor the item's history; persist order is added-item-files → queue.json → removed-item
+  files, so the only state a crash can strand is a runtime item no queue entry names — the orphan
+  nothing reads — never a queue entry whose §2.5 file is absent, which every later `loadItem`
+  would throw on. That ordering has its own row, injected by making the run dir unwritable while
+  `items/` stays writable.
+
+  **A MUTATION FOUND A HOLE THE 14 AUTHORED ROWS MISSED**, which is the third time this build has
+  banked on that habit. Dropping the rule that an `add` CANCELS a prior `remove` of the same id
+  left every row green — yet with the id in both sets the handler writes the reborn item's file,
+  writes queue.json naming it, and then executes the retirement, deleting the file it just made.
+  The run is left with a queue entry whose item is absent: the exact wedge this correction exists
+  to prevent, reintroduced by the fix for it. Row `C035-remove-then-readd-is-one-net-birth` now
+  covers both directions plus the laundering attempt (remove-then-add does NOT make a PUBLISHED
+  item amendable). Re-mutated afterwards: it re-reds, and so does the mirror mutation.
+
+  **ORCHESTRATOR ERROR, recorded so it is not repeated:** the first mutation harness reverted with
+  `git checkout <file>`, which discards UNCOMMITTED work — it threw away the tools.ts half of this
+  fix mid-round. Mutation reverts must restore from a file snapshot taken before the first
+  mutation. Nothing was lost (the edits were re-applied from the same strings) but the rule stands.
 
 - **MINOR (CLOSED by C-039's D1(a) — the union resolution removed the single-element rule entirely) — validate's scopePattern.** C-034 recorded that `runVerify` takes
   ONE scopePattern while an item may carry several fileScope entries selecting different §2.1

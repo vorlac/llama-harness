@@ -190,7 +190,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -217,6 +217,11 @@ import type { Journal } from "../adapter/journal.ts";
 import { loadPacks } from "../adapter/inject.ts";
 import { requireTwoOptions } from "../core/decide.ts";
 import { validateQueue } from "../core/planning.ts";
+// C-035: the amendment vocabulary is PURE core — the ops the tool declares, the rule
+// for applying them to the run's current queue, and the states in which a queue entry
+// may still change. Absent at red time.
+import { AMENDABLE_ITEM_STATES, applyAmendOps, parseAmendOps } from "../core/queue-amend.ts";
+import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { validate } from "../core/types.ts";
 import type {
   Config,
@@ -258,6 +263,11 @@ interface QueueAmendResult {
   ok: boolean;
   decisionId: string;
   itemIds: string[];
+  // C-035: what the ops actually did, so the caller (and Task 9.6's wiring) can see
+  // which §2.5 runtime items were born and which were retired.
+  added: string[];
+  updated: string[];
+  removed: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1943,9 +1953,17 @@ const SCORE = { capability: 4, testability: 4, movingParts: 3, validationEarline
 // ===========================================================================
 
 test("[9.4b-amend-revalidates-queue] conductor_queue_amend re-runs core validateQueue over the AMENDED queue and REFUSES a dependsOn cycle, an intersecting fileScope, and a behavioral/testScope violation — legality precedes persist, so on every refusal queue.json is byte-identical and NOTHING is written", async (t) => {
-  const bad: Array<{ label: string; queue: Queue; expect: RegExp }> = [
+  // C-035: the caller supplies OPS, never a whole queue, so each row states the ops and
+  // the queue they PRODUCE. The two are tied together below by running core applyAmendOps
+  // over the bench's seeded queue — a row whose ops do not build its stated queue fails
+  // its own premise rather than quietly testing something else.
+  const bad: Array<{ label: string; ops: QueueAmendOp[]; queue: Queue; expect: RegExp }> = [
     {
       label: "a dependsOn cycle",
+      ops: [
+        { op: "update", item: makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"], dependsOn: ["I2"] }) },
+        { op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"], dependsOn: ["I1"] }) },
+      ],
       queue: {
         items: [
           makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"], dependsOn: ["I2"] }),
@@ -1956,6 +1974,7 @@ test("[9.4b-amend-revalidates-queue] conductor_queue_amend re-runs core validate
     },
     {
       label: "a behavioral:false fileScope intersecting verify.behavioralPaths",
+      ops: [{ op: "update", item: makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: [], behavioral: false }) }],
       queue: {
         items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: [], behavioral: false })],
       },
@@ -1963,6 +1982,7 @@ test("[9.4b-amend-revalidates-queue] conductor_queue_amend re-runs core validate
     },
     {
       label: "a behavioral:true item with an empty testScope",
+      ops: [{ op: "update", item: makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: [] }) }],
       queue: {
         items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: [] })],
       },
@@ -1975,7 +1995,11 @@ test("[9.4b-amend-revalidates-queue] conductor_queue_amend re-runs core validate
       const bench = seedAmendBench();
       const before = readFileSync(path.join(bench.runDir, "queue.json"), "utf8");
       const beforeItem = itemFileBytes(bench.runDir, "I1");
-      // The premise: core validateQueue — the SAME pure function 9.2 uses — rejects it.
+      // The premise, first half: these ops DO build the queue this row is about.
+      const built = applyAmendOps(bench.queue, amendment.ops, { I1: "PENDING" });
+      assert.equal(built.ok, true, "premise: the ops apply cleanly — this row is about §2.4 legality, not op legality");
+      assert.deepEqual(built.ok ? built.queue : null, amendment.queue, "premise: the ops build exactly the queue this row states");
+      // The premise, second half: core validateQueue — the SAME pure function 9.2 uses — rejects it.
       const verdict = validateQueue(amendment.queue, bench.config);
       assert.equal(verdict.ok, false, "premise: core validateQueue rejects this amendment");
       assert.match(verdict.violations.join(" | "), amendment.expect, "premise: it rejects it for the expected reason");
@@ -1988,7 +2012,7 @@ test("[9.4b-amend-revalidates-queue] conductor_queue_amend re-runs core validate
             config: bench.config,
             journal: bench.journal.sink,
             now: () => START_MS,
-            queue: amendment.queue,
+            ops: amendment.ops,
             question: "Amend the queue?",
             options: [
               { name: "amend", score: SCORE },
@@ -2018,7 +2042,12 @@ test("[9.4b-amend-revalidates-queue] conductor_queue_amend re-runs core validate
 test("[9.4b-amend-records-decision] an accepted amendment persists the new queue AND appends ONE §2.7 kind:'derived' decision naming what changed, gated by the SAME core requireTwoOptions every other decision site runs — and an amendment carrying fewer than two scored options is rejected with NOTHING persisted", () => {
   const bench = seedAmendBench();
 
-  // The re-split the §3.3 BLOCKED ladder asks for: one item becomes two.
+  // The re-split the §3.3 BLOCKED ladder asks for: one item becomes two. I1 keeps its
+  // scope, so the whole amendment is a single `add` — which is the point of C-035's shape:
+  // the caller states the CHANGE, and the run's own queue supplies everything else.
+  const amendOps: QueueAmendOp[] = [
+    { op: "add", item: makeQueueItem("I1b", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"], dependsOn: ["I1"] }) },
+  ];
   const amended: Queue = {
     items: [
       makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
@@ -2038,7 +2067,7 @@ test("[9.4b-amend-records-decision] an accepted amendment persists the new queue
         config: bench.config,
         journal: bench.journal.sink,
         now: () => START_MS,
-        queue: amended,
+        ops: amendOps,
         question: "Split I1 into two items?",
         options: [{ name: "amend", score: SCORE }],
         choice: "amend",
@@ -2058,7 +2087,7 @@ test("[9.4b-amend-records-decision] an accepted amendment persists the new queue
     config: bench.config,
     journal: bench.journal.sink,
     now: () => START_MS,
-    queue: amended,
+    ops: amendOps,
     question: "Split I1 into two items?",
     options: [
       { name: "split-I1-into-I1-and-I1b", score: SCORE },
@@ -2412,6 +2441,9 @@ test("[9.4b-fix-foreign-red-set-skips-absent-files] the §4.2 foreign red set na
 
 test("[9.4b-fix-amend-validates-record-before-persist] conductor_queue_amend validates the §2.7 record COMPLETELY — the schema, not only the two-options rule — BEFORE it writes anything: a decision that fails the DecisionRecord schema leaves queue.json byte-identical, never a caller told the amendment failed while the run executes the amended queue", () => {
   const bench = seedAmendBench();
+  const amendOps: QueueAmendOp[] = [
+    { op: "add", item: makeQueueItem("I1b", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"], dependsOn: ["I1"] }) },
+  ];
   const amended: Queue = {
     items: [
       makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
@@ -2453,7 +2485,7 @@ test("[9.4b-fix-amend-validates-record-before-persist] conductor_queue_amend val
         config: bench.config,
         journal: bench.journal.sink,
         now: () => START_MS,
-        queue: amended,
+        ops: amendOps,
         question: probe.question,
         options: [
           { name: "split-I1-into-I1-and-I1b", score: partialScore },
@@ -2633,4 +2665,509 @@ test("[9.4b-fix-own-test-spelling-never-quarantined] the 'never quarantine the i
       );
     });
   }
+});
+
+// ===========================================================================
+// C-035 — conductor_queue_amend's handler surface must be the tool's surface.
+//
+// Plan §3.4 line 1323 registers `conductor_queue_amend | {ops[]}` and the
+// COMMITTED plugin declares `args: { ops: S.array(S.string()) }`. The first
+// implementation instead took a whole replacement Queue, so nothing could get
+// from the tool's arguments to the handler's and Task 9.6 would have had no
+// honest binding to write — the same class of defect as the 9.4a/5.3
+// gate-vs-handler disagreement this build treats as blocking.
+//
+// The fix carries a second half the retro review found independently: an
+// amendment that ADDS an id creates no §2.5 runtime item file, so the next
+// handler to loadItem it throws; and one that REMOVES an id leaves its item
+// file behind, so re-adding that id later RESURRECTS the old state.
+// ===========================================================================
+
+// A bench whose queue and item states are stated per test, so the amendable-state
+// rows can seed an item mid-FSM without disturbing the rows above.
+function seedAmendBenchWith(queue: Queue, states: Record<string, ItemState>): AmendBench {
+  const root = committedRepo();
+  const config = makeConfig({
+    command: [process.execPath, "-e", "process.exit(0);"],
+    itemTest: [process.execPath, "--test", "{files}"],
+  });
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const runDir = runDirOf(store, runId);
+  seedExecuting(store, runId, queue, states);
+  return { root, config, store, runId, runDir, journal, queue };
+}
+
+function itemFileExists(runDir: string, itemId: string): boolean {
+  return existsSync(path.join(runDir, "items", `${itemId}.json`));
+}
+
+function readItemFile(runDir: string, itemId: string): Item {
+  return JSON.parse(itemFileBytes(runDir, itemId)) as Item;
+}
+
+function readQueueFile(runDir: string): Queue {
+  return JSON.parse(readFileSync(path.join(runDir, "queue.json"), "utf8")) as Queue;
+}
+
+const AMEND_DECISION = {
+  question: "Amend the queue?",
+  options: [
+    { name: "amend", score: SCORE },
+    { name: "leave-as-is", score: SCORE },
+  ],
+  choice: "amend",
+  why: "the decomposition turned out to be wrong in a way the run can still act on",
+  appliedWhere: "queue.json",
+};
+
+// ===========================================================================
+// [C035-ops-apply-to-the-runs-own-queue]
+// ===========================================================================
+
+test("[C035-ops-apply-to-the-runs-own-queue] conductor_queue_amend takes the §3.4 ops and APPLIES them to the queue the run is executing — the caller never supplies a replacement queue, so an amendment that names only what changed cannot silently drop the items it did not mention", () => {
+  const bench = seedAmendBench();
+  const added = makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] });
+
+  const res: QueueAmendResult = handleQueueAmend({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    ops: [{ op: "add", item: added }],
+    ...AMEND_DECISION,
+  });
+
+  assert.equal(res.ok, true, "the amendment is accepted");
+  const persisted = readQueueFile(bench.runDir);
+  assert.deepEqual(
+    persisted.items.map((entry) => entry.id),
+    ["I1", "I2"],
+    "I1 SURVIVES an amendment that never mentioned it — the ops were applied to the run's own queue, not substituted for it",
+  );
+  assert.deepEqual(persisted.items[0], bench.queue.items[0], "the untouched entry is byte-for-byte what the run was already executing");
+  assert.deepEqual(persisted.items[1], added, "the added entry is the op's item verbatim");
+  assert.equal(validate("Queue", persisted).ok, true, "the persisted queue still satisfies SCHEMAS.Queue");
+  assert.deepEqual(res.added, ["I2"], "the compact return names what was added");
+  assert.deepEqual(res.updated, [], "nothing was updated");
+  assert.deepEqual(res.removed, [], "nothing was removed");
+  assert.deepEqual(res.itemIds, ["I1", "I2"], "itemIds is the RESULTING queue");
+});
+
+// ===========================================================================
+// [C035-add-creates-the-runtime-item]
+// ===========================================================================
+
+test("[C035-add-creates-the-runtime-item] an accepted `add` writes the §2.5 runtime item file at the head of the item FSM, so the very next handler that loads the new item finds it instead of throwing on a queue entry with no state", () => {
+  const bench = seedAmendBench();
+  assert.equal(itemFileExists(bench.runDir, "I2"), false, "premise: the new id has no runtime item yet");
+
+  handleQueueAmend({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    ops: [{ op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }) }],
+    ...AMEND_DECISION,
+  });
+
+  assert.equal(itemFileExists(bench.runDir, "I2"), true, "the added id HAS a §2.5 runtime item file");
+  const born = bench.store.loadItem(bench.runId, "I2");
+  assert.equal(born.state, "PENDING", "it is born at the head of the FSM, exactly like a decomposed item");
+  assert.equal(validate("Item", born).ok, true, "it satisfies SCHEMAS.Item");
+  assert.equal(born.blocked, null, "born clean");
+  assert.equal(born.deferred, null, "born clean");
+  assert.equal(born.assignee, null, "born clean");
+  assert.deepEqual(born.evidence, {}, "born with no evidence — nothing has been proven about it");
+  assert.equal(born.attempts.green, 0, "born with no attempts");
+  assert.ok(
+    bench.journal.records.some(
+      (r) => r.component === "state" && r.event === "item.updated" && (r.data as { itemId?: string }).itemId === "I2",
+    ),
+    "the birth is journaled through the EXISTING state/item.updated event (no new event name)",
+  );
+});
+
+// ===========================================================================
+// [C035-remove-retires-the-runtime-item]
+// ===========================================================================
+
+test("[C035-remove-retires-the-runtime-item] an accepted `remove` deletes the id's §2.5 runtime item file, so a later amendment that re-adds the same id starts it PENDING rather than RESURRECTING the state, evidence and attempts of the item that was dropped", () => {
+  const bench = seedAmendBenchWith(
+    {
+      items: [
+        makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+        makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }),
+      ],
+    },
+    { I1: "PENDING", I2: "GREEN" },
+  );
+
+  // Give I2 a history worth resurrecting, so a leftover file would be unmistakable.
+  const stale = bench.store.loadItem(bench.runId, "I2");
+  stale.attempts.green = 3;
+  stale.evidence = { red: { ledger: "evidence", seq: 7 }, green: { ledger: "evidence", seq: 9 } };
+  bench.store.saveItem(bench.runId, stale);
+
+  handleQueueAmend({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    ops: [{ op: "remove", id: "I2" }],
+    ...AMEND_DECISION,
+  });
+
+  assert.deepEqual(readQueueFile(bench.runDir).items.map((e) => e.id), ["I1"], "the queue no longer names I2");
+  assert.equal(itemFileExists(bench.runDir, "I2"), false, "and the ORPHANED runtime item is gone with it");
+
+  // The resurrection the deletion exists to prevent.
+  const res: QueueAmendResult = handleQueueAmend({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    ops: [{ op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }) }],
+    ...AMEND_DECISION,
+  });
+  assert.equal(res.ok, true, "re-adding the id is legal");
+  const reborn = bench.store.loadItem(bench.runId, "I2");
+  assert.equal(reborn.state, "PENDING", "the re-added id starts at the head of the FSM");
+  assert.equal(reborn.attempts.green, 0, "it does NOT inherit the dropped item's attempts");
+  assert.deepEqual(reborn.evidence, {}, "it does NOT inherit the dropped item's evidence — no run may claim a red it never produced");
+});
+
+// ===========================================================================
+// [C035-refuses-to-amend-an-integrated-item]
+// ===========================================================================
+
+test("[C035-refuses-to-amend-an-integrated-item] update and remove are legal only while NOTHING of the item's work is integrated — PENDING/RED/TEST_VETTED/GREEN — and are refused at VALIDATED, REVIEWED and PUBLISHED with queue.json byte-identical and no §2.7 record appended", async (t) => {
+  assert.deepEqual(
+    [...AMENDABLE_ITEM_STATES],
+    ["PENDING", "RED", "TEST_VETTED", "GREEN"],
+    "the amendable set is the CLOSED list §2.5 implies: everything before verification",
+  );
+
+  for (const state of ["VALIDATED", "REVIEWED", "PUBLISHED"] as ItemState[]) {
+    for (const op of [
+      { label: "update", op: { op: "update", item: makeQueueItem("I2", { fileScope: ["src/z.mjs"], testScope: ["tests/z.test.mjs"] }) } as QueueAmendOp },
+      { label: "remove", op: { op: "remove", id: "I2" } as QueueAmendOp },
+    ]) {
+      await t.test(`${op.label} at ${state}`, () => {
+        const bench = seedAmendBenchWith(
+          {
+            items: [
+              makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+              makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }),
+            ],
+          },
+          { I1: "PENDING", I2: state },
+        );
+        const beforeQueue = readFileSync(path.join(bench.runDir, "queue.json"), "utf8");
+        const beforeItem = itemFileBytes(bench.runDir, "I2");
+
+        assert.throws(
+          () =>
+            handleQueueAmend({
+              store: bench.store,
+              runId: bench.runId,
+              config: bench.config,
+              journal: bench.journal.sink,
+              now: () => START_MS,
+              ops: [op.op],
+              ...AMEND_DECISION,
+            }),
+          new RegExp(state),
+          "the refusal names the state that makes the item unamendable",
+        );
+
+        assert.equal(readFileSync(path.join(bench.runDir, "queue.json"), "utf8"), beforeQueue, "queue.json is BYTE-IDENTICAL");
+        assert.equal(itemFileBytes(bench.runDir, "I2"), beforeItem, "the item file is BYTE-IDENTICAL");
+        assert.equal(itemFileExists(bench.runDir, "I2"), true, "a refused remove did NOT delete the item");
+        assert.equal(readDecisions(bench.runDir).length, 0, "no §2.7 record was appended");
+      });
+    }
+  }
+});
+
+// ===========================================================================
+// [C035-update-clears-blocked]
+// ===========================================================================
+
+test("[C035-update-clears-blocked] §2.5 names conductor_queue_amend as a legal clearer of `blocked`, so an accepted update releases the item it re-scopes — the re-split path the §3.3 BLOCKED ladder ends in cannot leave the re-scoped item still blocked on the question that provoked it", () => {
+  const bench = seedAmendBenchWith(
+    {
+      items: [
+        makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+        makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }),
+      ],
+    },
+    { I1: "PENDING", I2: "RED" },
+  );
+  bench.store.setBlocked(bench.runId, "I2", { reason: "the item spans two acceptance clusters", stage: "implement" });
+  assert.notEqual(bench.store.loadItem(bench.runId, "I2").blocked, null, "premise: I2 is blocked");
+
+  const rescoped = makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] });
+  rescoped.title = "a narrower I2";
+  const res: QueueAmendResult = handleQueueAmend({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    ops: [{ op: "update", item: rescoped }],
+    ...AMEND_DECISION,
+  });
+
+  assert.equal(res.ok, true, "the amendment is accepted");
+  assert.deepEqual(res.updated, ["I2"], "the compact return names what was updated");
+  const after = bench.store.loadItem(bench.runId, "I2");
+  assert.equal(after.blocked, null, "the update CLEARED blocked");
+  assert.equal(after.state, "RED", "and it did NOT reset the FSM position — the work already proven still stands");
+  assert.equal(after.attempts.green, 0, "the update rewrote the queue entry, not the item's history");
+  assert.equal(readQueueFile(bench.runDir).items[1].title, "a narrower I2", "the queue entry IS the update");
+});
+
+// ===========================================================================
+// [C035-op-vocabulary-is-closed]
+// ===========================================================================
+
+test("[C035-op-vocabulary-is-closed] core parseAmendOps turns the tool's declared `ops: string[]` into the CLOSED add/update/remove union — the binding Task 9.6 needs — and refuses an unknown op, a malformed payload and a non-JSON string by naming the offending position", () => {
+  const good = [
+    JSON.stringify({ op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }) }),
+    JSON.stringify({ op: "update", item: makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }) }),
+    JSON.stringify({ op: "remove", id: "I3" }),
+  ];
+  const parsed = parseAmendOps(good);
+  assert.equal(parsed.ok, true, "the three legal kinds parse");
+  assert.deepEqual(parsed.ok ? parsed.ops.map((o) => o.op) : null, ["add", "update", "remove"], "in order, with the op names preserved");
+
+  const bad: Array<{ label: string; raw: string[]; expect: RegExp }> = [
+    { label: "an op outside the vocabulary", raw: [JSON.stringify({ op: "reorder", id: "I1" })], expect: /reorder/ },
+    { label: "an add with no item", raw: [JSON.stringify({ op: "add" })], expect: /item/i },
+    { label: "an add whose item has no id", raw: [JSON.stringify({ op: "add", item: { title: "x" } })], expect: /id/i },
+    { label: "a remove with no id", raw: [JSON.stringify({ op: "remove" })], expect: /id/i },
+    { label: "a string that is not JSON at all", raw: ["remove I1"], expect: /json/i },
+    { label: "a JSON scalar rather than an object", raw: ["42"], expect: /object/i },
+    { label: "no ops at all", raw: [], expect: /empt|at least one/i },
+  ];
+  for (const row of bad) {
+    const verdict = parseAmendOps(row.raw);
+    assert.equal(verdict.ok, false, `${row.label} is refused`);
+    assert.match(verdict.ok ? "" : verdict.why, row.expect, `${row.label} is refused for the stated reason`);
+  }
+  assert.match(
+    parseAmendOps([JSON.stringify({ op: "remove", id: "I1" }), JSON.stringify({ op: "nope" })]).ok
+      ? ""
+      : (parseAmendOps([JSON.stringify({ op: "remove", id: "I1" }), JSON.stringify({ op: "nope" })]) as { why: string }).why,
+    /\b1\b/,
+    "the refusal names the POSITION of the offending op, so a long ops list is diagnosable",
+  );
+});
+
+// ===========================================================================
+// [C035-op-preconditions]
+// ===========================================================================
+
+test("[C035-op-preconditions] core applyAmendOps refuses an add whose id already exists, an update or remove of an id the queue does not have, and an empty ops list — and applies ops IN ORDER, so a later op sees what an earlier one did", () => {
+  const queue: Queue = {
+    items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] })],
+  };
+  const states: Record<string, ItemState> = { I1: "PENDING" };
+
+  const dup = applyAmendOps(queue, [{ op: "add", item: makeQueueItem("I1", { fileScope: ["src/z.mjs"], testScope: ["tests/z.test.mjs"] }) }], states);
+  assert.equal(dup.ok, false, "adding an id the queue already has is refused");
+  assert.match(dup.ok ? "" : dup.why, /I1/, "the refusal names the duplicate id");
+
+  for (const op of [
+    { op: "update", item: makeQueueItem("I9", { fileScope: ["src/z.mjs"], testScope: ["tests/z.test.mjs"] }) } as QueueAmendOp,
+    { op: "remove", id: "I9" } as QueueAmendOp,
+  ]) {
+    const missing = applyAmendOps(queue, [op], states);
+    assert.equal(missing.ok, false, `${op.op} of an absent id is refused`);
+    assert.match(missing.ok ? "" : missing.why, /I9/, "the refusal names the id that is not there");
+  }
+
+  const empty = applyAmendOps(queue, [], states);
+  assert.equal(empty.ok, false, "an amendment that amends nothing is refused rather than recording a decision about no change");
+
+  // Order matters: remove-then-add of the same id is a legal re-scope, and only works
+  // if the second op sees the first one's result.
+  const resplit = applyAmendOps(
+    queue,
+    [
+      { op: "remove", id: "I1" },
+      { op: "add", item: makeQueueItem("I1", { fileScope: ["src/a.mjs", "src/a2.mjs"], testScope: ["tests/a.test.mjs"] }) },
+    ],
+    states,
+  );
+  assert.equal(resplit.ok, true, "remove-then-add of the same id applies in order");
+  assert.deepEqual(resplit.ok ? resplit.queue.items[0].fileScope : null, ["src/a.mjs", "src/a2.mjs"], "the ADD's scope is what lands");
+
+  // The input is never mutated — the handler re-validates a candidate and may refuse it.
+  assert.deepEqual(queue.items.map((e) => e.id), ["I1"], "applyAmendOps did not mutate the queue it was handed");
+  assert.deepEqual(queue.items[0].fileScope, ["src/a.mjs"], "nor anything inside it");
+});
+
+// ===========================================================================
+// [C035-persist-order-leaves-only-the-safe-orphan]
+// ===========================================================================
+
+test("[C035-persist-order-leaves-only-the-safe-orphan] the added item's §2.5 file is written BEFORE queue.json, so a crash between the two leaves a runtime item no queue entry names — harmless — rather than a queue entry naming an item file that does not exist, which every later loadItem would throw on", () => {
+  const bench = seedAmendBench();
+  const beforeQueue = readFileSync(path.join(bench.runDir, "queue.json"), "utf8");
+
+  // Make the run directory itself unwritable. queue.json's atomic write creates its temp
+  // sibling IN that directory and fails; items/ keeps its own permissions, so the item
+  // write that must come FIRST still succeeds. That difference is the whole assertion.
+  chmodSync(bench.runDir, 0o555);
+  try {
+    assert.throws(
+      () =>
+        handleQueueAmend({
+          store: bench.store,
+          runId: bench.runId,
+          config: bench.config,
+          journal: bench.journal.sink,
+          now: () => START_MS,
+          ops: [{ op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }) }],
+          ...AMEND_DECISION,
+        }),
+      /./,
+      "the queue write fails",
+    );
+  } finally {
+    chmodSync(bench.runDir, 0o755);
+  }
+
+  assert.equal(readFileSync(path.join(bench.runDir, "queue.json"), "utf8"), beforeQueue, "queue.json is unchanged");
+  assert.equal(itemFileExists(bench.runDir, "I2"), true, "the item file was already written — the orphan, which is the SAFE side to fail on");
+  assert.deepEqual(
+    readQueueFile(bench.runDir).items.map((e) => e.id),
+    ["I1"],
+    "no queue entry names an item whose file is missing, so nothing the run does next throws",
+  );
+});
+
+// ===========================================================================
+// [C035-remove-then-readd-is-one-net-birth] — found by MUTATION, not by review.
+//
+// Dropping the rule that an `add` cancels a prior `remove` of the same id left
+// every row above green. It is nonetheless the most dangerous line in the module:
+// with the id in BOTH sets the handler writes the reborn item's file, writes
+// queue.json naming it, and then executes the retirement — deleting the file it
+// just created. The run is left with a queue entry whose §2.5 item is absent,
+// which is the exact wedge this whole correction exists to prevent.
+// ===========================================================================
+
+test("[C035-remove-then-readd-is-one-net-birth] remove-then-add of ONE id inside a single amendment is a net BIRTH, not a birth and a retirement: the reborn item's file survives the amendment, and the reverse order (add-then-remove) retires an id that never reached disk without attempting to delete anything", () => {
+  // (a) The re-scope: I2 is dropped and immediately re-added with a wider scope.
+  const bench = seedAmendBenchWith(
+    {
+      items: [
+        makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+        makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }),
+      ],
+    },
+    { I1: "PENDING", I2: "GREEN" },
+  );
+  const stale = bench.store.loadItem(bench.runId, "I2");
+  stale.attempts.green = 2;
+  stale.evidence = { red: { ledger: "evidence", seq: 3 }, green: { ledger: "evidence", seq: 5 } };
+  bench.store.saveItem(bench.runId, stale);
+
+  const res: QueueAmendResult = handleQueueAmend({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    ops: [
+      { op: "remove", id: "I2" },
+      { op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs", "src/b2.mjs"], testScope: ["tests/b.test.mjs"] }) },
+    ],
+    ...AMEND_DECISION,
+  });
+
+  assert.equal(res.ok, true, "the re-scope is accepted");
+  assert.deepEqual(res.added, ["I2"], "the NET effect is a single birth");
+  assert.deepEqual(res.removed, [], "the retirement is cancelled by the re-add — it must NOT also be reported");
+  assert.deepEqual(res.updated, [], "and it is a birth, not an update: the old item's history does not carry over");
+
+  assert.equal(
+    itemFileExists(bench.runDir, "I2"),
+    true,
+    "the reborn item's §2.5 file SURVIVES the amendment — a queue entry whose item file is absent would throw on the next loadItem",
+  );
+  const reborn = bench.store.loadItem(bench.runId, "I2");
+  assert.equal(reborn.state, "PENDING", "reborn at the head of the FSM");
+  assert.equal(reborn.attempts.green, 0, "with none of the dropped item's attempts");
+  assert.deepEqual(reborn.evidence, {}, "and none of its evidence");
+  assert.deepEqual(
+    readQueueFile(bench.runDir).items.map((e) => e.id),
+    ["I1", "I2"],
+    "the queue names both items",
+  );
+  assert.deepEqual(
+    readQueueFile(bench.runDir).items[1].fileScope,
+    ["src/b.mjs", "src/b2.mjs"],
+    "and I2 carries the WIDER scope the re-add supplied",
+  );
+
+  // (b) The mirror: an id born and dropped inside one amendment never reached disk,
+  //     so there is nothing to retire and nothing to report.
+  const mirror = seedAmendBench();
+  const mirrorRes: QueueAmendResult = handleQueueAmend({
+    store: mirror.store,
+    runId: mirror.runId,
+    config: mirror.config,
+    journal: mirror.journal.sink,
+    now: () => START_MS,
+    ops: [
+      { op: "add", item: makeQueueItem("I9", { fileScope: ["src/z.mjs"], testScope: ["tests/z.test.mjs"] }) },
+      { op: "remove", id: "I9" },
+      { op: "add", item: makeQueueItem("I3", { fileScope: ["src/c.mjs"], testScope: ["tests/c.test.mjs"] }) },
+    ],
+    ...AMEND_DECISION,
+  });
+  assert.deepEqual(mirrorRes.added, ["I3"], "the id that was added and then dropped is not reported as added");
+  assert.deepEqual(mirrorRes.removed, [], "nor as removed — it never reached disk");
+  assert.equal(itemFileExists(mirror.runDir, "I9"), false, "and no §2.5 file was left behind for it");
+  assert.deepEqual(readQueueFile(mirror.runDir).items.map((e) => e.id), ["I1", "I3"], "the queue is what the net ops describe");
+
+  // The state check is waived only for an id THIS amendment created. A GREEN item
+  // dropped and re-added is amendable because GREEN is amendable, not because the
+  // add cancelled the check — an integrated item cannot be laundered this way.
+  const laundry = seedAmendBenchWith(
+    {
+      items: [
+        makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+        makeQueueItem("I2", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] }),
+      ],
+    },
+    { I1: "PENDING", I2: "PUBLISHED" },
+  );
+  assert.throws(
+    () =>
+      handleQueueAmend({
+        store: laundry.store,
+        runId: laundry.runId,
+        config: laundry.config,
+        journal: laundry.journal.sink,
+        now: () => START_MS,
+        ops: [
+          { op: "remove", id: "I2" },
+          { op: "add", item: makeQueueItem("I2", { fileScope: ["src/b.mjs", "src/b2.mjs"], testScope: ["tests/b.test.mjs"] }) },
+        ],
+        ...AMEND_DECISION,
+      }),
+    /PUBLISHED/,
+    "remove-then-add cannot launder an item whose work is already integrated",
+  );
+  assert.equal(itemFileExists(laundry.runDir, "I2"), true, "the published item is untouched");
 });
