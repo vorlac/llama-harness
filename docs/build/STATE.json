@@ -1139,7 +1139,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "40c6afe",
       "commitMessage": "conductor: 9.4b green/validate/amend",
       "planLines": [
         2624,

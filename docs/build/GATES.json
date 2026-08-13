@@ -560,7 +560,7 @@
       "M1": "PASS 943/943 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
       "M2": "PASS 921 -> 942 (13 authored rows, 21 tests with subtests) -> 943 (1 mutation-fix row)",
       "M3": "PASS (tsc clean; pre-implementation tsc showed ONLY the three missing exports)",
-      "M4": "PENDING",
+      "M4": "PASS post-commit from 40c6afe in a detached scratch worktree, BOTH directions: baseline 22/22 green at the commit; un-exporting handleMarkGreen re-derived the missing-export SyntaxError (tests=1 pass=0); restoring and deleting the own-tests guard re-red [9.4b-fix-stale-red-never-quarantines-own-test] ALONE (21 pass / 1 fail) — the mutation that had exposed the coverage hole now fails from the commit, which is what makes the new row worth having. Orchestrator-observed every run; worktree removed.",
       "M5": "PASS (production-scoped marker scan)",
       "M6": "PASS (all three handlers exported and exercised; runVerify/runTest reached through the real evidence adapter against real child processes and real git fixture repos)",
       "M7": "PASS 13 assertion rows each with a row-id-prefixed test + 1 mutation-fix row",

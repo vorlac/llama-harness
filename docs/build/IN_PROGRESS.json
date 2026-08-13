@@ -1,17 +1,10 @@
 {
   "spineTask": {
-    "taskId": "9.4b",
-    "step": "Phase 9 SERIAL. conductor_mark_green + conductor_validate + conductor_queue_amend in adapter/tools.ts. STATE: assertions signed (13 rows), TESTS WRITTEN AND VETTED, RED OBSERVED BY THE ORCHESTRATOR (tsc showed ONLY the three TS2305s for handleMarkGreen/handleQueueAmend/handleValidate; node --test gave the missing-export SyntaxError). The test file is PARKED at staging/task-9.4b/tools-9.4b.test.ts so the tree holds one red at a time — copy it to conductor/tests/tools-9.4b.test.ts to resume. NEXT STEP IS THE IMPLEMENTATION (the dispatched implementer died on a weekly account limit before making any edit; adapter/tools.ts is untouched).",
+    "taskId": "9.4c",
+    "step": "Phase 9 SERIAL. conductor_dispatch_wave (the wave driver). 9.4b is COMMITTED (40c6afe) + M4 PASS. NEXT: promote the staged draft at scratchpad/staging/assertions-drafts/task-9.4c.assertions.json — it carries the P3+P7 deferred bindings (dispatch_wave supplies PLAN_REVIEWED->EXECUTING context with survivingMajors:0 iff planReviewRounds<max; AND a stale/over-age evidence-marker break MUST fire treeState.onClear so a leaked freeze marker becomes an env-fail rather than a silent wave hang). Review the draft against the committed surfaces before promoting, as 11.4's promotion needed.",
     "intendedFiles": [
-      "conductor/tests/tools-9.4b.test.ts",
+      "conductor/tests/tools-9.4c.test.ts",
       "conductor/adapter/tools.ts"
-    ],
-    "rulings": [
-      "mark_green owns the WHOLE stage (dispatches the implementer, then runs the item test itself), mirroring 9.4a's submit_test.",
-      "The §3.3 BLOCKED escalation ladder's middle rungs ('stronger model', 'item re-split') are NOT constructible from §2.1 and are RAISED AT THE PHASE 9 GATE rather than stubbed (G4); the two constructible rungs are implemented.",
-      "The cap question reuses the EXISTING origin 'debug-architecture'; a BLOCKED implementer reuses 'implementer-blocked'. The §2.11 vocabulary is CLOSED.",
-      "adapter/evidence.ts needs NO change: RunTestOptions ALREADY carries excludeTestFiles + stateHome/workspaceKey (6.1, hardened by 968b5f8). 9.4b computes the foreign red set and PASSES it on both the mark_green item-test path and the validate path. Changing runItemTest's signature to take the exclusion set is expected.",
-      "The test file's own header pins P1 (debugFixCap bounds FIX ATTEMPTS: debugFixCap dispatches, debugFixCap+1 verifies) and P2 (a legality refusal THROWS; a failing test/verify returns ok:false). Follow them exactly."
     ]
   },
   "branchB": {

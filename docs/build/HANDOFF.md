@@ -118,6 +118,15 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1-11.3 done+gated; Phase 9 underwa
      mutate the implementation and confirm the right row fails; then READ THE DIFF ANYWAY. C-033 was
      invisible to both, and was found only by reading a comment that claimed something the code
      three lines below did not do.
+   - **MUTATE EVERY BRANCH OF A GUARD, NOT JUST THE GUARD (C-034).** A mutation that fails nothing
+     does not mean the code is unreachable — it can mean two paths reach the same assertion and only
+     one is under test. Deleting 9.4b's "never quarantine the item's own tests" guard left all 13
+     rows green, because the queue half of the §4.2 union already skips the subject item; the guard
+     is load-bearing only for the stale-red REGISTRY half, which no row exercised. That half is the
+     dangerous one — the registry outlives runs, so an earlier run's entry can silence THIS item's
+     own red.
+   - **WITHOUT SUBAGENTS, the review substitute is: mutation-test every load-bearing claim, then
+     read the whole diff.** That combination found C-033 and C-034 with no panel at all.
 - Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,
   overridesRemaining}; an implementer's active item with `debugging:true` (optional GateItem
   field) gets debug.md; init-failure logs via the injected logError seam (§7.1 stderr), never a
