@@ -586,7 +586,7 @@
       "M1": "PASS 979/979 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
       "M2": "PASS 954 -> 979 (12 rows, 25 tests with subtests)",
       "M3": "PASS (tsc clean; pre-implementation tsc showed EXACTLY one error, the missing handleDispatchWave export)",
-      "M4": "PENDING",
+      "M4": "PASS post-commit from 9541271 in a detached scratch worktree: baseline 25/25 green at the commit; un-exporting handleDispatchWave re-derived the missing-export SyntaxError (tests=1 pass=0). The four behaviour reverts in revertAssertion were each run separately in the main tree, not reasoned. Orchestrator-observed every run; worktree removed.",
       "M5": "PASS (production-scoped marker scan)",
       "M6": "PASS (the driver REACHES the committed 9.4a/9.4b stage handlers rather than reimplementing them; the Gap-1 change is exercised through the pure gate AND end to end)",
       "M7": "PASS 12 assertion rows each with a row-id-prefixed test",
