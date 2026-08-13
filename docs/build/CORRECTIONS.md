@@ -1945,3 +1945,61 @@ environment, not a defect in the code under test. Recorded so a future cancellat
 this rather than diagnosed from scratch: re-run on a quiet machine before treating it as a
 regression. If it recurs without load, the budget is genuinely too tight and should be widened
 deliberately.
+
+## C-054 — I documented a guard into existence and then trusted my own documentation (MAJOR)
+
+**The finding.** The Phase 9 milestone gate's gate-versus-handler lens reported, and both skeptics
+confirmed by RUNNING it, that `legalTools`' `publishEnabled` parameter was passed by NO production
+call site, and that the guard C-048 cited as the thing preventing exactly that —
+`conductor/tests/legaltools-callsites.test.ts` — DID NOT EXIST.
+
+Verified directly rather than taken on report: the file was absent, and all three production call
+sites (`adapter/inject.ts:110`, `adapter/tools.ts:2437`, `adapter/tools.ts:4878`) passed four
+arguments. Every gate verdict in production was therefore computed with `publishEnabled` defaulted
+to `true`.
+
+**What C-048 actually said.** "The danger a required parameter was meant to remove — a call site
+silently inheriting publish-enabled — is removed a different way, and a stronger one: ... every
+production call site passes it explicitly, and `tests/legaltools-callsites.test.ts` fails if one
+stops." Both halves were false when written. I then repeated the claim in a code comment at
+`gates-phase.ts`, which is where the gate's lens found it: the citation was the only thing that
+existed.
+
+**The consequence, as the lens demonstrated on a real non-repo workspace.** With an item at
+REVIEWED under §3.9 no-git, the gate OFFERS and RECOMMENDS `conductor_publish` — which the handler
+refuses unconditionally — and never offers `conductor_report`, which the handler accepts. The
+injected state block names the failing tool as the next step; the wave driver turns each attempt
+into a per-item envError.
+
+The skeptics NARROWED one sub-claim and they were right to: this is not a hard deadlock.
+`handleReport` never consults `legalTools` — it derives `isRepo` itself — so a caller who invokes
+report anyway still closes the run. What is broken is the GUIDANCE: the model is steered
+indefinitely toward a tool that cannot work, and away from the one that can.
+
+**The fix.** The guard now exists, and it reads the SOURCE rather than any behaviour — because a
+behavioural test cannot see this: `tools-9.5b.test.ts` passes the flag BY HAND
+(`gate(..., true, false)`), which pins the parameter's semantics perfectly and says nothing about
+whether production ever sets it. Two rows: every production call site passes five arguments, and
+the fifth is DERIVED rather than a bare literal (a literal would satisfy the arity check while
+restoring the identical bug). All three call sites are wired — the two in `tools.ts` from
+`isRepo(store.root)`, and `inject.ts` through a new REQUIRED `InjectCtx.publishEnabled`, threaded
+rather than derived because `buildSystemAppend` runs on every prompt and `isRepo` shells out to git.
+
+VERIFIED red before the wiring (all three sites listed by name), green after; suite 1128/1128.
+
+**The first version of the guard had the same disease as its subject.** It matched `legalTools` in
+COMMENTS — prose like "forwards to legalTools (repoConfigured)" — and reported two comments as
+under-argumented call sites. A scanner that inspects the wrong text is exactly the class it was
+built to catch. It now blanks comments before scanning, preserving line numbers.
+
+**The lesson, and it is the sharpest one this build has produced.** Every prior member of this
+family — C-044, C-045, C-046, C-047, C-051, C-052 — was a check that INSPECTED LESS THAN IT
+CLAIMED. This one is worse: there was no check at all, only a description of one, written by me, in
+two places, in the confident past tense. A described-but-unbuilt construction is more dangerous than
+an acknowledged gap, because the description is what the next reader audits against — and I was
+that reader twice.
+
+STANDING RULE: when a correction record claims a construction prevents a recurrence, the commit
+that records it MUST contain the construction. If the guard is deferred, the record says DEFERRED
+and names the task that will build it. "Is removed by" is a claim about the present tense and must
+be true when written.

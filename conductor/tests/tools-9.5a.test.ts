@@ -1918,7 +1918,7 @@ test("[9.5a-receive-review-pack-delivered] MANDATORY DEFERRED BINDING (Phase 8 g
   const run = gateRunOf(bench);
   const items = gateItemsOf(bench);
   const questions = gateQuestionsOf(bench);
-  const ctx = { repoConfigured: true, taintCount: 0, overridesRemaining: 1 };
+  const ctx = { repoConfigured: true, publishEnabled: true, taintCount: 0, overridesRemaining: 1 };
   const delivered = buildSystemAppend(entry as SessionRegistryEntry, run, items, questions, PACKS, ctx);
 
   assert.equal(delivered[0], PACKS["tdd.md"], "tdd.md stays the PRIMARY pack at append[0] (§4.1)");

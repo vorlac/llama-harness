@@ -2434,7 +2434,10 @@ function requireStageTool(
         (error instanceof Error ? error.message : String(error)),
     );
   }
-  const verdict = legalTools(gateRun, gateItems, questions, true);
+  // §3.9 publish availability is DERIVED from the workspace, never assumed: the
+  // handlers compute the same predicate, so gate and handler cannot disagree
+  // about whether an item at REVIEWED still owes a publish (C-048/C-054).
+  const verdict = legalTools(gateRun, gateItems, questions, true, isRepo(store.root));
   const offered = verdict.legal.get(tool)?.itemIds ?? [];
   if (!offered.includes(itemId)) {
     throw new Error(tool + ": " + stageDenyReason(tool, verdict, { run, queueItem, item, gateItems }));
@@ -4875,7 +4878,7 @@ function waveVerdict(store: StateStore, runId: string, runDir: string, queue: Qu
         (error instanceof Error ? error.message : String(error)),
     );
   }
-  return legalTools(gateRun, gateItemsOf(store, runId, queue), questions, true);
+  return legalTools(gateRun, gateItemsOf(store, runId, queue), questions, true, isRepo(store.root));
 }
 
 // The §3.3 stage tool the gate offers THIS item right now, or null when it

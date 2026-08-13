@@ -91,6 +91,13 @@ const REQUIRED_PACKS: readonly string[] = [
 // state block reports that are derivable from neither items nor questions.
 export interface InjectCtx {
   repoConfigured: boolean;
+  // §3.9: whether conductor_publish can work at all in this workspace, i.e.
+  // gitio.isRepo(root). REQUIRED rather than optional, and threaded rather than
+  // derived here, for two reasons: buildSystemAppend runs on EVERY prompt and
+  // isRepo shells out to git, and a caller that must name its git mode cannot
+  // forget to have one. Without it the state block names conductor_publish as
+  // the next tool in a run where the handler always refuses it (C-054).
+  publishEnabled: boolean;
   taintCount: number;
   overridesRemaining: number;
 }
@@ -107,7 +114,7 @@ function renderStateBlock(
   questions: GateQuestion[],
   ctx: InjectCtx,
 ): string {
-  const verdict = legalTools(run, items, questions, ctx.repoConfigured);
+  const verdict = legalTools(run, items, questions, ctx.repoConfigured, ctx.publishEnabled);
   const recommended = verdict.recommended;
   // The recommended tool is always one of the legal tools, so the count of the
   // OTHER legal tools excludes it (and excludes nothing when nothing is recommended).

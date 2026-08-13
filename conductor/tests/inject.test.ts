@@ -140,11 +140,17 @@ const item = (over: Partial<GateItem> = {}): GateItem => ({
 // The trailing options object this task adds to the §6.4 ledger arg list.
 interface InjectCtx {
   repoConfigured: boolean;
+  // C-054: §3.9 publish availability, threaded rather than defaulted. The factory
+  // below defaults it TRUE — the ordinary git-mode workspace these rows are about
+  // — so every existing assertion keeps its meaning; the no-git behaviour has its
+  // own row in the gate suite.
+  publishEnabled: boolean;
   taintCount: number;
   overridesRemaining: number;
 }
 const ctx = (over: Partial<InjectCtx> = {}): InjectCtx => ({
   repoConfigured: true,
+  publishEnabled: true,
   taintCount: 0,
   overridesRemaining: 3,
   ...over,
