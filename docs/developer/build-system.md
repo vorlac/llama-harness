@@ -29,19 +29,19 @@ produces no files. The plugin you edit is the plugin that runs, in both runtimes
 ## CMake targets
 
 Three executables — all declared at the top level except `membench`, which arrives through
-`add_subdirectory(src/tools)`.
+`add_subdirectory(tools)`.
 
 | Target         | Sources                                                    | Links                                                                  | Purpose                                           |
 | -------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| `llama-router` | `src/main.cpp`                                             | `spdlog`, `httplib`, `nlohmann_json`, `nlohmann_json_schema_validator` | The fail-soft proxy in front of `llama-server`    |
-| `router-tests` | `src/tests/scaffold_test.cpp`, `src/tests/config_test.cpp` | the above plus `doctest`                                               | The router's doctest suite, registered with ctest |
-| `membench`     | `src/tools/membench/membench.cpp`                          | `Threads::Threads`                                                     | Standalone memory-bandwidth probe                 |
+| `llama-router` | `router/main.cpp`                                             | `spdlog`, `httplib`, `nlohmann_json`, `nlohmann_json_schema_validator` | The fail-soft proxy in front of `llama-server`    |
+| `router-tests` | `router/tests/scaffold_test.cpp`, `router/tests/config_test.cpp` | the above plus `doctest`                                               | The router's doctest suite, registered with ctest |
+| `membench`     | `tools/membench/membench.cpp`                          | `Threads::Threads`                                                     | Standalone memory-bandwidth probe                 |
 
 All three set `cxx_std_23` explicitly with `target_compile_features`, on top of the project-wide
 `CMAKE_CXX_STANDARD 23`. `llama-router` and `router-tests` each add `src/` as a private include
 directory and nothing else — see [the include rule](#the-include-rule). Neither links `llama` nor
 `ftxui`; the router does not need llama.cpp's libraries, only the wire protocol its server speaks.
-Source lists grow per task, so a new `.cpp` under `src/router/` or `src/tests/` is compiled only
+Source lists grow per task, so a new `.cpp` under `router/` or `router/tests/` is compiled only
 once it is added to the relevant `add_executable` call.
 
 Test registration is two lines:
@@ -167,7 +167,7 @@ in-workspace header is included by its full path relative to `src/`:
 ```
 
 What it buys: an include names where the header actually lives, no matter which file is doing the
-including. `src/main.cpp` sits beside `src/router/` and `src/tests/config_test.cpp` sits in a
+including. `router/main.cpp` sits beside `router/` and `router/tests/config_test.cpp` sits in a
 sibling directory, yet both spell a router header the same way. There are no per-directory include
 paths to keep in sync, no relative-path chains that break when a file moves, and no ambiguity about
 which `config.hpp` a bare name resolves to — and a new subdirectory under `src/` needs no CMake
@@ -209,15 +209,15 @@ Four modules live in `cmake/`, found via `CMAKE_MODULE_PATH`.
 
 ## Standalone tools
 
-[`src/tools/`](../../src/tools/README.md) holds measurement tools that carry **no project
-dependencies**, deliberately: `src/tools/CMakeLists.txt` is the single line
+[`tools/`](../../tools/README.md) holds measurement tools that carry **no project
+dependencies**, deliberately: `tools/CMakeLists.txt` is the single line
 `add_subdirectory(membench)`, and `membench` links only `Threads::Threads`. That constraint exists
 so the tool builds two ways — through the tree, or with one compiler invocation and no CMake, no
 vcpkg, no configure:
 
 ```bash
 cmake --build .out/build/clang-relwdebinfo --target membench
-c++ -std=c++23 -O3 src/tools/membench/membench.cpp -o build/membench
+c++ -std=c++23 -O3 tools/membench/membench.cpp -o build/membench
 ```
 
 `membench` forces `-O3` even in a Debug configuration, because an `-O0` build measures loop
@@ -232,7 +232,7 @@ bandwidth estimate only if that fails — a figure that includes page-fault cost
 third low. One caveat: `hostinfo.py` resolves the source at `tools/membench/` relative to the repo
 root, a path left behind when the tools moved under `src/`, so a built binary or `MEMBENCH_BIN` is
 the reliable route. The full methodology — what the tool was built to answer, and why absolute
-alignment turned out not to matter — is in [`src/tools/README.md`](../../src/tools/README.md).
+alignment turned out not to matter — is in [`tools/README.md`](../../tools/README.md).
 
 ## The llama.cpp submodule
 
@@ -294,7 +294,7 @@ packages. Nothing it installs is deployed, imported at runtime, or committed;
 | `.data/`                  | Everything the harness generates: models, llama.cpp build, `.data/tools/` binaries, configs |
 | `build/`, `out/`          | Ad-hoc CMake trees, plus where `hostinfo.py` drops its on-demand `membench` build           |
 | `conductor/node_modules/` | Dev-only type tooling; reproducible from `package.json`                                     |
-| `src/tests/schemas/`      | The JSON Schemas regenerated from `core/types.ts` on every test run                         |
+| `router/tests/schemas/`      | The JSON Schemas regenerated from `core/types.ts` on every test run                         |
 | `__pycache__/`, `*.pyc`   | Python bytecode                                                                             |
 
 One deliberate exception: `.gitignore` matches `build/` at any depth, which would swallow
@@ -329,5 +329,5 @@ Never run `node --test` directly for a pass/fail decision: the wrapper exists be
 - [Testing and verification](testing-and-verification.md) — what the canonical gate checks and why
 - [llama-router](llama-router.md) — what the `llama-router` target is being built into
 - [Project status](project-status.md) — what is built, what is next
-- [`src/tools/README.md`](../../src/tools/README.md) — membench methodology and results
+- [`tools/README.md`](../../tools/README.md) — membench methodology and results
 - [`scripts/README.md`](../../scripts/README.md) — the model-harness scripts in full

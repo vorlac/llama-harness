@@ -2,7 +2,7 @@
 // Task 11.8 — llama-router entry point: a thin adapter over the pure CLI parse.
 //
 // Everything decidable without a socket lives in router/cli.hpp's parseCli,
-// which is what makes it doctest-reachable (src/tests/cli_test.cpp); this file
+// which is what makes it doctest-reachable (router/tests/cli_test.cpp); this file
 // only maps verdicts onto the C-041 / SG-I exit codes:
 //   0  clean shutdown after SIGINT/SIGTERM (Router::stop() ran), and the
 //      --help / --version paths;

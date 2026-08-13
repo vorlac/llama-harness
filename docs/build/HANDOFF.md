@@ -190,9 +190,13 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
 
 ## C++ / src layout (USER-DIRECTED, 2026-08-13 — supersedes the plan's §1.1 tree)
 
-- `src/tools/` (was root `tools/`) and `src/tests/` (was `src/router-tests/`). The CMake TARGET
-  is still named `router-tests` (it is the ctest name every gate row cites) — only the directory
-  moved. Generated schemas now land in `src/tests/schemas/` (gitignored).
+- **C++ LAYOUT, user-directed, two rounds.** First `tools/` -> `src/tools/` and
+  `src/router-tests/` -> `src/tests/`; then the whole tree was hoisted: `src/` -> `router/`,
+  `src/tests/` -> `router/tests/`, `src/tools/` -> `tools/`. The CMake TARGET is still named
+  `router-tests` (the ctest name every gate row cites) and the INCLUDE SPELLING is unchanged —
+  the include root moved from `src/` to the REPO ROOT, so `#include "router/config.hpp"` reads
+  identically before and after. Generated schemas now land in `router/tests/schemas/`
+  (gitignored). Plan §1.1's tree is stale on all of this and stays unedited.
 - **INCLUDE RULE: every in-workspace header is included by its FULL path relative to `src/`** —
   `#include "router/version.hpp"`, never `#include "version.hpp"`. `src/` is the only user-code
   include root on both targets, so an include names where the header actually lives regardless of

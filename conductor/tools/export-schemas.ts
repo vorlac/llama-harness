@@ -37,5 +37,5 @@ export function exportSchemas(outDir: string): string[] {
 // invocation and never when the module is imported — under Node type-stripping
 // there is no import.meta.main, so the suffix test is the robust equivalent.
 if (process.argv[1] && process.argv[1].endsWith("export-schemas.ts")) {
-  exportSchemas(process.argv[2] ?? path.resolve("src/tests/schemas"));
+  exportSchemas(process.argv[2] ?? path.resolve("router/tests/schemas"));
 }

@@ -14,8 +14,10 @@ if (CLANG_FORMAT_PROGRAM)
       format_src_list 
       RELATIVE 
         "${CMAKE_CURRENT_SOURCE_DIR}"
-          "src/*.[hc]"
-          "src/*.[hc]pp"
+          "router/*.[hc]"
+          "router/*.[hc]pp"
+          "tools/*.[hc]"
+          "tools/*.[hc]pp"
     )
 
     foreach(_src_file ${format_src_list})

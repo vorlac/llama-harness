@@ -15,7 +15,7 @@
 //
 // THE TARGET SURFACE
 //
-//   // src/router/affinity.hpp   (HEADER-ONLY, matching 11.2/11.3/11.4)
+//   // router/affinity.hpp   (HEADER-ONLY, matching 11.2/11.3/11.4)
 //   #pragma once
 //
 //   #include <cstddef>
@@ -73,7 +73,7 @@
 //
 //   }  // namespace conductor::router
 //
-// THE ADMISSION SEAM (src/router/admission.hpp, Task 11.4, extended IN PLACE —
+// THE ADMISSION SEAM (router/admission.hpp, Task 11.4, extended IN PLACE —
 // affinity is never a second queue and never a second lock):
 //   - the committed Waiter gains the group it was tagged with, so the queue can
 //     be asked about it at grant time:
@@ -97,14 +97,14 @@
 //   - the controller builds its policy from the config it is already given:
 //     AffinityPolicy(config.affinity). No config file is re-read.
 //
-// THE ROUTER SEAM (src/router/router.hpp, Task 11.3/11.4, extended IN PLACE):
+// THE ROUTER SEAM (router/router.hpp, Task 11.3/11.4, extended IN PLACE):
 //   handleProxy already computes plan.tags; it passes plan.tags.group to
 //   admit(). The group VALUE was resolved by 11.3 with the CONFIGURED header
 //   name (Router::groupHeader_, falling back to X-Conductor-Group when
 //   config.affinity.header is blank) or by the x_conductor body fallback. 11.5
 //   introduces no second precedence rule and reads no header of its own.
 //
-// This file's final home is src/tests/affinity_test.cpp. CMake wiring is
+// This file's final home is router/tests/affinity_test.cpp. CMake wiring is
 // ORCHESTRATOR-ONLY: this file joins the router-tests target source list.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns

@@ -31,7 +31,7 @@ matching zero files exits 0 — a vacuous green. The wrapper parses the TAP trai
 `tests > 0` and `fail`, `cancelled`, `skipped`, and `todo` are all zero, with no `# SKIP`/`# TODO`
 directive at any subtest depth. A green run of it is four things, not one: the trailer,
 `tsc --noEmit`, the Bun dual-runtime smoke, and the JSON Schema regeneration into
-`src/tests/schemas/`.
+`router/tests/schemas/`.
 
 ## Add a `conductor_*` tool
 
@@ -249,7 +249,7 @@ hand-coded in `validate` — the `Classification` rule tying `trivialItem` to `k
 the worked example.
 
 **Let the gate regenerate the exported file.** `scripts/test-conductor.sh` runs
-`node conductor/tools/export-schemas.ts src/tests/schemas`, writing one
+`node conductor/tools/export-schemas.ts router/tests/schemas`, writing one
 `<Name>.schema.json` per entry. Those files are generated and gitignored. Never hand-write one:
 the C++ router tests byte-read them, and a hand-edited copy is exactly the drift the export step
 exists to prevent.
@@ -272,14 +272,14 @@ extra field turns into a schema rejection and a re-prompt. Decide which one you 
 *The router today parses its config and reports its version; the proxy, admission control,
 affinity, schema observation, and metrics modules land at tasks 11.3–11.8.*
 
-**What you are adding.** A C++23 translation unit under `src/router/`.
+**What you are adding.** A C++23 translation unit under `router/`.
 
 **Files, in order.**
 
-1. `src/tests/<name>_test.cpp` — a doctest suite written against the exact API you intend to
-   produce. `src/tests/config_test.cpp` is the model: it opens with the target header's full
+1. `router/tests/<name>_test.cpp` — a doctest suite written against the exact API you intend to
+   produce. `router/tests/config_test.cpp` is the model: it opens with the target header's full
    declaration in a comment block, and every name in it is asserted below.
-2. `src/router/<name>.hpp` (and `.cpp` if it needs one).
+2. `router/<name>.hpp` (and `.cpp` if it needs one).
 3. [`CMakeLists.txt`](../../CMakeLists.txt) — add sources to the `router-tests` source list, and to
    `llama-router` if the binary needs them. The doctest binary is registered whole:
    `add_test(NAME router-tests COMMAND router-tests)`.

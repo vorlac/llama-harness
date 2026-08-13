@@ -14,7 +14,7 @@ else, and nothing in the repo writes to a bare `build/`.
 ```
 cmake --preset clang-relwdebinfo                                  # or any preset
 cmake --build .out/build/clang-relwdebinfo --target membench      # or, no CMake:
-c++ -std=c++23 -O3 src/tools/membench/membench.cpp -o .out/build/membench
+c++ -std=c++23 -O3 tools/membench/membench.cpp -o .out/build/membench
 ```
 
 `scripts/hostinfo.py` prefers a preset-built binary (newest wins across presets)
@@ -22,7 +22,7 @@ and otherwise compiles one on demand into `.out/build/membench`, falling back to
 Python estimate only if that fails too.
 
 ```
-BENCH=.out/build/clang-relwdebinfo/src/tools/membench/membench
+BENCH=.out/build/clang-relwdebinfo/tools/membench/membench
 
 $BENCH                  # one 512 MiB single-threaded copy
 $BENCH --sweep          # relative phase: dst slides, src stays put

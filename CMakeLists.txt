@@ -64,14 +64,16 @@ enable_testing()
 # `llama` or `ftxui` — the router proxies to a separately-launched `llama-server`
 # and needs neither library.
 add_executable(llama-router
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/main.cpp"
 )
 target_compile_features(llama-router PRIVATE cxx_std_23)
-# src/ is the ONLY user-code include root: every in-workspace header is included
-# by its full path relative to src/ (`#include "router/version.hpp"`), so an
+# The REPO ROOT is the only user-code include root: every in-workspace header is
+# included by its full path from the root (`#include "router/version.hpp"`), so an
 # include names where the header actually lives no matter which file includes it.
+# The spelling is unchanged from when the sources sat under src/ — router/ simply
+# moved up a level, so the include root moved with it.
 target_include_directories(llama-router
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(llama-router
   PRIVATE spdlog::spdlog
@@ -84,18 +86,18 @@ target_link_libraries(llama-router
 # 11.1 is a single scaffold case. (Per-case doctest_discover_tests can replace the
 # whole-binary add_test once configure is confirmed.)
 add_executable(router-tests
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/scaffold_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/config_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/proxy_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/admission_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/affinity_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/schema_observer_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/metrics_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/cli_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/scaffold_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/config_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/proxy_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/admission_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/affinity_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/schema_observer_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/metrics_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/cli_test.cpp"
 )
 target_compile_features(router-tests PRIVATE cxx_std_23)
 target_include_directories(router-tests
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(router-tests
   PRIVATE doctest::doctest
@@ -107,12 +109,14 @@ target_link_libraries(router-tests
 add_test(NAME router-tests COMMAND router-tests)
 
 # Standalone measurement tools. These carry no project dependencies so they can
-# also be built directly with a single compiler invocation - see src/tools/README.md.
-add_subdirectory(src/tools)
+# also be built directly with a single compiler invocation - see tools/README.md.
+# They live OUTSIDE router/ because they are not part of the router: membench is a
+# dependency-free measurement probe that links neither the router nor its libraries.
+add_subdirectory(tools)
 
 if (AUTOFORMAT_SRC_ON_CONFIGURE MATCHES ON)
   # Formatting rules defined by .clangformat
-  # Scoped to src/*.[h]pp and src/*.[c]pp
+  # Scoped to the workspace's own C++: router/ and tools/ (never extern/).
   include(clang-format)
 endif()
 

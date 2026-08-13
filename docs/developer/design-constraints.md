@@ -243,7 +243,7 @@ is worse than no process — it produces a confident, false record.
 
 **The system is "conductor". Custom tools are `conductor_*`. Run state in a target workspace lives
 under `.conductor/`, excluded via the target's `.git/info/exclude` and never by editing the
-target's tracked `.gitignore`. Source lives under `conductor/` (TS), `src/router/` (C++), and
+target's tracked `.gitignore`. Source lives under `conductor/` (TS), `router/` (C++), and
 `scripts/` (wiring).**
 
 **Why.** Names are load-bearing here. Tool ids appear in doctrine text, in phase-legality tables,
@@ -276,7 +276,7 @@ OpenAI-compatible server in place of llama-server, and asserts every row against
 behavior rather than the hoped-for specification text. Findings live in
 [`conductor/adapter/wire-notes.md`](../../conductor/adapter/wire-notes.md); the router's side is
 the same discipline against llama-server's `/v1` contract, recorded in
-[`src/router/UPSTREAM_CONTRACT.md`](../../src/router/UPSTREAM_CONTRACT.md). The rule that keeps
+[`router/UPSTREAM_CONTRACT.md`](../../router/UPSTREAM_CONTRACT.md). The rule that keeps
 drift contained is: **any drift updates the adapter constants, never the core.** The two recorded
 drifts are the missing prompt-level `format` field and the permission adjudication endpoint
 (`POST /session/{id}/permissions/{permissionID}` with body `{response}`, not an SDK reply call).
@@ -502,7 +502,7 @@ the part that is expensive to reconstruct.
 | (b)   | Three-layer enforcement split: TS plugin (all gates) + C++ router (wall-clock, metrics) + `serve.py` wiring | A single plugin layer; pushing enforcement into the router  |
 | (c)   | Gates hard-deny, with the budgeted `conductor_override` hatch                                               | An uncapped hatch; no hatch; a human-approved hatch         |
 | (d)   | One model for every role (G13)                                                                              | Role-tiered routing; a two-tier judge/worker split          |
-| (e)   | The stock `myprogram`/`src/main.cpp` target is replaced by the router targets                               | Keeping the stock example alongside                         |
+| (e)   | The stock `myprogram`/`router/main.cpp` target is replaced by the router targets                               | Keeping the stock example alongside                         |
 | (f)   | Plugin tests run under Node type-stripping, with one Bun smoke test (G14)                                   | All-Bun tests; Node-only tests                              |
 | (g)   | `.conductor/` excluded via `.git/info/exclude`; quarantine and worktrees live outside the repo              | In-repo placement with per-runner discovery exclusion flags |
 
@@ -538,7 +538,7 @@ So a deviation is *recorded*, not merged into the specification. Three files car
 | Progress tracking moved out of the plan's checkboxes | C-001                                     | The plan file became immutable; task status moved to `STATE.json`, because checkbox state dies under `git restore`, conflicts across workers, and makes the spec mutable                                                                                               |
 | Bun installed at preflight                           | C-002                                     | Task 2.2 authorized skipping the Bun leg if Bun were absent; it was installed instead, so the G14 leg is active and §11 acceptance runs for real                                                                                                                       |
 | The canonical test command                           | C-005                                     | `node --test` was wrapped in `scripts/test-conductor.sh` after the raw command was observed producing both a bogus red and a vacuous green                                                                                                                             |
-| C++ source layout                                    | HANDOFF "C++ / src layout", user-directed | `src/tests/` replaces the plan's `src/router-tests/`, and `src/tools/` replaces a root `tools/`. The CMake *target* is still named `router-tests`, because that is the ctest name every gate row cites. The plan's §1.1 tree is stale on this point and stays unedited |
+| C++ source layout                                    | HANDOFF "C++ / src layout", user-directed | The C++ tree is `router/` (sources plus its own `tests/`) with `tools/` beside it at the top level, where the plan's §1.1 says `src/` and `src/router-tests/`. The CMake *target* is still named `router-tests`, because that is the ctest name every gate row cites. The include root is the repo root, so a header is still spelled `#include "router/config.hpp"` exactly as before. The plan's §1.1 tree is stale on this point and stays unedited |
 | Task ordering                                        | `STATE.json` `meta.orderingOverrides`     | `0.3 before 0.2`, `4.2 before 4.1`, `2.2 after 4.1`, and `12.1 split into 12.1-core + 12.1-G5`                                                                                                                                                                         |
 
 The pattern in that list is the point. Every recorded deviation so far concerns layout, ordering,

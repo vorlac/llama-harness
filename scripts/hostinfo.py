@@ -181,16 +181,16 @@ def _membench_binary() -> Optional[Path]:
 
     # Every CMake tree in this workspace configures through CMakePresets.json,
     # whose binaryDir is .out/build/<presetName>, so a preset-built membench lands
-    # at .out/build/<preset>/src/tools/membench/membench. Globbing the presets
+    # at .out/build/<preset>/tools/membench/membench. Globbing the presets
     # rather than naming one means any configured tree is found, newest first.
     #
     # The previous list looked under <repo>/build/tools/membench/ — a bare CMake
     # dir that no preset produces, at a source path that moved when tools/ became
-    # src/tools/. Both halves were stale, so a preset-built binary was never found
+    # tools/. Both halves were stale, so a preset-built binary was never found
     # and this always fell through to the on-demand compile below.
     out_root = _REPO_ROOT / ".out" / "build"
     candidates = sorted(
-        out_root.glob("*/src/tools/membench/membench"),
+        out_root.glob("*/tools/membench/membench"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )

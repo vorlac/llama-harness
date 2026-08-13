@@ -216,8 +216,8 @@ Three rules apply to everyone, whatever the role:
 
 **Paths are normalized against the session's tree first.** Every scope is tree-relative, so
 an implementer working in a worktree under
-`<stateHome>/…/worktrees/<runId>/<itemId>/src/router/config.hpp` is judged on
-`src/router/config.hpp`. The `.conductor/**` deny is applied to the normalized path — the
+`<stateHome>/…/worktrees/<runId>/<itemId>/router/config.hpp` is judged on
+`router/config.hpp`. The `.conductor/**` deny is applied to the normalized path — the
 state area of the *current* tree — so a tree that happens to live under a `.conductor`
 directory does not false-deny every write inside it. A path that is not under the session's
 tree at all is left alone, matches no tree-relative scope, and is denied by the role check.

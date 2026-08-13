@@ -7,7 +7,7 @@
 // and behaviour here is asserted by the cases in this file. One TEST_CASE per
 // assertion id from task-11.3.assertions.json, named "[<id>] ...".
 //
-//   // src/router/router.hpp
+//   // router/router.hpp
 //   #pragma once
 //
 //   #include <optional>
@@ -99,8 +99,8 @@
 //
 //   }  // namespace conductor::router
 //
-// This file's final home is src/tests/proxy_test.cpp; the module it
-// exercises is src/router/router.{hpp,cpp}. CMake wiring is ORCHESTRATOR-ONLY:
+// This file's final home is router/tests/proxy_test.cpp; the module it
+// exercises is router/router.{hpp,cpp}. CMake wiring is ORCHESTRATOR-ONLY:
 // this file joins the router-tests target source list, router.cpp joins both
 // llama-router and router-tests.
 //

@@ -10,7 +10,7 @@
 // THE TARGET SURFACE (HEADER-ONLY, matching config.hpp / router.hpp /
 // admission.hpp / affinity.hpp):
 //
-//   // src/router/cli.hpp
+//   // router/cli.hpp
 //   #pragma once
 //
 //   #include <optional>
@@ -53,7 +53,7 @@
 // filesystem, parseRouterConfig and a live socket, and is recorded by the 11.8
 // live-smoke artifact, not by doctests — SG-I pins that split.
 //
-// This file's final home is src/tests/cli_test.cpp. CMake wiring is
+// This file's final home is router/tests/cli_test.cpp. CMake wiring is
 // ORCHESTRATOR-ONLY: this file joins the router-tests target source list;
 // cli.hpp is header-only and needs no source-list entry.
 //
@@ -80,7 +80,7 @@ namespace {
     // no file lives: the parse is pure and must never open, stat or otherwise
     // notice the filesystem, so a nonexistent path parses exactly like a real
     // one. (The real invocation passes .data/configs/conductor-router.json and
-    // src/tests/schemas/RouterConfig.schema.json; the parse cannot tell.)
+    // router/tests/schemas/RouterConfig.schema.json; the parse cannot tell.)
     constexpr std::string_view kConfigPath = "no/such/dir/conductor-router.json";
     constexpr std::string_view kSchemaPath = "no/such/dir/RouterConfig.schema.json";
 

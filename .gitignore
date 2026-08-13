@@ -28,9 +28,9 @@ __pycache__/
 !.vscode/launch.json
 
 # Task 11.1: generated §2 JSON Schemas for the C++ router-tests (from core/types.ts SCHEMAS)
-src/tests/schemas/
+router/tests/schemas/
 
 # The conductor build's scratch area: a red test file is authored here and parked
 # until the task that owns it starts, at which point the authoritative copy lands
-# in conductor/tests/ or src/tests/. Working files, never deliverables.
+# in conductor/tests/ or router/tests/. Working files, never deliverables.
 staging/

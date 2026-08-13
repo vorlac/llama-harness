@@ -266,14 +266,14 @@ recorded before and after but are not themselves flagged, so read those two colu
 throttled run says so instead of quietly skewing the numbers.
 
 Bandwidth is measured by `membench`, a dependency-free C++ probe in
-[`src/tools/membench/`](../../src/tools/membench/), invoked with `--sweep-threads --json`.
+[`tools/membench/`](../../tools/membench/), invoked with `--sweep-threads --json`.
 Point `MEMBENCH_BIN` at a built binary, or build one with
 `cmake --build .out/build/clang-relwdebinfo --target membench`. With no binary available,
 `hostinfo.py` falls back to a Python buffer copy that labels itself a fallback and carries a
 caveat: it reads roughly 3x low, because the destination is allocated inside the timed region
 and the copy pays a first-touch page fault on every page it writes. Even the real figure is a
 CPU-side ceiling below the chip's spec sheet, which assumes the GPU driving every channel at
-once. The methodology is in [`src/tools/README.md`](../../src/tools/README.md).
+once. The methodology is in [`tools/README.md`](../../tools/README.md).
 
 ## Benchmarking more models than fit on disk
 
@@ -371,5 +371,5 @@ of each other.
 - [`scripts/README.md`](../../scripts/README.md) — the authoritative script reference
 - [Models](models.md) — the catalog, categories, and what fits this machine
 - [Serving](serving.md) — router mode, and how a served model differs from a benchmarked one
-- [`src/tools/README.md`](../../src/tools/README.md) — membench methodology
+- [`tools/README.md`](../../tools/README.md) — membench methodology
 - [Project status](../developer/project-status.md) — what is built and what is next

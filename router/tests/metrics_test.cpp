@@ -13,7 +13,7 @@
 // THE TARGET SURFACE (pinned by the promoted spec's resolutions — exactly two
 // exports, mirroring affinity.hpp's dependency-light shape; NO httplib here):
 //
-//   // src/router/metrics.hpp   (HEADER-ONLY, matching 11.2-11.6)
+//   // router/metrics.hpp   (HEADER-ONLY, matching 11.2-11.6)
 //   #pragma once
 //
 //   #include <nlohmann/json.hpp>
@@ -80,7 +80,7 @@
 //
 //   }  // namespace conductor::router
 //
-// THE ROUTER SEAM (src/router/router.hpp, extended IN PLACE):
+// THE ROUTER SEAM (router/router.hpp, extended IN PLACE):
 //   - Router owns one MetricsLedger built from its RouterConfig — the ledger
 //     location comes ONLY from config.metrics.ledgerPath, never re-read, never
 //     hardcoded.
@@ -110,7 +110,7 @@
 //     committed GET /conductor/health, whose body 11.7 extends in place to
 //     {"status":"ok","version":<router_version()>}.
 //
-// This file's final home is src/tests/metrics_test.cpp. CMake wiring is
+// This file's final home is router/tests/metrics_test.cpp. CMake wiring is
 // ORCHESTRATOR-ONLY: this file joins the router-tests target source list;
 // metrics.hpp is header-only and needs no source-list entry.
 //

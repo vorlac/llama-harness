@@ -95,9 +95,9 @@ as `G14 dual-runtime divergence`. If the `bun` binary is missing the leg emits a
 `GATE WARN` rather than failing, because Bun was installed at preflight and its
 disappearance is a regression to investigate, not a normal condition.
 
-**5. The JSON Schema export.** `node conductor/tools/export-schemas.ts src/tests/schemas`
+**5. The JSON Schema export.** `node conductor/tools/export-schemas.ts router/tests/schemas`
 regenerates the §2 JSON Schemas from the `SCHEMAS` record in `conductor/core/types.ts` — the
-single source — into `src/tests/schemas/`, so the C++ `router-tests` validate against the
+single source — into `router/tests/schemas/`, so the C++ `router-tests` validate against the
 exact objects the fan-out engine uses. This is a *generation* step, not an assertion:
 correctness is covered by `conductor/tests/export-schemas.test.ts`, and a nonzero exit here
 means the exporter itself is broken.
@@ -114,7 +114,7 @@ bash scripts/conductor-gate.sh path/to/file.ts
 
 This is a separate mechanical scan for the G4-forbidden *shapes* — the things a test run
 cannot see because the code compiles, typechecks, and passes. With no arguments it scans
-every tracked file under `conductor/` (TypeScript) and `src/router/` (C++). Markdown files
+every tracked file under `conductor/` (TypeScript) and `router/` (C++). Markdown files
 are skipped; documentation is governed by anchor tests, not by this scan.
 
 | Pattern                                                     | Scope                  | Rationale                                                                    |
@@ -247,14 +247,14 @@ registered with ctest by [`CMakeLists.txt`](../../CMakeLists.txt):
 
 ```cmake
 add_executable(router-tests
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/scaffold_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/config_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/scaffold_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/config_test.cpp"
 )
 add_test(NAME router-tests COMMAND router-tests)
 ```
 
 Sources grow one file per task. The target keeps the name `router-tests` even though the
-directory is `src/tests/` — the target name is what every gate record cites. `src/` is the
+directory is `router/tests/` — the target name is what every gate record cites. `src/` is the
 only user-code include root, so a test includes a header by its full path relative to `src/`:
 `#include "router/config.hpp"`, never `#include "config.hpp"`.
 

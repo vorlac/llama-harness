@@ -23,7 +23,7 @@ ever committed.
 | `.out/install/<preset>/`  | the install prefix, if you ever run `cmake --install`                                         | `cmake --install`                    | no           |
 | `build/`                  | the standalone `membench` binary that `hostinfo.py` compiles on demand                        | `hostinfo.py`                        | no           |
 | `conductor/node_modules/` | types-only dev dependencies                                                                   | `npm install` in `conductor/`        | no           |
-| `src/tests/schemas/`      | the 18 exported JSON Schemas the C++ tests validate against                                   | `scripts/test-conductor.sh`          | no           |
+| `router/tests/schemas/`      | the 18 exported JSON Schemas the C++ tests validate against                                   | `scripts/test-conductor.sh`          | no           |
 | `extern/llama-cpp/`       | the pinned llama.cpp submodule                                                                | `git submodule update`               | pointer only |
 | `extern/vcpkg/`           | the vcpkg submodule and its bootstrapped `vcpkg` binary                                       | `cmake/vcpkg-init.cmake`             | pointer only |
 
@@ -217,7 +217,7 @@ failure, and a glob matching zero files exits 0 — a vacuous green. The wrapper
 trailer and fails unless `tests > 0` and `fail`, `cancelled`, `skipped` and `todo` are all
 zero, and unless no `# SKIP` or `# TODO` directive appears at any subtest depth. It then runs
 `tsc --noEmit` — which fails loudly if you have not run `npm install` — followed by the Bun
-smoke leg and the JSON Schema export into `src/tests/schemas/`. A clean run ends with
+smoke leg and the JSON Schema export into `router/tests/schemas/`. A clean run ends with
 `GATE PASS`.
 
 `bash scripts/conductor-gate.sh` is the separate mechanical stub scan.

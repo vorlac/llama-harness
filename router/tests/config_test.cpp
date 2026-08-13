@@ -6,7 +6,7 @@
 // implementer must produce — every name, type, and behaviour here is asserted by
 // the cases in this file.
 //
-//   // src/router/config.hpp
+//   // router/config.hpp
 //   #pragma once
 //
 //   #include <cstdint>
@@ -57,7 +57,7 @@
 //   //      the exported schema, which marks every key required;
 //   //   3. validate that completed document against the JSON Schema read from
 //   //      `schemaPath` (nlohmann_json_schema_validator) — the exported
-//   //      src/tests/schemas/RouterConfig.schema.json, never a copy of the
+//   //      router/tests/schemas/RouterConfig.schema.json, never a copy of the
 //   //      shape baked into this translation unit;
 //   //   4. range-check both ports: 1..65535 inclusive.
 //   // Any violation throws ConfigError naming the offending field.

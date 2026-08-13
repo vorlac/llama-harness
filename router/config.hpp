@@ -3,7 +3,7 @@
 //
 // Parses and validates the §2.2 router config document
 // (docs/plans/2026-08-07-conductor-harness-plan.md, lines 636-670). The shape is
-// owned by the exported JSON Schema file (src/tests/schemas/
+// owned by the exported JSON Schema file (router/tests/schemas/
 // RouterConfig.schema.json, regenerated from the single source by
 // conductor/tools/export-schemas.ts); the parser validates against whatever
 // schema FILE it is handed, never a copy of the shape baked in here.

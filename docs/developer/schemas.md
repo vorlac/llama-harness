@@ -196,7 +196,7 @@ flowchart TD
     end
 
     subgraph L2["Layer 2 - router in C++"]
-        FILES["src/tests/schemas/*.json"]
+        FILES["router/tests/schemas/*.json"]
         RT["router-tests"]
         CFG["config.hpp parse"]
     end
@@ -245,14 +245,14 @@ export function exportSchemas(outDir: string): string[];
 It creates `outDir` (and any missing parents), writes one file per entry as
 `<Name>.schema.json`, and returns the names written. The bytes are pinned:
 `JSON.stringify(schema, null, 2)` — two-space indent, **no trailing newline** — because
-[`src/tests/config_test.cpp`](../../src/tests/config_test.cpp) and its successors read
+[`router/tests/config_test.cpp`](../../router/tests/config_test.cpp) and its successors read
 those files as bytes and re-serialize them.
 
 The CLI leg is guarded so the module is side-effect-free on import:
 
 ```ts
 if (process.argv[1] && process.argv[1].endsWith("export-schemas.ts")) {
-  exportSchemas(process.argv[2] ?? path.resolve("src/tests/schemas"));
+  exportSchemas(process.argv[2] ?? path.resolve("router/tests/schemas"));
 }
 ```
 
@@ -261,7 +261,7 @@ equivalent, and importing the module — which the test does — never touches t
 
 Regeneration is not a manual step.
 [`scripts/test-conductor.sh`](../../scripts/test-conductor.sh) runs
-`node conductor/tools/export-schemas.ts src/tests/schemas` at the end of every gate run,
+`node conductor/tools/export-schemas.ts router/tests/schemas` at the end of every gate run,
 after the TAP, typecheck, and Bun legs. It is a *generation* step, not an assertion — a
 nonzero exit means the exporter itself is broken and fails the gate; correctness of the
 output is the job of
@@ -271,7 +271,7 @@ file round-trips to a deep-equal object and to the exact pinned bytes, the direc
 contains exactly those `.schema.json` files and nothing else, and a missing `outDir` is
 created.
 
-`src/tests/schemas/` is listed in `.gitignore`. The files are build output; the schemas
+`router/tests/schemas/` is listed in `.gitignore`. The files are build output; the schemas
 are the source.
 
 ## Closed vocabularies
@@ -336,7 +336,7 @@ added to an FSM but not to its schema, or the reverse, turns the suite red.
 
 ## The C++ side
 
-[`src/router/config.hpp`](../../src/router/config.hpp) is the first router consumer of the
+[`router/config.hpp`](../../router/config.hpp) is the first router consumer of the
 exported schemas, and it demonstrates the rule the rest of the router follows: it
 validates against whatever schema **file** it is handed, never a copy of the shape baked
 into the header.
@@ -386,7 +386,7 @@ shape would produce the same answer twice and fail the test.
 4. **Prefer deriving over copying.** If the new shape is another shape plus or minus a
    field, derive it the way `Plan`'s decision proposals derive from `DecisionRecord`.
 5. **Run the gate**: `bash scripts/test-conductor.sh`. It runs the suite, typechecks, runs
-   the Bun smoke, and regenerates `src/tests/schemas/`, so the C++ side picks the change up
+   the Bun smoke, and regenerates `router/tests/schemas/`, so the C++ side picks the change up
    on its next build with no separate step.
 6. **Expect a guard to fire — and know which one.** A drifted FSM vocabulary fails
    `single-source.test.ts`; an out-of-subset keyword fails the subset-clean test in

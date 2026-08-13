@@ -15,7 +15,7 @@ entries append below; prior entries are never rewritten.
 
 **Decision.** The system is **"conductor"** (G10). Custom tools are `conductor_*`. Run
 state in a target workspace lives under `.conductor/`. Source lives in this repo under
-`conductor/` (TS), `src/router/` (C++), and `scripts/` (wiring).
+`conductor/` (TS), `router/` (C++), and `scripts/` (wiring).
 
 **Options.** (1) Fix one name now and hardcode it everywhere — the winner. (2) Leave
 naming to be improvised per module as the build proceeds.
@@ -103,9 +103,9 @@ engine still groups jobs by resolved model so that a future multi-model config i
 config change, not a redesign — under the default config that grouping is the identity
 function.
 
-## (e) The stock example target `myprogram`/`src/main.cpp` is replaced by the router targets
+## (e) The stock example target `myprogram`/`router/main.cpp` is replaced by the router targets
 
-**Decision.** The stock example build target `myprogram`/`src/main.cpp` is REPLACED by
+**Decision.** The stock example build target `myprogram`/`router/main.cpp` is REPLACED by
 the llama-router targets.
 
 **Options.** (1) Replace it — the winner. (2) Keep the stock example alongside the new

@@ -91,9 +91,9 @@ Where a guide page and one of these disagree, these win.
 | [conductor/DECISIONS.md](../conductor/DECISIONS.md)                         | The standing decisions, append-only: what was decided, which options lost, and why. Entries sit at rung 2 of the decision ladder and bind later work.                                                                |
 | [conductor/adapter/wire-notes.md](../conductor/adapter/wire-notes.md)       | What opencode 1.18.15 actually does — verified hooks, endpoints, and the drifts from the plan's wire contract. Read before touching adapter or router code.                                                          |
 | [conductor/docs/RUNNER-DISCOVERY.md](../conductor/docs/RUNNER-DISCOVERY.md) | The measured proof behind quarantine: whether `node --test`, `pytest`, `go test ./...` and `ctest` reach a file in `.conductor/`, outside the repo, or in a nested worktree.                                         |
-| [src/router/UPSTREAM_CONTRACT.md](../src/router/UPSTREAM_CONTRACT.md)       | `llama-server`'s `/v1` contract and the effective concurrent slot count the router's admission limits must respect. The live measurement is a recorded obligation of task 12.1; the file states the exact procedure. |
+| [router/UPSTREAM_CONTRACT.md](../router/UPSTREAM_CONTRACT.md)       | `llama-server`'s `/v1` contract and the effective concurrent slot count the router's admission limits must respect. The live measurement is a recorded obligation of task 12.1; the file states the exact procedure. |
 | [scripts/README.md](../scripts/README.md)                                   | The deep reference for the model harness: catalog, sizing, every `fetch_models.py` subcommand, what validation checks, and how benchmark scoring works.                                                              |
-| [src/tools/README.md](../src/tools/README.md)                               | `membench`, the memory-bandwidth probe, and the measured answer it produced about alignment, first-touch faults and core placement.                                                                                  |
+| [tools/README.md](../tools/README.md)                               | `membench`, the memory-bandwidth probe, and the measured answer it produced about alignment, first-touch faults and core placement.                                                                                  |
 | [docs/build/HANDOFF.md](build/HANDOFF.md)                                   | The build's current position: what just landed, what is next, and the deviations in force.                                                                                                                           |
 | [docs/build/STATE.json](build/STATE.json)                                   | Machine truth for the build — one row per task, with its gate result and commit.                                                                                                                                     |
 | [docs/build/CORRECTIONS.md](build/CORRECTIONS.md)                           | Every deviation from the plan, append-only as `C-NNN`, each with the plan quote, the observed reality, and the blast radius.                                                                                         |
@@ -113,13 +113,14 @@ on with describing it.
 deviation is never edited into it; it is recorded in
 [docs/build/CORRECTIONS.md](build/CORRECTIONS.md) and carried in
 [docs/build/HANDOFF.md](build/HANDOFF.md), and these pages describe the code. The known
-cases are the `src/` layout (`src/tests/` and `src/tools/`, not the plan's
-`src/router-tests/` and root `tools/`) and the opencode wire drifts recorded in
+cases are the C++ layout (`router/` holds the router and its `tests/`, with `tools/`
+alongside them at the top level, where the plan's §1.1 tree says `src/router-tests/`)
+and the opencode wire drifts recorded in
 [wire-notes.md](../conductor/adapter/wire-notes.md).
 
 **File references are links to the real file.** When a page names a source file, config
 file or script, it links to it by a relative path — `conductor/core/schedule.ts`,
-`scripts/serve.py`, `src/router/config.hpp` — so you can click through from the
+`scripts/serve.py`, `router/config.hpp` — so you can click through from the
 description to the thing described. Files named as part of the design but not yet on disk
 appear as plain code spans, never as links.
 

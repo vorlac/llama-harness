@@ -10,7 +10,7 @@
 // assertion id from docs/build/specs/task-11.4.assertions.json, named
 // "[<id>] ...".
 //
-//   // src/router/admission.hpp   (HEADER-ONLY, matching 11.2 and 11.3)
+//   // router/admission.hpp   (HEADER-ONLY, matching 11.2 and 11.3)
 //   #pragma once
 //
 //   #include <cstddef>
@@ -84,7 +84,7 @@
 //
 //   }  // namespace conductor::router
 //
-// The Router SEAM (src/router/router.hpp, Task 11.3, extended in place):
+// The Router SEAM (router/router.hpp, Task 11.3, extended in place):
 //   - Router owns one AdmissionController built from its RouterConfig and
 //     exposes it read-only:
 //         [[nodiscard]] const AdmissionController& admission() const;
@@ -101,7 +101,7 @@
 //         return new httplib::ThreadPool(n); };
 //     so a full queue of blocked handler threads cannot starve the pool.
 //
-// The 11.2 CLAMP (src/router/config.hpp, inside the EXISTING parseRouterConfig
+// The 11.2 CLAMP (router/config.hpp, inside the EXISTING parseRouterConfig
 // validation path — not a parallel one): when computeTaskQueueThreads exceeds
 // kAdmissionThreadBudget, admission.maxQueued is clamped to
 // kAdmissionThreadBudget - maxInflightPerModel - kTaskQueueThreadMargin and the
@@ -109,7 +109,7 @@
 // that arithmetic cannot reach >= 1 the parse throws ConfigError naming
 // admission.maxQueued.
 //
-// This file's final home is src/tests/admission_test.cpp. CMake wiring is
+// This file's final home is router/tests/admission_test.cpp. CMake wiring is
 // ORCHESTRATOR-ONLY: this file joins the router-tests target source list.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns

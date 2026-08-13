@@ -534,18 +534,19 @@ llama-harness/
 │   ├── core/                      # pure decision + state-machine modules
 │   ├── adapter/                   # all I/O
 │   ├── doctrine/                  # the nine markdown doctrine packs
-│   ├── tools/export-schemas.ts    # writes the JSON Schemas to src/tests/schemas/
+│   ├── tools/export-schemas.ts    # writes the JSON Schemas to router/tests/schemas/
 │   ├── tests/                     # *.test.ts + fixtures
 │   ├── docs/RUNNER-DISCOVERY.md
 │   ├── opencode-fragment.json     # merged into the session opencode config
 │   ├── DECISIONS.md               # the standing-decisions ledger
 │   └── tsconfig.json
-├── src/                           # layer 2 — the C++ router, plus standalone tools
-│   ├── main.cpp                   # llama-router entry
-│   ├── router/                    # router modules + UPSTREAM_CONTRACT.md
-│   ├── tests/                     # doctest suites; CMake target `router-tests`
-│   │   └── schemas/               # generated JSON Schemas (gitignored)
-│   └── tools/                     # standalone measurement tools
+├── router/                        # layer 2 — the C++ router
+│   ├── main.cpp                   # llama-router entry: a thin adapter over cli.hpp
+│   ├── *.hpp                      # header-only modules + UPSTREAM_CONTRACT.md
+│   └── tests/                     # doctest suites; CMake target `router-tests`
+│       └── schemas/               # generated JSON Schemas (gitignored)
+├── tools/                         # standalone measurement tools — NOT part of the router
+│   └── membench/                  # dependency-free memory-bandwidth probe
 ├── scripts/                       # layer 3 — the wiring, plus the model harness
 ├── extern/llama-cpp/              # pinned llama.cpp submodule
 ├── cmake/                         # toolchain, warnings, clang-format helpers
@@ -562,13 +563,15 @@ lives there and in `docs/build/STATE.json`.
 
 | Plan says           | Reality          | Note                                                                                                                                       |
 | ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/router-tests/` | `src/tests/`     | Only the directory moved — the CMake *target* is still named `router-tests`, which is the ctest name every gate cites                      |
-| root `tools/`       | `src/tools/`     | Standalone measurement tools with no project dependencies                                                                                  |
-| —                   | The include rule | Every in-workspace header is included by its full path relative to `src/`: `#include "router/version.hpp"`, never `#include "version.hpp"` |
+| `src/`              | `router/`        | The component is named for what it is. In a repo with two components, `src/` names neither                                                 |
+| `src/router-tests/` | `router/tests/`  | Only the directory moved — the CMake *target* is still named `router-tests`, which is the ctest name every gate cites                      |
+| root `tools/`       | `tools/`         | Standalone measurement tools with no project dependencies, so they sit beside `router/` rather than inside it                              |
+| —                   | The include rule | Every in-workspace header is included by its full path from the repo root: `#include "router/version.hpp"`, never `#include "version.hpp"` |
 
-The include rule applies to all files under `src/`, headers included: `src/` is the only
-user-code include root on both C++ targets, so an include names where the header actually
-lives no matter which file does the including. Generated schemas land in `src/tests/schemas/`
+The include rule applies to all C++ under `router/` and `tools/`, headers included: the REPO
+ROOT is the only user-code include root on both C++ targets, so an include names where the
+header actually
+lives no matter which file does the including. Generated schemas land in `router/tests/schemas/`
 and are gitignored.
 
 One build note follows from the layout: build only the named targets
