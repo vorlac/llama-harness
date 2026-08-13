@@ -26,11 +26,15 @@ import type { Corr, Journal } from "./journal.ts";
 
 // §3.5 registry entry: sessionID -> {role, itemId, tree}. The gates dispatch on it,
 // and it MUST exist before the sub-session's first prompt so no sub-session can make
-// a gated tool call while unregistered.
+// a gated tool call while unregistered. `receivingReview` is the §3.3/C-028 delivery
+// signal: set on a review-fix dispatch so the §6.4 injection layer appends doctrine
+// receive-review.md to that session's system prompt — it rides the entry, never the
+// item state, so the same item's other dispatches receive nothing extra.
 export interface RegistryEntry {
   role: string;
   itemId: string;
   tree: string;
+  receivingReview?: boolean;
 }
 
 // The subset of the session registry the engine writes. A plain
@@ -61,6 +65,9 @@ export interface FanoutJob {
   schemaName: string;
   priority: string;
   lens?: string;
+  // Rides into the §3.5 registry entry: marks a dispatch that receives review
+  // findings, so buildSystemAppend delivers doctrine receive-review.md to it.
+  receivingReview?: boolean;
 }
 
 export interface FanoutResult {
@@ -276,7 +283,12 @@ export function createFanout(
 
           // §3.5: register BEFORE the first prompt — a sub-session must never be able
           // to make a tool call while unregistered.
-          registry.set(sessionID, { role: job.role, itemId: job.itemId, tree: job.tree });
+          registry.set(sessionID, {
+            role: job.role,
+            itemId: job.itemId,
+            tree: job.tree,
+            ...(job.receivingReview === true ? { receivingReview: true } : {}),
+          });
           journal.log(
             "info",
             "fanout",

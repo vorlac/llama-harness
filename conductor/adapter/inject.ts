@@ -66,11 +66,10 @@ const ROLE_PRIORITY: Record<string, string> = {
 
 // The nine doctrine packs §6.4 loads once at init (the seven role packs plus
 // debug.md and receive-review.md). debug.md IS delivered by buildSystemAppend on an
-// implementer's DEBUG posture (§4.1). receive-review.md is loaded and cached here but
-// its delivery vector is NOT yet wired — that is a Phase 9 deferred binding: the
-// review-receipt / fix-round routing will thread a "receiving-review" signal that
-// appends receive-review.md, so it is cached now to keep init fail-closed over the
-// complete pack set.
+// implementer's DEBUG posture (§4.1). receive-review.md is delivered by
+// buildSystemAppend on the registry entry's `receivingReview` signal — the mark the
+// §3.3 review-fix routing puts on exactly the dispatches that receive review
+// findings (C-028: a pack that is loaded but never delivered governs nothing).
 const REQUIRED_PACKS: readonly string[] = [
   "core.md",
   "decompose.md",
@@ -178,6 +177,14 @@ export function buildSystemAppend(
     if (activeItem?.debugging === true && !packFiles.includes("debug.md")) {
       packFiles.push("debug.md");
     }
+  }
+  // §3.3/C-028: a fix dispatch that receives review findings also receives doctrine
+  // receive-review.md as a SECONDARY pack (the role's primary pack stays append[0]),
+  // de-duplicated exactly as debug.md is. The signal rides the §3.5 registry entry
+  // the fan-out engine wrote for that dispatch — never the item's state, so the SAME
+  // item's other dispatches (a debug fix, a green fix) receive nothing extra.
+  if (registryEntry.receivingReview === true && !packFiles.includes("receive-review.md")) {
+    packFiles.push("receive-review.md");
   }
   const append: string[] = [];
   for (const file of packFiles) {

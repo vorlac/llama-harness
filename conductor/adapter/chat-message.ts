@@ -24,11 +24,13 @@ import type { CreateRunInput, StateStore } from "./state.ts";
 
 // The §3.5 session-registry the gate also consults. chat.message writes the
 // orchestrator session's entry; the fan-out engine (elsewhere) writes the
-// sub-session entries.
+// sub-session entries. `receivingReview` marks a §3.3 review-fix dispatch —
+// buildSystemAppend keys the receive-review.md secondary-pack delivery on it.
 export interface SessionRegistryEntry {
   role: string;
   itemId?: string;
   tree?: string;
+  receivingReview?: boolean;
 }
 export interface SessionRegistry {
   register(sessionID: string, entry: SessionRegistryEntry): void;

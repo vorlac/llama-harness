@@ -5,7 +5,10 @@
 //
 // Adapter module (G14): runs under BOTH the opencode plugin runtime and Node
 // type-stripping, so it uses ONLY runtime-agnostic code — no single-runtime
-// globals, no shell tag, no subprocess. All decision logic lives in the PURE core
+// globals, no shell tag; the only subprocesses are the §3.3 review probe's git
+// invocations, through node:child_process with argv arrays (the gitio.ts
+// discipline — every test and verify child process goes through
+// adapter/evidence.ts instead). All decision logic lives in the PURE core
 // gates (core/gates-git.ts, core/gates-edit.ts) and the core shell parser
 // (core/shell-parse.ts); this file only SEQUENCES them in the §3.5 order, gathers
 // the §7.4 input snapshot, and turns a `deny` decision into the thrown Error that
@@ -21,6 +24,7 @@
 // tool itself writes/advances-state/spawns) — guarded ⇒ deny, harmless read ⇒
 // allow. Every deny journals its snapshot under gates/deny (§7.4).
 
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 
@@ -4926,4 +4930,1073 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
     wave: { parallel: [...wave.parallel], rationale: wave.rationale },
     items,
   };
+}
+
+// ===========================================================================
+// (10) conductor_item_review — §3.3 VALIDATED->REVIEWED (Task 9.5a, plan lines
+// 2652-2665; §3.3 lines 1232-1271). Same §3.4 invariant loop as every stage
+// handler: legality -> derive -> persist -> journal -> compact return. Each
+// round, in order:
+//
+//   LENSES. sessions = clamp(readFanout("itemReview"), 3, 6) fresh reviewer
+//   sub-sessions (a trivial-classified run always uses the three-session
+//   composition), each holding one merged lens group over the item's diff +
+//   spec + test. The FIVE mandatory lenses are never truncated by
+//   configuration: below six sessions they MERGE pairwise from the tail of the
+//   priority list, so even three sessions cover all five. The rosterSizingRule
+//   (the E14 resolution): floor at a coverage SET the spec names, clamp where
+//   the spec names only a COUNT — parallel.maxReaders is a wall-clock ceiling
+//   the fan-out engine enforces internally, NEVER a coverage truncation. A
+//   pre-clamp fan-out below three journals a warn-level record on the existing
+//   fanout/subsession.dispatched event naming the configured and clamped
+//   values (no §7.4 vocabulary widening).
+//
+//   SKEPTICS. EVERY finding — regardless of severity, deliberately unlike
+//   handlePlanReview's majors-only rule: plan review answers one binary
+//   question, while item review's output is ROUTED FIXES, and a fix demand
+//   nobody adjudicated is not dispatchable — gets readFanout("skeptics")
+//   refuters, and survival is decided by core findingSurvives (⌈k/2⌉,
+//   TIE-UPHOLDS), never re-derived. An under-delivered panel is re-dispatched
+//   ONCE for its missing seats; a verdict still missing after that counts as
+//   an UPHOLD — conservative, so a real finding is never dropped because a
+//   skeptic session crashed (the Phase 1 deferred binding).
+//
+//   ADJUDICATION ORDERING. A surviving spec/contract finding discards the
+//   round's QUALITY-lens findings (test-adequacy, minimality, perf — doctrine
+//   review.md's tiering): judging not-yet-spec-compliant code is wasted
+//   judgment, so they are re-derived by the next round's fresh fan-out.
+//   Correctness and guardrail are tier-1 — retained and fixed alongside the
+//   spec findings.
+//
+//   ROUTING BY PATH (§3.3 table). A fix touching only fileScope dispatches an
+//   implementer; a test-adequacy finding — and any finding whose suggestedFix
+//   names a testScope path — dispatches a TEST-WRITER and never the
+//   implementer (who is gated to fileScope: routing it there is a guaranteed
+//   edit-gate denial); a fix touching both runs the testWriter FIRST, then the
+//   implementer, sequentially. A changed test RE-ENTERS the test discipline:
+//   re-run through evidence.runTest, the reverted-behavior probe where cheap,
+//   then a re-vet with readFanout("vet") fresh critics — all BEFORE
+//   re-validate. Every fix dispatch carries the receivingReview registry
+//   signal, so buildSystemAppend delivers doctrine receive-review.md to it
+//   (the Phase 8 / C-028 deferred binding: loaded is not delivered).
+//
+//   PUSHBACK. A fix receipt of DONE_WITH_CONCERNS whose concerns name a routed
+//   finding id is adjudicated by exactly ONE extra skeptic round carrying the
+//   fixer's reasoning verbatim: refuted, the finding dies with no further
+//   demand; upheld, the fix is re-demanded once and the loop stops there —
+//   pushback is never accepted silently and never loops.
+//
+//   BOUND. fix => re-validate (evidence.runVerify over the §4.2 foreign-red
+//   set) => re-review, bounded by workflow.reviewMaxRounds. At the cap ONE
+//   §2.11 question (existing origin "review-round-cap") carries the surviving
+//   finding list, the item is blocked via store.setBlocked and STAYS at
+//   VALIDATED. A round with zero survivors advances through core
+//   legalItemTransition — never a direct state write.
+// ===========================================================================
+
+const ITEM_REVIEW_TOOL = "conductor_item_review";
+
+// §3.3 lens vocabulary. The first five are MANDATORY; itemReviewers >= 6 adds perf.
+const LENS_SPEC = "spec/contract";
+const LENS_CORRECTNESS = "correctness";
+const LENS_GUARDRAIL = "guardrail";
+const LENS_TEST_ADEQUACY = "test-adequacy";
+const LENS_MINIMALITY = "minimality";
+const LENS_PERF = "perf";
+
+// The lenses a surviving spec/contract finding discards for its round (doctrine
+// review.md's tiering: requirement/behaviour findings stand, style/structure/polish
+// findings are re-derived over the fixed tree).
+const ITEM_QUALITY_LENSES: readonly string[] = [LENS_TEST_ADEQUACY, LENS_MINIMALITY, LENS_PERF];
+
+// The §3.3 merged compositions, keyed by session count: at 6 each lens is its own
+// session; below 6, lenses merge pairwise from the tail of the priority list; 3 is
+// the trivial-run composition. Merging never drops a mandatory lens.
+const ITEM_REVIEW_COMPOSITIONS: Record<number, readonly (readonly string[])[]> = {
+  6: [[LENS_SPEC], [LENS_CORRECTNESS], [LENS_GUARDRAIL], [LENS_TEST_ADEQUACY], [LENS_MINIMALITY], [LENS_PERF]],
+  5: [[LENS_SPEC], [LENS_CORRECTNESS], [LENS_GUARDRAIL], [LENS_TEST_ADEQUACY], [LENS_MINIMALITY, LENS_PERF]],
+  4: [[LENS_SPEC, LENS_TEST_ADEQUACY], [LENS_CORRECTNESS], [LENS_GUARDRAIL], [LENS_MINIMALITY, LENS_PERF]],
+  3: [[LENS_SPEC, LENS_CORRECTNESS], [LENS_GUARDRAIL, LENS_MINIMALITY], [LENS_TEST_ADEQUACY, LENS_PERF]],
+};
+
+// One charge per lens id — what that instrument judges (§3.3).
+const ITEM_LENS_CHARGES: Record<string, string> = {
+  [LENS_SPEC]:
+    "spec compliance — missing requirements, unrequested extras — plus API/contract soundness",
+  [LENS_CORRECTNESS]:
+    "whether the change actually behaves correctly on its inputs, edge cases included",
+  [LENS_GUARDRAIL]:
+    "security, trust-boundary validation and data-loss — the ponytail never-lazy list",
+  [LENS_TEST_ADEQUACY]:
+    "whether the test still honestly pins the change now that the implementation exists",
+  [LENS_MINIMALITY]:
+    "minimality/simplification — unrequested abstractions, and code something existing would serve",
+  [LENS_PERF]:
+    "performance — asymptotic or hot-path cost the change carries without need",
+};
+
+// One git invocation, argv-array discipline (the gitio.ts shape). Repo-location env
+// overrides are stripped so an inherited GIT_DIR can never redirect the probe away
+// from the run's own tree. A non-zero exit is a RESULT here, not an error: the §3.3
+// probe's cheapness rule reads it as "skip".
+function runReviewGit(cwd: string, args: string[]): { status: number; stdout: string } {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env["GIT_DIR"];
+  delete env["GIT_WORK_TREE"];
+  delete env["GIT_INDEX_FILE"];
+  delete env["GIT_COMMON_DIR"];
+  const out = spawnSync("git", args, {
+    cwd,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return { status: out.status === null ? 1 : out.status, stdout: out.stdout ?? "" };
+}
+
+// §3.3 "fresh reviewers over the item's diff + spec + test": the diff half. The
+// tracked diff comes from git over the item's declared paths; the fileScope files
+// also ride along as they stand, because an UNTRACKED fileScope file has no diff
+// hunk and the reviewers must still see the change itself.
+function itemDiffBlock(root: string, queueItem: QueueItem): string {
+  const paths = itemScopePaths(queueItem);
+  const diff = paths.length > 0 ? runReviewGit(root, ["diff", "--", ...paths]).stdout : "";
+  const parts: string[] = [
+    "\n\nTHE ITEM'S DIFF (working tree):\n" + (diff.trim().length > 0 ? diff : "(no tracked diff)"),
+    "\nTHE ITEM'S fileScope AS IT STANDS:",
+  ];
+  for (const rel of queueItem.fileScope) {
+    const abs = path.join(root, rel);
+    if (!existsSync(abs)) {
+      parts.push("--- " + rel + " (absent) ---");
+      continue;
+    }
+    parts.push("--- " + rel + " ---\n" + readFileSync(abs, "utf8"));
+  }
+  return parts.join("\n");
+}
+
+// A §2.10 finding as this stage carries it: the record, the lens it belongs to
+// (the finding's own `lens` field — a merged session holds two lenses, so the
+// session cannot disambiguate), and the sub-session that raised it (§2.11
+// provenance for the cap question).
+interface ItemRaisedFinding {
+  finding: Findings["findings"][number];
+  lens: string;
+  sessionID: string;
+}
+
+function renderItemFinding(entry: ItemRaisedFinding): string {
+  return (
+    "- [" +
+    entry.finding.id +
+    " | " +
+    entry.lens +
+    " | " +
+    entry.finding.severity +
+    "] " +
+    entry.finding.claim +
+    "\n  evidence: " +
+    entry.finding.evidence +
+    "\n  suggested fix: " +
+    entry.finding.suggestedFix
+  );
+}
+
+// The review.md doctrine at item level, one merged lens group per session. The
+// machine-readable `LENSES:` line is the session's lens attribution contract: a
+// reviewer-role prompt WITHOUT it is a §2.10 TEST_VET critic, never a lens session.
+function itemLensPrompt(
+  group: readonly string[],
+  queueItem: QueueItem,
+  diffBlock: string,
+  testText: string,
+  sessions: number,
+): string {
+  const charges = group.map((id) => '- "' + id + '": ' + (ITEM_LENS_CHARGES[id] ?? id)).join("\n");
+  return (
+    "You are an item reviewer, one of " +
+    String(sessions) +
+    " fresh review sub-sessions, holding the lens(es) below over ONE queue item's change — " +
+    "its diff, its spec and its test. Reply with a single JSON object matching the Findings " +
+    "schema (findings: id, severity, lens, claim, evidence, suggestedFix).\n" +
+    "LENSES: " +
+    group.join(", ") +
+    "\n" +
+    "Your charge(s):\n" +
+    charges +
+    "\n" +
+    "Report ONLY what your lens(es) see — a different session holds each of the others. An " +
+    "EMPTY findings list is a valid, finished review — it IS the approval; never invent a " +
+    "finding to look thorough.\n" +
+    'Severity by real impact: "major" must be fixed before this item ships; "minor" is a ' +
+    'smaller robustness issue; "nit" blocks nothing. One concern per finding. Set `lens` to ' +
+    "the single lens id (drawn from your LENSES line) the finding belongs to, and make " +
+    "`evidence` cite the file or test line the claim rests on. Give each finding a short " +
+    "stable `id` and a `suggestedFix` naming the smallest correct change and the path(s) it " +
+    "touches." +
+    itemSpecBlock(queueItem) +
+    diffBlock +
+    "\n\nTHE ITEM'S TEST:\n" +
+    testText
+  );
+}
+
+// The skeptic.md doctrine over ONE item-review finding, in isolation (a skeptic is
+// never shown its siblings — cross-contamination is how noise survives).
+function itemSkepticPrompt(
+  entry: ItemRaisedFinding,
+  k: number,
+  queueItem: QueueItem,
+  diffBlock: string,
+  testText: string,
+): string {
+  const f = entry.finding;
+  return (
+    "You are a skeptic. Your job is to REFUTE the review finding below — not to appreciate " +
+    "it, not to improve it, and not to wave it through. Reply with a single JSON object " +
+    "matching the Verdict schema (findingId, upheld, reasoning).\n" +
+    'Set `findingId` to exactly "' +
+    f.id +
+    '". Set `upheld` true ONLY if you personally could not refute the claim against the ' +
+    "item's change; when you cannot decide, the verdict is REFUTED (upheld false) — " +
+    "uncertainty is not evidence of a defect. You are one of " +
+    String(k) +
+    " independent skeptics on this ONE finding and it survives iff at least ⌈k/2⌉ of you " +
+    "uphold it, so do not uphold to be agreeable. Judge exactly this finding, in isolation; " +
+    "never invent a defect the reviewer did not raise.\n\nTHE FINDING UNDER REVIEW (id " +
+    f.id +
+    ", severity " +
+    f.severity +
+    ", lens " +
+    entry.lens +
+    "):\nclaim: " +
+    f.claim +
+    "\nevidence: " +
+    f.evidence +
+    "\nsuggested fix: " +
+    f.suggestedFix +
+    itemSpecBlock(queueItem) +
+    diffBlock +
+    "\n\nTHE ITEM'S TEST:\n" +
+    testText
+  );
+}
+
+// The ONE extra skeptic round a pushback earns (§3.3): the same refutation charge,
+// carrying the fixer's own reasoning VERBATIM.
+function itemPushbackSkepticPrompt(
+  entry: ItemRaisedFinding,
+  reasoning: readonly string[],
+  k: number,
+  queueItem: QueueItem,
+  diffBlock: string,
+  testText: string,
+): string {
+  return (
+    itemSkepticPrompt(entry, k, queueItem, diffBlock, testText) +
+    "\n\nTHE FIX DISPATCH ANSWERED THIS FINDING WITH REASONING instead of implementing it " +
+    "(§3.3: pushback is adjudicated by one more skeptic round, never accepted silently). " +
+    "Weigh that reasoning; uphold the finding ONLY if it still stands despite it.\n" +
+    "THE FIXER'S REASONING (verbatim):\n" +
+    reasoning.map((line) => "- " + line).join("\n")
+  );
+}
+
+// The implementer-route fix dispatch: doctrine receive-review.md's charge (verify
+// the claim before implementing the fix), fileScope only, the standard receipt.
+function reviewImplementerFixPrompt(
+  entries: readonly ItemRaisedFinding[],
+  queueItem: QueueItem,
+  round: number,
+  max: number,
+): string {
+  return (
+    "You are the implementer for this item. Independent review lenses raised the finding(s) " +
+    "below over the item's change, and each SURVIVED a panel of skeptics charged with " +
+    "refuting it (review round " +
+    String(round) +
+    " of at most " +
+    String(max) +
+    "). Work under doctrine receive-review.md: VERIFY each claim against the code before " +
+    "implementing its fix. You may edit ONLY the item's fileScope — the test files are " +
+    "frozen for you (§2.4).\n" +
+    "If a finding is WRONG, do not implement it: reply DONE_WITH_CONCERNS with a concerns[] " +
+    "entry that names the finding id and carries your reasoning; the handler routes that " +
+    "reasoning through one more skeptic round rather than accepting it silently.\n" +
+    "FINDINGS TO FIX:\n" +
+    entries.map(renderItemFinding).join("\n") +
+    itemSpecBlock(queueItem) +
+    "\n\nReply with the ImplementerResult receipt."
+  );
+}
+
+// The testWriter-route fix dispatch (§3.3 table row 2): testScope only, and the
+// changed test re-enters the test discipline before anything else moves.
+function reviewTestWriterFixPrompt(
+  entries: readonly ItemRaisedFinding[],
+  queueItem: QueueItem,
+  round: number,
+  max: number,
+): string {
+  return (
+    "You are the TEST-WRITER for this item. Independent review lenses raised the finding(s) " +
+    "below, each of which demands a TEST change, and each SURVIVED a panel of skeptics " +
+    "charged with refuting it (review round " +
+    String(round) +
+    " of at most " +
+    String(max) +
+    "). Work under doctrine receive-review.md: VERIFY each claim against the test before " +
+    "implementing its fix. You may edit ONLY the item's testScope — the edit-scope gate " +
+    "refuses every other path (§2.4). Never resolve a finding by weakening the assertion " +
+    "that produced it: the handler re-runs your changed test through evidence, probes it " +
+    "against a reverted-behavior tree where cheap, and re-vets it with independent critics " +
+    "BEFORE the item is re-validated.\n" +
+    "If a finding is WRONG, do not implement it: reply DONE_WITH_CONCERNS with a concerns[] " +
+    "entry that names the finding id and carries your reasoning; the handler routes that " +
+    "reasoning through one more skeptic round rather than accepting it silently.\n" +
+    "FINDINGS TO FIX:\n" +
+    entries.map(renderItemFinding).join("\n") +
+    itemSpecBlock(queueItem) +
+    "\n\nReply with the ImplementerResult receipt."
+  );
+}
+
+// The re-demand after an UPHELD pushback: the finding stands; the fix is required.
+function reviewRedemandPrompt(
+  role: string,
+  entries: readonly ItemRaisedFinding[],
+  queueItem: QueueItem,
+): string {
+  return (
+    "You are the " +
+    role +
+    " for this item. Your pushback on the finding(s) below was adjudicated by an extra " +
+    "skeptic round and UPHELD: each finding stands despite your reasoning, and its fix is " +
+    "REQUIRED (§3.3 — one pushback round per finding, never more).\n" +
+    "FINDINGS TO FIX:\n" +
+    entries.map(renderItemFinding).join("\n") +
+    itemSpecBlock(queueItem) +
+    "\n\nReply with the ImplementerResult receipt."
+  );
+}
+
+// §3.3's changed-test re-vet: fresh §2.10 critics over the test as it stands. This
+// prompt deliberately carries NO `LENSES:` line — that line is the lens-session
+// attribution contract, and a vet critic is not a lens.
+function reviewRevetPrompt(
+  queueItem: QueueItem,
+  testText: string,
+  rerunLine: string,
+  critics: number,
+): string {
+  return (
+    "You are one of " +
+    String(critics) +
+    " INDEPENDENT test-vet critics judging ONE test that was CHANGED during item review " +
+    "(§3.3: a changed test re-enters the test discipline). You are given the item's spec, " +
+    "the test as it stands, and the handler's own re-run outcome.\n" +
+    "Judge the test on exactly these criteria (§2.10 TEST_VET):\n" +
+    "- observableBehavior: it asserts observable behaviour through the subject's public " +
+    "surface, not internals.\n" +
+    "- wouldCatchWrongImpl: a subtly WRONG implementation would still fail it.\n" +
+    "- rightLevel: it is at the right level (unit vs integration) for what it pins.\n" +
+    "- pinsAcceptance: it pins THIS item's acceptance criteria, not a neighbouring concern.\n" +
+    "- antiPatterns: no anti-patterns — no sleep-based timing, no assertion-free run, no " +
+    "test that cannot fail.\n" +
+    "Reply with a single JSON object matching the TestVet schema: a verdict {pass, note} for " +
+    "each criterion, plus `mustFix` — the concrete changes this test MUST have. An EMPTY " +
+    "mustFix is the approval; never invent a fix to look thorough." +
+    itemSpecBlock(queueItem) +
+    "\n\nTHE TEST AS IT STANDS:\n" +
+    testText +
+    "\n\nTHE HANDLER'S RE-RUN OUTCOME:\n" +
+    rerunLine
+  );
+}
+
+function itemLensJob(itemId: string, group: readonly string[], prompt: string): FanoutJob {
+  return {
+    role: "reviewer",
+    itemId,
+    tree: STAGE_TREE,
+    writeCapable: false,
+    prompt,
+    schemaName: "Findings",
+    priority: "interactive",
+    lens: group.join("+"),
+  };
+}
+
+function itemSkepticJob(itemId: string, prompt: string): FanoutJob {
+  return {
+    role: "skeptic",
+    itemId,
+    tree: STAGE_TREE,
+    writeCapable: false,
+    prompt,
+    schemaName: "Verdict",
+    priority: "interactive",
+  };
+}
+
+// Every review-fix dispatch carries the C-028 delivery signal: the fan-out engine
+// copies it onto the §3.5 registry entry, and buildSystemAppend keys the
+// receive-review.md secondary pack on exactly that mark.
+function reviewFixJob(role: "implementer" | "testWriter", itemId: string, prompt: string): FanoutJob {
+  return {
+    role,
+    itemId,
+    tree: STAGE_TREE,
+    writeCapable: true,
+    prompt,
+    schemaName: "ImplementerResult",
+    priority: "interactive",
+    receivingReview: true,
+  };
+}
+
+function reviewRevetJob(itemId: string, prompt: string): FanoutJob {
+  return {
+    role: "reviewer",
+    itemId,
+    tree: STAGE_TREE,
+    writeCapable: false,
+    prompt,
+    schemaName: "TestVet",
+    priority: "interactive",
+  };
+}
+
+export interface ItemReviewInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: HandlerJournal;
+  stateHome: string;
+  workspaceKey: string;
+  packs: Record<string, string>;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface ItemReviewResult {
+  ok: boolean; // true IFF the item advanced VALIDATED->REVIEWED
+  itemState: ItemState; // the PERSISTED state after the call
+  rounds: number; // review rounds run (== item.attempts.reviewRounds)
+  surviving: string[]; // finding ids still surviving at exit ([] on a clean exit)
+  questionId: string | null; // the "review-round-cap" question (null on a clean exit)
+}
+
+/**
+ * conductor_item_review (§3.3 VALIDATED->REVIEWED). Runs the bounded item-level
+ * adversarial loop — lens fan-out, per-finding skeptic panels, path-routed fixes,
+ * fix => re-validate => re-review — and settles the item: a round with zero
+ * surviving findings advances it through core legalItemTransition; the round cap
+ * mints ONE §2.11 question (origin "review-round-cap") naming the survivors and
+ * blocks the item, which stays at VALIDATED.
+ */
+export async function handleItemReview(input: ItemReviewInput): Promise<ItemReviewResult> {
+  const { store, fanout, runId, itemId, config, journal, packs } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality — the gate's own derivation; a denial throws BEFORE any dispatch.
+  const stage = requireStageTool(ITEM_REVIEW_TOOL, store, runId, itemId, runDir);
+  const queueItem = stage.queueItem;
+
+  // The §3.3 session count (the rosterSizingRule): clamp(readFanout, 3, 6), and the
+  // trivial composition for a trivial-classified run. The floor is the named
+  // coverage set speaking — three sessions still cover all five mandatory lenses.
+  const preClamp = readFanout("itemReview", config);
+  const trivial = stage.run.classification.kind === "trivial";
+  const sessions = trivial ? 3 : Math.min(6, Math.max(3, Math.floor(preClamp)));
+  const composition = ITEM_REVIEW_COMPOSITIONS[sessions];
+  const k = Math.floor(readFanout("skeptics", config));
+  const max = Math.floor(config.workflow.reviewMaxRounds);
+  if (max < 1) {
+    throw new Error(
+      ITEM_REVIEW_TOOL +
+        ": workflow.reviewMaxRounds is " +
+        String(max) +
+        ", so no review round may run; configure at least one (§2.1)",
+    );
+  }
+
+  const scope = itemVerifyScope(config, queueItem, ITEM_REVIEW_TOOL);
+  const scopePaths = verifyScopePathsOf(queueItem);
+  const excluded = foreignRedSet(store, runId, stage.queue, itemId);
+
+  // The re-validate (§3.3 fix => re-validate): evidence.runVerify over the §4.2
+  // foreign-red set, exactly as conductor_validate composes it. A red re-validate is
+  // conductor_validate's DEBUG business, not another review round's — said out loud.
+  const revalidate = (): VerifyEvidence => {
+    const outcome = runVerify(runDir, itemId, config, scopePaths, {
+      cwd: store.root,
+      excludeTestFiles: excluded,
+      journal: evidenceJournalOf(journal),
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+      runId,
+      tree: STAGE_TREE,
+      now,
+    });
+    if (outcome.refused) {
+      throw new Error(
+        ITEM_REVIEW_TOOL +
+          ': item "' +
+          itemId +
+          '" cannot re-validate: ' +
+          outcome.reason +
+          " (tree " +
+          outcome.tree +
+          ", held by pid " +
+          String(outcome.heldBy.pid) +
+          ")",
+      );
+    }
+    const record = outcome.record as VerifyEvidence;
+    if (!record.green) {
+      throw new Error(
+        ITEM_REVIEW_TOOL +
+          ': the re-validate after the review fix round is RED for item "' +
+          itemId +
+          '" (' +
+          verifyFailureText(record) +
+          "); the fix regressed the verify, which is conductor_validate's DEBUG business — " +
+          "review cannot proceed past it (§3.3)",
+      );
+    }
+    return record;
+  };
+
+  let rounds = 0;
+  let surviving: ItemRaisedFinding[] = [];
+
+  // The stuck exit (a fixer that replied BLOCKED/NEEDS_CONTEXT, or a changed test
+  // that failed its own discipline): the item stays at VALIDATED — blocked is a §2.5
+  // annotation, not an FSM position — with ONE §2.11 question on the EXISTING
+  // "implementer-blocked" origin. Same shape as the vet-side stuck exit.
+  const blockReviewAndAsk = (
+    detail: string,
+    askedByRole: string,
+    askedBySessionID: string,
+  ): ItemReviewResult => {
+    const item = store.loadItem(runId, itemId);
+    item.attempts.reviewRounds += rounds;
+    store.saveItem(runId, item);
+    const questionText =
+      ITEM_REVIEW_TOOL +
+      ' could not complete a review fix round for item "' +
+      itemId +
+      '": ' +
+      detail +
+      ".\nSay how the surviving finding(s) should be resolved, or whether the item should " +
+      "proceed as it stands.";
+    const question = appendQuestion(
+      runDir,
+      {
+        runId,
+        question: questionText,
+        askedBy: { role: askedByRole, sessionID: askedBySessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      now(),
+    );
+    const blocked = store.setBlocked(runId, itemId, {
+      reason: "the review fix round could not proceed: " + detail,
+      stage: "REVIEWED",
+      questionId: question.id,
+    });
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "REVIEWED", itemId, round: rounds, reason: detail },
+      { runId, itemId },
+    );
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: true, questionId: question.id, stage: "REVIEWED", reviewRounds: rounds },
+      { runId, itemId },
+    );
+    return {
+      ok: false,
+      itemState: blocked.state,
+      rounds,
+      surviving: surviving.map((entry) => entry.finding.id),
+      questionId: question.id,
+    };
+  };
+
+  // The clean advance: the edge goes through the core rule, never a direct write,
+  // and the journaled `why` is the rule's own — the observable proof it was asked.
+  const advance = (): ItemReviewResult => {
+    const item = store.loadItem(runId, itemId);
+    const edge = legalItemTransition("VALIDATED", "REVIEWED", {
+      item: { behavioral: queueItem.behavioral, blocked: item.blocked },
+    });
+    if (!edge.ok) {
+      throw new Error(
+        ITEM_REVIEW_TOOL + ": " + (edge.why ?? "VALIDATED->REVIEWED is not legal for this item"),
+      );
+    }
+    item.state = "REVIEWED";
+    item.attempts.reviewRounds += rounds;
+    store.saveItem(runId, item);
+    journal.log(
+      "info",
+      "fsm",
+      "transition",
+      { itemId, from: "VALIDATED", to: "REVIEWED", rounds, sessions, why: edge.why },
+      { runId, itemId },
+    );
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, state: "REVIEWED", reviewRounds: item.attempts.reviewRounds },
+      { runId, itemId },
+    );
+    return { ok: true, itemState: item.state, rounds, surviving: [], questionId: null };
+  };
+
+  // One skeptic panel PER finding — k seats each, dispatched as one wave — with
+  // survival decided by core findingSurvives over the panel each finding was GIVEN
+  // (a verdict is bound to its finding by the job that asked, never by the reply's
+  // self-declared findingId). An under-delivered panel is re-dispatched ONCE for
+  // its missing seats; a verdict still missing after that counts as an UPHOLD (G6):
+  // feeding the partial panel straight to findingSurvives would read every missing
+  // verdict as an overturn and silently drop the finding.
+  const adjudicate = async (
+    entries: readonly ItemRaisedFinding[],
+    promptOf: (entry: ItemRaisedFinding) => string,
+  ): Promise<Map<string, boolean>> => {
+    const outcome = new Map<string, boolean>();
+    if (entries.length === 0) return outcome;
+    if (k < 1) {
+      throw new Error(
+        ITEM_REVIEW_TOOL +
+          ": the configured skeptic fan-out is " +
+          String(k) +
+          " (workflow.skepticsPerFinding clamped to parallel.maxReaders), so the " +
+          String(entries.length) +
+          " finding(s) this round cannot be adjudicated; configure at least one (§3.3)",
+      );
+    }
+    const jobs: FanoutJob[] = [];
+    for (const entry of entries) {
+      for (let seat = 0; seat < k; seat += 1) jobs.push(itemSkepticJob(itemId, promptOf(entry)));
+    }
+    const results = await fanout.dispatchWave(jobs);
+    const panels: Verdict[][] = entries.map(() => []);
+    const missing: number[] = [];
+    entries.forEach((entry, index) => {
+      for (let seat = 0; seat < k; seat += 1) {
+        const verdict = results[index * k + seat]?.value as Verdict | undefined;
+        if (verdict !== undefined) panels[index].push(verdict);
+      }
+      for (let gap = panels[index].length; gap < k; gap += 1) missing.push(index);
+    });
+    if (missing.length > 0) {
+      const retry = await fanout.dispatchWave(
+        missing.map((index) => itemSkepticJob(itemId, promptOf(entries[index]))),
+      );
+      retry.forEach((result, at) => {
+        const verdict = result.value as Verdict | undefined;
+        if (verdict !== undefined) panels[missing[at]].push(verdict);
+      });
+    }
+    entries.forEach((entry, index) => {
+      const panel = panels[index];
+      while (panel.length < k) {
+        panel.push({
+          findingId: entry.finding.id,
+          upheld: true,
+          reasoning:
+            "skeptic seat undelivered after one re-dispatch; the missing verdict counts as " +
+            "an UPHOLD — a finding is never dropped because a skeptic session crashed (§3.3)",
+        });
+      }
+      outcome.set(entry.finding.id, findingSurvives(panel, k));
+    });
+    return outcome;
+  };
+
+  // One review-fix dispatch (implementer or testWriter), write-capable, carrying
+  // the C-028 receivingReview signal.
+  const dispatchReviewFix = async (
+    role: "implementer" | "testWriter",
+    prompt: string,
+  ): Promise<{ reply: ImplementerResult; sessionID: string }> => {
+    const result = await fanout.dispatch(reviewFixJob(role, itemId, prompt));
+    const reply = result.value as ImplementerResult | undefined;
+    if (reply === undefined) {
+      throw new Error(
+        ITEM_REVIEW_TOOL +
+          ": the " +
+          role +
+          ' fix sub-session for item "' +
+          itemId +
+          '" produced no valid ImplementerResult (' +
+          JSON.stringify(result.error) +
+          ")",
+      );
+    }
+    return { reply, sessionID: result.sessionID };
+  };
+
+  // §3.3 routing by the paths the fix touches, not by a fixed recipient: a
+  // test-adequacy finding — and any finding whose suggestedFix names a testScope
+  // path — goes to the testWriter (the implementer is gated to fileScope, so
+  // routing it there is a guaranteed edit-gate denial); a fix naming both scopes
+  // goes to both; everything else is the implementer's.
+  const routeOf = (entry: ItemRaisedFinding): { testWriter: boolean; implementer: boolean } => {
+    const fix = entry.finding.suggestedFix;
+    const namesTest = queueItem.testScope.some((rel) => rel.length > 0 && fix.includes(rel));
+    const namesFile = queueItem.fileScope.some((rel) => rel.length > 0 && fix.includes(rel));
+    if (entry.lens === LENS_TEST_ADEQUACY || namesTest) {
+      return { testWriter: true, implementer: namesFile };
+    }
+    return { testWriter: false, implementer: true };
+  };
+
+  // The §3.3 "where cheap" reverted-behavior probe. Attempted iff the item's
+  // fileScope is non-empty AND its working-tree changes round-trip through
+  // `git stash push -- <fileScope>` / `git stash pop` (restored in a finally); ANY
+  // stash failure — including an exit-0 push that minted no entry, which a later
+  // pop would fail on — SKIPS the probe. It AUGMENTS the mandatory re-run + re-vet,
+  // never replaces them.
+  const probeReverted = (): { ran: boolean; stillFails: boolean } => {
+    if (queueItem.fileScope.length === 0) return { ran: false, stillFails: false };
+    const push = runReviewGit(store.root, ["stash", "push", "--", ...queueItem.fileScope]);
+    if (push.status !== 0) return { ran: false, stillFails: false };
+    if (runReviewGit(store.root, ["rev-parse", "--verify", "--quiet", "refs/stash"]).status !== 0) {
+      return { ran: false, stillFails: false };
+    }
+    try {
+      const probe = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+      return { ran: true, stillFails: probe.record.kind === "red" };
+    } finally {
+      runReviewGit(store.root, ["stash", "pop"]);
+    }
+  };
+
+  // The changed-test discipline (§3.3 table row 2): re-run through evidence, probe
+  // where cheap, then re-vet with fresh critics — all BEFORE re-validate.
+  const runTestDiscipline = async (): Promise<{ ok: true } | { ok: false; result: ItemReviewResult }> => {
+    const rerun = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const probe = probeReverted();
+    if (probe.ran && !probe.stillFails) {
+      return {
+        ok: false,
+        result: blockReviewAndAsk(
+          "the changed test PASSES against the reverted-behavior probe tree, so it no longer " +
+            "pins the item's behaviour — it pins the implementation's shape",
+          "testWriter",
+          input.sessionID ?? "",
+        ),
+      };
+    }
+    const critics = Math.floor(readFanout("vet", config));
+    if (critics < 1) {
+      throw new Error(
+        ITEM_REVIEW_TOOL +
+          ": the configured vet fan-out is " +
+          String(critics) +
+          " critic(s), so the changed test cannot be re-vetted; configure at least one (§4.3)",
+      );
+    }
+    const testText = testScopeContent(store.root, queueItem);
+    const rerunRecord = rerun.record;
+    const rerunLine =
+      rerunRecord.kind === "red"
+        ? "the changed test FAILS against the item's tree (exit " +
+          String(rerunRecord.exitCode) +
+          ", §2.6.1 class " +
+          rerunRecord.failureClass +
+          ")"
+        : "the changed test PASSES against the item's tree (exit 0) — the implementation exists";
+    const jobs: FanoutJob[] = [];
+    for (let i = 0; i < critics; i += 1) {
+      jobs.push(reviewRevetJob(itemId, reviewRevetPrompt(queueItem, testText, rerunLine, critics)));
+    }
+    const results = await fanout.dispatchWave(jobs);
+    const union: string[] = [];
+    for (const [index, result] of results.entries()) {
+      const vet = result.value as TestVet | undefined;
+      if (vet === undefined) {
+        throw new Error(
+          ITEM_REVIEW_TOOL +
+            ": re-vet critic " +
+            String(index + 1) +
+            " of " +
+            String(critics) +
+            ' for item "' +
+            itemId +
+            '" produced no valid TestVet (' +
+            JSON.stringify(result.error) +
+            ")",
+        );
+      }
+      for (const entry of vet.mustFix) {
+        if (!union.includes(entry)) union.push(entry);
+      }
+    }
+    if (union.length > 0) {
+      return {
+        ok: false,
+        result: blockReviewAndAsk(
+          "the changed test did not clear the review re-vet; the critics still require: " +
+            union.join("; "),
+          "reviewer",
+          results[0]?.sessionID ?? "",
+        ),
+      };
+    }
+    return { ok: true };
+  };
+
+  // (2) derive: review -> refute -> route fixes -> re-validate -> re-review, bounded
+  //     by reviewMaxRounds. Every iteration either exits or consumes one round.
+  for (;;) {
+    rounds += 1;
+    const diffBlock = itemDiffBlock(store.root, queueItem);
+    const testText = testScopeContent(store.root, queueItem);
+
+    // (2a) the lens fan-out. The sub-3 clamp warning rides the FIRST review
+    //      dispatch, on the EXISTING fanout event, at level warn (G2) — whichever
+    //      knob (itemReviewers or maxReaders) produced the sub-floor value.
+    if (rounds === 1 && preClamp < 3) {
+      journal.log(
+        "warn",
+        "fanout",
+        "subsession.dispatched",
+        {
+          configured: preClamp,
+          clamped: sessions,
+          tool: ITEM_REVIEW_TOOL,
+          why:
+            "the itemReview fan-out is below the §3.3 three-session floor; clamped up so " +
+            "the mandatory lens set still dispatches",
+        },
+        { runId, itemId, sessionID: input.sessionID },
+      );
+    }
+    const lensJobs = composition.map((group) =>
+      itemLensJob(itemId, group, itemLensPrompt(group, queueItem, diffBlock, testText, sessions)),
+    );
+    const lensResults = await fanout.dispatchWave(lensJobs);
+    const raised: ItemRaisedFinding[] = [];
+    for (const [index, result] of lensResults.entries()) {
+      const findings = result.value as Findings | undefined;
+      // A lens that produced nothing is a BLIND SPOT, not a clean bill of health
+      // (the handlePlanReview rule): the item is untouched and the tool can simply
+      // be run again.
+      if (findings === undefined) {
+        throw new Error(
+          ITEM_REVIEW_TOOL +
+            ': the "' +
+            composition[index].join("+") +
+            '" lens sub-session produced no valid Findings (' +
+            JSON.stringify(result.error) +
+            ")",
+        );
+      }
+      for (const finding of findings.findings) {
+        raised.push({ finding, lens: finding.lens, sessionID: result.sessionID });
+      }
+    }
+
+    // (2b) skeptics: every finding, k seats, core survival arithmetic.
+    const survivesById = await adjudicate(raised, (entry) =>
+      itemSkepticPrompt(entry, k, queueItem, diffBlock, testText),
+    );
+    let roundSurvivors = raised.filter((entry) => survivesById.get(entry.finding.id) === true);
+
+    // (2c) adjudication ordering (§3.3): a surviving spec/contract finding discards
+    //      the round's quality-lens findings — they are re-derived by the NEXT
+    //      round's fresh fan-out, after the spec fix and its re-validate. Tier-1
+    //      (correctness, guardrail) findings are retained.
+    if (roundSurvivors.some((entry) => entry.lens === LENS_SPEC)) {
+      roundSurvivors = roundSurvivors.filter((entry) => !ITEM_QUALITY_LENSES.includes(entry.lens));
+    }
+    surviving = roundSurvivors;
+
+    // (2d) zero survivors: the clean advance, through the core rule.
+    if (roundSurvivors.length === 0) return advance();
+
+    // (2e) the fix pass — §3.3 routing by path, testWriter FIRST then implementer,
+    //      sequentially, each under its own discipline.
+    if (
+      packs["receive-review.md"] === undefined ||
+      packs["receive-review.md"].trim().length === 0
+    ) {
+      throw new Error(
+        ITEM_REVIEW_TOOL +
+          ": doctrine receive-review.md is absent from the loaded pack set; refusing to " +
+          "dispatch a review fix without the doctrine that governs receiving one (§3.3/C-028)",
+      );
+    }
+    const routed = roundSurvivors.map((entry) => ({ entry, route: routeOf(entry) }));
+    const writerSet = routed.filter((r) => r.route.testWriter).map((r) => r.entry);
+    const implSet = routed.filter((r) => r.route.implementer).map((r) => r.entry);
+    const deadIds = new Set<string>();
+
+    // A DONE_WITH_CONCERNS receipt whose concerns name a routed finding id is a
+    // PUSHBACK (G5): ONE extra skeptic round carrying the reasoning verbatim.
+    // Refuted, the finding dies; upheld, the fix is re-demanded exactly once. The
+    // re-demand's own receipt is not re-adjudicated — one extra round, never more.
+    const resolveFix = async (
+      role: "implementer" | "testWriter",
+      entries: ItemRaisedFinding[],
+      first: { reply: ImplementerResult; sessionID: string },
+    ): Promise<{ ok: true } | { ok: false; result: ItemReviewResult }> => {
+      const escalate = (reply: ImplementerResult, sessionID: string): ItemReviewResult =>
+        blockReviewAndAsk(
+          "the " +
+            role +
+            " replied " +
+            reply.status +
+            " on the review fix dispatch: " +
+            (reply.blockReason ?? reply.neededContext ?? reply.summary),
+          role,
+          sessionID,
+        );
+      if (first.reply.status === "BLOCKED" || first.reply.status === "NEEDS_CONTEXT") {
+        return { ok: false, result: escalate(first.reply, first.sessionID) };
+      }
+      if (first.reply.status !== "DONE_WITH_CONCERNS") return { ok: true };
+      const pushed = entries.filter((entry) =>
+        first.reply.concerns.some((line) => line.includes(entry.finding.id)),
+      );
+      if (pushed.length === 0) return { ok: true };
+      const upheldById = await adjudicate(pushed, (entry) =>
+        itemPushbackSkepticPrompt(
+          entry,
+          first.reply.concerns.filter((line) => line.includes(entry.finding.id)),
+          k,
+          queueItem,
+          diffBlock,
+          testText,
+        ),
+      );
+      const upheld = pushed.filter((entry) => upheldById.get(entry.finding.id) === true);
+      for (const entry of pushed) {
+        if (upheldById.get(entry.finding.id) !== true) deadIds.add(entry.finding.id);
+      }
+      if (upheld.length > 0) {
+        const again = await dispatchReviewFix(role, reviewRedemandPrompt(role, upheld, queueItem));
+        if (again.reply.status === "BLOCKED" || again.reply.status === "NEEDS_CONTEXT") {
+          return { ok: false, result: escalate(again.reply, again.sessionID) };
+        }
+      }
+      return { ok: true };
+    };
+
+    if (writerSet.length > 0) {
+      const writer = await dispatchReviewFix(
+        "testWriter",
+        reviewTestWriterFixPrompt(writerSet, queueItem, rounds, max),
+      );
+      const settled = await resolveFix("testWriter", writerSet, writer);
+      if (!settled.ok) return settled.result;
+      // The changed test re-enters the discipline REGARDLESS of pushback: the
+      // writer may have edited before pushing back on a sibling finding.
+      const discipline = await runTestDiscipline();
+      if (!discipline.ok) return discipline.result;
+    }
+
+    const implLive = implSet.filter((entry) => !deadIds.has(entry.finding.id));
+    if (implLive.length > 0) {
+      const fixer = await dispatchReviewFix(
+        "implementer",
+        reviewImplementerFixPrompt(implLive, queueItem, rounds, max),
+      );
+      const settled = await resolveFix("implementer", implLive, fixer);
+      if (!settled.ok) return settled.result;
+    }
+
+    // A finding a pushback round REFUTED died: it demands nothing further and
+    // contributes nothing at the cap.
+    surviving = roundSurvivors.filter((entry) => !deadIds.has(entry.finding.id));
+
+    // (2f) fix => re-validate (§3.3). Always after a fix pass: a fix dispatch may
+    //      have edited the tree whatever its receipt said.
+    revalidate();
+
+    // (2g) the bound. Below the cap the next round re-reviews the fixed tree; at
+    //      the cap the machine is out of moves — ONE §2.11 question carrying the
+    //      surviving finding list, and the item is blocked, staying at VALIDATED.
+    if (rounds < max) continue;
+    if (surviving.length === 0) {
+      // Every survivor died in pushback adjudication: nothing survives, which is
+      // the VALIDATED->REVIEWED edge's own condition.
+      return advance();
+    }
+    const survivingIds = surviving.map((entry) => entry.finding.id);
+    const item = store.loadItem(runId, itemId);
+    item.attempts.reviewRounds += rounds;
+    store.saveItem(runId, item);
+    const questionText =
+      ITEM_REVIEW_TOOL +
+      ' reached its round cap for item "' +
+      itemId +
+      '": ' +
+      String(rounds) +
+      " of workflow.reviewMaxRounds=" +
+      String(max) +
+      " review round(s) spent and these finding(s) still survive their skeptics:\n" +
+      surviving.map(renderItemFinding).join("\n") +
+      "\nThe item stays at VALIDATED and is blocked until you answer: say how the finding(s) " +
+      "should be resolved, or that the item should proceed as it stands.";
+    const question = appendQuestion(
+      runDir,
+      {
+        runId,
+        question: questionText,
+        askedBy: { role: "reviewer", sessionID: surviving[0].sessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "review-round-cap",
+        blocksItems: [itemId],
+      },
+      now(),
+    );
+    const blocked = store.setBlocked(runId, itemId, {
+      reason:
+        "item review reached reviewMaxRounds=" +
+        String(max) +
+        " with finding(s) still surviving: " +
+        survivingIds.join("; "),
+      stage: "REVIEWED",
+      questionId: question.id,
+    });
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "REVIEWED", itemId, round: rounds, max, surviving: survivingIds },
+      { runId, itemId },
+    );
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: true, questionId: question.id, stage: "REVIEWED", reviewRounds: rounds },
+      { runId, itemId },
+    );
+    return {
+      ok: false,
+      itemState: blocked.state,
+      rounds,
+      surviving: survivingIds,
+      questionId: question.id,
+    };
+  }
 }
