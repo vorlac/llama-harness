@@ -1,18 +1,30 @@
 {
   "spineTask": {
     "taskId": "9.4b",
-    "step": "Phase 9 SERIAL. conductor_mark_green + conductor_validate + conductor_queue_amend in adapter/tools.ts. Assertions AUTHORED BY THE ORCHESTRATOR at docs/build/specs/task-9.4b.assertions.json (13 rows, 5 spec gaps resolved) — the lookahead burst covered 9.4c/9.5a/9.5b/9.6 but never 9.4b, so no draft existed. Rulings already made: (1) mark_green owns the WHOLE stage (dispatches the implementer, then runs the item test itself), mirroring 9.4a's submit_test. (2) The §3.3 BLOCKED escalation ladder's middle rungs ('stronger model', 'item re-split') are NOT constructible from §2.1 and are RAISED AT THE PHASE 9 GATE rather than stubbed (G4); the two constructible rungs are implemented. (3) The cap question reuses the EXISTING origin 'debug-architecture' and a BLOCKED implementer reuses 'implementer-blocked' — the §2.11 vocabulary is CLOSED. (4) adapter/evidence.ts runTest must GAIN the excludeTestFiles the §4.2 quarantine rule already assigns it (plan line 1582 names runTest's no-template fallback as a quarantine site, but RunTestOptions has no such parameter) — this is what makes the two-no-template-items row pass, and it is complementary to C-032 D1: the quarantine is exactly what makes a fallback run name the item's OWN testScope file.",
+    "step": "Phase 9 SERIAL. conductor_mark_green + conductor_validate + conductor_queue_amend in adapter/tools.ts. STATE: assertions signed (13 rows), TESTS WRITTEN AND VETTED, RED OBSERVED BY THE ORCHESTRATOR (tsc showed ONLY the three TS2305s for handleMarkGreen/handleQueueAmend/handleValidate; node --test gave the missing-export SyntaxError). The test file is PARKED at staging/task-9.4b/tools-9.4b.test.ts so the tree holds one red at a time — copy it to conductor/tests/tools-9.4b.test.ts to resume. NEXT STEP IS THE IMPLEMENTATION (the dispatched implementer died on a weekly account limit before making any edit; adapter/tools.ts is untouched).",
     "intendedFiles": [
       "conductor/tests/tools-9.4b.test.ts",
-      "conductor/adapter/tools.ts",
-      "conductor/adapter/evidence.ts"
+      "conductor/adapter/tools.ts"
+    ],
+    "rulings": [
+      "mark_green owns the WHOLE stage (dispatches the implementer, then runs the item test itself), mirroring 9.4a's submit_test.",
+      "The §3.3 BLOCKED escalation ladder's middle rungs ('stronger model', 'item re-split') are NOT constructible from §2.1 and are RAISED AT THE PHASE 9 GATE rather than stubbed (G4); the two constructible rungs are implemented.",
+      "The cap question reuses the EXISTING origin 'debug-architecture'; a BLOCKED implementer reuses 'implementer-blocked'. The §2.11 vocabulary is CLOSED.",
+      "adapter/evidence.ts needs NO change: RunTestOptions ALREADY carries excludeTestFiles + stateHome/workspaceKey (6.1, hardened by 968b5f8). 9.4b computes the foreign red set and PASSES it on both the mark_green item-test path and the validate path. Changing runItemTest's signature to take the exclusion set is expected.",
+      "The test file's own header pins P1 (debugFixCap bounds FIX ATTEMPTS: debugFixCap dispatches, debugFixCap+1 verifies) and P2 (a legality refusal THROWS; a failing test/verify returns ok:false). Follow them exactly."
     ]
   },
+  "branchB": {
+    "taskId": "11.5",
+    "step": "affinity — prefix-group ordering. 11.4 is COMMITTED (e04fe14) + M4 PASS. Promote the draft at scratchpad/staging/assertions-drafts/task-11.5.assertions.json, applying the SAME corrections 11.4's promotion needed: src/tests/ (not src/router-tests/), full-path includes relative to src/, header-only modules, and REUSE 11.3's RequestTags (affinity's group tag is already parsed there, with the config-overridable header name in Router::groupHeader_)."
+  },
   "processNotes": {
-    "throttle": "AGREED WITH USER after the C-030 burst exhausted a 5h window (~79 agents/5.7M tokens): quote spec excerpts inline instead of letting agents read the plan; skeptics for MAJOR findings only; 2 review lenses not 3; lookahead of 1-2 tasks not 8; orchestrator does implementations directly when cheaper. C-031 (16 agents/1.4M) and C-032 (18 agents/2.3M) both still found real MAJORs.",
+    "subagentsUnavailable": "2026-08-13: a WEEKLY account limit (resets Aug 15 19:00 America/New_York) killed both dispatched implementers. Until it resets, Agent/Workflow dispatch fails — the orchestrator's own main loop still works, so tasks proceed SOLO. This is why 11.4 was finished by hand.",
+    "throttle": "AGREED WITH USER after the C-030 burst exhausted a 5h window (~79 agents/5.7M tokens): quote spec excerpts inline instead of letting agents read the plan; skeptics for MAJOR findings only; 2 review lenses not 3; lookahead of 1-2 tasks not 8; orchestrator does implementations directly when cheaper.",
     "reviewResultTrap": "A review workflow returning an EMPTY finding set may mean the LENSES CRASHED, not that the diff is clean. Check the run's failures list + journal.jsonl before treating empty as a pass (seen at 9.3).",
-    "firstImplementerTrap": "A subagent can return an anomalous 0-edit 'done'. ALWAYS verify the tree (git status + run the test) before trusting green (seen at 9.1).",
-    "reviewFixRevertTrap": "When recording revertAssertion rows, VERIFY the revert actually re-reds the named test. At 9.4a, removing the !edge.repairable branch did NOT re-red [C032-D1] (that test configures testRepairAttempts:0, where the repair path blocks immediately anyway); the redAdmission change is what re-reds it, and that is what the row now cites.",
-    "userParallelWork": "The user commits their own work on main concurrently (llama-conductor rename, submodule pointers, presets, docs). ALWAYS git add explicit paths, never -A, and never revert their files."
+    "firstImplementerTrap": "A subagent can return an anomalous 0-edit 'done', and a dead subagent can leave a NON-COMPILING tree (seen at 11.4). ALWAYS git status + build/run before trusting anything.",
+    "mutationThenRead": "Mutation-test a green suite to prove it discriminates, THEN read the diff anyway — C-033 survived both a green suite and two successful mutation checks, and was caught only by reading a comment that lied about the code below it.",
+    "reviewFixRevertTrap": "VERIFY every revertAssertion row by actually running the revert. At 9.4a, removing the !edge.repairable branch did NOT re-red [C032-D1] (that test runs at testRepairAttempts:0). All four of 11.4's revert claims were run.",
+    "userParallelWork": "The user commits their own work on main concurrently. ALWAYS git add explicit paths, never -A, and never revert their files."
   }
 }

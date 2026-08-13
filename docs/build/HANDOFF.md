@@ -38,10 +38,21 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1-11.3 done+gated; Phase 9 underwa
    **11.2 DONE** (header-only src/router/config.hpp, ns conductor::router; parse order defaults-
    BEFORE-schema-validate; ports 1..65535 in parser; ConfigError.field() dotted; doctest 7 cases
    119/119; M4 both directions; nit ledgered in STATE: empty-field() on input-JSON parse error).
-   **Next Branch B: 11.3 proxy** (staged test being drafted by the lookahead workflow — vet from
-   scratchpad staging/task-11.3/ + wire CMake MYSELF). Then 11.4 admission, 11.5 affinity, 11.6
-   schema-observer (shrunk per 0.2: request-side schemaMissing counter + note; responses stream
-   so response-validation is inert), 11.7 metrics, 11.8 (live).
+   **11.3 DONE** (a3bf1e7, header-only src/router/router.hpp: /v1/* proxy, RequestTags tag
+   normalization with header-over-body precedence, SSE relayed unbuffered).
+   **11.4 DONE** (e04fe14, src/router/admission.hpp + the router seam + the SG-2 maxQueued clamp
+   inside 11.2's validation path; ctest 26/26). C-033, found by the ORCHESTRATOR'S OWN DIFF READ
+   rather than a review panel: the chunked content provider did not capture the admitted slot, so
+   on the STREAMING path (all generation traffic) the slot was released the instant the handler
+   returned and `maxInflightPerModel` bounded nothing. The 8 authored rows were green and two
+   mutations proved they discriminate — the stub simply always sets a Content-Length, so the
+   buffered path was the only one ever exercised. Fixed test-first.
+   **Next Branch B: 11.5 affinity**, then 11.6 schema-observer (shrunk per 0.2: request-side
+   schemaMissing counter + note; responses stream so response-validation is inert), 11.7 metrics,
+   11.8 (live).
+   - **C++ M4 METHOD:** the configured build dir is bound to the MAIN worktree's source path, so a
+     detached-worktree M4 would need its own ~45min vcpkg configure. Do the revert in the main tree
+     with the tree verified clean against the commit — same guarantee, minutes not an hour.
 2. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
    **9.1 DONE** (C-029: 4 MAJOR + 2 minor found by a 3-lens review; 864/864).
    **9.2 DONE** (conductor_decompose + conductor_plan; NEW pure core/planning.ts; NEW SCHEMAS.Plan —
@@ -73,13 +84,15 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1-11.3 done+gated; Phase 9 underwa
    **NEXT: 9.4b** (assertions ORCHESTRATOR-AUTHORED at docs/build/specs/task-9.4b.assertions.json —
    13 rows, 5 spec gaps; there was no lookahead draft for 9.4b, contrary to an earlier note here).
    Then 9.4c-9.6. The Phase 9 MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
-   - **9.4b carries a REAL SPEC GAP to resolve in code:** §4.2 (line 1582) names `runTest`'s
-     no-template fallback as one of the four quarantine sites, but the committed `RunTestOptions`
-     has no `excludeTestFiles` — so the fallback currently runs the whole suite including other
-     items' deliberate reds. That is what the "two no-template items in one wave without
-     livelocking" row exercises, and it is COMPLEMENTARY to C-032's D1 fix: the quarantine is
-     exactly what makes a fallback run name the item's OWN testScope file, so without it a
-     no-template item could never legally go red at all.
+   - **9.4b's foreign-red quarantine needs NO evidence.ts change** (an earlier note here claimed it
+     did — that was an orchestrator misread, corrected). `RunTestOptions` ALREADY carries
+     `excludeTestFiles?: string[]` + stateHome/workspaceKey, landed with 6.1 and hardened by the
+     Phase-6 gate fixes (968b5f8); 9.4a's `runItemTest` simply never passes it. 9.4b computes the
+     foreign red set and PASSES it, on both the mark_green item-test path and the validate path.
+     **LESSON: read the INTERFACE, not the call site, before declaring a surface missing.**
+     The C-032 D1 interaction stands and is why this matters: the handler refuses an untargeted red
+     whose excerpt names no testScope file, and the quarantine is exactly what makes a no-template
+     fallback name the item's OWN file — without it a no-template item could never legally go red.
    - **REVIEW-RESULT TRAP (seen at 9.3):** a workflow returning an EMPTY finding set can mean the
      lenses CRASHED, not that the diff is clean. Always check the run's failures + journal.jsonl
      before treating an empty review as a pass.
@@ -95,6 +108,16 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1-11.3 done+gated; Phase 9 underwa
      lookahead of 1-2 tasks over 8.
    - FIRST-IMPLEMENTER TRAP (seen at 9.1): a subagent can return an anomalous/injected 0-edit
      "done" result — ALWAYS verify the actual tree (git status + run the test) before trusting green.
+   - **SUBAGENTS CAN DIE MID-EDIT (2026-08-13): both implementers of the 9.4b/11.4 round were killed
+     by a WEEKLY account limit (reset Aug 15 19:00 ET), leaving a NON-COMPILING tree** — 11.4's had
+     written a complete admission.hpp but stopped between USING `admission_` and DECLARING it, and
+     never wrote `sendAdmissionError`. FIRST ACTION after any agent failure is `git status` + a
+     build; finish or revert deliberately, never assume "failed" means "wrote nothing". Recovering
+     the work by hand was correct here and cost minutes.
+   - **A GREEN SUITE THAT MUTATION-TESTS CLEAN CAN STILL MISS A MAJOR.** Before trusting any green,
+     mutate the implementation and confirm the right row fails; then READ THE DIFF ANYWAY. C-033 was
+     invisible to both, and was found only by reading a comment that claimed something the code
+     three lines below did not do.
 - Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,
   overridesRemaining}; an implementer's active item with `debugging:true` (optional GateItem
   field) gets debug.md; init-failure logs via the injected logError seam (§7.1 stderr), never a

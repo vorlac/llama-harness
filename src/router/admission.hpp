@@ -114,9 +114,11 @@ namespace conductor::router {
             queue_.emplace(key, &waiter);
 
             const auto deadline = std::chrono::steady_clock::now() + queueTimeout_;
-            waiter.woken.wait_until(lock, deadline, [&waiter] {
-                return waiter.granted;
-            });
+            waiter.woken.wait_until(
+                lock, deadline,
+                [&waiter] {
+                    return waiter.granted;
+                });
 
             // A grant that landed while this thread was waking still counts: the
             // releaser holds mutex_ for the whole grant, so the predicate above is
@@ -135,7 +137,6 @@ namespace conductor::router {
         // claimed out of order by an arrival that came later.
         void release(const std::string& model) {
             const std::lock_guard<std::mutex> lock(mutex_);
-
             const auto counted = inflight_.find(model);
             if (counted != inflight_.end() && counted->second > 0) {
                 if (--counted->second == 0)
@@ -214,18 +215,16 @@ namespace conductor::router {
         [[nodiscard]] int priorityValue(const std::optional<std::string>& priority) const {
             if (!priority)
                 return priorities_.interactive;
-
             if (*priority == "interactive")
                 return priorities_.interactive;
-
             if (*priority == "review")
                 return priorities_.review;
-
             if (*priority == "batch")
                 return priorities_.batch;
 
-            spdlog::debug("router: priority tag '{}' is outside interactive|review|batch — queued as interactive",
-                          *priority);
+            spdlog::debug(
+                "router: priority tag '{}' is outside interactive|review|batch — queued as interactive",
+                *priority);
 
             return priorities_.interactive;
         }

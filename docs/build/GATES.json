@@ -547,7 +547,7 @@
       "M1": "PASS ctest 26/26 (1599 assertions), stable across 3 runs (1.53s/1.54s/1.57s); llama-router still links",
       "M2": "PASS 18 -> 25 cases (8 authored) -> 26 (1 review-fix)",
       "M3": "n/a for C++ (tsc leg covers the TS package; the compiler IS the typecheck here, -Wall -Wextra clean)",
-      "M4": "PENDING",
+      "M4": "PASS from e04fe14, verified in BOTH directions: with the tree at the commit, removing src/router/admission.hpp re-derived the missing-header red in BOTH consumers (admission_test.cpp:151 and router.hpp:50); restoring it rebuilt and ran 26/26. METHOD NOTE: unlike the TS tasks this was done in the MAIN tree at the commit rather than a detached scratch worktree — the configured build dir is bound to the main worktree's source path, so a worktree M4 would need its own ~45min vcpkg configure; the tree was verified clean against the commit before and after, which gives the same guarantee. The three per-fix reverts in revertAssertion were each verified separately, not reasoned.",
       "M5": "PASS (production-scoped marker scan)",
       "M6": "PASS (AdmissionController + computeTaskQueueThreads reached through the real Router seam and the real parseRouterConfig path, not called in isolation)",
       "M7": "PASS 8 assertion rows each with a row-id-prefixed TEST_CASE + 1 review-fix case",
