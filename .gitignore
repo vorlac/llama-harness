@@ -23,3 +23,6 @@ __pycache__/
 .vscode/**
 !.vscode/c_cpp_properties.json
 !.vscode/launch.json
+
+# Task 11.1: generated §2 JSON Schemas for the C++ router-tests (from core/types.ts SCHEMAS)
+src/router-tests/schemas/

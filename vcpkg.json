@@ -6,6 +6,10 @@
   "dependencies": [
     "pkgconf",
     "ftxui",
-    "spdlog"
+    "spdlog",
+    "cpp-httplib",
+    "nlohmann-json",
+    "json-schema-validator",
+    "doctest"
   ]
 }

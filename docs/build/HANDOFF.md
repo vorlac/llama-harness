@@ -30,12 +30,15 @@ Updated: 2026-08-13 (Phases 0-8 complete + gated; next = Branch B + Phase 9)
 
 ## What is next (immediate)
 
-1. **Branch B (C++ router, 11.1-11.8)** — groundwork DONE (see branch-b-plan.md: run ON MAIN,
-   submodules+ports+preset confirmed). Execute 11.1 as ONE focused sequence: CMakeLists surgery
-   (remove myprogram block lines 42-68; add find_package httplib/nlohmann_json/validator/doctest
-   + llama-router + router-tests targets) + vcpkg.json (+4 ports) + src/router skeleton +
-   export-schemas.ts + ctest-green, then commit. CMakeLists/vcpkg/CMakePresets ORCHESTRATOR-ONLY.
-   Build ONLY --target llama-router/router-tests (never bare --build → pre-broken llama).
+1. **Branch B 11.1 DONE (Step 1)** — CMake surgery on MAIN (myprogram removed; llama-router +
+   router-tests targets vs 4 vcpkg ports; validator = `nlohmann_json_schema_validator::validator`;
+   ctest 1/1 green; llama-router runs). export-schemas.ts (17 schemas) + test wired into
+   test-conductor.sh; src/router-tests/schemas/ gitignored. Build dir `.out/build/clang-relwdebinfo`.
+   Build ONLY `--target llama-router/router-tests` (never bare --build → pre-broken llama).
+   **Next Branch B: 11.2** (router config + logging: doctest red for §2.2 config parse/defaults/
+   reject-unknown/bad-ports/spdlog-level → implement → ctest green → commit). Then 11.3 proxy,
+   11.4 admission, 11.5 affinity, 11.6 schema-observer (shrunk per 0.2: request-side schemaMissing
+   counter + note; responses stream so response-validation is inert), 11.7 metrics, 11.8 (live).
 2. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
    Carries 9.1/9.4a/9.4c/9.5a/9.5b/9.6 bindings below. Then 10.1, 12, 13, 14, 15.
 - Injection signature note: buildSystemAppend takes a trailing ctx {repoConfigured, taintCount,
@@ -69,6 +72,10 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
   that sends surviving findings to the implementer MUST thread a "receiving-review" signal to
   `buildSystemAppend` so it appends `receive-review.md` (parallel to the debug.md/DEBUG-posture
   path already wired). The pack is loaded/cached now; only its delivery signal is deferred.
+- **11.1 Step 2 live upstream contract** → Task 12.1: measure llama-server's /v1 contract + the
+  effective concurrent slot count via serve.py --no-shell (qwen3.6-27b), complete
+  src/router/UPSTREAM_CONTRACT.md with a real WIRE_CONTRACT_VERIFIED stamp. Assets confirmed
+  present (.out/llamacpp/bin/llama-server, .data/models/qwen3.6-27b). M8: observed output only.
 - **G7 residuals** (honest-limits-pending.md → fold into 15.1): backtick substitution + alias
   injection now DENY (C-022); residual obscure in-place writers; M5 marker scan is
   production-scoped (C-026, stray marker comment in a test caught by diff read only).

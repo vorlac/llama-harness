@@ -1193,22 +1193,52 @@
       "taskId": "11.1",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 11.1 router scaffold + upstream contract",
       "planLines": [
         2755,
         2783
       ],
-      "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "canonicalTestCmd": "bash scripts/test-conductor.sh + ctest --test-dir .out/build/clang-relwdebinfo",
+      "tap": {
+        "tests": 847,
+        "pass": 847,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0,
+        "ctest": "1/1 PASS (router-tests)"
+      },
+      "redEvidence": {
+        "cmd": "node --test conductor/tests/export-schemas.test.ts (TS half); C++ half is scaffold bring-up (no red-first, per plan 'trivial doctest builds+runs green')",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ERR_MODULE_NOT_FOUND conductor/tools/export-schemas.ts (observed by orchestrator before the tool existed)"
+      },
+      "filesTouched": [
+        "CMakeLists.txt",
+        "vcpkg.json",
+        ".gitignore",
+        "scripts/test-conductor.sh",
+        "src/router/version.hpp",
+        "src/router/main.cpp",
+        "src/router/UPSTREAM_CONTRACT.md",
+        "src/router-tests/scaffold_test.cpp",
+        "conductor/tools/export-schemas.ts",
+        "conductor/tests/export-schemas.test.ts"
+      ],
+      "revertAssertion": "removing export-schemas.ts re-reds export-schemas.test.ts (missing-subject); removing src/router/main.cpp fails the llama-router link; removing scaffold_test.cpp / version.hpp fails the router-tests build; the ctest proves the C++ sources are load-bearing",
+      "attempts": 1,
+      "deviations": [
+        "Branch B run ON MAIN (not a worktree): submodules already populated, worktree submodule-init is the flagged gotcha, C++ never overlaps conductor/*.ts, test-conductor.sh is cmake-independent (branch-b-plan.md groundwork).",
+        "CMakeLists: dropped include(compiler-warnings) with the myprogram block (it applies target_compile_options to the removed ${PROJECT_NAME}=myprogram target; tools/ does not use it). Router warnings can be re-added target-scoped later.",
+        "validator target is nlohmann_json_schema_validator::validator (confirmed from the vcpkg port usage; configure passed but link needed the ::validator target).",
+        "router-tests registered with ctest via add_test (whole-binary) rather than doctest_discover_tests (per-case) to avoid the include(doctest) module-path gotcha; per-case discovery is a later refinement.",
+        "Step 2 (LIVE upstream contract) DEFERRED to 12.1 — serve.py (its specified vehicle) is not built; assets (llama-server binary + qwen3.6-27b) confirmed present; recorded in src/router/UPSTREAM_CONTRACT.md, NOT fabricated.",
+        "CMake pre-build custom_command for export-schemas deferred to 11.6 (when router-tests consumes the schemas); test-conductor.sh already regenerates them."
+      ],
+      "startedAt": "2026-08-13T01:00:00Z",
+      "finishedAt": "2026-08-13T01:20:00Z"
     },
     "11.2": {
       "taskId": "11.2",

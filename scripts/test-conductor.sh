@@ -82,5 +82,18 @@ if [ -f "$BUN_SMOKE" ]; then
   fi
 fi
 
+# §11.1 schema export: regenerate the §2 JSON Schemas (from core/types.ts SCHEMAS,
+# the single source) into src/router-tests/schemas/ so the C++ router-tests (Task
+# 11.6) validate against the exact same objects the fan-out engine uses. A
+# GENERATION step, not a pass/fail assertion (export-schemas.test.ts covers
+# correctness); a nonzero exit means the exporter itself is broken.
+if [ -f conductor/tools/export-schemas.ts ]; then
+  if ! node conductor/tools/export-schemas.ts src/router-tests/schemas >/dev/null 2>&1; then
+    echo "GATE FAIL: export-schemas.ts failed to run (§11.1 schema export)"
+    exit 1
+  fi
+  echo "schema export: OK (src/router-tests/schemas/)"
+fi
+
 echo "GATE PASS"
 exit 0
