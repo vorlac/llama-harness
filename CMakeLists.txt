@@ -71,6 +71,7 @@ target_link_libraries(llama-router
 # whole-binary add_test once configure is confirmed.)
 add_executable(router-tests
   "${CMAKE_CURRENT_SOURCE_DIR}/src/router-tests/scaffold_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/router-tests/config_test.cpp"
 )
 target_compile_features(router-tests PRIVATE cxx_std_23)
 target_include_directories(router-tests

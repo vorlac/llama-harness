@@ -1,0 +1,40 @@
+{
+  "taskId": "11.2",
+  "planLines": [
+    2784,
+    2788
+  ],
+  "kind": "code (Branch B, C++ router — src/router/config.{hpp,cpp} + src/router-tests/config_test.cpp). doctest RED is a COMPILE failure (the subject header does not exist yet), then implement -> ctest green. The §2.2 config document is pinned verbatim at plan lines 636-670; the machine-readable shape is the exported src/router-tests/schemas/RouterConfig.schema.json (single source in conductor/core/types.ts, two consumers per plan lines 470-476). CMakeLists.txt wiring is ORCHESTRATOR-ONLY — the subagent never edits it.",
+  "assertions": [
+    {
+      "id": "11.2-parse-verbatim",
+      "text": "the §2.2 document parsed VERBATIM (plan lines 636-670, comments stripped) yields every field with its exact value: listen 127.0.0.1:8088, upstream 127.0.0.1:8080, admission {maxInflightPerModel 4, maxQueued 64, queueTimeoutMs 600000}, priorities {interactive 0, review 1, batch 2}, affinity {header X-Conductor-Group, contiguousDequeue true}, schema {observeHeader X-Conductor-Schema, validateResponses true, rejectOnMissing false}, metrics.ledgerPath .data/router/metrics.jsonl, logging.level info",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.2-defaults",
+      "text": "a config omitting optional blocks falls back to the §2.2 documented defaults rather than zero-initialising (a missing logging block yields level \"info\"; a missing schema.rejectOnMissing yields false; a missing affinity.contiguousDequeue yields true) — defaults are the §2.2 values, and the parse still succeeds",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.2-reject-unknown",
+      "text": "an UNKNOWN key (top-level and nested, e.g. a stray \"batching\" block or admission.bogus) is REJECTED with an error naming the offending key — additionalProperties:false in the exported RouterConfig schema is enforced, not ignored",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.2-reject-bad-ports",
+      "text": "a bad port is REJECTED with an error naming the field: listen.port 0, listen.port 65536, upstream.port negative, and a non-numeric port each fail; a valid boundary port (1 and 65535) is accepted",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.2-schema-single-source",
+      "text": "the parser validates the document against the EXPORTED src/router-tests/schemas/RouterConfig.schema.json (nlohmann_json_schema_validator) rather than a hand-rewritten copy of the shape — the single-source contract (plan lines 470-476); the test proves the exported schema file is the one consulted",
+      "coveredByTest": null
+    },
+    {
+      "id": "11.2-logging-level",
+      "text": "config.logging.level is APPLIED to spdlog (the effective logger level is observably set from the config: \"debug\" yields spdlog debug level, \"warn\" yields warn), and an unrecognised level string is rejected naming the field rather than silently defaulting",
+      "coveredByTest": null
+    }
+  ]
+}

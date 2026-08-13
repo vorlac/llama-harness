@@ -35,10 +35,13 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone un
    ctest 1/1 green; llama-router runs). export-schemas.ts (17 schemas) + test wired into
    test-conductor.sh; src/router-tests/schemas/ gitignored. Build dir `.out/build/clang-relwdebinfo`.
    Build ONLY `--target llama-router/router-tests` (never bare --build → pre-broken llama).
-   **Next Branch B: 11.2** (router config + logging: doctest red for §2.2 config parse/defaults/
-   reject-unknown/bad-ports/spdlog-level → implement → ctest green → commit). Then 11.3 proxy,
-   11.4 admission, 11.5 affinity, 11.6 schema-observer (shrunk per 0.2: request-side schemaMissing
-   counter + note; responses stream so response-validation is inert), 11.7 metrics, 11.8 (live).
+   **11.2 DONE** (header-only src/router/config.hpp, ns conductor::router; parse order defaults-
+   BEFORE-schema-validate; ports 1..65535 in parser; ConfigError.field() dotted; doctest 7 cases
+   119/119; M4 both directions; nit ledgered in STATE: empty-field() on input-JSON parse error).
+   **Next Branch B: 11.3 proxy** (staged test being drafted by the lookahead workflow — vet from
+   scratchpad staging/task-11.3/ + wire CMake MYSELF). Then 11.4 admission, 11.5 affinity, 11.6
+   schema-observer (shrunk per 0.2: request-side schemaMissing counter + note; responses stream
+   so response-validation is inert), 11.7 metrics, 11.8 (live).
 2. **Phase 9 (tools MILESTONE, 9.1-9.6 SERIAL, NO-PARALLEL — all land in adapter/tools.ts).**
    **9.1 DONE** (conductor_classify/status/decide/surface/answer/defer; §7.4 widening
    state:decision.recorded; a 3-lens adversarial review found+fixed 4 MAJOR + 2 minor defects the

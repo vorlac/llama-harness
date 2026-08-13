@@ -1,0 +1,472 @@
+// =============================================================================
+// Task 11.2 — llama-router `config` + logging.
+//
+// This suite is written RED: `config.hpp` does not exist yet, so it fails to
+// compile. That is the intended red shape. The API below is the exact target the
+// implementer must produce — every name, type, and behaviour here is asserted by
+// the cases in this file.
+//
+//   // src/router/config.hpp
+//   #pragma once
+//
+//   #include <cstdint>
+//   #include <stdexcept>
+//   #include <string>
+//
+//   namespace conductor::router {
+//
+//   struct Endpoint      { std::string host; int port{}; };
+//   struct Admission     { int maxInflightPerModel{}; int maxQueued{};
+//                          std::int64_t queueTimeoutMs{}; };
+//   struct Priorities    { int interactive{}; int review{}; int batch{}; };
+//   struct Affinity      { std::string header; bool contiguousDequeue{true}; };
+//   struct SchemaObserve { std::string observeHeader; bool validateResponses{};
+//                          bool rejectOnMissing{false}; };
+//   struct Metrics       { std::string ledgerPath; };
+//   struct Logging       { std::string level{"info"}; };
+//
+//   struct RouterConfig {
+//     int version{};
+//     Endpoint listen;
+//     Endpoint upstream;
+//     Admission admission;
+//     Priorities priorities;
+//     Affinity affinity;
+//     SchemaObserve schema;
+//     Metrics metrics;
+//     Logging logging;
+//   };
+//
+//   // The single failure mode of this module.
+//   //   field()  — dotted path naming the offending field: "listen.port",
+//   //              "admission.bogus", "logging.level", "batching". Empty only when
+//   //              the schema file itself could not be read or parsed, in which
+//   //              case what() names the offending path.
+//   //   what()   — human message that ALWAYS contains field() verbatim.
+//   class ConfigError : public std::runtime_error {
+//    public:
+//     ConfigError(std::string field, const std::string& message);
+//     [[nodiscard]] const std::string& field() const noexcept;
+//   };
+//
+//   // Parse order, which the cases below pin:
+//   //   1. parse `json` as JSON;
+//   //   2. fill the three documented-optional keys with their §2.2 defaults —
+//   //      logging.level "info", schema.rejectOnMissing false,
+//   //      affinity.contiguousDequeue true — so the COMPLETED document satisfies
+//   //      the exported schema, which marks every key required;
+//   //   3. validate that completed document against the JSON Schema read from
+//   //      `schemaPath` (nlohmann_json_schema_validator) — the exported
+//   //      src/router-tests/schemas/RouterConfig.schema.json, never a copy of the
+//   //      shape baked into this translation unit;
+//   //   4. range-check both ports: 1..65535 inclusive.
+//   // Any violation throws ConfigError naming the offending field.
+//   RouterConfig parseRouterConfig(const std::string& json,
+//                                  const std::string& schemaPath);
+//
+//   // Applies cfg.logging.level to spdlog so that
+//   // spdlog::default_logger()->level() reports it. Mapping:
+//   //   "trace"->trace, "debug"->debug, "info"->info, "warn"->warn, "error"->err.
+//   void applyLoggingLevel(const RouterConfig& cfg);
+//
+//   }  // namespace conductor::router
+//
+// NOTE: doctest's main() comes from scaffold_test.cpp, which owns
+// DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN for the whole router-tests binary. This
+// translation unit must not define it again.
+// =============================================================================
+
+#include <doctest/doctest.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <initializer_list>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+#include <spdlog/common.h>
+#include <spdlog/spdlog.h>
+
+#include "config.hpp"
+
+namespace {
+
+using nlohmann::json;
+
+// The router config document from §2.2 of docs/plans/2026-08-07-conductor-harness-plan.md
+// (plan lines 636-670), verbatim. The plan block is `jsonc`; its comments are
+// documentation and are not part of the JSON, so they are the only thing removed.
+constexpr const char* kSection22ConfigText = R"CONFIG({
+  "version": 1,
+  "listen": { "host": "127.0.0.1", "port": 8088 },
+  "upstream": { "host": "127.0.0.1", "port": 8080 },
+  "admission": {
+    "maxInflightPerModel": 4,
+    "maxQueued": 64,
+    "queueTimeoutMs": 600000
+  },
+  "priorities": { "interactive": 0, "review": 1, "batch": 2 },
+  "affinity": { "header": "X-Conductor-Group", "contiguousDequeue": true },
+  "schema": {
+    "observeHeader": "X-Conductor-Schema",
+    "validateResponses": true,
+    "rejectOnMissing": false
+  },
+  "metrics": { "ledgerPath": ".data/router/metrics.jsonl" },
+  "logging": { "level": "info" }
+})CONFIG";
+
+// The exported schema lives beside this source file, in a gitignored directory
+// regenerated by conductor/tools/export-schemas.ts. Resolve it from __FILE__
+// (CMake compiles these sources by absolute path) and fall back to walking up
+// from the working directory, so the suite runs from a build tree too.
+std::filesystem::path exportedSchemaPath() {
+    static constexpr const char* kRelative = "schemas/RouterConfig.schema.json";
+
+    const std::filesystem::path here(__FILE__);
+    const std::filesystem::path beside = here.parent_path() / kRelative;
+    if (std::filesystem::exists(beside)) {
+        return beside;
+    }
+
+    std::error_code ec;
+    std::filesystem::path dir = std::filesystem::current_path(ec);
+    while (!ec && !dir.empty()) {
+        const std::filesystem::path candidate = dir / "src" / "router-tests" / kRelative;
+        if (std::filesystem::exists(candidate)) {
+            return candidate;
+        }
+        const std::filesystem::path parent = dir.parent_path();
+        if (parent == dir) {
+            break;
+        }
+        dir = parent;
+    }
+    return beside;  // Nothing found: report the expected location in the failure.
+}
+
+json section22Document() { return json::parse(kSection22ConfigText); }
+
+bool mentions(std::string_view haystack, std::string_view needle) {
+    return haystack.find(needle) != std::string_view::npos;
+}
+
+// What a rejected parse produced, captured so the assertions can inspect both the
+// dotted field path and the human message.
+struct Rejection {
+    bool thrown{false};
+    std::string field;
+    std::string message;
+};
+
+Rejection parseExpectingRejection(const std::string& document, const std::string& schemaPath) {
+    Rejection rejection;
+    try {
+        const auto config = conductor::router::parseRouterConfig(document, schemaPath);
+        (void)config;
+    } catch (const conductor::router::ConfigError& error) {
+        rejection.thrown = true;
+        rejection.field = error.field();
+        rejection.message = error.what();
+    }
+    return rejection;
+}
+
+// A rejection is only useful if it says WHICH field is wrong: the dotted path must
+// contain every named part, and the human message must repeat that path.
+void checkRejectionNames(const Rejection& rejection,
+                         std::initializer_list<std::string_view> parts) {
+    REQUIRE(rejection.thrown);
+    INFO("field='", rejection.field, "' message='", rejection.message, "'");
+    CHECK_FALSE(rejection.field.empty());
+    for (const std::string_view part : parts) {
+        CHECK(mentions(rejection.field, part));
+    }
+    CHECK(mentions(rejection.message, rejection.field));
+}
+
+struct TempDir {
+    std::filesystem::path path;
+
+    explicit TempDir(std::string_view label) {
+        std::error_code ec;
+        path = std::filesystem::temp_directory_path(ec) / "conductor-router-11.2" / label;
+        std::filesystem::remove_all(path, ec);
+        std::filesystem::create_directories(path, ec);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+    TempDir(const TempDir&) = delete;
+    TempDir& operator=(const TempDir&) = delete;
+};
+
+void writeFile(const std::filesystem::path& path, const std::string& text) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    REQUIRE(out.is_open());
+    out << text;
+    out.close();
+    REQUIRE(std::filesystem::exists(path));
+}
+
+json readJsonFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in.is_open());
+    return json::parse(in);
+}
+
+// Restores the process-wide spdlog level so the logging case cannot leak its
+// setting into the rest of the binary.
+struct SpdlogLevelGuard {
+    spdlog::level::level_enum saved{spdlog::default_logger()->level()};
+
+    SpdlogLevelGuard() = default;
+    ~SpdlogLevelGuard() { spdlog::set_level(saved); }
+    SpdlogLevelGuard(const SpdlogLevelGuard&) = delete;
+    SpdlogLevelGuard& operator=(const SpdlogLevelGuard&) = delete;
+};
+
+}  // namespace
+
+TEST_CASE("[11.2-parse-verbatim] the section 2.2 document parses to its exact documented values") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    const auto config =
+        conductor::router::parseRouterConfig(kSection22ConfigText, schemaPath.string());
+
+    CHECK(config.version == 1);
+
+    CHECK(config.listen.host == "127.0.0.1");
+    CHECK(config.listen.port == 8088);
+    CHECK(config.upstream.host == "127.0.0.1");
+    CHECK(config.upstream.port == 8080);
+
+    CHECK(config.admission.maxInflightPerModel == 4);
+    CHECK(config.admission.maxQueued == 64);
+    CHECK(config.admission.queueTimeoutMs == 600000);
+
+    CHECK(config.priorities.interactive == 0);
+    CHECK(config.priorities.review == 1);
+    CHECK(config.priorities.batch == 2);
+
+    CHECK(config.affinity.header == "X-Conductor-Group");
+    CHECK(config.affinity.contiguousDequeue);
+
+    CHECK(config.schema.observeHeader == "X-Conductor-Schema");
+    CHECK(config.schema.validateResponses);
+    CHECK_FALSE(config.schema.rejectOnMissing);
+
+    CHECK(config.metrics.ledgerPath == ".data/router/metrics.jsonl");
+    CHECK(config.logging.level == "info");
+}
+
+TEST_CASE("[11.2-defaults] omitted optional keys fall back to the section 2.2 values, not zero") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    json document = section22Document();
+    document.erase("logging");
+    document["schema"].erase("rejectOnMissing");
+    document["affinity"].erase("contiguousDequeue");
+    REQUIRE_FALSE(document.contains("logging"));
+    REQUIRE_FALSE(document["schema"].contains("rejectOnMissing"));
+    REQUIRE_FALSE(document["affinity"].contains("contiguousDequeue"));
+
+    const auto config = conductor::router::parseRouterConfig(document.dump(), schemaPath.string());
+
+    // The three documented defaults. `contiguousDequeue` is the one that a plain
+    // zero-init would get wrong: its default is true, not false.
+    CHECK(config.logging.level == "info");
+    CHECK_FALSE(config.schema.rejectOnMissing);
+    CHECK(config.affinity.contiguousDequeue);
+
+    // Defaulting must not disturb the keys that were present.
+    CHECK(config.listen.port == 8088);
+    CHECK(config.upstream.port == 8080);
+    CHECK(config.affinity.header == "X-Conductor-Group");
+    CHECK(config.schema.observeHeader == "X-Conductor-Schema");
+    CHECK(config.schema.validateResponses);
+
+    // A block with no documented default stays required — "optional" is the three
+    // keys above, not "every key is optional and missing ones become zero".
+    json missingListen = section22Document();
+    missingListen.erase("listen");
+    const Rejection rejection =
+        parseExpectingRejection(missingListen.dump(), schemaPath.string());
+    checkRejectionNames(rejection, {"listen"});
+}
+
+TEST_CASE("[11.2-reject-unknown] an unknown key is rejected and the error names it") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    SUBCASE("top-level: the stretch-goal batching block is not in the base shape") {
+        json document = section22Document();
+        document["batching"] =
+            json::object({{"swapWindowMs", 250}, {"maxBatchHoldMs", 1000}});
+
+        const Rejection rejection =
+            parseExpectingRejection(document.dump(), schemaPath.string());
+        checkRejectionNames(rejection, {"batching"});
+    }
+
+    SUBCASE("nested: a stray key inside a known block") {
+        json document = section22Document();
+        document["admission"]["bogus"] = 7;
+
+        const Rejection rejection =
+            parseExpectingRejection(document.dump(), schemaPath.string());
+        checkRejectionNames(rejection, {"admission", "bogus"});
+    }
+}
+
+TEST_CASE("[11.2-reject-bad-ports] out-of-range and non-numeric ports are rejected by name") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    SUBCASE("listen.port 0") {
+        json document = section22Document();
+        document["listen"]["port"] = 0;
+
+        const Rejection rejection =
+            parseExpectingRejection(document.dump(), schemaPath.string());
+        checkRejectionNames(rejection, {"listen", "port"});
+    }
+
+    SUBCASE("listen.port 65536") {
+        json document = section22Document();
+        document["listen"]["port"] = 65536;
+
+        const Rejection rejection =
+            parseExpectingRejection(document.dump(), schemaPath.string());
+        checkRejectionNames(rejection, {"listen", "port"});
+    }
+
+    SUBCASE("upstream.port negative") {
+        json document = section22Document();
+        document["upstream"]["port"] = -1;
+
+        const Rejection rejection =
+            parseExpectingRejection(document.dump(), schemaPath.string());
+        checkRejectionNames(rejection, {"upstream", "port"});
+    }
+
+    SUBCASE("a non-numeric port") {
+        json document = section22Document();
+        document["listen"]["port"] = "8088";
+
+        const Rejection rejection =
+            parseExpectingRejection(document.dump(), schemaPath.string());
+        checkRejectionNames(rejection, {"listen", "port"});
+    }
+
+    SUBCASE("the boundary ports 1 and 65535 are accepted") {
+        json document = section22Document();
+        document["listen"]["port"] = 1;
+        document["upstream"]["port"] = 65535;
+
+        const auto config =
+            conductor::router::parseRouterConfig(document.dump(), schemaPath.string());
+        CHECK(config.listen.port == 1);
+        CHECK(config.upstream.port == 65535);
+    }
+}
+
+TEST_CASE("[11.2-schema-single-source] validation is driven by the exported schema file") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    // The exported file really is the machine-readable form of the section 2.2
+    // document: same nine top-level keys, closed to anything else.
+    const json exported = readJsonFile(schemaPath);
+    REQUIRE(exported.contains("required"));
+    CHECK(exported.at("additionalProperties") == false);
+    const auto required = exported.at("required").get<std::vector<std::string>>();
+    for (const std::string key : {"version", "listen", "upstream", "admission", "priorities",
+                                  "affinity", "schema", "metrics", "logging"}) {
+        INFO("required key '", key, "' missing from the exported schema");
+        CHECK(std::find(required.begin(), required.end(), key) != required.end());
+    }
+
+    json withBatching = section22Document();
+    withBatching["batching"] = json::object({{"swapWindowMs", 250}});
+
+    // Under the exported schema the stray block is rejected...
+    const Rejection rejection =
+        parseExpectingRejection(withBatching.dump(), schemaPath.string());
+    checkRejectionNames(rejection, {"batching"});
+
+    // ...and under a copy of that very schema which permits the block, the same
+    // document is accepted. If the parser carried a hand-written copy of the shape
+    // instead of reading the file it was handed, the outcome would not change.
+    const TempDir temp("schema-single-source");
+    json relaxed = exported;
+    relaxed["properties"]["batching"] = json::object({{"type", "object"}});
+    const std::filesystem::path relaxedPath = temp.path / "RelaxedRouterConfig.schema.json";
+    writeFile(relaxedPath, relaxed.dump(2));
+
+    const auto config =
+        conductor::router::parseRouterConfig(withBatching.dump(), relaxedPath.string());
+    CHECK(config.listen.port == 8088);
+    CHECK(config.logging.level == "info");
+
+    // A schema path that does not exist is a hard error naming the path — proof the
+    // file is opened on every parse rather than consulted once, or never.
+    const std::filesystem::path missingPath = temp.path / "no-such-RouterConfig.schema.json";
+    REQUIRE_FALSE(std::filesystem::exists(missingPath));
+    const Rejection missing =
+        parseExpectingRejection(kSection22ConfigText, missingPath.string());
+    REQUIRE(missing.thrown);
+    INFO("message='", missing.message, "'");
+    CHECK(mentions(missing.message, "no-such-RouterConfig.schema.json"));
+}
+
+TEST_CASE("[11.2-logging-level] logging.level is applied to spdlog and bad levels are rejected") {
+    const std::filesystem::path schemaPath = exportedSchemaPath();
+    REQUIRE(std::filesystem::exists(schemaPath));
+
+    const SpdlogLevelGuard guard;
+
+    // std::string rather than const char*, so a failure prints the level name
+    // instead of a pointer.
+    const std::pair<std::string, spdlog::level::level_enum> mappings[] = {
+        {"trace", spdlog::level::trace},
+        {"debug", spdlog::level::debug},
+        {"info", spdlog::level::info},
+        {"warn", spdlog::level::warn},
+        {"error", spdlog::level::err},
+    };
+
+    for (const auto& [text, expected] : mappings) {
+        json document = section22Document();
+        document["logging"]["level"] = text;
+
+        const auto config =
+            conductor::router::parseRouterConfig(document.dump(), schemaPath.string());
+        REQUIRE(config.logging.level == text);
+
+        // Park spdlog on a level no mapping produces, so a passing check can only
+        // mean applyLoggingLevel moved it.
+        spdlog::set_level(spdlog::level::critical);
+        REQUIRE(spdlog::default_logger()->level() == spdlog::level::critical);
+
+        conductor::router::applyLoggingLevel(config);
+
+        INFO("logging.level='", text, "'");
+        CHECK(spdlog::default_logger()->level() == expected);
+    }
+
+    // An unrecognised level is a config error naming the field, never a silent
+    // fallback to "info".
+    json document = section22Document();
+    document["logging"]["level"] = "verbose";
+    const Rejection rejection = parseExpectingRejection(document.dump(), schemaPath.string());
+    checkRejectionNames(rejection, {"logging", "level"});
+}
