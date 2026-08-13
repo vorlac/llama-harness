@@ -1137,23 +1137,44 @@
     "9.4b": {
       "taskId": "9.4b",
       "manifest": true,
-      "tier": "A",
-      "status": "NOT_STARTED",
+      "tier": "B",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 9.4b green/validate/amend",
       "planLines": [
-        2625,
-        2639
+        2624,
+        2638
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 943,
+        "pass": 943,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "redEvidence": {
+        "cmd": "node --test 'conductor/tests/tools-9.4b.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handleMarkGreen' (orchestrator-observed; tsc showed ONLY the three TS2305s for handleMarkGreen/handleQueueAmend/handleValidate). The mutation-fix row [9.4b-fix-stale-red-never-quarantines-own-test] was separately observed red under the own-guard mutation."
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/tests/tools-9.4b.test.ts",
+        "docs/build/specs/task-9.4b.assertions.json"
+      ],
+      "revertAssertion": "removing handleMarkGreen re-reds tools-9.4b.test.ts (missing-export); dropping excludeTestFiles from the mark_green item-test call re-reds [9.4b-no-template-wave-no-livelock]; dropping the stale-red half of foreignRedSet re-reds [9.4b-foreign-red-set-three-cases]; hardcoding debugFixCap to 3 re-reds [9.4b-debug-cap-escalates]; removing the own-tests guard re-reds [9.4b-fix-stale-red-never-quarantines-own-test] (all five VERIFIED by running the revert, not reasoned)",
+      "attempts": 1,
+      "deviations": [
+        "IMPLEMENTED BY THE ORCHESTRATOR, not a subagent: the dispatched implementer died on a weekly account limit before making any edit. The test file was written and vetted by a subagent beforehand; the orchestrator observed the red, wrote section (8), and reviewed it.",
+        "NO ADVERSARIAL REVIEW PANEL was possible (subagents unavailable). Substituted mutation testing + a self-review of the diff — which found the C-034 coverage hole that all 13 authored rows missed, plus two self-review defects (a blank askedBy.sessionID and an inconsistent attempts.green).",
+        "§3.3's BLOCKED escalation ladder: only the two CONSTRUCTIBLE rungs are implemented. 'Stronger model' needs a §2.1 knob that does not exist and 'item re-split' would have mark_green call queue_amend, which the 9.4b bullet does not ask for. Raised at the Phase 9 gate rather than stubbed (G4).",
+        "runVerify takes ONE scopePattern, so an item whose fileScope entries select DIFFERENT §2.1 scopes runs only the first entry's scopes. Sibling of C-032's F6; raised at the Phase 9 gate.",
+        "adapter/evidence.ts was NOT changed: RunTestOptions already carried excludeTestFiles/stateHome/workspaceKey (6.1, hardened by 968b5f8). An earlier orchestrator note claiming otherwise was a call-site misread, corrected in the assertions file, HANDOFF and IN_PROGRESS before implementation."
+      ],
+      "startedAt": "2026-08-13T10:50:00Z",
+      "finishedAt": "2026-08-13T12:10:00Z"
     },
     "9.4c": {
       "taskId": "9.4c",

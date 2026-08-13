@@ -882,3 +882,59 @@ to httplib's default failed [11.4-health-at-full-queue]). The defect was still t
   existing validation path), `src/tests/admission_test.cpp` (8 authored rows + 1 review-fix),
   `CMakeLists.txt` (source list, orchestrator-only). ctest 26/26, stable across three runs
   (1.53s / 1.54s / 1.57s); `llama-router` still links.
+
+## C-034 — Task 9.4b (mark_green / validate / queue_amend): a guard no test could see
+
+**How it was found.** Subagents were unavailable (weekly account limit), so there was no adversarial
+review panel for this task. In its place the orchestrator ran the substitute it had just proved out
+at 11.4: MUTATION-TEST the green suite, then read the diff. Four mutations were run against the
+13-row suite; three failed the right rows and one did NOT.
+
+- **COVERAGE HOLE (found by mutation, fixed with a new row) — the "never quarantine the item's own
+  tests" guard was unpinned.** Deleting `own.has(file)` from `foreignRedSet` left all 13 rows green.
+  The reason is a real asymmetry in the §4.2 union: the QUEUE half already skips the subject item
+  (`if (entry.id === itemId) continue`), so the guard does nothing there — it is load-bearing only
+  for the REGISTRY half. And that is the dangerous half: the §2.11 stale-red registry is
+  workspace-level and SURVIVES RUNS, so an entry an earlier run wrote can name a path that is now
+  THIS item's testScope. Quarantining it would move the item's own red out of its own verify and
+  return a false green — precisely the cross-run poisoning the plan describes at §2.11 (lines
+  1019-1020: "conductor_validate of run 2 runs run 1's red test… and spends debugFixCap fix
+  attempts hunting a 'bug' that is a leftover"), except in the more dangerous direction, where the
+  leftover SILENCES the check instead of failing it.
+  The existing [9.4b-own-red-still-fails-validate] row cannot catch it: its foreign red belongs to a
+  sibling, so it only ever exercises the queue half. FIX: a new row,
+  [9.4b-fix-stale-red-never-quarantines-own-test], seeds a registry entry from an earlier run naming
+  the subject item's own test and asserts the item's own red still fails its verify — verified to go
+  RED under the mutation and green with the guard restored.
+  **The general lesson, now in HANDOFF:** a row that passes a mutation is not necessarily a row that
+  covers the code; two independent code paths can reach the same assertion, and only one of them may
+  be under test. Mutate every branch of a guard, not just the guard.
+
+- The three mutations that DID discriminate, each failing only its own rows: dropping
+  `excludeTestFiles` from the item-test path (the no-template livelock row), dropping the stale-red
+  half of the union (the three-cases + one more), and hardcoding `debugFixCap` to 3 (the cap row,
+  which is pinned at two different caps for exactly this reason).
+
+- **Self-review findings, fixed before commit:** (a) the `debug-architecture` question minted at the
+  cap carried `askedBy.sessionID: ""` from a leftover ternary that could only ever evaluate to the
+  empty string — §2.11 provenance must name the sub-session that was working the item, so the last
+  fixer's session id is now threaded to it; (b) the non-behavioral PENDING->GREEN path did not
+  increment `attempts.green` while the behavioral path did — a green is a green, and an inconsistent
+  counter is a counter nobody can read.
+
+- **Recorded limitation, raised at the Phase 9 gate:** `runVerify` takes ONE `scopePattern`, and
+  §2.1 maps path patterns to scope names, so an item whose `fileScope` entries select DIFFERENT
+  scopes cannot express their union in a single call — the first entry's scopes are the ones that
+  run. This is the sibling of C-032's F6 (itemVerifyScope's arbitrary pick) and belongs with it.
+
+- **Unimplementable rungs, raised rather than faked (G4):** §3.3's BLOCKED ladder reads "more
+  context -> stronger model -> item re-split via conductor_queue_amend -> surfaced to the human".
+  The two middle rungs are not constructible from §2.1 — it carries `models.roles` (a role->model
+  map) with no notion of an escalation model, and the re-split rung would have mark_green call
+  queue_amend, which the 9.4b bullet does not ask for. The two constructible rungs are implemented
+  (a NEEDS_CONTEXT stop-and-ask, and a BLOCKED stop-and-ask on the existing "implementer-blocked"
+  origin); the other two are Phase-9-gate business.
+
+- **Blast radius:** `conductor/adapter/tools.ts` section (8) (+~640 lines: handleMarkGreen,
+  handleValidate, handleQueueAmend and their helpers), `conductor/tests/tools-9.4b.test.ts`
+  (13 authored rows + 1 mutation-fix row). 943/943 green, typecheck OK, bun leg OK.

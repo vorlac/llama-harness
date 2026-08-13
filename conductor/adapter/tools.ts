@@ -30,7 +30,7 @@ import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
 import { globMatch, isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
 import { legalRunTransition } from "../core/fsm-run.ts";
-import { legalItemTransition } from "../core/fsm-item.ts";
+import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
@@ -64,7 +64,7 @@ import { writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import type { Fanout, FanoutJob } from "./fanout.ts";
-import { runTest } from "./evidence.ts";
+import { runTest, runVerify } from "./evidence.ts";
 import type { RunTestResult, ScopeSpec } from "./evidence.ts";
 import type { Journal } from "./journal.ts";
 
@@ -2142,6 +2142,8 @@ function evidenceJournalOf(journal: HandlerJournal): Journal {
 
 // The §2.6 red member of the evidence union.
 type RedEvidence = Extract<EvidenceRecord, { kind: "red" }>;
+type VerifyEvidence = Extract<EvidenceRecord, { kind: "verify" }>;
+type ItemTestEvidence = Extract<EvidenceRecord, { kind: "red" | "green" }>;
 
 // ---------------------------------------------------------------------------
 // The shared legality step (invariant-loop step 1)
@@ -3534,4 +3536,690 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
     red = record as RedEvidence;
     testText = testScopeContent(store.root, queueItem);
   }
+}
+
+// ---------------------------------------------------------------------------
+// (8) conductor_mark_green + conductor_validate + conductor_queue_amend
+//     (§3.3 TEST_VETTED->GREEN and GREEN->VALIDATED; §2.4/§2.7 the amendment)
+// ---------------------------------------------------------------------------
+
+const MARK_GREEN_TOOL = "conductor_mark_green";
+const VALIDATE_TOOL = "conductor_validate";
+const QUEUE_AMEND_TOOL = "conductor_queue_amend";
+
+// The §3.3 write-capable implementer: doctrine tdd.md's minimal-code section, the
+// item's fileScope, the SAME ImplementerResult receipt every other write-capable
+// role replies with (9.4b registers no schema).
+function implementerJob(itemId: string, prompt: string): FanoutJob {
+  return {
+    role: "implementer",
+    itemId,
+    tree: STAGE_TREE,
+    writeCapable: true,
+    prompt,
+    schemaName: "ImplementerResult",
+    priority: "interactive",
+  };
+}
+
+async function dispatchImplementer(
+  tool: string,
+  fanout: Fanout,
+  itemId: string,
+  prompt: string,
+): Promise<{ reply: ImplementerResult; sessionID: string }> {
+  const result = await fanout.dispatch(implementerJob(itemId, prompt));
+  const reply = result.value as ImplementerResult | undefined;
+  if (reply === undefined) {
+    throw new Error(
+      tool +
+        ': the implementer sub-session for item "' +
+        itemId +
+        '" produced no valid ImplementerResult (' +
+        JSON.stringify(result.error) +
+        ")",
+    );
+  }
+  return { reply, sessionID: result.sessionID };
+}
+
+// §4.2's foreign red set: the testScope files of every OTHER queue item below
+// GREEN, UNION every path in the workspace stale-red registry — which survives
+// runs, and is the only witness to a red test an EARLIER run abandoned. The
+// subject item's OWN tests are never excluded: quarantining them would let the
+// verify pass by not running the thing it is supposed to prove.
+function foreignRedSet(store: StateStore, runId: string, queue: Queue, itemId: string): string[] {
+  const belowGreen = ITEM_STATES.indexOf("GREEN");
+  const own = new Set<string>();
+  for (const entry of queue.items) {
+    if (entry.id === itemId) for (const file of entry.testScope) own.add(file);
+  }
+
+  const foreign: string[] = [];
+  const seen = new Set<string>();
+  const add = (file: string): void => {
+    if (own.has(file) || seen.has(file)) return;
+    seen.add(file);
+    foreign.push(file);
+  };
+
+  for (const entry of queue.items) {
+    if (entry.id === itemId) continue;
+    let state: ItemState;
+    try {
+      state = store.loadItem(runId, entry.id).state;
+    } catch {
+      // A queue item with no runtime file has certainly not reached GREEN, so its
+      // tests are foreign reds by the same rule.
+      state = "PENDING";
+    }
+    if (ITEM_STATES.indexOf(state) >= belowGreen) continue;
+    for (const file of entry.testScope) add(file);
+  }
+
+  for (const entry of store.readStaleRed().entries) add(entry.path);
+
+  // Deterministic, so two runs over one fixture quarantine the same set in the
+  // same order and a manifest is comparable across them.
+  foreign.sort();
+  return foreign;
+}
+
+// The scope pattern the full verify selects its required scopes with. §2.1 maps
+// path patterns to scope names and runVerify takes ONE pattern, so an item whose
+// fileScope entries select DIFFERENT scopes cannot express their union in a
+// single call — the first entry's scopes are the ones that run. Raised at the
+// Phase 9 gate alongside itemVerifyScope's sibling limitation.
+function verifyScopePatternOf(queueItem: QueueItem): string {
+  return queueItem.fileScope[0] ?? queueItem.testScope[0] ?? "**";
+}
+
+function implementerPrompt(queueItem: QueueItem): string {
+  return (
+    "You are the implementer for this item. Write the MINIMAL production code that makes its " +
+    "already-vetted failing test pass (doctrine tdd.md, minimal-code section). You may edit ONLY " +
+    "the item's fileScope; the test files are frozen — if the test looks wrong, say so in your " +
+    "receipt rather than editing it." +
+    itemSpecBlock(queueItem) +
+    "\n\nReply with the ImplementerResult receipt."
+  );
+}
+
+// The DEBUG dispatch: doctrine debug.md VERBATIM (root cause before fix, one
+// hypothesis at a time), plus the verify's own captured failure — never a
+// paraphrase of it.
+function debugFixPrompt(
+  queueItem: QueueItem,
+  packs: Record<string, string>,
+  failure: string,
+  round: number,
+  cap: number,
+): string {
+  const doctrine = packs["debug.md"];
+  if (doctrine === undefined || doctrine.trim().length === 0) {
+    throw new Error(
+      VALIDATE_TOOL +
+        ": the DEBUG protocol requires doctrine debug.md and the loaded pack set has none; " +
+        "refusing to dispatch a debug fix without the doctrine that governs it (§3.3)",
+    );
+  }
+  return (
+    doctrine +
+    "\n\nThe full verify FAILED for this item. Find the ROOT CAUSE before changing anything, and " +
+    "test ONE hypothesis at a time.\n" +
+    "Fix attempt " +
+    String(round) +
+    " of workflow.debugFixCap=" +
+    String(cap) +
+    "." +
+    itemSpecBlock(queueItem) +
+    "\n\nTHE VERIFY'S OWN CAPTURED FAILURE:\n" +
+    failure +
+    "\n\nReply with the ImplementerResult receipt."
+  );
+}
+
+// What the verify actually reported, rendered for a prompt and for the DEBUG
+// hypothesis: the scopes that failed, with their exit codes, off the §2.6 record.
+function verifyFailureText(record: VerifyEvidence): string {
+  const failed = Object.entries(record.scopes).filter(([, outcome]) => !outcome.green);
+  if (failed.length === 0) return "the verify reported no failing scope";
+  return failed
+    .map(([name, outcome]) => "scope " + name + " exited " + String(outcome.exitCode))
+    .join("\n");
+}
+
+export interface MarkGreenInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: HandlerJournal;
+  stateHome: string;
+  workspaceKey: string;
+  now?: () => number;
+}
+
+export interface MarkGreenResult {
+  ok: boolean; // true IFF the item advanced to GREEN
+  itemState: ItemState; // the PERSISTED state after the call
+  ranItemTest: boolean; // false for a behavioral:false item
+  exitCode: number | null; // the handler-run item test's exit code (null if none)
+  attempts: number; // implementer dispatches consumed
+  excluded: string[]; // the §4.2 foreign red set the item test ran under
+  questionId: string | null; // the §2.11 question minted at a stuck implementer
+}
+
+/**
+ * conductor_mark_green (§3.3). Owns the whole stage exactly as submit_test owns
+ * PENDING->RED: it dispatches the implementer, then runs the item test ITSELF and
+ * admits the result through core legalItemTransition. A DONE receipt is not an
+ * advance — the tool call fails until the test actually passes.
+ *
+ * A behavioral:false item has no constructible test (§2.4 proves its fileScope
+ * disjoint from behavioralPaths), so it advances PENDING->GREEN with no item test
+ * run at all.
+ */
+export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenResult> {
+  const { store, fanout, runId, itemId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality — the gate's own derivation, before a single sub-session is spent.
+  const stage = requireStageTool(MARK_GREEN_TOOL, store, runId, itemId, runDir);
+  const queueItem = stage.queueItem;
+  const from = stage.item.state;
+
+  // (2) derive. The implementer runs for BOTH kinds of item: a non-behavioral item
+  //     still needs its production change written, it just owes no test.
+  const writer = await dispatchImplementer(
+    MARK_GREEN_TOOL,
+    fanout,
+    itemId,
+    implementerPrompt(queueItem),
+  );
+  const attempts = 1;
+
+  const stuck = (why: string): MarkGreenResult => {
+    const questionText =
+      MARK_GREEN_TOOL +
+      ' could not take item "' +
+      itemId +
+      '" to GREEN — ' +
+      why +
+      "\nSay how the implementation should proceed, or whether the item should be reshaped.";
+    const question = appendQuestion(
+      runDir,
+      {
+        runId,
+        question: questionText,
+        askedBy: { role: "implementer", sessionID: writer.sessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      now(),
+    );
+    const blocked = store.setBlocked(runId, itemId, {
+      reason: "the implementer could not take the item to GREEN: " + why,
+      stage: "GREEN",
+      questionId: question.id,
+    });
+    journal.log(
+      "info",
+      "state",
+      "item.updated",
+      { itemId, blocked: true, questionId: question.id, stage: "GREEN" },
+      { runId, itemId },
+    );
+    return {
+      ok: false,
+      itemState: blocked.state,
+      ranItemTest: false,
+      exitCode: null,
+      attempts,
+      excluded: [],
+      questionId: question.id,
+    };
+  };
+
+  // The two CONSTRUCTIBLE rungs of §3.3's escalation ladder. "Stronger model" and
+  // "item re-split" need a §2.1 knob that does not exist, so they are raised at the
+  // Phase 9 gate rather than faked (G4).
+  if (writer.reply.status === "BLOCKED") {
+    return stuck("the implementer replied BLOCKED: " + (writer.reply.blockReason ?? writer.reply.summary));
+  }
+  if (writer.reply.status === "NEEDS_CONTEXT") {
+    return stuck(
+      "the implementer replied NEEDS_CONTEXT: " + (writer.reply.neededContext ?? writer.reply.summary),
+    );
+  }
+
+  // (3a) a non-behavioral item: PENDING->GREEN with NO item test.
+  if (!queueItem.behavioral) {
+    const edge = legalItemTransition(from, "GREEN", {
+      item: { behavioral: queueItem.behavioral, blocked: stage.item.blocked },
+    });
+    if (!edge.ok) {
+      throw new Error(MARK_GREEN_TOOL + ": " + (edge.why ?? from + "->GREEN is not legal for this item"));
+    }
+    const item = store.loadItem(runId, itemId);
+    item.state = "GREEN";
+    item.attempts.green += 1;
+    store.saveItem(runId, item);
+    journal.log(
+      "info",
+      "fsm",
+      "transition",
+      { itemId, from, to: "GREEN", behavioral: false, attempts, why: edge.why },
+      { runId, itemId },
+    );
+    journal.log("info", "state", "item.updated", { itemId, state: "GREEN" }, { runId, itemId });
+    return {
+      ok: true,
+      itemState: item.state,
+      ranItemTest: false,
+      exitCode: null,
+      attempts,
+      excluded: [],
+      questionId: null,
+    };
+  }
+
+  // (3b) a behavioral item: THE HANDLER runs the test, under the §4.2 foreign red
+  //      set so a sibling's deliberate red cannot fail this item's run (the
+  //      no-template fallback needs it exactly as much as the verify does).
+  const excluded = foreignRedSet(store, runId, stage.queue, itemId);
+  const scope = itemVerifyScope(config, queueItem, MARK_GREEN_TOOL);
+  const outcome = runTest(runDir, itemId, {
+    scope,
+    testFiles: [...queueItem.testScope],
+    cwd: store.root,
+    fileScope: [...queueItem.fileScope],
+    excludeTestFiles: excluded,
+    stateHome: input.stateHome,
+    workspaceKey: input.workspaceKey,
+    journal: evidenceJournalOf(journal),
+    runId,
+    now,
+  });
+  if (outcome.record.kind === "verify") {
+    // runTest appends red|green for an item test; a verify record here would mean
+    // the ledger writer changed under us. Say so rather than reading fields that
+    // are not there.
+    throw new Error(
+      MARK_GREEN_TOOL +
+        ': the item test run for "' +
+        itemId +
+        '" appended a §2.6 verify record; an item test yields red|green only',
+    );
+  }
+  const record: ItemTestEvidence = outcome.record;
+
+  const edge = legalItemTransition(from, "GREEN", {
+    item: { behavioral: queueItem.behavioral, blocked: stage.item.blocked },
+    testExit: record.exitCode,
+  });
+  if (!edge.ok) {
+    // Not a refusal — the stage RAN and the implementation is not done. The item
+    // stays where it was, un-blocked, and the orchestrator re-calls the tool.
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "GREEN", itemId, exitCode: record.exitCode, attempts, why: edge.why },
+      { runId, itemId },
+    );
+    return {
+      ok: false,
+      itemState: store.loadItem(runId, itemId).state,
+      ranItemTest: true,
+      exitCode: record.exitCode,
+      attempts,
+      excluded,
+      questionId: null,
+    };
+  }
+
+  const item = store.loadItem(runId, itemId);
+  item.state = "GREEN";
+  item.attempts.green += 1;
+  item.evidence.green = { ledger: "evidence.jsonl", seq: record.seq };
+  store.saveItem(runId, item);
+
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    {
+      itemId,
+      from,
+      to: "GREEN",
+      exitCode: record.exitCode,
+      evidenceSeq: record.seq,
+      excluded: excluded.length,
+      attempts,
+      why: edge.why,
+    },
+    { runId, itemId },
+  );
+  journal.log(
+    "info",
+    "state",
+    "item.updated",
+    { itemId, state: "GREEN", evidenceSeq: record.seq },
+    { runId, itemId },
+  );
+
+  return {
+    ok: true,
+    itemState: item.state,
+    ranItemTest: true,
+    exitCode: record.exitCode,
+    attempts,
+    excluded,
+    questionId: null,
+  };
+}
+
+export interface ValidateInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: HandlerJournal;
+  stateHome: string;
+  workspaceKey: string;
+  packs: Record<string, string>;
+  now?: () => number;
+}
+
+export interface ValidateResult {
+  ok: boolean; // true IFF the item advanced GREEN->VALIDATED
+  itemState: ItemState; // the PERSISTED state after the call
+  green: boolean; // the LAST verify's outcome
+  excluded: string[]; // the §4.2 foreign red set quarantined for the verify
+  verifySeq: number | null; // the §2.6 verify record the outcome rests on
+  debugFixes: number; // fix attempts spent (== item.attempts.debugFixes)
+  questionId: string | null; // the "debug-architecture" question minted at the cap
+}
+
+/**
+ * conductor_validate (§3.3 GREEN->VALIDATED). Composes evidence.runVerify, which
+ * owns the whole verify mechanism — quarantining the foreign red set OUT of the
+ * repo, start-stamping, recording HEAD, the per-tree marker that freezes the tree,
+ * and restoring everything on every exit. This handler computes the §4.2 SET and
+ * admits the outcome; it re-implements none of that.
+ *
+ * A live same-tree marker is a REFUSAL (two verifies in one tree would each
+ * describe a tree the other was mutating). A red verify enters the DEBUG protocol:
+ * `debugging` is set from the verify's OWN failure, then up to
+ * config.workflow.debugFixCap implementer dispatches — each carrying doctrine
+ * debug.md — with a re-verify after each; at the cap the item is blocked and ONE
+ * §2.11 question is raised on the existing "debug-architecture" origin.
+ */
+export async function handleValidate(input: ValidateInput): Promise<ValidateResult> {
+  const { store, fanout, runId, itemId, config, journal, packs } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality.
+  const stage = requireStageTool(VALIDATE_TOOL, store, runId, itemId, runDir);
+  const queueItem = stage.queueItem;
+  const excluded = foreignRedSet(store, runId, stage.queue, itemId);
+  const scopePattern = verifyScopePatternOf(queueItem);
+  // Floored for the same reason as every other budget knob: the §2.1 schema types
+  // it `number`, and a fractional cap would round the fix budget UP.
+  const cap = Math.max(0, Math.floor(config.workflow.debugFixCap));
+
+  const verify = (): VerifyEvidence => {
+    const outcome = runVerify(runDir, itemId, config, scopePattern, {
+      cwd: store.root,
+      excludeTestFiles: excluded,
+      journal: evidenceJournalOf(journal),
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+      runId,
+      tree: STAGE_TREE,
+      now,
+    });
+    if (outcome.refused) {
+      // The marker's holder is left untouched — never stolen, never overwritten.
+      throw new Error(
+        VALIDATE_TOOL +
+          ': item "' +
+          itemId +
+          '" cannot verify: ' +
+          outcome.reason +
+          " (tree " +
+          outcome.tree +
+          ", held by pid " +
+          String(outcome.heldBy.pid) +
+          ")",
+      );
+    }
+    return outcome.record as VerifyEvidence;
+  };
+
+  // (2) derive: the first verify, then the bounded DEBUG loop.
+  let record = verify();
+  let debugFixes = 0;
+  // §2.11 provenance: the question raised at the cap names the sub-session that was
+  // working the item when the stage gave up, not a blank.
+  let fixerSessionID = "";
+
+  while (!record.green) {
+    // The DEBUG posture is persisted BEFORE the implementer speaks, and its
+    // hypothesis comes off the verify's OWN record — the model has said nothing
+    // yet, so it cannot be a paraphrase of anything it claimed.
+    const failure = verifyFailureText(record);
+    if (debugFixes === 0) {
+      store.setDebugging(runId, itemId, {
+        hypothesis:
+          "the full verify failed for this item: " +
+          failure +
+          " — find the root cause before changing anything (§3.3 DEBUG)",
+      });
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "VALIDATED", itemId, green: false, evidenceSeq: record.seq, debugging: true },
+        { runId, itemId },
+      );
+    }
+
+    if (debugFixes >= cap) {
+      const item = store.loadItem(runId, itemId);
+      item.attempts.debugFixes += debugFixes;
+      store.saveItem(runId, item);
+
+      const questionText =
+        VALIDATE_TOOL +
+        ' reached workflow.debugFixCap=' +
+        String(cap) +
+        ' for item "' +
+        itemId +
+        '" and the full verify is still red:\n' +
+        failure +
+        "\nThe §3.3 three-fix rule reads a failure that resists this many fixes as an ARCHITECTURE " +
+        "question, not another bug: say how the item (or the design it rests on) should change.";
+      const question = appendQuestion(
+        runDir,
+        {
+          runId,
+          question: questionText,
+          askedBy: { role: "implementer", sessionID: fixerSessionID },
+          humanTerritory: isHumanTerritory(questionText),
+          origin: "debug-architecture",
+          blocksItems: [itemId],
+        },
+        now(),
+      );
+      const blocked = store.setBlocked(runId, itemId, {
+        reason:
+          "the full verify stayed red through workflow.debugFixCap=" +
+          String(cap) +
+          " fix attempts: " +
+          failure,
+        stage: "VALIDATED",
+        questionId: question.id,
+      });
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId, blocked: true, questionId: question.id, stage: "VALIDATED", debugFixes },
+        { runId, itemId },
+      );
+      return {
+        ok: false,
+        itemState: blocked.state,
+        green: false,
+        excluded,
+        verifySeq: record.seq,
+        debugFixes,
+        questionId: question.id,
+      };
+    }
+
+    debugFixes += 1;
+    const fixer = await dispatchImplementer(
+      VALIDATE_TOOL,
+      fanout,
+      itemId,
+      debugFixPrompt(queueItem, packs, failure, debugFixes, cap),
+    );
+    fixerSessionID = fixer.sessionID;
+    record = verify();
+  }
+
+  // (3) persist the advance.
+  const item = store.loadItem(runId, itemId);
+  const edge = legalItemTransition("GREEN", "VALIDATED", {
+    item: { behavioral: queueItem.behavioral, blocked: item.blocked },
+  });
+  if (!edge.ok) {
+    throw new Error(VALIDATE_TOOL + ": " + (edge.why ?? "GREEN->VALIDATED is not legal for this item"));
+  }
+  item.state = "VALIDATED";
+  item.attempts.debugFixes += debugFixes;
+  item.debugging = null;
+  item.evidence.validated = { ledger: "evidence.jsonl", seq: record.seq };
+  store.saveItem(runId, item);
+
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    {
+      itemId,
+      from: "GREEN",
+      to: "VALIDATED",
+      evidenceSeq: record.seq,
+      excluded: excluded.length,
+      debugFixes,
+      why: edge.why,
+    },
+    { runId, itemId },
+  );
+  journal.log(
+    "info",
+    "state",
+    "item.updated",
+    { itemId, state: "VALIDATED", evidenceSeq: record.seq, debugFixes },
+    { runId, itemId },
+  );
+
+  return {
+    ok: true,
+    itemState: item.state,
+    green: true,
+    excluded,
+    verifySeq: record.seq,
+    debugFixes,
+    questionId: null,
+  };
+}
+
+export interface QueueAmendInput {
+  store: StateStore;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  now?: () => number;
+  queue: Queue;
+  question: string;
+  options: Array<{ name: string; score?: DecisionRecord["options"][number]["score"] }>;
+  choice: string;
+  why: string;
+  appliedWhere: string;
+}
+
+export interface QueueAmendResult {
+  ok: boolean;
+  decisionId: string;
+  itemIds: string[];
+}
+
+/**
+ * conductor_queue_amend (§2.4/§2.7). Re-runs core validateQueue over the AMENDED
+ * queue and refuses any violation, and gates its §2.7 record through the same core
+ * requireTwoOptions every other decision site runs. Both refusals precede every
+ * write, so a rejected amendment leaves queue.json byte-identical.
+ *
+ * Synchronous: it dispatches nothing.
+ */
+export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
+  const { store, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality, in both halves, BEFORE anything is persisted.
+  const verdict = validateQueue(input.queue, config);
+  if (!verdict.ok) {
+    throw new Error(
+      QUEUE_AMEND_TOOL +
+        ": the amended queue is not §2.4-legal, so nothing was written: " +
+        verdict.violations.join("; "),
+    );
+  }
+
+  const decision: DecisionRecord = {
+    id: mintDecisionId(runDir),
+    tsIso: new Date(now()).toISOString(),
+    question: input.question,
+    options: input.options.map((option) => ({
+      name: option.name,
+      ...(option.score === undefined ? {} : { score: option.score }),
+    })) as DecisionRecord["options"],
+    choice: input.choice,
+    why: input.why,
+    kind: "derived",
+    appliedWhere: input.appliedWhere,
+  };
+  const gate = requireTwoOptions(decision);
+  if (!gate.ok) {
+    throw new Error(
+      QUEUE_AMEND_TOOL + ": " + (gate.why ?? "the amendment decision is not §2.7-legal") +
+        " — nothing was written",
+    );
+  }
+
+  // (2) persist: the queue the run will execute, then the record of why.
+  writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(input.queue, null, 2));
+  appendDecision(runDir, decision);
+
+  const itemIds = input.queue.items.map((entry) => entry.id);
+  journal.log(
+    "info",
+    "state",
+    "decision.recorded",
+    { decisionId: decision.id, kind: decision.kind, choice: decision.choice, items: itemIds.length },
+    { runId },
+  );
+
+  return { ok: true, decisionId: decision.id, itemIds };
 }
