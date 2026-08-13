@@ -1,10 +1,11 @@
 {
   "spineTask": {
     "taskId": "9.4c",
-    "step": "Phase 9 SERIAL. conductor_dispatch_wave (the wave driver). 9.4b is COMMITTED (40c6afe) + M4 PASS. NEXT: promote the staged draft at scratchpad/staging/assertions-drafts/task-9.4c.assertions.json — it carries the P3+P7 deferred bindings (dispatch_wave supplies PLAN_REVIEWED->EXECUTING context with survivingMajors:0 iff planReviewRounds<max; AND a stale/over-age evidence-marker break MUST fire treeState.onClear so a leaked freeze marker becomes an env-fail rather than a silent wave hang). Review the draft against the committed surfaces before promoting, as 11.4's promotion needed.",
+    "step": "Phase 9 SERIAL. conductor_dispatch_wave. Assertions promoted (12 rows, f35f9f3). TESTS WRITTEN AND VETTED BY THE WRITER (tsc showed exactly ONE error: the missing handleDispatchWave export; node --test gave the missing-export SyntaxError; the writer also ran a stubbed smoke copy so its FIXTURE code executed, which caught a path bug of its own). PARKED at staging/task-9.4c/tools-9.4c.test.ts and deliberately NOT moved into conductor/tests/ yet: two review-fix agents are running with a green gate as their definition of done, and a red file in the tree would fail their gate through no fault of theirs. Move it in once they report, observe the red MYSELF, then implement.",
     "intendedFiles": [
       "conductor/tests/tools-9.4c.test.ts",
-      "conductor/adapter/tools.ts"
+      "conductor/adapter/tools.ts",
+      "conductor/core/gates-phase.ts"
     ]
   },
   "branchB": {
