@@ -1260,22 +1260,40 @@
       "taskId": "9.5b",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "5f1e592",
       "commitMessage": "conductor: 9.5b publish + report",
       "planLines": [
         2667,
         2686
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
+      "tap": "tests=1079 pass=1079 fail=0 (suite); 9.5b file 50/50",
+      "redEvidence": {
+        "cmd": "conductor/node_modules/.bin/tsc -p conductor/tsconfig.json --noEmit",
+        "exitCode": 2,
+        "class": "missing-subject",
+        "excerpt": "7 missing subjects: demoteReviewedToGreen, foreignRedSet (declared locally, not exported), handlePublish, handleReport, registerStaleRed, gates-phase settledForReport, and core/commit-message.ts as a missing MODULE (TS2307)"
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/gates-phase.ts",
+        "conductor/core/commit-message.ts",
+        "conductor/core/tool-bindings.ts",
+        "conductor/tests/tools-9.5b.test.ts"
+      ],
+      "revertAssertion": "un-export handleReport from adapter/tools.ts => the 9.5b suite re-derives the missing-export red (tests=1 pass=0). M4 RUN in a detached worktree at 5f1e592: baseline 50/50 green, mutated 1/0. VERIFIED, not reasoned.",
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "IMPLEMENTED BY THE ORCHESTRATOR, not a subagent: both dispatched implementers (9.5b and 11.7) died on an API session limit mid-read, having written nothing. Tree verified undamaged first, then the work was done by hand, as 11.4/11.5 were during the earlier outage.",
+        "C-048: C-043 ruling 1 AMENDED. publishEnabled stays an OPTIONAL 5th param of legalTools - a required one is not assignable to the type the red pins (verified with a tsc probe), and isRepo() shells out to git on a path that runs per tool call. The danger is removed by a construction instead: the handlers derive and pass it explicitly and settledForReport takes the same flag."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": null,
+      "openItems": [
+        "RESIDUAL (Phase 9 gate): inject.ts:110 and the two gate-hook call sites still use the 4-arg legalTools, so the injected state block can name conductor_publish as legal in a no-git run the handler would refuse. Display inconsistency, not state - but it is the gate-vs-handler shape this build keeps finding.",
+        "The 8 mutations run against this task all discriminated (report precondition ordering, handler-side denylist, shared settled predicate, re-verify demotion, preexisting-dirty staging, the freshness HEAD term, template quoting, stale-red existence check). No survivors."
+      ]
     },
     "9.5c": {
       "taskId": "9.5c",
