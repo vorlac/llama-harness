@@ -999,3 +999,76 @@ clamping it costs breadth of opinion, not coverage.
 internally, and is NEVER a coverage truncation. **No committed code changes** — the rule ratifies what
 9.3 and 9.4a already do and tells 9.5a what to do. E14 can be closed at the Phase 9 gate rather than
 carried into it.
+
+## C-037 — rulings from the 9.5b/9.6 fact-check (one of them fixes a gate/handler split I created)
+
+**How it was found.** Before promoting the last two Phase-9 drafts, a verification pass checked every
+factual claim in them against HEAD — the same discipline that caught the `excludeTestFiles` misread.
+It found six things worth deciding and one outright defect-in-waiting.
+
+### 1. MAJOR (mine) — the report precondition would have split gate from handler
+C-032 changed `legalTools`' report precondition from `items.every(isSettled)` to
+`items.every(it => isSettled(it) || stuck.has(it.id))` (the `cannotEverPublish` fixpoint). The 9.5b
+draft — written earlier — pins `handleReport` to `isSettled` ALONE. Implementing it as drafted would
+make the HANDLER STRICTER THAN THE GATE: the gate offers `conductor_report` for a run holding a
+permanently-stuck item, and the handler would refuse it. That is precisely the gate/handler
+disagreement the 9.4a `depsReady` binding exists to close, and I would have created it myself.
+**RULING:** core/gates-phase.ts EXPORTS one settled-for-report predicate (isSettled ∪ cannotEverPublish)
+and BOTH the gate and handleReport call it. This also discharges C-032's parked F5 (the §4.2 readiness
+rule written twice) by establishing the principle: **a rule the gate enforces and a handler re-checks
+must have exactly one derivation, exported from core.**
+
+### 2. §3.3 vs §3.9 are about DIFFERENT modes — not a contradiction
+The draft read them as conflicting. They are not: §3.3:1298 says `git.mode:"read-only"` still RUNS
+publish and writes the prepared batch into the report *instead of* committing; §3.9:1502-1503 says
+NO-GIT mode *disables* publish, items terminating at REVIEWED.
+**RULING:** read-only → publish runs, commit replaced by report content, item reaches PUBLISHED.
+no-git → publish is not legal, items terminate at REVIEWED, and the §3.2 all-settled precondition must
+accept a REVIEWED-terminal item under no-git. Two different rows, not one.
+
+### 3. The batch carrier: NOT the journal
+The draft proposed carrying the prepared batch between publish and report in a journal payload.
+Verified defective: journal records are hard-capped at 32 KiB and `shrinkToFit` silently replaces an
+oversized `data` with `{truncated:true}` (journal.ts:58,142-159). A per-file diff would be truncated
+and the report would lie.
+**RULING:** publish writes the batch as a runDir ARTIFACT that report reads. This is a §1.2 layout
+deviation (recorded, not a closed-vocabulary widening) and is the honest carrier.
+
+### 4. Nobody writes the stale-red registry
+`store.addStaleRed` has ZERO production callers at HEAD, yet §2.11 requires entries "written when a run
+terminates with any item below GREEN whose test files exist", and BOTH the `done` report (§3.2:1147)
+and the stop-report (9.5c) must list them.
+**RULING:** ONE shared registration helper, called on every terminal path — 9.5b's done-report and
+9.5c's stop-report alike. Neither task may write its own copy.
+
+### 5. TREE IDENTITY IS TWO DIFFERENT THINGS (architectural, found here first)
+evidence.ts's `tree` is an ITEM-ID SLUG — `markerPathOf` runs `assertSafeId(tree)`, which rejects any
+string containing `/` (evidence.ts:634). gates-edit.ts's `tree` is a PATH — `normalizeUnderTree` strips
+it as a path prefix and the freeze compares `verifyInFlightTree === sessionTree` as paths
+(gates-edit.ts:120-131, 181-182). In worktree mode the fanout `tree` is the worktree PATH. **No
+committed code maps between them**, so a verify marker written under a slug can never match a freeze
+check keyed by a path — the freeze would silently never fire in worktree mode.
+**RULING:** the slug stays authoritative for the marker (relaxing `assertSafeId` is an F3
+trust-boundary change and is refused). Whoever computes `verifyInFlightTree` for the gate must
+translate slug → path via the item's `worktree` field. That mapping belongs to the gate-wiring layer,
+is a 9.6 assertion row, and is raised at the Phase 9 gate because it also touches §5.3's wiring.
+
+### 6. archiveRun cannot do what the draft asks
+`archiveRun` (state.ts:552-557) clears a pointer, deliberately deletes nothing ("archiving is not
+deletion"), and has NO production caller. A row asserting it removes worktrees asserts an effect that
+cannot happen.
+**RULING:** worktree removal lives in adapter/worktrees.ts and is called by the run-lifecycle owner
+(Task 10.1), never by state.ts. state.ts does not gain an adapter→adapter edge.
+
+### 7. The demotion's journal event — the two drafts disagreed
+9.5b proposed `fsm: transition {demotion:true}`; 9.6 proposed `state: item.updated`, for the same
+helper. §4.2:1617 mandates the drop (REVIEWED → GREEN) and `legalItemTransition` has no backward edge.
+**RULING:** `state: item.updated`. Calling it `fsm: transition` would claim a transition the FSM
+denies. The demotion is an administrative write, it goes through the store (G6), it is ONE named
+helper shared by 9.5b and 9.6, and adding a backward FSM edge stays a STOP-AND-PARK.
+
+### 8. Coverage the drafts miss (rows to add when promoting)
+Publish is SERIAL IN ITEM ORDER (§4.2:1572, §4.3:1633) — no row asserted it. The `commit-and-push`
+push leg (§3.3:1296) — no row. And §3.2:1144-1148's fuller report content (per-item red proof and
+review rounds, the decision-ledger summary, the newly-registered stale-red files) — the 9.5b bullet
+abbreviates it and the draft followed the abbreviation.
