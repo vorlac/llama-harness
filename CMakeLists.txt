@@ -56,8 +56,11 @@ add_executable(llama-router
   "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
 )
 target_compile_features(llama-router PRIVATE cxx_std_23)
+# src/ is the ONLY user-code include root: every in-workspace header is included
+# by its full path relative to src/ (`#include "router/version.hpp"`), so an
+# include names where the header actually lives no matter which file includes it.
 target_include_directories(llama-router
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/router"
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(llama-router
   PRIVATE spdlog::spdlog
@@ -70,12 +73,12 @@ target_link_libraries(llama-router
 # 11.1 is a single scaffold case. (Per-case doctest_discover_tests can replace the
 # whole-binary add_test once configure is confirmed.)
 add_executable(router-tests
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/router-tests/scaffold_test.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/router-tests/config_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/scaffold_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/config_test.cpp"
 )
 target_compile_features(router-tests PRIVATE cxx_std_23)
 target_include_directories(router-tests
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/router"
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(router-tests
   PRIVATE doctest::doctest
@@ -87,8 +90,8 @@ target_link_libraries(router-tests
 add_test(NAME router-tests COMMAND router-tests)
 
 # Standalone measurement tools. These carry no project dependencies so they can
-# also be built directly with a single compiler invocation - see tools/README.md.
-add_subdirectory(tools)
+# also be built directly with a single compiler invocation - see src/tools/README.md.
+add_subdirectory(src/tools)
 
 if (AUTOFORMAT_SRC_ON_CONFIGURE MATCHES ON)
   # Formatting rules defined by .clangformat

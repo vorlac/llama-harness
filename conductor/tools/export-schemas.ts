@@ -1,6 +1,6 @@
 // conductor/tools/export-schemas.ts — Task 11.1 (§11.1): ship the §2 JSON
 // Schemas out of core/types.ts (the single-source SCHEMAS record) as one file
-// per schema, so the C++ router-tests (Task 11.6) validate against the exact
+// per schema, so the C++ router tests (Task 11.6) validate against the exact
 // same objects the fan-out engine feeds to session.prompt({format}) — single
 // source, two consumers (plan lines 470-476).
 //
@@ -37,5 +37,5 @@ export function exportSchemas(outDir: string): string[] {
 // invocation and never when the module is imported — under Node type-stripping
 // there is no import.meta.main, so the suffix test is the robust equivalent.
 if (process.argv[1] && process.argv[1].endsWith("export-schemas.ts")) {
-  exportSchemas(process.argv[2] ?? path.resolve("src/router-tests/schemas"));
+  exportSchemas(process.argv[2] ?? path.resolve("src/tests/schemas"));
 }

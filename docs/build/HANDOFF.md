@@ -33,7 +33,7 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone un
 1. **Branch B 11.1 DONE (Step 1)** — CMake surgery on MAIN (myprogram removed; llama-router +
    router-tests targets vs 4 vcpkg ports; validator = `nlohmann_json_schema_validator::validator`;
    ctest 1/1 green; llama-router runs). export-schemas.ts (17 schemas) + test wired into
-   test-conductor.sh; src/router-tests/schemas/ gitignored. Build dir `.out/build/clang-relwdebinfo`.
+   test-conductor.sh; src/tests/schemas/ gitignored. Build dir `.out/build/clang-relwdebinfo`.
    Build ONLY `--target llama-router/router-tests` (never bare --build → pre-broken llama).
    **11.2 DONE** (header-only src/router/config.hpp, ns conductor::router; parse order defaults-
    BEFORE-schema-validate; ports 1..65535 in parser; ConfigError.field() dotted; doctest 7 cases
@@ -105,6 +105,19 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
 - **G7 residuals** (honest-limits-pending.md → fold into 15.1): backtick substitution + alias
   injection now DENY (C-022); residual obscure in-place writers; M5 marker scan is
   production-scoped (C-026, stray marker comment in a test caught by diff read only).
+
+## C++ / src layout (USER-DIRECTED, 2026-08-13 — supersedes the plan's §1.1 tree)
+
+- `src/tools/` (was root `tools/`) and `src/tests/` (was `src/router-tests/`). The CMake TARGET
+  is still named `router-tests` (it is the ctest name every gate row cites) — only the directory
+  moved. Generated schemas now land in `src/tests/schemas/` (gitignored).
+- **INCLUDE RULE: every in-workspace header is included by its FULL path relative to `src/`** —
+  `#include "router/version.hpp"`, never `#include "version.hpp"`. `src/` is the only user-code
+  include root on both targets, so an include names where the header actually lives regardless of
+  which file includes it. Applies to ALL files under src/, headers included.
+- Plan §1.1's tree (`src/router-tests/`, root `tools/`) is now STALE on this point; the plan stays
+  IMMUTABLE, this deviation is recorded here and in STATE. `AUTOFORMAT_SRC_ON_CONFIGURE` runs
+  clang-format over src/ at configure time — C++ reformatting in a diff is that, not a hand edit.
 
 ## Standing facts (don't re-derive wrong)
 

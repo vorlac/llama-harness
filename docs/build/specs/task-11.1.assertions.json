@@ -14,7 +14,7 @@
     {
       "id": "11.1-scaffold-green",
       "text": "a trivial doctest case (real assertion on router_version()==0.0.1, not vacuous) builds and runs green via ctest; llama-router binary runs and prints its version",
-      "coveredByTest": "src/router-tests/scaffold_test.cpp via ctest; llama-router binary output observed"
+      "coveredByTest": "src/tests/scaffold_test.cpp via ctest; llama-router binary output observed"
     },
     {
       "id": "11.1-export-schemas",

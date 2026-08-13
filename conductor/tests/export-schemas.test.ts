@@ -14,7 +14,7 @@
 //   For EACH key k in SCHEMAS it writes <outDir>/<k>.schema.json whose content
 //   is JSON.stringify(SCHEMAS[k], null, 2) (pretty JSON), creates outDir if
 //   absent, and returns the array of schema names written (the keys). A CLI
-//   entry that targets src/router-tests/schemas/ also exists but is NOT tested
+//   entry that targets src/tests/schemas/ also exists but is NOT tested
 //   here — this pins the exported function only.
 //
 // Assertion: 11.1-export-schemas.

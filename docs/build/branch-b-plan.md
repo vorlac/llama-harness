@@ -56,11 +56,11 @@ Edits:
    admission.cpp, affinity.cpp, schema-observer.cpp, metrics.cpp, config.cpp — add as TDD builds
    them; start with main.cpp + config.cpp). Link httplib + nlohmann_json + the validator + spdlog.
    NO llama, NO ftxui. `target_compile_features cxx_std_23`.
-4. `add_executable(router-tests)` from src/router-tests/*.cpp; link doctest + the same libs +
+4. `add_executable(router-tests)` from src/tests/*.cpp; link doctest + the same libs +
    the router sources under test. `include(doctest)` + `doctest_discover_tests(router-tests)` so
    ctest sees each case. A trivial `TEST_CASE` must build + run green via ctest (11.1 Step 1).
 5. Add a router-tests PRE_BUILD step that runs `node conductor/tools/export-schemas.ts` writing
-   §2 JSON Schemas into `src/router-tests/schemas/` (add_custom_command). G1 untouched (dev-time only).
+   §2 JSON Schemas into `src/tests/schemas/` (add_custom_command). G1 untouched (dev-time only).
 6. Optional `conductor-dashboard` (ftxui) target, `option(CONDUCTOR_DASHBOARD ... OFF)`.
 
 ## vcpkg.json — ORCHESTRATOR-ONLY
@@ -77,7 +77,7 @@ targets — never a bare `--build` (would hit the pre-broken llama target).
 
 ## export-schemas.ts (Task 11.1) — conductor/tools/, a dev script (subagent may write it)
 Reads SCHEMAS from conductor/core/types.ts, writes each as `<name>.schema.json` into
-src/router-tests/schemas/. A TS test (conductor/tests/) asserts the emitted files parse and
+src/tests/schemas/. A TS test (conductor/tests/) asserts the emitted files parse and
 cover the schema names Task 11.6 consumes. Wire it into scripts/test-conductor.sh too (11.1).
 
 ## Step 2 (LIVE, manual — §8.4, attempt once): src/router/UPSTREAM_CONTRACT.md

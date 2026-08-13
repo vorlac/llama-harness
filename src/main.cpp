@@ -1,6 +1,6 @@
 #include <print>
 
-#include "version.hpp"
+#include "router/version.hpp"
 
 // Task 11.1 scaffold entry point for the conductor llama-router. The real CLI
 // (config load, server start, supervisor loop) lands in Tasks 11.2-11.7; for now
