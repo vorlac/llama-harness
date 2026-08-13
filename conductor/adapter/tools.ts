@@ -44,6 +44,7 @@ import { nextWave, readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
 import { SCHEMAS, validate } from "../core/types.ts";
 import type {
+  AnomalyRecord,
   Classification,
   ClassificationCheck,
   ClassificationKind,
@@ -181,6 +182,25 @@ export interface GateDeps {
   decideEdit?: (input: EditInput) => Decision;
 }
 
+/**
+ * §3.6's one-shot override grant, minted by handleOverride into a CALLER-owned
+ * map (the sibling of the §3.5 session registry) and consumed — deleted — by the
+ * first gate decision it converts from deny to allow. Keyed by
+ * {sessionID, gate, itemId}, so a foreign session can neither see nor spend it.
+ */
+export interface OverrideGrant {
+  sessionID: string;
+  gate: string;
+  itemId: string;
+  reason: string;
+  grantedAction: string;
+  tsMs: number;
+}
+
+function overrideGrantKey(sessionID: string, gate: string, itemId: string): string {
+  return sessionID + "::" + gate + "::" + itemId;
+}
+
 export interface GateHookInput {
   sessionID: string;
   toolName: string;
@@ -195,6 +215,9 @@ export interface GateHookInput {
   testScope: string[];
   verifyInFlightTree: string | null;
   inlineClaimScope: string[] | null;
+  // §3.6: the caller-owned map handleOverride writes one-shot grants into. A
+  // grant bypasses exactly ONE otherwise-denied decision of its named gate.
+  overrideGrants?: Map<string, OverrideGrant>;
   journal: GateJournal;
   corr: Corr;
   deps?: GateDeps;
@@ -271,6 +294,32 @@ function reasonOf(decision: Decision, fallback: string): string {
     : fallback;
 }
 
+// §3.6's one-shot bypass, at the point of denial: when the named gate would
+// deny, a live grant keyed to {sessionID, gate, itemId} converts that ONE
+// decision to allow and is deleted (consumed) in the same breath — any later
+// action in the session, the same one repeated or a different one, meets the
+// gate on its ordinary terms. The consumption is journaled at warn so the
+// bypassed deny stays as visible as a deny itself (§2.8 taints the item; this
+// journals the moment the grant was spent).
+function consumeOverrideGrant(input: GateHookInput, gate: string): boolean {
+  const grants = input.overrideGrants;
+  if (grants === undefined) return false;
+  const itemId = input.registry.get(input.sessionID)?.itemId;
+  if (itemId === undefined) return false;
+  const key = overrideGrantKey(input.sessionID, gate, itemId);
+  const grant = grants.get(key);
+  if (grant === undefined) return false;
+  grants.delete(key);
+  input.journal.log(
+    "warn",
+    "gates",
+    "override-consumed",
+    { gate, itemId, grantedAction: grant.grantedAction, reason: grant.reason, toolName: input.toolName },
+    input.corr,
+  );
+  return true;
+}
+
 export function gateBeforeToolCall(input: GateHookInput): void {
   const entry = input.registry.get(input.sessionID);
   const registered = entry !== undefined;
@@ -312,7 +361,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
     { gate: "session", toolName: input.toolName, toolClass },
     () => decideSessionFn({ registered, role, toolName: input.toolName, toolClass }),
   );
-  if (sessionDecision.action === "deny") {
+  if (sessionDecision.action === "deny" && !consumeOverrideGrant(input, "session")) {
     denyThrow(input, reasonOf(sessionDecision, "the session-registry gate denied this call"));
   }
 
@@ -340,7 +389,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       { gate: "git", toolName: input.toolName, command },
       () => decideGitFn(command, role ?? "", input.gitMode, input.runActive, input.branchPolicy),
     );
-    if (gitDecision.action === "deny") {
+    if (gitDecision.action === "deny" && !consumeOverrideGrant(input, "git")) {
       denyThrow(input, reasonOf(gitDecision, "the git gate denied this command"));
     }
 
@@ -351,7 +400,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
         { gate: "edit", toolName: input.toolName, command, editPath: target },
         () => decideEditFn(editInputFor(target)),
       );
-      if (editDecision.action === "deny") {
+      if (editDecision.action === "deny" && !consumeOverrideGrant(input, "edit")) {
         denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this write"));
       }
     }
@@ -367,7 +416,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       { gate: "edit", toolName: input.toolName, editPath },
       () => decideEditFn(editInputFor(editPath)),
     );
-    if (editDecision.action === "deny") {
+    if (editDecision.action === "deny" && !consumeOverrideGrant(input, "edit")) {
       denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this edit"));
     }
   }
@@ -6637,8 +6686,10 @@ export interface ReportInput {
   store: StateStore;
   // Taken for a uniform handler shape so the composition root can call every
   // handler alike, and deliberately UNUSED: a report dispatches nothing. Reading
-  // it would be the bug, not ignoring it.
-  fanout: Fanout;
+  // it would be the bug, not ignoring it. OPTIONAL because handleOverride also
+  // drives this writer (§2.9: every stop writes a report) and an over-budget
+  // override has no fan-out engine in hand to satisfy a required field with.
+  fanout?: Fanout;
   runId: string;
   config: Config;
   journal: HandlerJournal;
@@ -6654,7 +6705,11 @@ export interface ReportInput {
 
 export interface ReportResult {
   runState: RunState;
+  // §3.2:1155's SECTION-CONTENT mode (full vs lite). The §2.9 stop-report is
+  // the third mode of the same writer; it is reported by `stopReport` rather
+  // than widening this field, and it never ran a verify (verifySeq null).
   mode: "full" | "lite";
+  stopReport: boolean;
   reportPath: string;
   verifySeq: number | null;
   green: boolean;
@@ -6666,6 +6721,78 @@ export interface ReportResult {
 
 function reportSection(heading: string, lines: string[]): string {
   return "## " + heading + "\n\n" + (lines.length > 0 ? lines.join("\n") : "(none)") + "\n";
+}
+
+// The per-item disposition block every report mode shares (§3.2 full/lite and
+// the §2.9 stop-report): id + FSM position as the block heading, the settled
+// disposition, the red proof, review rounds, taints, and — for blocked or
+// deferred items — the recorded REASON.
+function reportItemLines(
+  store: StateStore,
+  runId: string,
+  runDir: string,
+  queue: Queue,
+  publishEnabled: boolean,
+): string[] {
+  const itemLines: string[] = [];
+  for (const entry of queue.items) {
+    const persisted = store.loadItem(runId, entry.id);
+    itemLines.push("### " + entry.id + " — " + persisted.state);
+    const disposition =
+      persisted.state === "PUBLISHED"
+        ? "published"
+        : persisted.deferred !== null
+          ? "deferred"
+          : persisted.blocked !== null
+            ? "blocked"
+            : publishEnabled
+              ? "unfinished"
+              : "terminated at REVIEWED (no-git)";
+    itemLines.push("Disposition: " + disposition);
+
+    const redRef = persisted.evidence.red ?? null;
+    const red = redRef === null ? null : (readEvidenceAt(runDir, redRef.seq) as Extract<EvidenceRecord, { kind: "red" }> | null);
+    itemLines.push(
+      red === null
+        ? "Red proof: none"
+        : "Red proof: seq " + String(red.seq) + " — " + red.command.join(" "),
+    );
+    itemLines.push("Review rounds: " + String(persisted.attempts.reviewRounds));
+    itemLines.push("Taints: " + (persisted.taint.length === 0 ? "(none)" : JSON.stringify(persisted.taint)));
+    if (persisted.blocked !== null) itemLines.push("Reason: " + persisted.blocked.reason);
+    if (persisted.deferred !== null) itemLines.push("Reason: " + persisted.deferred.reason);
+    itemLines.push("");
+  }
+  return itemLines;
+}
+
+function reportQuestionLines(runDir: string): string[] {
+  return readQuestions(runDir)
+    .filter((q) => q.answeredIso === null)
+    .map((q) => "- " + q.id + " — " + q.question);
+}
+
+function reportDecisionLines(runDir: string): string[] {
+  return readDecisions(runDir).map(
+    (d) => "- " + d.id + " (" + d.kind + ") " + d.question + " => " + d.choice + " — " + d.why,
+  );
+}
+
+function reportStaleLines(queue: Queue, staleRedAdded: string[]): string[] {
+  return staleRedAdded.map((file) => {
+    const owner = queue.items.find((entry) =>
+      entry.testScope.some((candidate) => normalizeRepoRel(candidate) === file),
+    );
+    return "- " + file + (owner === undefined ? "" : " (" + owner.id + ")");
+  });
+}
+
+function reportMetricsSection(summary: MetricsSummary | null): string {
+  return (
+    "## Metrics\n\n" +
+    (summary === null ? "(unavailable)" : JSON.stringify(summary, null, 2)) +
+    "\n"
+  );
 }
 
 export async function handleReport(input: ReportInput): Promise<ReportResult> {
@@ -6682,6 +6809,70 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   // §3.9 again, and from the SAME predicate the gate uses: with publish disabled
   // an item terminating at REVIEWED is settled; with git it still owes a publish.
   const publishEnabled = isRepo(root);
+
+  // §2.9 STOP-REPORT mode, selected from the PERSISTED stop and nothing else: a
+  // recorded stop means the recorder (the continuation engine, the fan-out
+  // engine, or handleOverride) already decided how this run ends, and the
+  // writer's whole job is to leave the artifact behind. Three consequences:
+  //   - NO all-settled precondition — a stopped run is by definition unsettled
+  //     (wedged, interrupted, env-broken), and enforcing §3.2's done-gate here
+  //     would make the artifact unreachable in exactly the runs §2.9 serves;
+  //   - NO closing verify — a stopped run has no claim to prove and may be
+  //     mid-edit (§2.9), so nothing executes, nothing is quarantined, and the
+  //     evidence ledger is untouched;
+  //   - run.json is READ, never rewritten — the stop kind stays whatever the
+  //     recorder wrote, least of all upgraded to `done`.
+  if (run.stop !== null) {
+    const stop = run.stop;
+
+    // §2.11 disclosure through the ONE shared helper the `done` path also calls.
+    const staleRedAdded = registerStaleRed({
+      store,
+      runId,
+      queue,
+      reason: "left red when run " + runId + " terminated (§2.11)",
+      now,
+    });
+    const summary = input.metrics === undefined ? null : await input.metrics();
+
+    const parts: string[] = [
+      "# conductor stop-report — " + stop.kind + " — run " + runId,
+      "",
+      "Stop kind: " + stop.kind,
+      "Reason: " + stop.reasonDisplay,
+      "Closing verify: none — a stop-report proves no claim and re-runs nothing (§2.9)",
+      "",
+      reportSection("Items", reportItemLines(store, runId, runDir, queue, publishEnabled)),
+      reportSection("Open questions", reportQuestionLines(runDir)),
+      reportSection("Decisions", reportDecisionLines(runDir)),
+      reportSection("Stale-red additions", reportStaleLines(queue, staleRedAdded)),
+      reportMetricsSection(summary),
+    ];
+
+    const reportPath = path.join(runDir, REPORT_FILE);
+    writeFileAtomicSync(reportPath, parts.join("\n"));
+
+    journal.log(
+      "info",
+      "report",
+      "stop-report",
+      { kind: stop.kind, reasonDisplay: stop.reasonDisplay, staleRedAdded },
+      { runId },
+    );
+
+    return {
+      runState: run.state,
+      mode,
+      stopReport: true,
+      reportPath,
+      verifySeq: null,
+      green: false,
+      excluded: [],
+      staleRedAdded,
+      metricsAvailable: summary !== null,
+      stop: { kind: stop.kind, reasonDisplay: stop.reasonDisplay, tsMs: stop.tsMs },
+    };
+  }
 
   const items = queue.items.map((entry) => {
     const persisted = store.loadItem(runId, entry.id);
@@ -6743,50 +6934,10 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   const summary = input.metrics === undefined ? null : await input.metrics();
 
   // ---- report.md ---------------------------------------------------------
-  const itemLines: string[] = [];
-  for (const entry of queue.items) {
-    const persisted = store.loadItem(runId, entry.id);
-    itemLines.push("### " + entry.id + " — " + persisted.state);
-    const disposition =
-      persisted.state === "PUBLISHED"
-        ? "published"
-        : persisted.deferred !== null
-          ? "deferred"
-          : persisted.blocked !== null
-            ? "blocked"
-            : publishEnabled
-              ? "unfinished"
-              : "terminated at REVIEWED (no-git)";
-    itemLines.push("Disposition: " + disposition);
-
-    const redRef = persisted.evidence.red ?? null;
-    const red = redRef === null ? null : (readEvidenceAt(runDir, redRef.seq) as Extract<EvidenceRecord, { kind: "red" }> | null);
-    itemLines.push(
-      red === null
-        ? "Red proof: none"
-        : "Red proof: seq " + String(red.seq) + " — " + red.command.join(" "),
-    );
-    itemLines.push("Review rounds: " + String(persisted.attempts.reviewRounds));
-    itemLines.push("Taints: " + (persisted.taint.length === 0 ? "(none)" : JSON.stringify(persisted.taint)));
-    if (persisted.blocked !== null) itemLines.push("Reason: " + persisted.blocked.reason);
-    if (persisted.deferred !== null) itemLines.push("Reason: " + persisted.deferred.reason);
-    itemLines.push("");
-  }
-
-  const openQuestions = readQuestions(runDir).filter((q) => q.answeredIso === null);
-  const questionLines = openQuestions.map((q) => "- " + q.id + " — " + q.question);
-
-  const decisions = readDecisions(runDir);
-  const decisionLines = decisions.map(
-    (d) => "- " + d.id + " (" + d.kind + ") " + d.question + " => " + d.choice + " — " + d.why,
-  );
-
-  const staleLines = staleRedAdded.map((file) => {
-    const owner = queue.items.find((entry) =>
-      entry.testScope.some((candidate) => normalizeRepoRel(candidate) === file),
-    );
-    return "- " + file + (owner === undefined ? "" : " (" + owner.id + ")");
-  });
+  const itemLines = reportItemLines(store, runId, runDir, queue, publishEnabled);
+  const questionLines = reportQuestionLines(runDir);
+  const decisionLines = reportDecisionLines(runDir);
+  const staleLines = reportStaleLines(queue, staleRedAdded);
 
   const batches = readPublishBatch(runDir);
   const skippedFromBatches = new Set<string>();
@@ -6828,11 +6979,7 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
 
   parts.push(reportSection("Stale-red additions", staleLines));
   parts.push(reportSection("Exclusions", exclusionLines));
-  parts.push(
-    "## Metrics\n\n" +
-      (summary === null ? "(unavailable)" : JSON.stringify(summary, null, 2)) +
-      "\n",
-  );
+  parts.push(reportMetricsSection(summary));
   parts.push(reportSection("Prepared batches", batchLines));
 
   const reportPath = path.join(runDir, REPORT_FILE);
@@ -6871,6 +7018,7 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   return {
     runState: target,
     mode,
+    stopReport: false,
     reportPath,
     verifySeq: record.seq,
     green: record.green,
@@ -6878,5 +7026,329 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
     staleRedAdded,
     metricsAvailable: summary !== null,
     stop,
+  };
+}
+
+// ===========================================================================
+// (13) The §3.6 hatches (Task 9.5c, plan lines 2687-2698):
+// conductor_inline_claim + conductor_override, plus the ONE derivation that
+// turns a persisted claim into the §3.5 gate's inlineClaimScope input. The
+// §2.9 stop-report path itself lives in handleReport (section 12) — the report
+// writer has three modes and one implementation — and handleOverride's
+// over-budget refusal only DRIVES it.
+// ===========================================================================
+
+const INLINE_CLAIM_TOOL = "conductor_inline_claim";
+const OVERRIDE_TOOL = "conductor_override";
+
+// §2.8 anomalies.jsonl: validate, then append one line. Called AHEAD of the
+// rest of the triggering handler's writes (write-ahead), so a killed process
+// still leaves its trace.
+function appendAnomaly(runDir: string, record: AnomalyRecord): void {
+  const result = validate("AnomalyRecord", record);
+  if (!result.ok) {
+    throw new Error("tools: refusing to write an invalid AnomalyRecord: " + result.errors.join("; "));
+  }
+  mkdirSync(runDir, { recursive: true });
+  appendFileSync(path.join(runDir, "anomalies.jsonl"), JSON.stringify(record) + "\n");
+}
+
+// ---------------------------------------------------------------------------
+// conductor_inline_claim (§3.6)
+// ---------------------------------------------------------------------------
+
+export interface InlineClaimInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+  now?: () => number;
+  itemId: string;
+  reason: string;
+  options: Array<{ name: string; score?: DecisionRecord["options"][number]["score"] }>;
+  choice: string;
+}
+
+export interface InlineClaimResult {
+  itemId: string;
+  decisionId: string;
+  // The claimed scope, read back through the ONE derivation the gate is fed
+  // from, so this result and the gate cannot disagree about what was granted.
+  fileScope: string[] | null;
+}
+
+/**
+ * §3.6: grant the ORCHESTRATOR edit permission scoped to the claimed item's
+ * fileScope, for work where dispatch is objectively more expensive than doing.
+ * The claim is a §2.7 DERIVED decision (dispatching was the other option), so
+ * it passes the SAME requireTwoOptions gate conductor_decide applies — and
+ * legality precedes persist: a rejected claim writes NOTHING (no ledger line,
+ * no item annotation, no widened scope). On accept: the ledger line first,
+ * then the §2.5 {reason, decisionId} annotation pointing at it. The claim
+ * changes WHO edits, never WHAT is enforced — the item FSM applies in full.
+ */
+export function handleInlineClaim(input: InlineClaimInput): InlineClaimResult {
+  const { store, runId, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality before persist (§3.4): the item must exist...
+  let item: Item;
+  try {
+    item = store.loadItem(runId, input.itemId);
+  } catch {
+    throw new Error(INLINE_CLAIM_TOOL + ': item "' + input.itemId + '" does not exist; refusing to claim');
+  }
+
+  // ...and the claim's decision must be §2.7-legal BEFORE anything persists.
+  const record: DecisionRecord = {
+    id: mintDecisionId(runDir),
+    tsIso: new Date(now()).toISOString(),
+    question: "Work item " + input.itemId + " inline under an orchestrator claim instead of dispatching?",
+    options: input.options.map((option) =>
+      option.score === undefined ? { name: option.name } : { name: option.name, score: option.score },
+    ),
+    choice: input.choice,
+    why: input.reason,
+    kind: "derived",
+    appliedWhere: "item " + input.itemId,
+  };
+  const gate = requireTwoOptions(record);
+  if (!gate.ok) {
+    throw new Error(INLINE_CLAIM_TOOL + ": " + gate.why);
+  }
+  assertDecisionValid(record);
+
+  // (2) persist: the ledger line, then the annotation (handleDefer's order).
+  appendDecision(runDir, record);
+  item.inlineClaim = { reason: input.reason, decisionId: record.id };
+  store.saveItem(runId, item);
+
+  // (3) journal; (4) compact return.
+  journal.log(
+    "info",
+    "state",
+    "decision.recorded",
+    { decisionId: record.id, kind: record.kind, itemId: input.itemId },
+    { runId, itemId: input.itemId },
+  );
+  journal.log(
+    "info",
+    "state",
+    "item.updated",
+    { itemId: input.itemId, inlineClaim: true, decisionId: record.id },
+    { runId, itemId: input.itemId },
+  );
+
+  return {
+    itemId: input.itemId,
+    decisionId: record.id,
+    fileScope: inlineClaimScopeFor(store, runId, input.itemId),
+  };
+}
+
+/**
+ * The ONE derivation of an active inline claim's scope: the persisted §2.5 item
+ * says WHETHER a claim is active, the §2.4 queue says WHAT the item's fileScope
+ * is (§3.6: the claim scopes edit permission to exactly that), and BOTH the
+ * plugin's permission adjudicator and the §5.3 gate feed the gate's
+ * inlineClaimScope input from here — this build has watched a rule that lives
+ * in two places drift five separate times. No claim (or no item, or no queue
+ * entry) derives no scope at all: fail closed, never open.
+ */
+export function inlineClaimScopeFor(store: StateStore, runId: string, itemId: string): string[] | null {
+  let item: Item;
+  try {
+    item = store.loadItem(runId, itemId);
+  } catch {
+    return null;
+  }
+  if (item.inlineClaim === null) return null;
+
+  let queue: Queue;
+  try {
+    queue = readJsonFileSync(path.join(handlerRunDir(store, runId), "queue.json")) as Queue;
+  } catch {
+    return null;
+  }
+  const entry = queue.items.find((candidate) => candidate.id === itemId);
+  if (entry === undefined) return null;
+  return [...entry.fileScope];
+}
+
+// ---------------------------------------------------------------------------
+// conductor_override (§3.6)
+// ---------------------------------------------------------------------------
+
+export interface OverrideInput {
+  store: StateStore;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  now?: () => number;
+  sessionID: string;
+  itemId: string;
+  gate: string;
+  reason: string;
+  grantedAction: string;
+  overrideGrants: Map<string, OverrideGrant>;
+  stateHome: string;
+  workspaceKey: string;
+  metrics?: () => Promise<MetricsSummary | null>;
+}
+
+export interface OverrideResult {
+  granted: boolean;
+  itemId: string;
+  gate: string;
+  // Both §2.1 budget meters as persisted after the call.
+  overridesUsedItem: number;
+  overridesUsedRun: number;
+  // On a refusal: the recorded §2.9 env stop and the stop-report it wrote.
+  stop: Run["stop"];
+  reportPath: string | null;
+}
+
+/**
+ * §3.6: spend the override budget for a ONE-SHOT gate bypass with taint. The
+ * budget check comes FIRST, against BOTH §2.1 meters (maxOverridesPerItem and
+ * maxOverridesPerRun) — over EITHER, the refusal is atomic: an `env` stop plus
+ * the stop-report (through the ONE writer, §2.9's normative rule) and NOTHING
+ * else. No taint, no counter, no anomaly, no grant: a refused override is not
+ * an override that happened, and half-recording one would make the report lie.
+ *
+ * Within budget: the §2.8 anomaly first (write-ahead), then the item's taint
+ * entry + per-item meter, the run meter, and finally the one-shot grant into
+ * the CALLER-owned map the §5.3 gate consumes from — keyed to
+ * {sessionID, gate, itemId} and spent by the first decision it converts.
+ */
+export async function handleOverride(input: OverrideInput): Promise<OverrideResult> {
+  const { store, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  // (1) legality: the item must exist...
+  let item: Item;
+  try {
+    item = store.loadItem(runId, input.itemId);
+  } catch {
+    throw new Error(OVERRIDE_TOOL + ': item "' + input.itemId + '" does not exist; refusing to override');
+  }
+  const run = store.loadRun(runId);
+
+  // ...and the budget check precedes every write (§3.6).
+  const maxItem = config.workflow.maxOverridesPerItem;
+  const maxRun = config.workflow.maxOverridesPerRun;
+  const exhausted: string[] = [];
+  if (item.attempts.overridesUsed >= maxItem) {
+    exhausted.push(
+      'item "' + input.itemId + '" has used ' + String(item.attempts.overridesUsed) +
+        " of maxOverridesPerItem " + String(maxItem),
+    );
+  }
+  if (run.counters.overridesUsed >= maxRun) {
+    exhausted.push(
+      "the run has used " + String(run.counters.overridesUsed) +
+        " of maxOverridesPerRun " + String(maxRun),
+    );
+  }
+
+  if (exhausted.length > 0) {
+    const stop: Run["stop"] = {
+      kind: "env",
+      reasonDisplay:
+        "override budget exhausted: " + exhausted.join("; ") +
+        " — over budget is an env stop, not another override (§3.6)",
+      tsMs: now(),
+    };
+    run.stop = stop;
+    store.saveRun(run);
+    journal.log(
+      "warn",
+      "state",
+      "override.refused",
+      { itemId: input.itemId, gate: input.gate, exhausted },
+      { runId, itemId: input.itemId, sessionID: input.sessionID },
+    );
+
+    // §2.9: every stop writes a report — through the ONE writer, which selects
+    // stop mode from the stop this handler just recorded.
+    const report = await handleReport({
+      store,
+      runId,
+      config,
+      journal,
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+      now,
+      metrics: input.metrics,
+    });
+
+    return {
+      granted: false,
+      itemId: input.itemId,
+      gate: input.gate,
+      overridesUsedItem: item.attempts.overridesUsed,
+      overridesUsedRun: run.counters.overridesUsed,
+      stop,
+      reportPath: report.reportPath,
+    };
+  }
+
+  // (2) persist: anomaly FIRST (§2.8 write-ahead), then taint + both meters.
+  const tsMs = now();
+  appendAnomaly(runDir, {
+    ts: tsMs,
+    kind: "override",
+    itemId: input.itemId,
+    gate: input.gate,
+    reason: input.reason,
+    grantedAction: input.grantedAction,
+  });
+  item.taint.push({
+    tsMs,
+    kind: "override",
+    gate: input.gate,
+    reason: input.reason,
+    grantedAction: input.grantedAction,
+  });
+  item.attempts.overridesUsed += 1;
+  store.saveItem(runId, item);
+  run.counters.overridesUsed += 1;
+  store.saveRun(run);
+
+  // (3) the one-shot grant, into the caller-owned map the gate consumes from.
+  input.overrideGrants.set(overrideGrantKey(input.sessionID, input.gate, input.itemId), {
+    sessionID: input.sessionID,
+    gate: input.gate,
+    itemId: input.itemId,
+    reason: input.reason,
+    grantedAction: input.grantedAction,
+    tsMs,
+  });
+
+  // (4) journal; (5) compact return. A granted override is NOT a stop: the run
+  // stays live and no report is written.
+  journal.log(
+    "warn",
+    "state",
+    "override.granted",
+    {
+      itemId: input.itemId,
+      gate: input.gate,
+      grantedAction: input.grantedAction,
+      overridesUsedItem: item.attempts.overridesUsed,
+      overridesUsedRun: run.counters.overridesUsed,
+    },
+    { runId, itemId: input.itemId, sessionID: input.sessionID },
+  );
+
+  return {
+    granted: true,
+    itemId: input.itemId,
+    gate: input.gate,
+    overridesUsedItem: item.attempts.overridesUsed,
+    overridesUsedRun: run.counters.overridesUsed,
+    stop: null,
+    reportPath: null,
   };
 }

@@ -24,8 +24,8 @@
 // accepts it, and optionality means no binding decision hangs on them. The table
 // carries only the fields a handler REQUIRES.
 //
-// A `null` entry is a tool whose handler does not exist yet (9.5b: publish,
-// report; 9.5c: inline_claim, override, setup, forget_stale). The guard test
+// A `null` entry is a tool whose handler does not exist yet (setup,
+// forget_stale). The guard test
 // asserts null-ness against the adapter source, so the moment such a handler is
 // exported the guard goes red until its binding is declared here — a new handler
 // is born under the guard, never retrofitted into it.
@@ -160,7 +160,6 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     input: "ReportInput",
     infrastructure: [
       "store",
-      "fanout",
       "runId",
       "config",
       "journal",
@@ -168,6 +167,10 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       "workspaceKey",
       // `metrics` (Task 7.2's fetchMetricsSummary) and `now` are OPTIONAL seams
       // and are omitted for the same reason as publish's messageBuilder.
+      // `fanout` is an OPTIONAL seam too (unlike publish's): handleOverride's
+      // over-budget refusal drives this same writer for the §2.9 stop-report
+      // and has no fan-out engine in hand, so the input cannot require one.
+      // The root still passes its fanout here, as everywhere an input accepts it.
     ],
     fixed: NO_FIXED,
   },
@@ -205,8 +208,37 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     infrastructure: ["store", "runId", "config", "journal"],
     fixed: NO_FIXED,
   },
-  conductor_inline_claim: null,
-  conductor_override: null,
+  conductor_inline_claim: {
+    handler: "handleInlineClaim",
+    input: "InlineClaimInput",
+    // The claim is a §2.7 DERIVED decision (dispatching was the other option),
+    // so the model supplies the scored options and the choice exactly as it
+    // does for conductor_decide — the root can fabricate neither.
+    infrastructure: ["store", "runId", "journal"],
+    fixed: NO_FIXED,
+  },
+  conductor_override: {
+    handler: "handleOverride",
+    input: "OverrideInput",
+    infrastructure: [
+      "store",
+      "runId",
+      "config",
+      "journal",
+      // The overriding session's identity and its assigned item come from the
+      // root's session registry (§3.5) — context, not model-supplied arguments.
+      "sessionID",
+      "itemId",
+      // The §3.6 one-shot grant map is root-owned state, the sibling of the
+      // session registry: handleOverride writes into it and gateBeforeToolCall
+      // consumes from it.
+      "overrideGrants",
+      "stateHome",
+      "workspaceKey",
+      // `metrics` and `now` are OPTIONAL seams, omitted as on conductor_report.
+    ],
+    fixed: NO_FIXED,
+  },
   conductor_status: {
     handler: "handleStatus",
     input: "StatusInput",

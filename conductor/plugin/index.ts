@@ -203,6 +203,10 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       args: {
         itemId: S.string().describe("the item whose fileScope is claimed"),
         reason: S.string().describe("why inline work is cheaper than dispatch"),
+        // The claim is a §2.7 DERIVED decision (dispatching was the other
+        // option), so it carries scored options exactly as conductor_decide does.
+        options: scoredOptions.describe("the options considered, each with its §2.7 ladder-5 score"),
+        choice: S.string().describe("the chosen option (working the item inline)"),
       },
     },
     conductor_override: {
@@ -210,6 +214,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       args: {
         gate: S.string().describe("the gate being overridden"),
         reason: S.string().describe("the justification for the override"),
+        grantedAction: S.string().describe("the ONE next action this override permits (§2.8 grantedAction)"),
       },
     },
     conductor_status: {
