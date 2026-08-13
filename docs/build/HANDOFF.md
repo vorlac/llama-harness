@@ -1,19 +1,24 @@
 # HANDOFF — read this first on every start
 
-Updated: 2026-08-13 (Phases 0-8 done+gated; Phase 9 at 9.5a; Branch B at 11.6)
+Updated: 2026-08-13 (Phase 9 implementation COMPLETE; Branch B through 11.8's CLI; gate running)
 
 ## Current position — read docs/build/IN_PROGRESS.json FIRST
 
-This file is the accumulated LESSONS and the per-phase history. The live position — which
-task each lane is on, what is parked where, and which traps are currently in play — lives in
-`docs/build/IN_PROGRESS.json`, which is rewritten every task. `docs/build/STATE.json` is the
-authoritative task ledger (`status` per task + `commitSha`); `git log --grep='^conductor: '`
-is the authoritative commit list.
+This file is the accumulated LESSONS and the per-phase history. The live position — which task
+each lane is on, what is parked where, and which traps are currently in play — lives in
+`docs/build/IN_PROGRESS.json`, rewritten every task. `docs/build/STATE.json` is the authoritative
+task ledger (`status` + `commitSha`); `git log --grep='^conductor: '` is the authoritative commit
+list.
 
-At this writing: **37 of 54 manifest tasks committed.** Conductor suite 994/994 GATE PASS;
-C++ ctest 36 cases / 21,072 assertions. Phase 9 has 9.5a (in flight), 9.5b, 9.5c, 9.6 left,
-then the Phase 9 MILESTONE gate. Branch B has 11.6, 11.7, 11.8 (all three specs promoted).
-Then 10.1, 12, 13, 14, 15.
+At this writing: **43 of 54 manifest tasks committed.** Conductor suite 1126/1126 GATE PASS;
+C++ 73 cases / 26,392 assertions. Phase 9 (9.1-9.6) is COMPLETE and its MILESTONE GATE is the
+next step. Branch B has 11.8's live smoke left. Then 10.1, 12, 13, 14, 15.
+
+**LAYOUT CHANGED (user-directed, after 9.6):** the C++ tree was hoisted — `src/` is now `router/`,
+`src/tests/` is `router/tests/`, `src/tools/` is `tools/`. The include ROOT moved with it to the
+repo root, so every header is still spelled `#include "router/config.hpp"` exactly as before.
+CMake target names are unchanged. Anything below this line written before that move still says
+`src/`; that is history, not instruction.
 
 ## Where we are
 
