@@ -50,6 +50,32 @@ interface ToolSpec {
   args: ArgShape;
 }
 
+// §2.7's scored option, declared ONCE and shared by every tool that records a
+// decision. Every tool-recorded decision is `kind:"derived"` (§2.7 reserves
+// "human" for a decision that was ASKED of the human, which arrives through
+// conductor_answer), and core requireTwoOptions rejects a derived record with
+// fewer than two options or with any option lacking a score.
+//
+// Declaring this as a bare string array — as both conductor_decide and
+// conductor_queue_amend did — made those tools UNABLE TO SUCCEED AT ALL: a
+// string carries no score, the composition root may not fabricate one, so every
+// call would have been refused by requireTwoOptions. The model supplies the
+// score because the model is the one making the judgement (C-047).
+const scoredOptions = S.array(
+  S.object({
+    name: S.string().describe("the option considered"),
+    score: S.object({
+      capability: S.number(),
+      testability: S.number(),
+      movingParts: S.number(),
+      validationEarliness: S.number(),
+      singleSource: S.number(),
+    })
+      .optional()
+      .describe("the §2.7 ladder-5 score; REQUIRED on a derived decision, omitted only for human questions"),
+  }),
+);
+
 // A registered conductor tool whose handler is bound in later phases (§3.4:
 // handlers check gates-phase legality, re-derive evidence, and write state). Until
 // a run binds the handler layer to this session, invoking the tool is a real
@@ -155,14 +181,22 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       description: "Append a decision record for a chosen option (§2.7).",
       args: {
         question: S.string().describe("the decision being recorded"),
-        options: S.array(S.string()).describe("the options considered"),
+        options: scoredOptions.describe("the options considered, each with its §2.7 ladder-5 score"),
         choice: S.string().describe("the chosen option"),
         why: S.string().describe("the rationale for the choice"),
+        appliedWhere: S.string().describe("where the decision is applied (file, doc, or config site)"),
       },
     },
     conductor_queue_amend: {
       description: "Re-validate and apply queue amendment ops with a decision record.",
-      args: { ops: S.array(S.string()).describe("the amendment operations to apply") },
+      args: {
+        ops: S.array(S.string()).describe("the amendment operations to apply"),
+        question: S.string().describe("the decision the amendment answers (§2.7)"),
+        options: scoredOptions.describe("the options considered, each with its §2.7 ladder-5 score"),
+        choice: S.string().describe("the chosen option"),
+        why: S.string().describe("the rationale for the choice"),
+        appliedWhere: S.string().describe("where the decision is applied (file, doc, or config site)"),
+      },
     },
     conductor_inline_claim: {
       description: "Record an inline claim scoping orchestrator edit permission to an item (§3.6).",

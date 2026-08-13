@@ -195,8 +195,8 @@ terminal runs included.
 | `conductor_surface`      | `{question, blocksItems[], humanTerritory?}`             | the human-territory verdict; every named item must exist    | —        | any non-terminal state                              |
 | `conductor_answer`       | `{questionId, answer}`                                   | which items that question blocked                           | —        | whenever a question is open, terminal runs included |
 | `conductor_defer`        | `{itemId, reason}`                                       | the item exists; mints the decision record                  | —        | any non-terminal state                              |
-| `conductor_decide`       | `{question, options[], choice, why, kind, appliedWhere}` | the ≥2-scored-options rule for `kind: "derived"`            | —        | any non-terminal state                              |
-| `conductor_queue_amend`  | `{ops[]}`                                                | DAG, scope and behavioral re-validation; records a decision | —        | `EXECUTING`                                         |
+| `conductor_decide`       | `{question, options[], choice, why, appliedWhere}`       | the ≥2-scored-options rule for `kind: "derived"`            | —        | any non-terminal state                              |
+| `conductor_queue_amend`  | `{ops[], question, options[], choice, why, appliedWhere}` | DAG, scope and behavioral re-validation; records a decision | —        | `EXECUTING`                                         |
 | `conductor_forget_stale` | `{path}`                                                 | removes the named stale-red entry                           | —        | after the human has resolved the red                |
 
 **`conductor_surface`** appends the question to `questions.jsonl` with `origin:

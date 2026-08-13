@@ -1533,3 +1533,60 @@ VERIFIED TO DISCRIMINATE: with `|| isStream` removed the suite is 48/49 with
 assertion proves the outcome, not the mechanism. When two independent gates can each produce the
 expected result, the test pins neither — so a fixture must be chosen that only ONE of them can
 explain. Mutation testing is what surfaces this; nothing else in the build would have.
+
+## C-047 — two tools could never have completed a single call (MAJOR); the guard gains a SHAPE half
+
+**How it was found.** By the C-044 guard's own author, in its `concerns`, one step after finishing:
+the guard it had just built checks that every required handler field is SUPPLIED by something, and
+it noticed that nothing checks WITH WHAT TYPE. It reported the gap rather than shipping past it.
+
+**The defect.** Both `conductor_decide` and `conductor_queue_amend` declared
+`options: S.array(S.string())`, while `DecideInput`/`QueueAmendInput` take
+`Array<{name, score?}>`. Core `requireTwoOptions` rejects a `kind:"derived"` record with fewer than
+two options OR with any option lacking a score; every tool-recorded decision IS derived (C-044's
+ruling: §2.7 reserves "human" for a decision that was ASKED, which arrives via `conductor_answer`);
+and a bare string cannot carry a ladder-5 score. The composition root may not fabricate one — a
+fabricated score is a lie in the decision ledger, which is the one artifact that exists to record
+why a choice was made.
+
+So both tools would have been refused on EVERY call. Not degraded: unusable. And both were
+NAME-PERFECT the whole time — C-044's equation passed on them the moment the missing names were
+added, because names were all it could see.
+
+**The fix.** `tool.schema` IS zod (verified: the package's `tool.d.ts` declares
+`var schema: typeof z`), so object shapes were available all along and the string declaration was
+simply wrong. §2.7's scored option is now declared ONCE at module scope in plugin/index.ts and
+shared by both tools, carrying `name` plus the optional five-criterion `score`. `docs/user/
+tool-reference.md` was corrected in the same round — it had listed `kind` as an argument of
+`conductor_decide`, contradicting C-044's ruling, and had not listed `queue_amend`'s decision
+fields at all.
+
+**The guard's new half — `[C-047-shape]`.** For every declared arg of every bound tool, a COARSE
+kind (string / number / boolean / object / array-of-string / array-of-object) is derived from the
+zod schema at runtime and from the handler field's type text, and the two must agree. Coarse is
+deliberate: a precise structural comparison between zod and erased TypeScript is not available, and
+a guard that claims more precision than it has is worse than one that states its resolution. What
+it catches is the whole family this defect belongs to — a scalar declared where a structure is
+required, or the reverse.
+
+Three anti-rot properties, each verified by mutation:
+- Restoring the string options reddens it, naming BOTH tools and both sides of each mismatch.
+- Breaking the zod introspection reddens it via the "at least 12 comparable" floor rather than
+  passing with zero comparisons — the C-045 failure mode, refused by construction.
+- Anything the classifier cannot place is asserted against an EXPLICIT allowlist, so a new
+  unclassifiable arg is a red someone must look at. A skip list that grows by itself is how a
+  guard rots.
+
+The allowlist has exactly one entry, `conductor_queue_amend.ops`, and the distinction it records is
+the substantive one: `ops` is declared `string[]` and bridged to the closed `QueueAmendOp` union by
+`core/queue-amend.ts parseAmendOps` — a pure, separately tested widening from C-035 that VALIDATES
+what it parses and refuses what it cannot. That is a real bridge. Nothing can bridge an unscored
+string to a §2.7 score, which is precisely why one is allowed and the other is a defect.
+
+**The pattern across C-044, C-045, C-046 and C-047 is now unmistakable and belongs at the Phase 9
+gate.** Every one was a check that PASSED while inspecting less than it appeared to: a name-level
+equation blind to types, a grep blind to a binary file, an assertion satisfiable by two independent
+mechanisms, a green suite over an inert product. The build's instinct to make invariants
+constructions rather than conventions is the right one; what these four add is that a construction
+must also assert IT ACTUALLY RAN — a floor, an allowlist, a premise that fails when the fixture
+becomes unverifiable.
