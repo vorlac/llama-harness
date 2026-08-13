@@ -53,7 +53,7 @@ enable_testing()
 # `llama` or `ftxui` — llama.cpp's build is pre-broken upstream and the router does
 # not need it (only its configure is exercised, via add_subdirectory above).
 add_executable(llama-router
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/router/main.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
 )
 target_compile_features(llama-router PRIVATE cxx_std_23)
 target_include_directories(llama-router
