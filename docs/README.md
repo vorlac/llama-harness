@@ -1,4 +1,4 @@
-# llama-harness documentation
+# llama-conductor documentation
 
 This is the documentation set for `llama-harness`: a self-contained macOS/Apple-Silicon
 workspace that installs, serves and benchmarks open-weight GGUF models locally, and
