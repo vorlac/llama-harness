@@ -1,6 +1,6 @@
 # HANDOFF — read this first on every start
 
-Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone underway — 9.1 done)
+Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1-11.3 done+gated; Phase 9 underway — 9.1-9.4a done, 9.4b in flight)
 
 ## Where we are
 
@@ -55,17 +55,39 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone un
    by the reader clamp); a bare `src/` token blocked the WHOLE queue; the ordinary citation forms
    (`./x`, bare filename, markdown link, possessive) blocked NOTHING; and two survivors naming one item
    made the ledger lie + released the item early. All fixed test-first (6 R-tests).
-   **NEXT: 9.4a** (assertions PROMOTED + signed off at docs/build/specs/task-9.4a.assertions.json —
-   11 rows, 7 spec gaps resolved; ruling: reuse EXISTING question origins 'implementer-blocked'
-   (submit exhaustion) + 'review-round-cap' (vet cap), NEVER widen the closed §2.11 vocabulary).
-   Then 9.4b-9.6. The Phase 9 MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   **9.4a DONE** (conductor_submit_test + conductor_vet_test; NEW core/gates-phase depsReady — the
+   9.4a/5.3 binding, ENFORCE; 921/921; 49ecf6d). C-032 THROTTLED review (2 lenses, majors-only
+   skeptics = 18 agents) found **5 surviving MAJORs collapsing to 3 defects**, each found twice by
+   independent lenses: the handlers DROPPED `evidence.legalRed`, so a full-scope fallback that failed
+   elsewhere in the suite was admitted as this item's RED (`grep` showed legalRed was written by
+   evidence.ts and read by NOBODY); a repaired test that stopped being red left `item.evidence.red`
+   pointing at the PRE-repair failure, so a re-entered vet could advance a **PASSING** test to
+   TEST_VETTED and thence GREEN with no red ever proven; and `testScope` paths were dereferenced
+   un-normalised, so a `..` entry made the child runner EXECUTE an out-of-repo file and streamed it
+   into a prompt. Plus 6 minors/nits. One MAJOR (F1, testWriter vs test-writer) was REFUTED by both
+   skeptics — the diff's string is the one §3.3 names; recorded so it is not re-litigated.
+   **The depsReady binding itself REGRESSED the run's exit** (a deferred dependency left dependents
+   with no stage tool and no report — no legal exit at all); fixed by `cannotEverPublish`. My first
+   version of that fix ALSO retracted recoverable BLOCKED deps and was caught by the committed
+   8.2-null-recommendation test — the test's premise was right and the fix was too broad.
+   **NEXT: 9.4b** (assertions ORCHESTRATOR-AUTHORED at docs/build/specs/task-9.4b.assertions.json —
+   13 rows, 5 spec gaps; there was no lookahead draft for 9.4b, contrary to an earlier note here).
+   Then 9.4c-9.6. The Phase 9 MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   - **9.4b carries a REAL SPEC GAP to resolve in code:** §4.2 (line 1582) names `runTest`'s
+     no-template fallback as one of the four quarantine sites, but the committed `RunTestOptions`
+     has no `excludeTestFiles` — so the fallback currently runs the whole suite including other
+     items' deliberate reds. That is what the "two no-template items in one wave without
+     livelocking" row exercises, and it is COMPLEMENTARY to C-032's D1 fix: the quarantine is
+     exactly what makes a fallback run name the item's OWN testScope file, so without it a
+     no-template item could never legally go red at all.
    - **REVIEW-RESULT TRAP (seen at 9.3):** a workflow returning an EMPTY finding set can mean the
      lenses CRASHED, not that the diff is clean. Always check the run's failures + journal.jsonl
      before treating an empty review as a pass.
-   - **Assertion drafts exist in scratchpad staging/assertions-drafts/ for 9.4a, 9.4b, 9.4c, 9.5a,
-     9.5b, 9.6, 10.1, 11.3, 11.4, 11.5, 11.6, 11.7, 12.1, 12.2** (14 files, each with a specGaps
-     section + verified reusesExisting). They are DRAFTS: review each before promoting it to
-     docs/build/specs/.
+   - **Assertion drafts exist in scratchpad staging/assertions-drafts/ for 9.4c, 9.5a, 9.5b, 9.6,
+     10.1, 11.4, 11.5, 11.6, 11.7, 12.1, 12.2.** They are DRAFTS: review each before promoting it
+     to docs/build/specs/. **The burst did NOT cover 9.4b or 9.5c** — both were authored directly
+     by the orchestrator and are already in docs/build/specs/. Do not assume a draft exists because
+     an earlier note said so; `ls docs/build/specs/` is the truth.
    - **SUBAGENT BUDGET LESSON (see the burst that produced those drafts):** ~79 agents / ~5.7M tokens
      in ~22 min exhausted a 5-hour account window. Fan-out multiplies cost — each agent re-read the
      3399-line plan independently. Throttle: skeptics for MAJOR findings only, pass plan EXCERPTS
@@ -92,8 +114,13 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
 
 - **9.1**: enforce derived-decision scored options (decide.requireTwoOptions);
   ClassificationCheck correctedKind==null iff agreed.
-- **9.4a/5.3**: decide + gate/handler consistent on dependency-readiness for direct per-item
-  stage-tool calls (legalTools must not offer a stage tool for a dep-unready item).
+- ~~**9.4a/5.3**: gate/handler consistent on dependency-readiness~~ **DISCHARGED at 9.4a**
+  (core/gates-phase depsReady, ENFORCE; see the regression it caused and its fix, above).
+- **10.1 from 9.4a review (C-032 E7):** blockAndAsk/blockVetAndAsk append the question FIRST and
+  setBlocked SECOND, and nothing reuses an already-open question for the same item+stage — so two
+  in-flight calls, or a crash between the two writes, leave an OPEN question no item references
+  (unanswerable through the normal path, since answerQuestion only clears items whose
+  blocked.questionId matches). Same crash/partial-write class as the C-030/C-031 parks.
 - **9.4c** (P3+P7): dispatch_wave supplies PLAN_REVIEWED→EXECUTING context (survivingMajors:0
   iff planReviewRounds<max, else round>=max); AND a stale/over-age evidence-marker break MUST
   fire treeState.onClear so a leaked freeze marker becomes an env-fail, not a silent wave hang.
@@ -147,3 +174,9 @@ router-tests`. src/ off-limits to GLOB sweeps until 11.1.
 - Staging: parallel test-writers write to scratchpad/staging/task-<id>/; move in one at a
   time so the tree holds one red at a time. commitSha backfilled next STATE touch (a row's
   own commit can't know its sha; git log --grep on commitMessage authoritative meanwhile).
+- **revertAssertion rows must be VERIFIED, not reasoned.** At 9.4a, removing the `!edge.repairable`
+  branch did NOT re-red [C032-D1] — that test configures `testRepairAttempts:0`, where the repair
+  path blocks immediately anyway. Actually run each revert you claim; cite the one that fires.
+- A commit whose subject deviates from STATE.json's commitMessage, or that carries a body or a
+  trailer, is a slip: the 9.4a commit was written that way and amended before anything built on it.
+  Narrative belongs in CORRECTIONS.md, not in the commit.

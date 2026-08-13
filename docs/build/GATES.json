@@ -534,7 +534,7 @@
       "M1": "PASS 921/921 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
       "M2": "PASS 901 -> 912 (11 authored) -> 921 (9 review-fix). Each review-fix test observed red on its own defect assertion before the fix.",
       "M3": "PASS (tsc clean; pre-implementation tsc showed ONLY the two missing handleSubmitTest/handleVetTest exports)",
-      "M4": "PENDING",
+      "M4": "PASS post-commit from f3b9070 in a detached scratch worktree, verified in BOTH directions: baseline 20/20 green at the commit; un-exporting handleSubmitTest re-derived the missing-export SyntaxError (tests=2 pass=0 fail=2, both 9.4a files); restoring and reverting the Math.floor knob re-red [C032-D8-fractional-budget] alone; restoring and disabling redAdmission's legalRed half re-red [C032-D1-fallback-red-refused] alone. Orchestrator-observed every run; worktree removed. NOTE: removing the !edge.repairable branch alone does NOT re-red D1, because that test configures testRepairAttempts:0 where the repair path blocks immediately anyway — the revertAssertion cites the redAdmission change, which is what was actually verified.",
       "M5": "PASS (production-scoped marker scan)",
       "M6": "PASS (handleSubmitTest + handleVetTest exported and exercised; core depsReady/cannotEverPublish reached through legalTools by both the handler and the pure gate test)",
       "M7": "PASS 11 assertion rows each with a name-prefixed test + 9 review-fix rows (C032-D1..D9)",

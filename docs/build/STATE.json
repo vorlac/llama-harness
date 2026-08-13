@@ -1093,7 +1093,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "49ecf6d",
       "commitMessage": "conductor: 9.4a test submission + vetting",
       "planLines": [
         2612,
@@ -1128,7 +1128,8 @@
         "The 9.4a/5.3 deferred binding is ENFORCE: core/gates-phase depsReady removes the stage tool for a dependency-unready item, so gate and handler cannot disagree. It introduced the E11 wedge (a deferred dependency left the run with no legal exit), fixed in the same commit by cannotEverPublish.",
         "An untargeted red (evidence legalRed=false) is NOT routed into the repair loop, unlike a class-'error' red: no edit the writer can make to its own test makes a full-suite fallback target it, so the stage stops and asks rather than spending the budget re-observing another suite's failure.",
         "C-032 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 18 agents/2.3M tokens): 5 surviving MAJORs collapsing to 3 distinct defects, plus 6 minors/nits fixed; 1 crash-class finding deferred to 10.1; 6 policy questions raised at the Phase 9 gate.",
-        "One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics — the string the diff uses is the one §3.3 and the pinned contract name — and is recorded in C-032 so it is not re-litigated."
+        "One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics — the string the diff uses is the one §3.3 and the pinned contract name — and is recorded in C-032 so it is not re-litigated.",
+        "PROCESS SLIP (self-caught, corrected): the commit was first written with a long body and a Co-Authored-By trailer, against the standing convention recorded in HANDOFF ('Commits verbatim from STATE.json commitMessage; NO trailers') which every prior conductor: commit follows. Amended to the verbatim subject line before anything else was built on it; the narrative it carried already lives in CORRECTIONS.md C-032, which is its designated home."
       ],
       "startedAt": "2026-08-13T06:30:00Z",
       "finishedAt": "2026-08-13T09:05:00Z"

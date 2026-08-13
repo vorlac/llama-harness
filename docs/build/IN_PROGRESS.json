@@ -1,17 +1,18 @@
 {
   "spineTask": {
-    "taskId": "9.4a",
-    "step": "Phase 9 MILESTONE (SERIAL). conductor_submit_test + conductor_vet_test in adapter/tools.ts. Assertions PROMOTED + orchestrator-signed at docs/build/specs/task-9.4a.assertions.json (11 rows, 7 spec gaps resolved). Test-writer dispatched to staging/task-9.4a/ with §3.3 + Task 9.4a spec QUOTED INLINE (throttle: no agent re-reads the 3,399-line plan). Rulings already made: reuse EXISTING §2.11 origins ('implementer-blocked' for submit repair exhaustion, 'review-round-cap' for the vet cap) — NEVER widen the closed vocabulary; testWriter replies use the already-registered SCHEMAS.ImplementerResult (9.4a authors NO new schema); the 9.4a/5.3 deferred binding is ENFORCE (gates-phase legalTools must not offer a stage tool for a dependency-unready item AND the handler must refuse it too).",
+    "taskId": "9.4b",
+    "step": "Phase 9 SERIAL. conductor_mark_green + conductor_validate + conductor_queue_amend in adapter/tools.ts. Assertions AUTHORED BY THE ORCHESTRATOR at docs/build/specs/task-9.4b.assertions.json (13 rows, 5 spec gaps resolved) — the lookahead burst covered 9.4c/9.5a/9.5b/9.6 but never 9.4b, so no draft existed. Rulings already made: (1) mark_green owns the WHOLE stage (dispatches the implementer, then runs the item test itself), mirroring 9.4a's submit_test. (2) The §3.3 BLOCKED escalation ladder's middle rungs ('stronger model', 'item re-split') are NOT constructible from §2.1 and are RAISED AT THE PHASE 9 GATE rather than stubbed (G4); the two constructible rungs are implemented. (3) The cap question reuses the EXISTING origin 'debug-architecture' and a BLOCKED implementer reuses 'implementer-blocked' — the §2.11 vocabulary is CLOSED. (4) adapter/evidence.ts runTest must GAIN the excludeTestFiles the §4.2 quarantine rule already assigns it (plan line 1582 names runTest's no-template fallback as a quarantine site, but RunTestOptions has no such parameter) — this is what makes the two-no-template-items row pass, and it is complementary to C-032 D1: the quarantine is exactly what makes a fallback run name the item's OWN testScope file.",
     "intendedFiles": [
-      "conductor/tests/tools-9.4a.test.ts",
+      "conductor/tests/tools-9.4b.test.ts",
       "conductor/adapter/tools.ts",
-      "conductor/core/gates-phase.ts"
+      "conductor/adapter/evidence.ts"
     ]
   },
   "processNotes": {
-    "throttle": "AGREED WITH USER after the C-030 burst exhausted a 5h window (~79 agents/5.7M tokens): quote spec excerpts inline instead of letting agents read the plan; skeptics for MAJOR findings only; 2 review lenses not 3; lookahead of 1-2 tasks not 8; orchestrator does implementations directly when cheaper. C-031 proved it: 16 agents/1.4M tokens still found 5 MAJORs.",
+    "throttle": "AGREED WITH USER after the C-030 burst exhausted a 5h window (~79 agents/5.7M tokens): quote spec excerpts inline instead of letting agents read the plan; skeptics for MAJOR findings only; 2 review lenses not 3; lookahead of 1-2 tasks not 8; orchestrator does implementations directly when cheaper. C-031 (16 agents/1.4M) and C-032 (18 agents/2.3M) both still found real MAJORs.",
     "reviewResultTrap": "A review workflow returning an EMPTY finding set may mean the LENSES CRASHED, not that the diff is clean. Check the run's failures list + journal.jsonl before treating empty as a pass (seen at 9.3).",
     "firstImplementerTrap": "A subagent can return an anomalous 0-edit 'done'. ALWAYS verify the tree (git status + run the test) before trusting green (seen at 9.1).",
+    "reviewFixRevertTrap": "When recording revertAssertion rows, VERIFY the revert actually re-reds the named test. At 9.4a, removing the !edge.repairable branch did NOT re-red [C032-D1] (that test configures testRepairAttempts:0, where the repair path blocks immediately anyway); the redAdmission change is what re-reds it, and that is what the row now cites.",
     "userParallelWork": "The user commits their own work on main concurrently (llama-conductor rename, submodule pointers, presets, docs). ALWAYS git add explicit paths, never -A, and never revert their files."
   }
 }
