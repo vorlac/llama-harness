@@ -794,7 +794,7 @@ function makeWiring(runId: string, runDir: string, config: Config, journal: Jour
   sdk.setResponder((req) => {
     const role = req.entry?.role ?? "";
     const itemId = req.entry?.itemId ?? "";
-    const key = `${role} ${itemId}`;
+    const key = `${role}\u0000${itemId}`;
     const nth = counts.get(key) ?? 0;
     counts.set(key, nth + 1);
     prompted.push({

@@ -1458,3 +1458,44 @@ Patching two instances would leave the third to be found at 13.1. Instead, follo
 `adapter/tools.ts` right now and a new test file would change the suite count under it. Lands
 immediately after 9.5a commits, before 9.5b starts, so 9.5b's and 9.5c's new handlers are the
 first to be born under the guard rather than retrofitted into it.
+
+## C-045 — a committed test file was BINARY, so grep silently skipped 26 tests (MAJOR, detection integrity)
+
+**How it was found.** By accident, and that is the point. While checking a claim the 9.5a
+implementer made about a 9.4c row, `grep -c "9.4c" conductor/tests/tools-9.4c.test.ts` returned
+NOTHING — on a 109 KB file whose FIRST LINE contains "9.4c". Every grep against that file had been
+returning empty, and had been doing so since the file was committed.
+
+**The cause.** One literal NUL byte at line 797, used as a composite-key separator in a fixture
+(`role` + NUL + `itemId` — a normal idiom, since NUL cannot occur in either component). `file(1)`
+classifies the file as `data`, and GREP SKIPS BINARY FILES. The 26 tests in it were invisible to
+every text-based audit: coverage sweeps, "does any test already pin X", the review lenses' own
+searches, and the orchestrator's. My earlier row-coverage audits happened to use Python's
+`open().read()` and were unaffected; anything shell-based was not.
+
+Nothing was ever red. The suite passed at every gate, M4 passed, the reviews passed. This is the
+failure mode this build fears most: not a red that shouts, but a CHECK THAT QUIETLY INSPECTS LESS
+THAN IT CLAIMS TO. A green suite proves the tests that ran; it says nothing about a search that
+silently covered 25 files instead of 26.
+
+**The fix.** The separator is now a six-character backslash-u escape instead of a raw byte. The
+runtime string is byte-for-byte identical — this changes the file's ENCODING, not its semantics —
+and the suite is unchanged at 1022/1022. Both the committed file and its parked staging copy were
+fixed.
+
+**The guard.** NEW `conductor/tests/source-hygiene.test.ts` walks the repo (skipping `.git`,
+`node_modules`, `.out`, `.data`, `.conductor`, `staging` and `extern` — vendored third-party source
+is not ours to police, and ftxui's terminal-parser tests legitimately embed ESC) and fails if any
+file with a source extension carries a NUL or other forbidden control byte. Tab, newline and
+carriage return are text; everything else below 0x20, plus DEL, is not.
+
+Two things the guard does deliberately. It asserts the walk found more than 100 files, because a
+guard whose traversal breaks would otherwise pass VACUOUSLY — the same defect class it exists to
+catch. And its extension list is an allowlist rather than "everything not binary", so a new binary
+ASSET cannot fail it while a new SOURCE type has to be added on purpose.
+
+VERIFIED TO DISCRIMINATE: reintroducing the NUL turns it red; restoring turns it green.
+
+**A standing lesson for every audit in this build, mine included.** An empty grep result is not
+evidence of absence until you have confirmed grep actually read the file. Prefer a reader that
+fails loudly on undecodable input over one that skips quietly.
