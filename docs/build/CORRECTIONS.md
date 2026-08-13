@@ -1683,3 +1683,51 @@ type error does not stop `node --test` from running the previous module graph �
 should be confirmed against the typecheck leg too.
 
 A compiling variant of the same decision was run instead and the implementer's finding stands.
+
+## C-050 — the wave driver cannot drive the last three stages (OPEN; fix queued before the Phase 9 gate)
+
+**The finding.** `handleDispatchWave`'s `defaultStageExecutors()` covers exactly four stages —
+`conductor_submit_test`, `conductor_vet_test`, `conductor_mark_green`, `conductor_validate`. It has
+no executor for `conductor_item_review` (Task 9.5a) or `conductor_publish` (Task 9.5b), because
+neither existed when 9.4c shipped. A VALIDATED wave member therefore cannot be advanced by the
+driver at all.
+
+**How bad it is, stated precisely rather than dramatically.** Two facts bound it, and both were
+checked rather than assumed:
+
+1. **The run is NOT wedged.** `core/gates-phase.ts:404` still adds the per-item stage tool to the
+   legal set for every actionable item, so `conductor_item_review` and `conductor_publish` remain
+   directly callable by the orchestrator model. The work can proceed; it just proceeds one tool call
+   at a time.
+2. **The driver fails HONESTLY, by design.** Committed row `[9.4c-missing-stage-stops-honestly]`
+   pins that a stage with no executor stops the member with an envError NAMING the missing stage —
+   the G4 no-stubs posture. It does not silently skip the item, which is the failure that would
+   actually be dangerous.
+
+So this is a DEGRADED driver, not a broken product. But it defeats the driver's stated purpose:
+§4.2 exists so the orchestrator model does not interleave items by hand, and a driver that hands
+back an env error for the last three stages of every item forces exactly that.
+
+**Why it was not fixed in 9.5a or 9.5b.** Adding an executor requires REVISING a committed test
+row — `[9.4c-missing-stage-stops-honestly]` deliberately asserts the current, incomplete table, and
+it names `conductor_item_review` as one of its two missing stages. That row is not wrong; it was
+true when written. Changing behaviour it pins is a correction round, not a side effect of another
+task, and doing it silently inside 9.5a would have meant editing a committed assertion to match new
+code — the one move this build refuses.
+
+**QUEUED FIX, test-first, after 9.6 lands and before the Phase 9 milestone gate.** 9.6 is being
+written now and threads worktree mode through BOTH `conductor_dispatch_wave` and
+`conductor_publish`, so it will touch the driver; sequencing the executor work after it avoids two
+rounds editing the same function, and avoids shifting the ground under a red that is being authored
+against the current driver right now. The round must:
+
+- add `conductor_item_review` and `conductor_publish` executors to the default table, each a thin
+  adapter over the committed handler exactly as the existing four are;
+- honour §4.2's SERIAL_STAGES rule — `conductor_publish` is already listed there because the git
+  index is a singleton, so its executor must not run concurrently with a sibling's;
+- REVISE `[9.4c-missing-stage-stops-honestly]` to pin the honest-stop behaviour against a stage that
+  is genuinely absent, rather than against two that were merely unbuilt. The row's PROPERTY is
+  right and must survive; only its fixture changes.
+
+Until then the driver's coverage is recorded here rather than discovered at Task 13.1's end-to-end,
+which drives a full run through the driver and is where this would otherwise have surfaced.
