@@ -1,6 +1,19 @@
 # HANDOFF — read this first on every start
 
-Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1-11.3 done+gated; Phase 9 underway — 9.1-9.4a done, 9.4b in flight)
+Updated: 2026-08-13 (Phases 0-8 done+gated; Phase 9 at 9.5a; Branch B at 11.6)
+
+## Current position — read docs/build/IN_PROGRESS.json FIRST
+
+This file is the accumulated LESSONS and the per-phase history. The live position — which
+task each lane is on, what is parked where, and which traps are currently in play — lives in
+`docs/build/IN_PROGRESS.json`, which is rewritten every task. `docs/build/STATE.json` is the
+authoritative task ledger (`status` per task + `commitSha`); `git log --grep='^conductor: '`
+is the authoritative commit list.
+
+At this writing: **37 of 54 manifest tasks committed.** Conductor suite 994/994 GATE PASS;
+C++ ctest 36 cases / 21,072 assertions. Phase 9 has 9.5a (in flight), 9.5b, 9.5c, 9.6 left,
+then the Phase 9 MILESTONE gate. Branch B has 11.6, 11.7, 11.8 (all three specs promoted).
+Then 10.1, 12, 13, 14, 15.
 
 ## Where we are
 

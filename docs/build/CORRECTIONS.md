@@ -1275,3 +1275,52 @@ NOT guard the call; a bare `worktree add` names the branch after the path basena
 I told the promotion pass that the draft's `planLines [2700,2725]` "cut off the `git worktree prune`
 clause". It did not — that clause is at 2724, inside the range. The widening to [2699, 2728] is
 correct for section boundaries but is directive-driven, not defect-driven, and the record says so.
+
+## C-041 — Branch B: no task in the plan makes llama-router runnable (RESOLVED at 11.8)
+
+**How it was found.** The 11.8 assertion-promotion pass checked the plan's own premise instead of
+taking it: plan:2857 says "run llama-router against it", so the pass asked whether the binary can
+be run at HEAD. It cannot. `src/main.cpp` is still the Task 11.1 scaffold — no argc/argv, no config
+load, no Router — and its own comment claims "the real CLI ... lands in Tasks 11.2-11.7". Every one
+of 11.2-11.7 is a HEADER-ONLY library task whose bullets never mention a CLI, so the comment
+describes work no bullet ever assigns. 11.8 is the first task that runs the binary at all.
+
+This is a genuine gap in an IMMUTABLE plan, not a misreading. The plan cannot be edited, so the
+question is only which task absorbs the work.
+
+- **RULING: 11.8 lands the minimum CLI, test-first.** 11.8's Step 1 presupposes a runnable binary,
+  so 11.8 is unexecutable without it; no later task can supply it either, because 12.1's serve.py
+  *launches* the binary and therefore needs it to already exist. NEW header-only `src/router/cli.hpp`
+  exporting a PURE `parseCli` (args EXCLUDING argv[0]) + NEW `src/tests/cli_test.cpp` (red first, as
+  a compile failure, like every other Branch B task) + `src/main.cpp` rewritten as a thin adapter
+  over it. The pure/adapter split is what keeps the parse doctest-reachable while the parts that
+  need a live socket stay in the live artifact.
+- **CONSEQUENCE: 11.8's tier moves C → B** and STATE.json records the deviation. Tier C means
+  mechanical; a task that lands a new header, a new doctest file and a rewritten entry point is not.
+  The live-artifact obligation (M8: verbatim command lines, cwd, raw output, exit codes) still
+  applies to the smoke half.
+- **`--schema <path>` is REQUIRED with no default and no search path.** `parseRouterConfig` reads a
+  schema file on every parse and the only schema in the tree is a build-time export into the SOURCE
+  tree. Any search path (exe-relative, cwd-relative, $PREFIX/share) would be a SECOND source of
+  truth for the config shape, which is the exact thing the exported-schema design exists to prevent,
+  and a wrong guess would fail with a file-not-found instead of a named field. 12.1 inherits a
+  stated contract rather than a discovered one.
+- **Exit codes pinned here so 12.1's supervisor inherits them rather than guessing:** 0 clean
+  shutdown after SIGINT/SIGTERM, 2 usage error (stderr names the offending flag, then usage),
+  3 ConfigError (stderr carries `ConfigError::field()` verbatim), 4 listen bind failure (stderr
+  carries host:port). Only the exit-2 family is doctest-reachable — it is a pure parse verdict;
+  the rest are recorded live from raw output.
+
+**Two further 11.8 resolutions worth reading at the Phase 11 gate rather than rediscovering:**
+11.8 does NOT discharge Task 11.1's Step 2 (it observes four of the six items but cannot produce
+the effective concurrent slot count for N∈{1,2,4,8} with and without `--parallel`, which is the
+load-bearing number, so `WIRE_CONTRACT_VERIFIED:` stays `<pending>`); and "the dashboard (if built)"
+resolves FALSE — there is no dashboard target and 11.8 must not add one, since Branch B's build
+deliberately excludes ftxui.
+
+**A cross-spec obligation that was already satisfied.** 11.8's smoke wants to read the metrics
+ledger while the router is still up, which only works if 11.7 appends per request instead of
+buffering to shutdown. Checked rather than assumed: 11.7's promoted spec already pins it
+(`11.7-streamed-line-once` requires the line to be present after the stream completes and before
+shutdown, and `11.7-ledger-line-per-request` requires one line per request). No change needed —
+recorded so the Phase 11 gate does not re-litigate it.

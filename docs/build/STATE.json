@@ -104,7 +104,7 @@
         "C-012: binary self-updated 1.18.10 -> 1.18.15 mid-build; contract pinned against 1.18.15",
         "DRIFT: prompt format:{json_schema} does not exist -> structured output = prompt-shaped + independent validation (scopes 7.1); requests carry NO schema field (scopes 11.6)",
         "DRIFT: permission reply = POST /session/{id}/permissions/{permissionID} {response}, not client.permission.reply({requestID, reply})",
-        "C-014: fragment + fragment.test.ts gained tools.task=false (plan-mandated cross-task update, §5.3 lines 1792-1798, key pinned by discovery iii)"
+        "C-014: fragment + fragment.test.ts gained tools.task=false (plan-mandated cross-task update, \u00a75.3 lines 1792-1798, key pinned by discovery iii)"
       ],
       "startedAt": "2026-08-12T09:10:00Z",
       "finishedAt": "2026-08-12T09:39:02Z"
@@ -182,7 +182,7 @@
         "conductor/tests/types.test.ts",
         "conductor/core/types.ts"
       ],
-      "revertAssertion": "reverting core/types.ts to its 0.3 form fails all of types.test.ts at link time (missing SCHEMAS/validate exports) — 84 tests; e.g. 'rejects item state \"DONE\"' can only pass against the real Item schema",
+      "revertAssertion": "reverting core/types.ts to its 0.3 form fails all of types.test.ts at link time (missing SCHEMAS/validate exports) \u2014 84 tests; e.g. 'rejects item state \"DONE\"' can only pass against the real Item schema",
       "attempts": 1,
       "deviations": [
         "EvidenceRecord/AnomalyRecord encoded as merged object schemas (subset has no combinator; tests reject oneOf); TS discriminated unions carry the per-kind strictness; noted in file comments"
@@ -261,8 +261,8 @@
       "revertAssertion": "removing the three core modules re-fails all 52 tests at link time; e.g. stops.test.ts's 80-combo interrupt sweep only passes against the real shouldTerminate",
       "attempts": 1,
       "deviations": [
-        "shouldTerminate guards isTerminal(run) first (plan silent, §3.7-consistent)",
-        "multi-specifier rule: ALL must be in-scope for missing-subject (conservative per §2.6.1)",
+        "shouldTerminate guards isTerminal(run) first (plan silent, \u00a73.7-consistent)",
+        "multi-specifier rule: ALL must be in-scope for missing-subject (conservative per \u00a72.6.1)",
         "classification by output shape, exitCode recorded-not-consulted (runners disagree on codes)"
       ],
       "startedAt": "2026-08-12T11:15:00Z",
@@ -291,7 +291,7 @@
         "cmd": null,
         "exitCode": null,
         "class": "n/a",
-        "excerpt": "guard task: no red by design (plan line 2135 'trivially green now; bites later'); M4 mutation variant executed instead — see revertAssertion"
+        "excerpt": "guard task: no red by design (plan line 2135 'trivially green now; bites later'); M4 mutation variant executed instead \u2014 see revertAssertion"
       },
       "filesTouched": [
         "conductor/tests/purity.test.ts"
@@ -299,7 +299,7 @@
       "revertAssertion": "mutation probes run by orchestrator: (A) node:fs import injected into core/types.ts -> 2 guard tests FAIL naming the file/token; (B) legal core-sibling import -> 4/4 PASS (not over-broad); (C) Bun.spawn in adapter/probe-adapter.ts -> 2 guard tests FAIL naming G14",
       "attempts": 1,
       "deviations": [
-        "executed after 1.2, before 1.3/1.5 (within the prompt §6.2 safe-pair {1.1,1.2,1.4})"
+        "executed after 1.2, before 1.3/1.5 (within the prompt \u00a76.2 safe-pair {1.1,1.2,1.4})"
       ],
       "startedAt": "2026-08-12T11:05:00Z",
       "finishedAt": "2026-08-12T10:20:34Z"
@@ -374,7 +374,7 @@
       "revertAssertion": "removing either journal subject re-fails all 22 journal tests at link time; e.g. '[2.1-seq] seq monotonic, second journal continues from last seq' only passes against the real re-read-last-seq adapter",
       "attempts": 1,
       "deviations": [
-        "dev/test-vs-prod flag = env.NODE_ENV (prod arm retains+surfaces, never drops, per §7.4); rotation index found via existsSync probe (readdirSync not in the allowed fs set)"
+        "dev/test-vs-prod flag = env.NODE_ENV (prod arm retains+surfaces, never drops, per \u00a77.4); rotation index found via existsSync probe (readdirSync not in the allowed fs set)"
       ],
       "startedAt": "2026-08-12T12:30:00Z",
       "finishedAt": "2026-08-12T11:31:03Z",
@@ -413,7 +413,7 @@
       "attempts": 1,
       "deviations": [
         "ordering override 3: 2.2 committed immediately after 4.1 (not in Phase 2)",
-        "G14 leg ACTIVE (bun 1.3.14) — the preflight-uncertain acceptance row (§2.5/C-002) is now a real green, NOT SKIPPED_UNMET",
+        "G14 leg ACTIVE (bun 1.3.14) \u2014 the preflight-uncertain acceptance row (\u00a72.5/C-002) is now a real green, NOT SKIPPED_UNMET",
         "no cross-runtime divergence: no adapter change, no wire-notes stamp needed"
       ],
       "startedAt": "2026-08-12T15:40:00Z",
@@ -453,7 +453,7 @@
       "revertAssertion": "removing either FSM module re-fails all 149 transition tests at link time; e.g. fsm-item 'PENDING->RED missing-subject ACCEPTED' only passes against the real table",
       "attempts": 1,
       "deviations": [
-        "states defined inline in fsm-*.ts (pure, no ./types coupling); must stay set-equal to types.ts RunState/ItemState — spec-conformance to verify"
+        "states defined inline in fsm-*.ts (pure, no ./types coupling); must stay set-equal to types.ts RunState/ItemState \u2014 spec-conformance to verify"
       ],
       "startedAt": "2026-08-12T13:15:00Z",
       "finishedAt": "2026-08-12T11:46:53Z"
@@ -490,7 +490,7 @@
       "revertAssertion": "removing core/gates-phase.ts re-fails all 15 legality tests; [3.2-two-item-wave] reorder-determinism only passes against the nextWave-delegated derivation",
       "attempts": 1,
       "deviations": [
-        "conductor_report also legalized when ALL items settled (not only trivial) — §3.2 'no terminal path writes nothing'; adds report to a lone-blocked legal set (test only asserts the 6 per-item tools absent, so passes). To confirm at Phase-3 gate."
+        "conductor_report also legalized when ALL items settled (not only trivial) \u2014 \u00a73.2 'no terminal path writes nothing'; adds report to a lone-blocked legal set (test only asserts the 6 per-item tools absent, so passes). To confirm at Phase-3 gate."
       ],
       "startedAt": "2026-08-12T13:50:00Z",
       "finishedAt": "2026-08-12T12:04:27Z"
@@ -567,7 +567,7 @@
       "attempts": 1,
       "deviations": [
         "C-019 stale-break routed to journal (not AnomalyRecord)",
-        "beacon shape {pid,startMs,version,sessionID} per §3.8 over §1.2's 3-field comment",
+        "beacon shape {pid,startMs,version,sessionID} per \u00a73.8 over \u00a71.2's 3-field comment",
         "staleLockMs default 24h injectable",
         "injected DI clock (now) + pid for deterministic lock/beacon/sinceMs"
       ],
@@ -634,7 +634,7 @@
         "cmd": "bash scripts/test-conductor.sh 'conductor/tests/gates-git.test.ts'",
         "exitCode": 1,
         "class": "missing-subject",
-        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-git.ts (observed by orchestrator; first impl attempt died to a machine-sleep env error before creating any file — clean recovery, no partial work)"
+        "excerpt": "ERR_MODULE_NOT_FOUND core/gates-git.ts (observed by orchestrator; first impl attempt died to a machine-sleep env error before creating any file \u2014 clean recovery, no partial work)"
       },
       "filesTouched": [
         "conductor/tests/gates-git.test.ts",
@@ -643,8 +643,8 @@
       "revertAssertion": "removing core/gates-git.ts re-fails all 120 git-policy tests; [5.1-phasegate] 'git branch -D x -> deny' only passes against the operand-scanning decideBranch (keying on gitSubcommand alone would ALLOW it). Orchestrator independently re-ran 18 security-critical cases: 18/18 correct.",
       "attempts": 2,
       "deviations": [
-        "sessionRole/gitMode void'd (git policy role/mode-uniform per §3.5:1373; publish handler runs git via execFile, never reaching this gate)",
-        "bare git remote/reflog/stash-show/tag default-denied (not on the exhaustive allow-list; spec-faithful — a missing allow only surfaces a question)"
+        "sessionRole/gitMode void'd (git policy role/mode-uniform per \u00a73.5:1373; publish handler runs git via execFile, never reaching this gate)",
+        "bare git remote/reflog/stash-show/tag default-denied (not on the exhaustive allow-list; spec-faithful \u2014 a missing allow only surfaces a question)"
       ],
       "startedAt": "2026-08-12T16:50:00Z",
       "finishedAt": "2026-08-12T16:14:17Z"
@@ -682,7 +682,7 @@
       "attempts": 1,
       "deviations": [
         "freeze/.conductor/role ordering (both denies; no test distinguishes)",
-        "decideEdit doesn't re-adjudicate registered (decideSession owns it, §3.5:1344)",
+        "decideEdit doesn't re-adjudicate registered (decideSession owns it, \u00a73.5:1344)",
         "paths outside sessionTree left non-normalized -> fail-safe via role deny"
       ],
       "startedAt": "2026-08-12T17:20:00Z",
@@ -762,8 +762,8 @@
       "attempts": 1,
       "deviations": [
         "buildCommand on a VerifyConfig superset (core Config scope schema is frozen additionalProperties:false)",
-        "stale-marker break surfaced on VerifyOutcome (staleMarkerBroken) not a journal anomaly (§7.4 evidence vocab is red/green/verify only; anomaly kinds lack marker-break) — same posture as C-019",
-        "strips NODE_TEST_CONTEXT in the child env (nested node --test would else mis-report a fail as pass) — env-hygiene like gitio's GIT_DIR strip",
+        "stale-marker break surfaced on VerifyOutcome (staleMarkerBroken) not a journal anomaly (\u00a77.4 evidence vocab is red/green/verify only; anomaly kinds lack marker-break) \u2014 same posture as C-019",
+        "strips NODE_TEST_CONTEXT in the child env (nested node --test would else mis-report a fail as pass) \u2014 env-hygiene like gitio's GIT_DIR strip",
         "longest-prefix-first relativization for /var vs /private/var symlink"
       ],
       "startedAt": "2026-08-12T19:40:00Z",
@@ -794,7 +794,7 @@
       "revertAssertion": "M8 artifact: verify-acceptance checks RUNNER-DISCOVERY.md exists, >20 lines, contains command transcripts; orchestrator independently re-ran the node (c) cell and matched the recorded output (3 tests, wt_fail red, whole-tree exit 1)",
       "attempts": 1,
       "deviations": [
-        "committed out of §8 order as free early parallel work (orchestrator prompt §6.2); C-011"
+        "committed out of \u00a78 order as free early parallel work (orchestrator prompt \u00a76.2); C-011"
       ],
       "startedAt": "2026-08-12T09:12:00Z",
       "finishedAt": "2026-08-12T09:13:04Z"
@@ -951,8 +951,8 @@
       "revertAssertion": "removing inject.ts re-fails all 11 tests (missing-subject); reverting FIX #1 alone re-reds 8.2-null-recommendation (block renders legalTools.why, not a hardcoded 'terminal'); reverting FIX #2 alone re-reds 8.2-empty-pack (empty pack must fail-closed before the beacon)",
       "attempts": 1,
       "deviations": [
-        "buildSystemAppend gained a trailing ctx object {repoConfigured, taintCount, overridesRemaining}: the §6.4 ledger arg list omits the scalars legalTools + the state block need. Helper-signature extension only; §2 schema untouched.",
-        "init-failure channel is the injected logError seam (§7.1 stderr / client.app.log), NOT a journal event: the closed vocabulary (journal-events.ts) has no init event and widening it is a STOP-AND-PARK closed-vocab change, correctly avoided.",
+        "buildSystemAppend gained a trailing ctx object {repoConfigured, taintCount, overridesRemaining}: the \u00a76.4 ledger arg list omits the scalars legalTools + the state block need. Helper-signature extension only; \u00a72 schema untouched.",
+        "init-failure channel is the injected logError seam (\u00a77.1 stderr / client.app.log), NOT a journal event: the closed vocabulary (journal-events.ts) has no init event and widening it is a STOP-AND-PARK closed-vocab change, correctly avoided.",
         "C-027 pre-commit adversarial review: MAJOR false-terminality in the null-recommendation block (fixed to render legalTools.why) + fail-closed empty-pack hardening in loadPacks. Both fixed test-first inside this task; rows 8.2-null-recommendation/8.2-empty-pack added to the ledger."
       ],
       "startedAt": "2026-08-12T23:45:00Z",
@@ -992,7 +992,7 @@
       "attempts": 2,
       "deviations": [
         "First implementer attempt returned an anomalous/injected-looking result with 0 tool uses (no edits); caught by orchestrator verifying the actual tree (nothing written, test still red), discarded, re-dispatched fresh.",
-        "§7.4 journal widening: added state:decision.recorded to journal-events.ts EVENTS (decide/defer record no run/item state; sanctioned by the file's widening rule; NO §2-schema enum touched, no STOP-AND-PARK). Grep-tested via the real throwing journal (F7).",
+        "\u00a77.4 journal widening: added state:decision.recorded to journal-events.ts EVENTS (decide/defer record no run/item state; sanctioned by the file's widening rule; NO \u00a72-schema enum touched, no STOP-AND-PARK). Grep-tested via the real throwing journal (F7).",
         "queue.json + decisions.jsonl are handler-owned ledgers written directly (writeFileAtomicSync / JSONL append), not via state.ts's private evidence appender (G6 restricts that to state.ts/evidence.ts).",
         "C-029 pre-commit adversarial review: 4 MAJOR (classify hard-throw, surface/defer half-write, surface humanTerritory) + 2 minor (correctedKind null-iff-agreed, decisions torn-line) fixed test-first. 2 nits deferred to 10.1 (classify archiveRun; decide isHumanTerritory ask-gate)."
       ],
@@ -1035,11 +1035,11 @@
       "attempts": 1,
       "deviations": [
         "SCHEMAS.Plan is a NEW 18th schema in core/types.ts. Not optional: fanout's schemaName is mandatory and validate() resolves it from SCHEMAS at call time, so conductor_plan cannot dispatch without one. export-schemas.test.ts derives from Object.keys(SCHEMAS), so the addition is safe by construction.",
-        "The pure §3.2 validation table lives in a NEW core/planning.ts (G3 pure-core/thin-adapter); tools.ts stays dispatch/re-prompt/persist/journal.",
-        "Re-prompt budget is ONE uniformly for every §3.2 row (the plan reserves the bounded round for the size row and 9.2's bullet for the cycle case). Strictly more forgiving; still ends in a named rejection. Raised at the Phase 9 gate (C-030 F5).",
+        "The pure \u00a73.2 validation table lives in a NEW core/planning.ts (G3 pure-core/thin-adapter); tools.ts stays dispatch/re-prompt/persist/journal.",
+        "Re-prompt budget is ONE uniformly for every \u00a73.2 row (the plan reserves the bounded round for the size row and 9.2's bullet for the cycle case). Strictly more forgiving; still ends in a named rejection. Raised at the Phase 9 gate (C-030 F5).",
         "'> 1 acceptance cluster' has no spec definition; approximated by the criterion's subject token after skipping determiners, documented in planning.ts. No authored test exercises this row directly.",
         "C-030 pre-commit adversarial review: 19 surviving findings (2 MAJOR) fixed test-first across 14 R-tests; 3 refuted; E10 (crash-mid-persist reconciliation) deferred to 10.1. 9 skeptics died on a session limit and their findings were counted as UPHELD per the plan's under-delivered-panel rule.",
-        "R13 (derived plan-decision schema) PASSED pre-fix — it is a regression guard, not red-driven TDD evidence. Recorded rather than presented as a red."
+        "R13 (derived plan-decision schema) PASSED pre-fix \u2014 it is a regression guard, not red-driven TDD evidence. Recorded rather than presented as a red."
       ],
       "startedAt": "2026-08-13T02:45:00Z",
       "finishedAt": "2026-08-13T04:40:00Z"
@@ -1079,8 +1079,8 @@
       "attempts": 1,
       "deviations": [
         "The staged red test came from the lookahead burst whose writer DIED on a session limit; the orchestrator verified completeness (1077 lines, 8 tests = 8 assertions, clean EOF, node --check, tsc showing only the missing export) before trusting it.",
-        "Lens ROSTER is max(readFanout('planReview'), 4), which can exceed workflow.planReviewers. §3.2 mandates four lenses and they are the substance of the stage; the reader clamp is a concurrency knob the fan-out engine enforces internally. Raised at the Phase 9 gate.",
-        "blocksItems mapping is the pinned spec-gap resolution (§2.10 findings carry no item reference): id tokens + file-shaped path tokens, over-match biased (a human unblocks) but never whole-queue. Raised at the Phase 9 gate.",
+        "Lens ROSTER is max(readFanout('planReview'), 4), which can exceed workflow.planReviewers. \u00a73.2 mandates four lenses and they are the substance of the stage; the reader clamp is a concurrency knob the fan-out engine enforces internally. Raised at the Phase 9 gate.",
+        "blocksItems mapping is the pinned spec-gap resolution (\u00a72.10 findings carry no item reference): id tokens + file-shaped path tokens, over-match biased (a human unblocks) but never whole-queue. Raised at the Phase 9 gate.",
         "Question origin/round semantics: planReviewRounds counts REVISION rounds; the cap exit itself performs no revision.",
         "C-031 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 16 agents/1.4M tokens vs C-030's 79/5.7M): 5 MAJOR + 2 minor fixed test-first; 5 crash-class findings deferred to 10.1; 2 raised at the Phase 9 gate.",
         "A first review run returned an EMPTY finding set because both lenses died to a connection error; treated as 'review did not run', not as a pass, and re-run."
@@ -1123,12 +1123,12 @@
       "revertAssertion": "removing handleSubmitTest re-reds tools-9.4a.test.ts (missing-subject); reverting redAdmission to the class-only edge re-reds [C032-D1-fallback-red-refused]; reverting the capturedRedOf staleness report re-reds [C032-D2-stale-red]; removing assertContainedPaths re-reds [C032-D3-testscope-escape]; reverting cannotEverPublish re-reds [C032-D4-deferred-dep-wedge]; reverting the legal-class filter re-reds [C032-D5-illegal-class-red]; reverting the accumulated attempts re-reds [C032-D6-attempts-accumulate]; removing the named questions.jsonl failure re-reds [C032-D7-torn-questions]; removing the Math.floor knobs re-reds [C032-D8-fractional-budget]; removing the NEEDS_CONTEXT exit re-reds [C032-D9-needs-context]",
       "attempts": 1,
       "deviations": [
-        "testRepairAttempts bounds REPAIRS, not total dispatches (§3.3 'returns the failure to the writer FOR REPAIR, bounded at testRepairAttempts' + the §2.1 knob comment 'submit_test: illegal-red repair attempts'), so one call makes at most 1 + testRepairAttempts writer dispatches. An earlier orchestrator-signed draft of the assertions row said total dispatches <= the knob; corrected in the assertions file BEFORE the tests were written, and the test-writer returned a mutation table proving only 1+budget satisfies both loop tests.",
-        "Question origins REUSE the closed §2.11 vocabulary: 'implementer-blocked' at submit repair exhaustion (the blocked write-capable sub-session IS the test-writer) and 'review-round-cap' at the vet cap. Raised at the Phase 9 gate.",
+        "testRepairAttempts bounds REPAIRS, not total dispatches (\u00a73.3 'returns the failure to the writer FOR REPAIR, bounded at testRepairAttempts' + the \u00a72.1 knob comment 'submit_test: illegal-red repair attempts'), so one call makes at most 1 + testRepairAttempts writer dispatches. An earlier orchestrator-signed draft of the assertions row said total dispatches <= the knob; corrected in the assertions file BEFORE the tests were written, and the test-writer returned a mutation table proving only 1+budget satisfies both loop tests.",
+        "Question origins REUSE the closed \u00a72.11 vocabulary: 'implementer-blocked' at submit repair exhaustion (the blocked write-capable sub-session IS the test-writer) and 'review-round-cap' at the vet cap. Raised at the Phase 9 gate.",
         "The 9.4a/5.3 deferred binding is ENFORCE: core/gates-phase depsReady removes the stage tool for a dependency-unready item, so gate and handler cannot disagree. It introduced the E11 wedge (a deferred dependency left the run with no legal exit), fixed in the same commit by cannotEverPublish.",
         "An untargeted red (evidence legalRed=false) is NOT routed into the repair loop, unlike a class-'error' red: no edit the writer can make to its own test makes a full-suite fallback target it, so the stage stops and asks rather than spending the budget re-observing another suite's failure.",
         "C-032 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 18 agents/2.3M tokens): 5 surviving MAJORs collapsing to 3 distinct defects, plus 6 minors/nits fixed; 1 crash-class finding deferred to 10.1; 6 policy questions raised at the Phase 9 gate.",
-        "One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics — the string the diff uses is the one §3.3 and the pinned contract name — and is recorded in C-032 so it is not re-litigated.",
+        "One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics \u2014 the string the diff uses is the one \u00a73.3 and the pinned contract name \u2014 and is recorded in C-032 so it is not re-litigated.",
         "PROCESS SLIP (self-caught, corrected): the commit was first written with a long body and a Co-Authored-By trailer, against the standing convention recorded in HANDOFF ('Commits verbatim from STATE.json commitMessage; NO trailers') which every prior conductor: commit follows. Amended to the verbatim subject line before anything else was built on it; the narrative it carried already lives in CORRECTIONS.md C-032, which is its designated home."
       ],
       "startedAt": "2026-08-13T06:30:00Z",
@@ -1168,9 +1168,9 @@
       "attempts": 1,
       "deviations": [
         "IMPLEMENTED BY THE ORCHESTRATOR, not a subagent: the dispatched implementer died on a weekly account limit before making any edit. The test file was written and vetted by a subagent beforehand; the orchestrator observed the red, wrote section (8), and reviewed it.",
-        "NO ADVERSARIAL REVIEW PANEL was possible (subagents unavailable). Substituted mutation testing + a self-review of the diff — which found the C-034 coverage hole that all 13 authored rows missed, plus two self-review defects (a blank askedBy.sessionID and an inconsistent attempts.green).",
-        "§3.3's BLOCKED escalation ladder: only the two CONSTRUCTIBLE rungs are implemented. 'Stronger model' needs a §2.1 knob that does not exist and 'item re-split' would have mark_green call queue_amend, which the 9.4b bullet does not ask for. Raised at the Phase 9 gate rather than stubbed (G4).",
-        "runVerify takes ONE scopePattern, so an item whose fileScope entries select DIFFERENT §2.1 scopes runs only the first entry's scopes. Sibling of C-032's F6; raised at the Phase 9 gate.",
+        "NO ADVERSARIAL REVIEW PANEL was possible (subagents unavailable). Substituted mutation testing + a self-review of the diff \u2014 which found the C-034 coverage hole that all 13 authored rows missed, plus two self-review defects (a blank askedBy.sessionID and an inconsistent attempts.green).",
+        "\u00a73.3's BLOCKED escalation ladder: only the two CONSTRUCTIBLE rungs are implemented. 'Stronger model' needs a \u00a72.1 knob that does not exist and 'item re-split' would have mark_green call queue_amend, which the 9.4b bullet does not ask for. Raised at the Phase 9 gate rather than stubbed (G4).",
+        "runVerify takes ONE scopePattern, so an item whose fileScope entries select DIFFERENT \u00a72.1 scopes runs only the first entry's scopes. Sibling of C-032's F6; raised at the Phase 9 gate.",
         "adapter/evidence.ts was NOT changed: RunTestOptions already carried excludeTestFiles/stateHome/workspaceKey (6.1, hardened by 968b5f8). An earlier orchestrator note claiming otherwise was a call-site misread, corrected in the assertions file, HANDOFF and IN_PROGRESS before implementation."
       ],
       "startedAt": "2026-08-13T10:50:00Z",
@@ -1210,11 +1210,11 @@
       "revertAssertion": "removing handleDispatchWave re-reds tools-9.4c.test.ts (missing-export); reverting the Gap-1 gate offer re-reds [9.4c-gate-offers-wave-while-schedulable] AND [9.4c-first-call-executing] (the repeat call is denied without it) while gates-phase.test.ts stays 16/16 green; reverting the missing-stage envError re-reds [9.4c-missing-stage-stops-honestly] alone; removing the treeState.notifyClear call re-reds [9.4c-binding-p7-stale-marker-onclear] alone; reverting write serialization re-reds [9.4c-writes-serialize] AND [9.4c-publish-order], which share the mechanism (all verified by running the revert)",
       "attempts": 1,
       "deviations": [
-        "DEFERRED BINDING P3 DISCHARGED: PLAN_REVIEWED->EXECUTING goes through core legalRunTransition with context derived from PERSISTED planReviewRounds (Run carries no survivingMajors) — < max means the review exited clean (survivingMajors:0), else {round,max}. Both shapes advance; an empty first wave still transitions, so a fully-blocked run cannot wedge at PLAN_REVIEWED.",
-        "DEFERRED BINDING P7 DISCHARGED: the driver calls treeState.notifyClear(tree) after EVERY stage execution (verified to be genuine production wiring, not a test-only seam), so a job the engine holds on a marker that stage broke is released. A write stage dispatched into a frozen tree races its settlement against config.parallel.subSessionTimeoutMs — the operator's OWN sub-session budget, not a new knob and not the engine's watchdog, which is never armed for a held job.",
+        "DEFERRED BINDING P3 DISCHARGED: PLAN_REVIEWED->EXECUTING goes through core legalRunTransition with context derived from PERSISTED planReviewRounds (Run carries no survivingMajors) \u2014 < max means the review exited clean (survivingMajors:0), else {round,max}. Both shapes advance; an empty first wave still transitions, so a fully-blocked run cannot wedge at PLAN_REVIEWED.",
+        "DEFERRED BINDING P7 DISCHARGED: the driver calls treeState.notifyClear(tree) after EVERY stage execution (verified to be genuine production wiring, not a test-only seam), so a job the engine holds on a marker that stage broke is released. A write stage dispatched into a frozen tree races its settlement against config.parallel.subSessionTimeoutMs \u2014 the operator's OWN sub-session budget, not a new knob and not the engine's watchdog, which is never armed for a held job.",
         "GAP-1 (C-040 theme): core/gates-phase legalTools now offers conductor_dispatch_wave in EXECUTING while the wave it already computes is non-empty. As committed it was legal ONLY at PLAN_REVIEWED, which denied every call after the first and broke multi-wave runs. `recommended` is untouched, and gates-phase.test.ts passes unchanged.",
-        "GAP-2 (G4 honesty): the default executor table wires ONLY handlers committed at HEAD; there is no item_review or publish entry until 9.5a/9.5b land. A member reaching an unserved stage STOPS with a disposition naming it — never a 'not implemented' throw, never a silent skip.",
-        "PINNED SEMANTICS: each stage tool is entered ONCE PER dispatch_wave CALL (the assertions' stage-by-stage rendezvous rule). A member arriving at a stage the wave already passed waits for the next call — which is exactly why GAP-1 is required for a run to finish."
+        "GAP-2 (G4 honesty): the default executor table wires ONLY handlers committed at HEAD; there is no item_review or publish entry until 9.5a/9.5b land. A member reaching an unserved stage STOPS with a disposition naming it \u2014 never a 'not implemented' throw, never a silent skip.",
+        "PINNED SEMANTICS: each stage tool is entered ONCE PER dispatch_wave CALL (the assertions' stage-by-stage rendezvous rule). A member arriving at a stage the wave already passed waits for the next call \u2014 which is exactly why GAP-1 is required for a run to finish."
       ],
       "startedAt": "2026-08-13T13:30:00Z",
       "finishedAt": "2026-08-13T15:10:00Z"
@@ -1369,7 +1369,7 @@
         "CMakeLists: dropped include(compiler-warnings) with the myprogram block (it applies target_compile_options to the removed ${PROJECT_NAME}=myprogram target; tools/ does not use it). Router warnings can be re-added target-scoped later.",
         "validator target is nlohmann_json_schema_validator::validator (confirmed from the vcpkg port usage; configure passed but link needed the ::validator target).",
         "router-tests registered with ctest via add_test (whole-binary) rather than doctest_discover_tests (per-case) to avoid the include(doctest) module-path gotcha; per-case discovery is a later refinement.",
-        "Step 2 (LIVE upstream contract) DEFERRED to 12.1 — serve.py (its specified vehicle) is not built; assets (llama-server binary + qwen3.6-27b) confirmed present; recorded in src/router/UPSTREAM_CONTRACT.md, NOT fabricated.",
+        "Step 2 (LIVE upstream contract) DEFERRED to 12.1 \u2014 serve.py (its specified vehicle) is not built; assets (llama-server binary + qwen3.6-27b) confirmed present; recorded in src/router/UPSTREAM_CONTRACT.md, NOT fabricated.",
         "CMake pre-build custom_command for export-schemas deferred to 11.6 (when router-tests consumes the schemas); test-conductor.sh already regenerates them."
       ],
       "startedAt": "2026-08-13T01:00:00Z",
@@ -1406,7 +1406,7 @@
       "attempts": 1,
       "deviations": [
         "HEADER-ONLY implementation (src/router/config.hpp, namespace conductor::router) so CMakeLists source-wiring stays orchestrator-only; no config.cpp.",
-        "Parse order pinned by the test: JSON parse -> fill the three documented §2.2 defaults -> schema-file validation (exported RouterConfig.schema.json, single-source) -> port range 1..65535 in the parser (schema has no min/max) -> logging.level vocabulary check.",
+        "Parse order pinned by the test: JSON parse -> fill the three documented \u00a72.2 defaults -> schema-file validation (exported RouterConfig.schema.json, single-source) -> port range 1..65535 in the parser (schema has no min/max) -> logging.level vocabulary check.",
         "Test author proved the suite satisfiable against a throwaway scratchpad reference impl and ran 6 mutations, each caught by exactly the intended case; reference deleted before delivery.",
         "KNOWN NIT for the Phase 11 gate: malformed INPUT JSON also throws ConfigError with empty field(), which the class comment reserves for schema-file trouble (doc/contract mismatch, no test pins it; flagged honestly by the implementer).",
         "Fractional ports rejected via is_number_integer() before the range test (schema's bare 'number' would admit them)."
@@ -1446,9 +1446,9 @@
       "deviations": [
         "Staged test came from the lookahead burst (writer died on a session limit). Orchestrator verified completeness (839 lines, 10 cases = 10 assertions, clean EOF) AND updated it to the user-directed src/ layout: moved to src/tests/proxy_test.cpp and converted to full-path includes (#include \"router/router.hpp\").",
         "HEADER-ONLY src/router/router.hpp so CMakeLists source wiring stays orchestrator-only (same posture as 11.2's config.hpp).",
-        "Verbatim relay does NOT use httplib Response::set_content: this vcpkg build has brotli support, so set_content would gzip/brotli the body whenever the caller sent Accept-Encoding, adding Content-Encoding/Vary the upstream never sent. Buffered relays use a fixed-length content provider instead, which httplib does not re-encode. Tests would have passed either way (the client decompresses transparently) — this is about being verbatim ON THE WIRE.",
+        "Verbatim relay does NOT use httplib Response::set_content: this vcpkg build has brotli support, so set_content would gzip/brotli the body whenever the caller sent Accept-Encoding, adding Content-Encoding/Vary the upstream never sent. Buffered relays use a fixed-length content provider instead, which httplib does not re-encode. Tests would have passed either way (the client decompresses transparently) \u2014 this is about being verbatim ON THE WIRE.",
         "SSE needs a worker thread: httplib invokes the server-side chunked content provider AFTER the handler returns, and the client's send() blocks, so both cannot be driven from one thread. Lifetime is owned by a detail::UpstreamCall captured in the provider lambda; its destructor cancels + client->stop() + joins, so a downstream disconnect can neither leak nor wedge a thread.",
-        "TCP_NODELAY enabled on both legs (httplib defaults it off) — right for token-by-token SSE and removes Nagle as a flake source.",
+        "TCP_NODELAY enabled on both legs (httplib defaults it off) \u2014 right for token-by-token SSE and removes Nagle as a flake source.",
         "G5 fail-soft verified in the implementation, not just the tests: json::parse uses allow_exceptions=false, dump() is wrapped so an un-round-trippable body forwards ORIGINAL bytes, and the only minted status is the 502 for an unreachable upstream.",
         "FLAKE-HUNT: implementer ran 30 sequential 11.3-only + 20 sequential full ctest + 48 runs at 12-way concurrency, zero 11.3 failures."
       ],
@@ -1477,7 +1477,7 @@
         "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
         "exitCode": 1,
         "class": "missing-subject",
-        "excerpt": "src/tests/admission_test.cpp:151:10: fatal error: 'router/admission.hpp' file not found (orchestrator-observed AFTER wiring the file into the router-tests source list — the test-writer correctly reported that the target build had passed WITHOUT compiling its file, since CMakeLists is orchestrator-only). The review-fix case [11.4-fix-streaming-slot-release] was separately observed red: CHECK(0 == 1) on inflight_count during a live stream."
+        "excerpt": "src/tests/admission_test.cpp:151:10: fatal error: 'router/admission.hpp' file not found (orchestrator-observed AFTER wiring the file into the router-tests source list \u2014 the test-writer correctly reported that the target build had passed WITHOUT compiling its file, since CMakeLists is orchestrator-only). The review-fix case [11.4-fix-streaming-slot-release] was separately observed red: CHECK(0 == 1) on inflight_count during a live stream."
       },
       "filesTouched": [
         "src/router/admission.hpp",
@@ -1489,11 +1489,11 @@
       "revertAssertion": "deleting src/router/admission.hpp re-reds the whole TU (missing include); dropping `slot` from the chunked content provider's capture re-reds [11.4-fix-streaming-slot-release] alone; returning priorities_.interactive for the 'review' tag re-reds [11.4-priority-order] alone; sizing new_task_queue at a literal 8 instead of computeTaskQueueThreads re-reds [11.4-health-at-full-queue] alone (all four verified, not reasoned)",
       "attempts": 1,
       "deviations": [
-        "SUBAGENT LIMIT: the implementer died mid-task on a weekly account limit, having written a complete admission.hpp but stopping between USING admission_ and DECLARING it, and never writing sendAdmissionError — the tree did not compile. The orchestrator finished it by hand and then reviewed the whole diff as if it had come from a live agent.",
+        "SUBAGENT LIMIT: the implementer died mid-task on a weekly account limit, having written a complete admission.hpp but stopping between USING admission_ and DECLARING it, and never writing sendAdmissionError \u2014 the tree did not compile. The orchestrator finished it by hand and then reviewed the whole diff as if it had come from a live agent.",
         "C-033 (found by the orchestrator's own diff read, NOT by a review panel): the admitted slot was released mid-stream because the chunked content provider did not capture it, so maxInflightPerModel was inert for all SSE traffic. Fixed test-first with a streaming stub; the 8 authored rows could not have caught it because their stub always sets a Content-Length.",
-        "SG-2's thread budget uses config.admission.maxInflightPerModel directly rather than a sum over models: §2.2 carries ONE scalar per-model cap, not a per-model map, so the plan's 'sum(maxInflightPerModel)' reduces to that scalar. Pinned by the assertions (76 threads for the §2.2 defaults).",
+        "SG-2's thread budget uses config.admission.maxInflightPerModel directly rather than a sum over models: \u00a72.2 carries ONE scalar per-model cap, not a per-model map, so the plan's 'sum(maxInflightPerModel)' reduces to that scalar. Pinned by the assertions (76 threads for the \u00a72.2 defaults).",
         "The clamp test holds ~248 concurrent connections, which is unavoidable rather than careless: effective-queue + inflight is always 248 by construction under a fixed 256 budget, so no rebalancing of the knobs makes it cheaper. Measured cost is small (whole suite 1.5s, stable across 3 runs), so the budget stays a fixed constant rather than becoming injectable.",
-        "C-038 (retroactive adversarial review, run once subagents were available again): 3 defects fixed test-first — a signed-overflow in the listener sizing that wrapped negative, skipped the clamp and produced a ONE-THREAD listener (inverting the very pool-exhaustion property 11.4 pins); no range validation on the three admission integers; and a ConfigError naming the wrong field. ctest 36/36. The fixes are in a follow-up commit, not e04fe14."
+        "C-038 (retroactive adversarial review, run once subagents were available again): 3 defects fixed test-first \u2014 a signed-overflow in the listener sizing that wrapped negative, skipped the clamp and produced a ONE-THREAD listener (inverting the very pool-exhaustion property 11.4 pins); no range validation on the three admission integers; and a ConfigError naming the wrong field. ctest 36/36. The fixes are in a follow-up commit, not e04fe14."
       ],
       "startedAt": "2026-08-13T09:20:00Z",
       "finishedAt": "2026-08-13T10:45:00Z"
@@ -1535,7 +1535,7 @@
         "SUBAGENT DIED (transient 'Connection refused', not the account limit) with the implementation COMPLETE but before it ran ctest. The orchestrator verified it instead: built, ran the suite, mutation-tested the three ordering laws, and read the whole seam diff.",
         "C-036's roster-sizing rule does not apply here (affinity orders a queue, it does not size a roster).",
         "KNOWN MINOR, raised at the Phase 11 gate: AdmissionController::policies_ is erased only in grantNext (when a model's queue empties or its last entry is granted), so a model whose CONTENDED queue drains entirely by queueTimeout rather than by grant leaves one AffinityPolicy behind. Bounded by distinct model names ever contended; G13 pins one model, so it is inert today. The fix would need an O(n) scan in the timeout path, which is why it was not taken now.",
-        "The policy is PURE (no clock, no randomness, no global state) and is consulted from grantNext under the mutex admission already holds — no second queue, no second lock. 'Queued at selection time' is derived from the monotonic arrival ordinal (a per-burst ceiling), so the policy needs neither a clock nor an extra parameter."
+        "The policy is PURE (no clock, no randomness, no global state) and is consulted from grantNext under the mutex admission already holds \u2014 no second queue, no second lock. 'Queued at selection time' is derived from the monotonic arrival ordinal (a per-burst ceiling), so the policy needs neither a clock nor an extra parameter."
       ],
       "startedAt": "2026-08-13T12:30:00Z",
       "finishedAt": "2026-08-13T13:05:00Z"
@@ -1585,7 +1585,7 @@
     "11.8": {
       "taskId": "11.8",
       "manifest": true,
-      "tier": "C",
+      "tier": "B",
       "status": "NOT_STARTED",
       "commitSha": null,
       "commitMessage": "conductor: 11.8 router live smoke",
@@ -1599,7 +1599,9 @@
       "filesTouched": [],
       "revertAssertion": null,
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "C-041: tier C -> B. The plan assigns no task the llama-router CLI (src/main.cpp is still the 11.1 scaffold and 11.2-11.7 are all header-only library tasks), yet 11.8 Step 1 runs the binary. 11.8 therefore lands a minimum CLI test-first: NEW src/router/cli.hpp (pure parseCli) + NEW src/tests/cli_test.cpp + src/main.cpp as a thin adapter. --schema is a required flag with no search path; exit codes 0/2/3/4 pinned for 12.1's supervisor."
+      ],
       "startedAt": null,
       "finishedAt": null
     },
@@ -1827,7 +1829,7 @@
       ],
       "startedAt": "2026-08-12T18:10:00Z",
       "finishedAt": "2026-08-12T17:21:24Z",
-      "note": "Added per orchestrator prompt §3.3 (unassigned chat.message hook; plan §3.2 lines 1064-1159, §3.5 lines 1334-1427). Own red->green->commit before Phase 9."
+      "note": "Added per orchestrator prompt \u00a73.3 (unassigned chat.message hook; plan \u00a73.2 lines 1064-1159, \u00a73.5 lines 1334-1427). Own red->green->commit before Phase 9."
     },
     "12.1-G5": {
       "taskId": "12.1-G5",
@@ -1849,7 +1851,7 @@
       "deviations": [],
       "startedAt": null,
       "finishedAt": null,
-      "note": "G5 equivalence half of Task 12.1 (run 13.1 e2e with and without router). Executes after 13.1 green; no separate commit; §11 acceptance row 9."
+      "note": "G5 equivalence half of Task 12.1 (run 13.1 e2e with and without router). Executes after 13.1 green; no separate commit; \u00a711 acceptance row 9."
     }
   }
 }

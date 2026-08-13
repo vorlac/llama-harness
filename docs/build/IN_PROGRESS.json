@@ -1,24 +1,29 @@
 {
+  "asOf": "2026-08-13, after C-035 landed (ee254a8). Suite 994/994 GATE PASS; ctest 36 cases / 21072 assertions.",
   "spineTask": {
-    "taskId": "9.4c",
-    "step": "Phase 9 SERIAL. conductor_dispatch_wave. Assertions promoted (12 rows, f35f9f3). TESTS WRITTEN AND VETTED BY THE WRITER (tsc showed exactly ONE error: the missing handleDispatchWave export; node --test gave the missing-export SyntaxError; the writer also ran a stubbed smoke copy so its FIXTURE code executed, which caught a path bug of its own). PARKED at staging/task-9.4c/tools-9.4c.test.ts and deliberately NOT moved into conductor/tests/ yet: two review-fix agents are running with a green gate as their definition of done, and a red file in the tree would fail their gate through no fault of theirs. Move it in once they report, observe the red MYSELF, then implement.",
-    "intendedFiles": [
-      "conductor/tests/tools-9.4c.test.ts",
-      "conductor/adapter/tools.ts",
-      "conductor/core/gates-phase.ts"
-    ]
+    "taskId": "9.5a",
+    "step": "conductor_item_review. Assertions promoted (14 rows). The red IS IN THE TREE at conductor/tests/tools-9.5a.test.ts and the ORCHESTRATOR OBSERVED IT: tsc gives exactly one error (TS2305, no exported member 'handleItemReview') and node --test gives the matching missing-export SyntaxError. An implementer is running. On its return: verify the tree myself (git status + full gate), read the diff, re-run at least one of its mutations independently, then commit + M4.",
+    "intendedFiles": ["conductor/adapter/tools.ts", "conductor/tests/tools-9.5a.test.ts"],
+    "twoBindingsLandingHere": "(1) an under-delivered skeptic panel counts missing verdicts as UPHOLDS (Phase 1 gate deferral); (2) receive-review.md is actually injected into the sessions that receive findings (Phase 8 gate / C-028 deferral)."
   },
   "branchB": {
-    "taskId": "11.5",
-    "step": "affinity — prefix-group ordering. 11.4 is COMMITTED (e04fe14) + M4 PASS. Promote the draft at scratchpad/staging/assertions-drafts/task-11.5.assertions.json, applying the SAME corrections 11.4's promotion needed: src/tests/ (not src/router-tests/), full-path includes relative to src/, header-only modules, and REUSE 11.3's RequestTags (affinity's group tag is already parsed there, with the config-overridable header name in Router::groupHeader_)."
+    "taskId": "11.6",
+    "step": "schema-observer. Specs for 11.6 (13 rows), 11.7 (16 rows) and 11.8 (12 rows) are PROMOTED to docs/build/specs/. A test-writer is producing the red at staging/task-11.6/schema_observer_test.cpp. Scope was SHRUNK by Task 0.2's wire findings: responses stream, so response-side validation is inert and 11.6 is a request-side schemaMissing counter + note.",
+    "known11_8Gap": "SG-A, recorded in the 11.8 spec and NOT yet resolved: src/main.cpp is still the 11.1 scaffold — no argc/argv, no config load, no Router — so the binary cannot actually be run. 11.8 is a LIVE smoke task, so either 11.8 carries the main() wiring or it has nothing to smoke. Decide before starting 11.8."
+  },
+  "readyToStart": {
+    "9.5c": "red PARKED at staging/task-9.5c/tools-9.5c.test.ts (12 rows). Do NOT move it in while the 9.5a implementer is editing adapter/tools.ts — one red at a time, or a failure cannot be attributed.",
+    "9.5b": "30 rows promoted; its red test-writer was dispatched with 9.5a's and 9.5c's.",
+    "9.6": "21 rows promoted. Its test-writer was deliberately HELD until C-035 landed, because 9.6 wires tool calls to handlers and would have read the queue_amend surface mid-rewrite. That block is now clear."
   },
   "processNotes": {
-    "subagentsUnavailable": "2026-08-13: a WEEKLY account limit (resets Aug 15 19:00 America/New_York) killed both dispatched implementers. Until it resets, Agent/Workflow dispatch fails — the orchestrator's own main loop still works, so tasks proceed SOLO. This is why 11.4 was finished by hand.",
-    "throttle": "AGREED WITH USER after the C-030 burst exhausted a 5h window (~79 agents/5.7M tokens): quote spec excerpts inline instead of letting agents read the plan; skeptics for MAJOR findings only; 2 review lenses not 3; lookahead of 1-2 tasks not 8; orchestrator does implementations directly when cheaper.",
-    "reviewResultTrap": "A review workflow returning an EMPTY finding set may mean the LENSES CRASHED, not that the diff is clean. Check the run's failures list + journal.jsonl before treating empty as a pass (seen at 9.3).",
+    "serialLanes": "Every Phase 9 task lands in adapter/tools.ts, so IMPLEMENTERS are strictly serial. TEST-WRITERS can run in parallel (they only write their own file) but must be parked in staging/ and moved in one at a time. Branch B (C++) is an independent tree and runs as a SECOND lane concurrently — but 11.6/11.7/11.8 are serial among themselves since each wires into router.hpp.",
+    "mutationRevertTrap": "2026-08-13, cost a recovery: a mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. It threw away the tools.ts half of C-035 mid-round. Snapshot with `cp` before the first mutation and restore from the snapshot. Never git checkout a file with uncommitted work.",
+    "agentStrayFileTrap": "2026-08-13: a test-writer left its typecheck copy at conductor/tests/tools-9.5a.test.ts instead of only staging/. It reddened the gate and looked exactly like a flake (the TEST COUNT changed, 994 -> 995, which is the tell). After ANY agent returns, run git status before trusting a gate result.",
+    "mutationFindsWhatReviewMisses": "Third time banked: C-035's 14 authored rows were all green and a mutation still found a load-bearing hole (an `add` must cancel a prior `remove` of the same id, or the handler creates the reborn item file and then deletes it). Always mutate, and always read the diff afterwards anyway.",
+    "readTheInterface": "Read the exported SIGNATURE, never infer it from one call site. Declaring a surface missing on call-site evidence has already cost this build one correction round (excludeTestFiles at 9.4b).",
+    "reviewResultTrap": "A review workflow returning an EMPTY finding set can mean the LENSES CRASHED, not that the diff is clean. Check the run's failures list + journal.jsonl before treating empty as a pass (seen at 9.3).",
     "firstImplementerTrap": "A subagent can return an anomalous 0-edit 'done', and a dead subagent can leave a NON-COMPILING tree (seen at 11.4). ALWAYS git status + build/run before trusting anything.",
-    "mutationThenRead": "Mutation-test a green suite to prove it discriminates, THEN read the diff anyway — C-033 survived both a green suite and two successful mutation checks, and was caught only by reading a comment that lied about the code below it.",
-    "reviewFixRevertTrap": "VERIFY every revertAssertion row by actually running the revert. At 9.4a, removing the !edge.repairable branch did NOT re-red [C032-D1] (that test runs at testRepairAttempts:0). All four of 11.4's revert claims were run.",
     "userParallelWork": "The user commits their own work on main concurrently. ALWAYS git add explicit paths, never -A, and never revert their files."
   }
 }
