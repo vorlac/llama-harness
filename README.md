@@ -1,362 +1,351 @@
 # llama-harness
 
-A self-contained workspace for running open-weight LLMs locally on Apple Silicon
-and driving them from [opencode](https://opencode.ai), with llama.cpp as the only
-inference path.
+A self-contained macOS/Apple-Silicon workspace for running open-weight LLMs locally on
+llama.cpp, and for driving them from [opencode](https://opencode.ai). On top of that sits
+**conductor**: a TDD-enforcing, adversarially-reviewed orchestration harness whose job is to
+make a *local* ~27B model produce software you can trust. Everything the workspace downloads,
+builds or generates lives under a small set of gitignored directories (`.data/`, `.out/`,
+`build/`), so a clean checkout is one `rm -rf` away.
 
-It does four things:
+## What this is
 
-1. **Installs** curated GGUF models, verified by checksum rather than trusted.
-2. **Serves** them through a single llama.cpp router that swaps models on demand.
-3. **Wires** opencode to whichever model you picked, so you just `cd` and work.
-4. **Benchmarks** them objectively — by executing the code they generate.
+**conductor** is an [opencode](https://opencode.ai) plugin plus a C++ scheduling layer. It
+takes a prompt, classifies it, decomposes it into items with explicit file scopes, plans the
+work, tears that plan apart with fresh reviewers, then executes each item under enforced
+test-driven development — and it does all of this through a state machine that only advances
+when a tool handler has re-derived the evidence itself. A model saying "tests pass" advances
+nothing. See [the conductor overview](docs/user/conductor-overview.md).
 
-Everything it downloads, builds or generates lives under one gitignored `.data/`
-directory. Delete that directory and the workspace is back to a clean checkout.
-
----
+**The model harness** is the substrate underneath: Python 3.9 stdlib-only scripts and a pinned
+`llama.cpp` submodule that install, verify, serve and benchmark GGUF models locally. One
+`llama-server` in *router mode* serves every installed model at a single endpoint and swaps
+weights on demand; opencode talks to that endpoint and nothing else. No cloud provider is
+involved and no API key is required.
 
 ## Quickstart
 
 ```bash
-./setup.sh
-```
-
-That single command is interactive and handles everything: missing dependencies,
-the llama.cpp submodule, building the tools, picking models, downloading and
-validating them, and writing the configs.
-
-Then start working:
-
-```bash
-scripts/serve.py       # pick a model, land in a ready shell
+./setup.sh                  # deps, submodule, tools, models, configs - interactive
+scripts/serve.py            # pick a model, land in a ready shell
 cd ~/your/project
-opencode               # already pointed at the served model
+opencode                    # already pointed at the served model
 ```
 
-Type `exit` in that shell to stop the model. That's the whole loop.
+Type `exit` in that shell to stop the model. Requires Python 3.9+ (macOS ships it), plus
+`git`, `cmake` and `ninja`; `setup.sh` offers to install anything missing. Longer walkthrough:
+[docs/user/quickstart.md](docs/user/quickstart.md); dependency detail:
+[docs/user/installation.md](docs/user/installation.md).
 
-> Requires Python 3.9+ (macOS ships this), plus `git`, `cmake` and `ninja`.
-> `setup.sh` offers to install anything missing, including the optional
-> [`rich`](https://rich.readthedocs.io) package for live progress bars and
-> colour-coded benchmark tables (`pip3 install --user rich`). Everything works
-> without it — output falls back to aligned plain text.
+## conductor
 
+> *Not yet wired: `scripts/serve.py` loads the conductor plugin and launches llama-router from
+> task 12.1 onward — see [project status](docs/developer/project-status.md).*
+
+### The problem
+
+A local model writing software fails in the same ways every time:
+
+- **Optimistic self-reporting.** It reports success it did not verify.
+- **Process amnesia.** Rules stated at turn 1 are gone by turn 30.
+- **Test-after theater.** The test is written once the code already passes.
+- **Anchored review.** A model reviewing its own work in its own context agrees with itself.
+- **Over-building.** It solves the general case nobody asked for.
+- **Shortcut-taking under difficulty.** A hard test becomes a skipped test.
+
+None of these are fixed by asking more firmly. They are fixed mechanically or not at all.
+
+### The answer
+
+conductor holds each run in a state machine that can only be advanced by a small set of typed
+`conductor_*` tools, and every one of those handlers re-derives its own evidence: it runs the
+test command, reads the git state, and computes the verdict, so the model's claim is never the
+record. Around that sits a gate stack that denies out-of-order and out-of-scope actions
+outright — a deny is a thrown error the model reads back as a refusal reason — and a fan-out
+engine that dispatches review to **fresh sub-sessions** with no memory of writing the code,
+one lens each, whose findings then face refuters before they count. Doctrine is re-injected
+into every request rather than stated once, because a rule the model has to remember is a rule
+it will forget.
+
+### The three layers
+
+```mermaid
 ---
-
-## How it works
-
-```
-                    ┌────────────────────────────────────┐
-   opencode ───────►│  llama-server  (router mode)       │
-   (any workspace)  │    ├── ornith-35b     [loaded]     │
-                    │    ├── qwen3-coder-30b             │
-                    │    └── gemma-4-31b                 │
-                    └────────────────────────────────────┘
-                              reads .data/configs/llama-models.ini
-```
-
-**One server, many models.** Rather than a process per model, a single
-`llama-server` runs in *router mode*. It publishes every installed model at
-`/v1/models` and loads or unloads weights on demand as requests arrive. Because
-`--models-max` defaults to `1`, switching models transparently evicts the
-previous one — which matters when a single model can occupy 30 GB of a 64 GB
-machine.
-
-**opencode talks to exactly one endpoint.** The generated `opencode.json` defines
-a provider using `@ai-sdk/openai-compatible` pointed at that router, so llama.cpp
-is the only path between opencode and any model. No cloud provider is involved
-and no API key is required.
-
-**`serve.py` ties it together.** It starts the server, writes a session-scoped
-opencode config whose default model is the one you picked, and drops you into an
-interactive bash subshell with `OPENCODE_CONFIG` already exported. The model
-lives exactly as long as that shell.
-
-### Repository layout
-
-```
-setup.sh                guided first-time install
-scripts/
-  serve.py              start a model + a ready-to-use shell
-  fetch_models.py       download / validate / configure / build
-  models_catalog.py     the model catalog — edit to add models
-  benchmark.py          the benchmark runner
-  bench_presets.py      presets and task suites
-  hostinfo.py           measured host profile
-  README.md             deep reference for all of the above
-src/main.cpp            minimal C++ llama.cpp chat client
-extern/llama-cpp        pinned llama.cpp submodule
-
-.data/                  everything generated (the only gitignored dir)
-  models/<id>/            weights + .manifest.json
-  tools/                  llama-* binaries built from the pinned submodule
-  configs/                opencode.json, llama-models.ini, benchmark.json
-  benchmark/              results + report.md
-  scripts/                generated helpers
-```
-
+config:
+    theme: 'base'
+    curve: 'straight'
+    themeVariables:
+        darkMode: true
+        clusterBkg: '#22272f62'
+        clusterBorder: '#6a6f77ff'
+        clusterTextColor: '#C1C4CAff'
+        lineColor: '#C1C4CAAA'
+        background: '#262B33'
+        primaryColor: '#3a3f47ff'
+        primaryTextColor: '#C1C4CAff'
+        primaryBorderColor: '#6a6f77ff'
+        primaryLabelBkg: '#262B33'
+        secondaryColor: '#425f5fff'
+        secondaryBorderColor: '#8c9c81ff'
+        secondaryTextColor: '#C1C4CAff'
+        tertiaryColor: '#4d4962ff'
+        tertiaryBorderColor: '#8983a5ff'
+        tertiaryTextColor: '#C1C4CAff'
+        nodeTextColor: '#C1C4CA'
+        defaultLinkColor: '#C1C4CA'
+        edgeLabelBackground: '#262B33'
+        labelTextColor: '#C1C4CA'
 ---
+flowchart TD
+    U["User prompt"]
 
-## Choosing a model
+    subgraph L1["Layer 1 - conductor plugin (fail-closed)"]
+        S["opencode session"]
+        G["Gate stack"]
+        T["conductor tools and FSMs"]
+        F["Sub-session fan-out"]
+    end
+
+    subgraph L2["Layer 2 - llama-router (fail-soft)"]
+        R["Admission and prefix affinity"]
+        O["Metrics and schema observation"]
+    end
+
+    subgraph L3["Layer 3 - wiring"]
+        W["serve.py session config"]
+    end
+
+    subgraph INF["Inference substrate"]
+        LS["llama-server in router mode"]
+    end
+
+    W -.->|"injects plugin"| S
+    W -.->|"launches"| R
+    W -.->|"launches"| LS
+    U --> S
+    S -->|"tool call"| G
+    G -->|"deny throws"| S
+    G -->|"allow"| T
+    T --> F
+    F -->|"provider requests"| R
+    R --> O
+    O --> LS
+    F -.->|"--no-router"| LS
+
+    linkStyle default stroke:#C1C4CAaa,stroke-width:2px,color:#C1C4CAaa
+
+    classDef neutral fill:#3a3f47,stroke:#6a6f77,color:#C1C4CA,rx:6,ry:6
+    classDef accent  fill:#2b4268,stroke:#779DC9,color:#ffffff,rx:6,ry:6
+
+    class U,S,F,R,O,LS,W neutral
+    class G,T accent
+```
+
+Layer 1 is the only layer that can see a tool call, so every gate lives there and it is
+**fail-closed**: a crash inside gate evaluation on a guarded call denies. Layer 2 gets exactly
+the jobs the plugin structurally cannot do — cap in-flight requests against a server it does
+not own, keep a shared KV prefix hot, validate a claim it did not itself make — and it is
+**fail-soft**: it never returns a status the direct path would not have returned, its schema
+guard *observes* rather than rejects, and `serve.py --no-router` runs the identical process,
+just slower. Layer 3 is the wiring: `scripts/serve.py` injects the plugin, agents and
+permissions into the session-scoped opencode config it already generates and launches the
+router, so the harness travels into whatever workspace you `cd` into. `llama-server` is the
+substrate all three sit on, not a conductor layer. See
+[architecture](docs/developer/architecture.md), [llama-router](docs/developer/llama-router.md).
+
+### What happens to every prompt
+
+- **Classify** — `question`, `trivial` or `work`; a question is answered and the run ends.
+- **Decompose** — the work becomes items, each with an explicit `fileScope` and `testScope`.
+- **Plan** — per-item approach, dependencies, acceptance criteria, and a `behavioral` flag.
+- **Review the plan** — a fresh skeptical pass; surviving majors force a revision and re-review.
+- **Execute** — items run in dependency-ready, scope-disjoint waves under enforced TDD.
+- **Report** — every terminal path writes a report, including the ones that stop early.
+
+The per-item discipline is `PENDING → RED → TEST_VETTED → GREEN → VALIDATED → REVIEWED →
+PUBLISHED`. See [run lifecycle](docs/user/run-lifecycle.md), [state machines](docs/developer/state-machines.md).
+
+### What is actually enforced
+
+| Mechanism                | Fires on                                  | Enforces                                                                                                                                                                                                                                          |
+| ------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session-registry gate    | every tool call                           | only a registered, scoped session may write; opencode's `task` sub-agent spawning is denied in every session                                                                                                                                      |
+| Git-policy gate          | any bash command containing a git segment | default-deny for any subcommand not on the read-only allow-list, matched over parsed tokens rather than substring regex                                                                                                                           |
+| Edit-scope gate          | every write-shaped call                   | implementer writes only its item's `fileScope`, test-writer only `testScope`, reviewers and planners write nothing, nobody writes `.conductor/**`                                                                                                 |
+| Verify freeze            | any edit while a verify marker is live    | the tree is frozen for the duration, production and test files alike                                                                                                                                                                              |
+| Phase-legality gate      | every `conductor_*` call                  | out-of-order transitions are denied; the same `legalTools` derivation drives the gate, the prompt injection, and continuation                                                                                                                     |
+| Item FSM                 | each per-item stage tool                  | a behavioral item cannot reach GREEN without an observed, vetted RED first, and an item may declare itself non-behavioral only if its `fileScope` is disjoint from `verify.behavioralPaths` — impossible for real code, trivial for a comment fix |
+| Handler-derived evidence | every FSM-advancing tool                  | the handler runs the command and classifies the failure; the model's claim is not the record                                                                                                                                                      |
+| Freshness stamp          | every verify                              | a verify is start-stamped against a `HEAD`; an edit to a staged behavioral file or a moved `HEAD` voids it                                                                                                                                        |
+| Foreign-red quarantine   | before each verify start-stamp            | other items' red tests are moved outside the repository so they cannot mask or pollute this item's verdict                                                                                                                                        |
+| Override budget          | `conductor_override`                      | one per item, two per run; records an anomaly, permanently taints the item, and over budget is a stop rather than a third override                                                                                                                |
+| Doctrine injection       | every request                             | the role's doctrine packs plus a live state block are restated every request, never remembered                                                                                                                                                    |
+
+Full inventory: [tool reference](docs/user/tool-reference.md),
+[gates and hatches](docs/user/gates-and-hatches.md), [gates internals](docs/developer/gates.md).
+
+Every sub-session runs the *same* served model. A role selects doctrine pack, sampling
+temperature, gate posture and router priority tag — never weights — because the point is to
+measure what process alone buys, and mixing model sizes would destroy that measurement. The
+reasoning behind this and every other standing decision is in
+[`conductor/DECISIONS.md`](conductor/DECISIONS.md).
+
+## The model harness
+
+The Python half installs, verifies, serves and benchmarks models, with no dependencies beyond
+the standard library. The one optional extra is [`rich`](https://rich.readthedocs.io), which
+upgrades benchmark output to live progress bars and colored tables.
 
 ```bash
-scripts/fetch_models.py list
-```
-
-```
-Host  64 GiB RAM  |  usable for weights: 52 GB (macOS default (75% of RAM))  |  comfortable: 42 GB
-
-Coding & agentic software engineering (primary focus)
-  ornith-35b             Ornith 1.0 35B (MoE)                  26.5 GB  fits
-  ornith-9b              Ornith 1.0 9B (dense)                  9.5 GB  fits
-  qwen3-coder-next       Qwen3-Coder-Next 80B-A3B              48.0 GB  tight
-  qwen3-coder-30b        Qwen3-Coder 30B-A3B Instruct          25.1 GB  fits
-  kat-coder-v2.5         KAT-Coder V2.5 Dev                    30.1 GB  fits
-  ...
-```
-
-The catalog holds **24 models across five categories**. Sizes are measured from
-the HuggingFace file tree, not estimated.
-
-| category | good starting point | why |
-|---|---|---|
-| coding | `ornith-35b` | MIT, SOTA agentic coding for its size |
-| coding (fast) | `qwen3-coder-30b` | 3B active params, very fast |
-| general | `qwen3.6-27b` | strong reasoning, also multimodal |
-| writing / docs | `gemma-4-26b-a4b` | best local prose, MoE speed |
-| vision | `qwen3-vl-30b` | reads mockups and screenshots |
-| embeddings | `embeddinggemma-300m` | tiny, for retrieval |
-
-**On sizing.** macOS caps Metal at ~75% of RAM, so a 64 GiB machine has about
-52 GB for weights, and KV cache sits on top of that. `fits` means weights plus
-headroom are comfortable; `tight` means it loads but you should reduce context.
-To go higher:
-
-```bash
-sudo sysctl iogpu.wired_limit_mb=57344   # 56 GB, resets on reboot
-```
-
-`list` reads that sysctl and recalculates automatically.
-
-See [`scripts/README.md`](scripts/README.md) for the full catalog with every
-quant, license and note.
-
----
-
-## Everyday commands
-
-```bash
-# models
-scripts/fetch_models.py list --long              # full detail per model
-scripts/fetch_models.py info ornith-35b --remote # live quant listing from HF
-scripts/fetch_models.py install ornith-35b       # download + validate + configure
+scripts/fetch_models.py list                 # catalog + what fits this machine
+scripts/fetch_models.py install ornith-35b   # download, validate, configure
 scripts/fetch_models.py install --category coding
-scripts/fetch_models.py install gemma-4-31b --with-mmproj   # vision projector
-scripts/fetch_models.py verify                   # re-check every installed model
-scripts/fetch_models.py remove ornith-9b
-scripts/fetch_models.py status                   # what is installed and configured
-
-# serving
-scripts/serve.py                                 # numbered picker
-scripts/serve.py ornith-35b                      # skip the picker
-scripts/serve.py --fresh                         # ignore saved settings
-scripts/serve.py --no-shell                      # plain foreground server
-
-# tools
-scripts/fetch_models.py build                    # build llama-* from the submodule
-scripts/fetch_models.py config --models-max 2    # regenerate configs
+scripts/fetch_models.py verify               # re-check every installed model
+scripts/fetch_models.py build                # build llama-* from the pinned submodule
 ```
 
-Inside a `serve.py` session shell, the prompt is prefixed with the model name and
-two helpers are available: `llama_status` (what the router is serving) and
-`llama_log` (tail the server log).
+The catalog holds **24 models across five categories** — coding, general reasoning,
+prose/documentation, vision, and embeddings/rerankers — with sizes measured from the
+HuggingFace file tree rather than estimated. `list` reads the Metal wired limit from `sysctl`
+and labels each model `fits`, `tight` or `too big`. See [docs/user/models.md](docs/user/models.md).
 
-### Downloads are verified, not trusted
+**Downloads are verified, not trusted.** Every install checks, in order: exact byte size,
+SHA-256 against the LFS `oid` published by HuggingFace, GGUF magic and version, and
+shard-count consistency read from the GGUF metadata itself. Architecture and tensor count are
+recorded in `.data/models/<id>/.manifest.json`. Downloads resume at 32 MB granularity, so an
+interrupted install is re-run rather than restarted.
 
-Every install checks, in order: exact byte size, **SHA-256 against the LFS oid
-published by HuggingFace**, GGUF magic and version, and shard-count consistency
-read from the GGUF metadata itself. Architecture and tensor count are recorded in
-`.data/models/<id>/.manifest.json`.
-
-Downloads resume at 32 MB granularity — interrupt an install and re-run it.
-
-### Tools stay in lockstep with the submodule
-
-`scripts/fetch_models.py build` compiles nine binaries (`llama-server`,
-`llama-bench`, `llama-perplexity`, `llama-cli`, `llama-mtmd-cli`, `llama-tts`,
-`llama-batched-bench`, `llama-tokenize`, `llama-quantize`) into `.data/tools/`,
-recording the submodule commit they came from. Every `serve` and `benchmark` run
-re-checks that stamp and rebuilds if the submodule moved, so the tools can never
-silently drift from the pinned llama.cpp.
-
----
-
-## Advanced: benchmarking
-
-Serving is only half of it. The benchmark answers two questions the model cards
-cannot: *how fast is this model on this machine*, and *is its output actually
-correct*.
+**Tools stay in lockstep with the pinned submodule.** `fetch_models.py build` compiles nine
+binaries (`llama-server`, `llama-bench`, `llama-perplexity`, `llama-cli`, `llama-mtmd-cli`,
+`llama-tts`, `llama-batched-bench`, `llama-tokenize`, `llama-quantize`) into `.data/tools/`
+and records the submodule commit they came from. Every `serve` and every `benchmark` re-checks
+that stamp and rebuilds if the submodule moved, so the tools can never silently drift.
 
 ```bash
-scripts/benchmark.py --dry-run     # plan + time estimate, runs nothing
-scripts/benchmark.py               # every enabled model
+scripts/serve.py                             # numbered picker, then a ready shell
+scripts/serve.py ornith-35b                  # skip the picker
+scripts/serve.py --no-shell                  # plain foreground server
+```
+
+`serve.py` starts one `llama-server` in router mode reading
+`.data/configs/llama-models.ini`, writes a session-scoped `opencode.json` whose default model
+is the one you picked, and drops you into a subshell with `OPENCODE_CONFIG` exported. Because
+`--models-max 1`, switching models transparently evicts the previous one — which matters when
+a single model occupies 30 GB of a 64 GB machine. See [docs/user/serving.md](docs/user/serving.md).
+
+```bash
+scripts/benchmark.py --dry-run               # plan + time estimate, runs nothing
 scripts/benchmark.py --model ornith-35b
-scripts/benchmark.py --resume      # skip completed cells
-scripts/benchmark.py --report-only # rebuild the report from existing results
+scripts/benchmark.py --resume                # skip completed cells
 ```
 
-Always start with `--dry-run` — a full sweep is hours, and it tells you the cost
-before you commit:
+Benchmarking uses ten named presets rather than a sampling cross-product, and scores in three
+tiers: **objective** (generated code is executed against hidden tests), **perplexity** (via
+`llama-perplexity`), and **self-graded**, which is never mixed into the objective score. The
+interesting number is calibration, `self_score − objective`. See
+[docs/user/benchmarking.md](docs/user/benchmarking.md); the complete reference — every catalog
+row with quant and license, every CLI flag, the validation and benchmark internals, and how to
+add your own models, presets or tasks — is [`scripts/README.md`](scripts/README.md).
 
-```
-Plan
-  ornith-9b              coding     task=merge-ranges       10 presets in 6 load group(s)
+## Repository layout
 
-  10 runs total, rough estimate 13-52 minutes
-  (dominated by model loads; large models push the upper bound)
-```
-
-Everything else is configured in `.data/configs/benchmark.json`, regenerated by
-`fetch_models.py config` so it always matches what is installed. Set
-`enabled: false` to skip a model, or trim `presets` to shorten a run.
-
-### Presets, not parameter sweeps
-
-A cross-product of sampling values mostly produces noise. Instead there are ten
-named presets, each answering one question, drawn from what model authors publish
-and what the Apple-Silicon community has settled on:
-
-| preset | question it answers |
-|---|---|
-| `author-default` | the author's own published settings — the control |
-| `deterministic` | greedy decoding, the standard for code |
-| `metal-throughput` | flash-attn on + large ubatch — peak tok/s |
-| `flash-attn-off` | what is flash attention actually worth here? |
-| `kv-q8` | is the "8-bit KV is free" consensus true on real output? |
-| `kv-q4` | how much quality does a 4-bit KV cache actually cost? |
-| `long-context` | 4× context + q8 KV — degradation as context grows |
-| `balanced-chat` | temp 0.7 / top-p 0.8 — general-purpose middle ground |
-| `min-p` | does min-p beat top-p at equal diversity? |
-| `high-creative` | temp 1.0 / top-p 0.95 — helps prose, hurts code |
-
-Presets split into **runtime** flags (fixed at load time — changing one forces a
-model reload) and **sampling** flags (per request, free). The runner groups by
-runtime signature so each distinct config is loaded exactly once and all its
-sampling variants run against that single load. On a 30 GB model this is the
-difference between minutes and hours.
-
-### Scoring: three tiers, only one of them trustworthy
-
-1. **Objective.** Generated code is *executed* against hidden tests. Docs are
-   checked against symbols parsed from the source. Retrieval is recall@1.
-2. **Perplexity**, via `llama-perplexity` — objectively measures how much a
-   given quant or KV-cache config degrades the model. No judge involved.
-3. **Self-graded.** The model scores **its own** output. This is *not* an
-   independent quality measure and is never mixed into the objective score.
-
-The interesting number is **calibration**: `self_score − objective`. Positive
-means the model over-rated itself; near zero means it can tell when it is wrong.
-
-Tasks are shared per category so models compete on identical work — the coding
-task is deliberately not a LeetCode classic, since those are memorized verbatim
-from training data and measure recall rather than ability.
-
-### Example results
-
-Results land in `.data/benchmark/<model>/<preset>/` (`result.json`,
-`output.txt`, `reasoning.txt`) with an aggregate `report.md`:
-
-```
-### `ornith-9b`
-
-| preset | objective | gen tok/s | prompt tok/s | wall s | SELF-graded | calibration |
-|---|--:|--:|--:|--:|--:|--:|
-| `deterministic` | 100% (12/12) | 68.0 | 614.7 | 22.8 | 100 | +0 |
-
-Perplexity (lower is better):
-
-| preset | perplexity |
-|---|--:|
-| `deterministic` | 2.4399 |
+```text
+conductor/               the opencode plugin - all enforcement lives here
+  core/                    pure logic: FSMs, gate predicates, scheduler, decisions
+  adapter/                 I/O seams: state, journal, evidence, fan-out, injection
+  plugin/index.ts          the opencode plugin factory - the module's only export
+  doctrine/                nine always-injected doctrine packs
+  tools/                   export-schemas.ts (TS types to JSON Schema)
+  tests/                   the TypeScript suite
+  DECISIONS.md             standing-decisions ledger
+  opencode-fragment.json   plugin + agents + permissions, merged into the session config
+src/
+  main.cpp                 llama-router entry point
+  router/                  the C++23 router; src/ is the only include root
+  tests/                   doctest suite (CMake target router-tests) + generated schemas
+  tools/membench/          standalone memory-bandwidth probe
+scripts/                 Python harness (serve, fetch, benchmark) + the test gates
+docs/
+  user/ developer/ faq/    this documentation set
+  plans/                   the immutable design plan
+  build/                   STATE.json, HANDOFF.md, CORRECTIONS.md - conductor build state
+  reviews/                 adversarial reviews of the plan
+cmake/                   vcpkg init, warnings, clang-format
+extern/llama-cpp         pinned llama.cpp submodule (configured, never built here)
+extern/vcpkg             the vcpkg toolchain
+setup.sh                 guided first-time install
+CMakeLists.txt           llama-router, router-tests, membench
+.data/                   everything downloaded or generated  (gitignored)
+.out/                    CMake build and install trees       (gitignored)
 ```
 
-Read that as: all 12 hidden tests passed, 68 tokens/sec generation on this
-machine, and the model rated itself 100 — perfectly calibrated, since it was in
-fact correct.
+## Documentation
 
-The report also records the **measured** host profile — memory bandwidth, disk
-read, CPU throughput, GPU cores, Metal budget — plus power source and thermal
-state **before and after** the run, so a thermally throttled run says so rather
-than quietly skewing the numbers.
+| Page                                                                                               | What it covers                                                                            |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| [docs/README.md](docs/README.md)                                                                   | the documentation hub — start here and pick a track                                       |
+| [docs/user/quickstart.md](docs/user/quickstart.md)                                                 | install to first working session, end to end                                              |
+| [docs/user/README.md](docs/user/README.md)                                                         | the user guide: models, serving, running conductor, configuration, troubleshooting        |
+| [docs/developer/README.md](docs/developer/README.md)                                               | the developer guide: architecture, state machines, gates, evidence, schemas, build system |
+| [docs/faq/README.md](docs/faq/README.md)                                                           | short answers to the questions the design keeps provoking                                 |
+| [docs/plans/2026-08-07-conductor-harness-plan.md](docs/plans/2026-08-07-conductor-harness-plan.md) | the immutable design authority the whole build is derived from                            |
 
-### Benchmarking more models than fit on disk
+## Building the C++ side
 
-```jsonc
-"eviction": { "download_missing": true, "delete_after_each": true }
-```
-
-Each model is fetched, benchmarked, then deleted before the next. The whole
-catalog can be benchmarked on a machine that could never hold it at once, and
-`--resume` lets an interrupted overnight run continue where it stopped.
-
-### What cannot be benchmarked
-
-- **Music / beat generation** — nothing exists. llama.cpp has no music
-  architecture. Speech synthesis *is* supported (`qwen3tts`), which the audio
-  task uses.
-- **Image generation** — llama.cpp cannot generate images. FLUX, SD3.5 and
-  Qwen-Image ship GGUF weights but run in `stable-diffusion.cpp`, a separate
-  engine. Vision models here are scored on *interpretation* instead.
-
-Both appear in the report as explicitly not benchmarked, rather than silently
-omitted.
-
----
-
-## Building the C++ client
-
-The repo also builds a minimal native llama.cpp chat client from `src/main.cpp`,
-independent of the Python tooling:
+The C++ half is the llama-router and its test binary. Configure with a preset, then build
+**only** named targets:
 
 ```bash
-cmake -B .out -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build .out
-.out/myprogram -m .data/models/ornith-9b/*.gguf -c 4096 -ngl 99
+cmake --preset clang-relwdebinfo
+cmake --build .out/build/clang-relwdebinfo --target llama-router
+cmake --build .out/build/clang-relwdebinfo --target router-tests
+ctest --test-dir .out/build/clang-relwdebinfo
 ```
 
-This is the starting point for the eventual custom harness — enforced TDD,
-adversarial review after each change, workspace lockdown — rather than a
-finished tool.
+A bare `cmake --build` also compiles the whole vendored `extern/llama-cpp` tree, which nothing
+here links — the router proxies to a separately-launched `llama-server` — so always pass
+`--target`. The presets are `clang-debug`, `clang-release` and `clang-relwdebinfo`, all writing
+to `.out/build/<preset>/`. `membench` is a third, dependency-free target that also builds with a
+single `c++` invocation. Every in-workspace header is included by its full path relative to
+`src/` — `#include "router/version.hpp"`, never `#include "version.hpp"` — because `src/` is the
+only user-code include root on both targets. Setting `-DAUTOFORMAT_SRC_ON_CONFIGURE=ON` runs
+clang-format over `src/` at configure time.
 
----
+The TypeScript side has one canonical gate, and it is not `node --test`:
 
-## Troubleshooting
+```bash
+bash scripts/test-conductor.sh                                  # the whole suite
+bash scripts/test-conductor.sh 'conductor/tests/gates-*.test.ts'
+bash scripts/conductor-gate.sh                                  # mechanical stub scan
+```
 
-| symptom | fix |
-|---|---|
-| `llama-server not found` | `scripts/fetch_models.py build` |
-| model fails to load / OOM | it is `tight` — lower `ctx-size`, or raise `iogpu.wired_limit_mb` |
-| `sha256 mismatch` on verify | `scripts/fetch_models.py install <id> --force` |
-| gated repo (401/403) | accept the terms on the model page, then `export HF_TOKEN=...` |
-| port already in use | `serve.py` detects this and offers the next free port |
-| opencode sees no models | `scripts/fetch_models.py config`, then re-run `serve.py` |
-| benchmark scores 0% | check `truncated` in `result.json` — a reasoning model may have run out of token budget rather than been wrong |
+The wrapper exists because raw `node --test` lies in two directions on Node 26: a directory
+positional resolves as a module and produces a bogus failure, and a glob matching zero files
+exits 0. It parses the TAP trailer and fails unless tests ran and nothing was skipped or
+marked todo at any depth, then typechecks, runs the Bun dual-runtime smoke, and regenerates
+the JSON Schemas the C++ tests consume. See [build system](docs/developer/build-system.md),
+[testing and verification](docs/developer/testing-and-verification.md).
 
-Useful environment variables: `HF_TOKEN`, `HF_ENDPOINT` (mirror),
-`LLAMA_SERVER` (explicit binary path), `NO_COLOR`.
+## Honest limits
 
----
+The design states its own limits rather than hiding them.
 
-## Further reading
-
-[`scripts/README.md`](scripts/README.md) is the full reference: the complete
-24-model catalog with quants and licenses, VRAM sizing in detail, every CLI flag,
-the validation and benchmark internals, and how to add your own models, presets
-or tasks.
+- Gates fire inside opencode only. A human at a raw terminal is ungated, and so is a second,
+  plain `opencode` session running in the same repository.
+- conductor cannot detect its own absence. A plugin that fails to load is logged and opencode
+  continues completely ungated, which is why the plugin writes a liveness beacon and the first
+  response carries a banner. **No banner, no conductor.**
+- Ledgers are records, not proofs — but every FSM-advancing record is written by a handler
+  that re-derived the evidence itself.
+- Scope intersection is deliberately conservative: false positives serialize work that could
+  have run in parallel, and never corrupt it.
+- Verify trusts the target repository's own test command, so vacuous tests get vacuous
+  protection.
+- `node -e` and `python -c` bypass the write-shape extractor the edit-scope gate depends on.
+- `behavioral: false` is only as honest as the configured `behavioralPaths`, which is why
+  setup asks for them instead of guessing.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Individual models carry their own licenses, listed
-per model in the catalog; several are Apache-2.0 or MIT, but Gemma models are
-under the Gemma Terms of Use and a few are vendor-specific.
+MIT — see [LICENSE](LICENSE). Individual models carry their own licenses, listed per model in
+the catalog: several are Apache-2.0 or MIT, Gemma models are under the Gemma Terms of Use, and
+a few are vendor-specific.
