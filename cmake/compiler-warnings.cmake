@@ -13,9 +13,6 @@ target_compile_options(${PROJECT_NAME}
 
             # Treat all warning as errors
             /WX
-
-            # Disable warnings you don't want here:
-            /wd4100 # unreferenced formal parameter
 		>
 
         # Clang and GNU
@@ -23,11 +20,6 @@ target_compile_options(${PROJECT_NAME}
             -Wall
             -Wcast-align
             -Wpedantic
-
-            # Disable warnings you don't want here
-            -Wno-unused-parameter
-            -Wno-c++98-compat
-            -Wno-c++98-compat-pedantic
         >
 
         # Clang only
