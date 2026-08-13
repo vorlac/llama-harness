@@ -1185,3 +1185,62 @@ test-first, each pinned by a mutation.
   `conductor/adapter/tools.ts` (+110/-27), `conductor/tests/tools-9.4b.test.ts` (+464/-0, purely
   additive). 954/954 green, typecheck and bun legs clean. Orchestrator independently re-ran the D1(a)
   mutation: reverting the union resolution fails 2 rows and nothing else.
+
+## C-040 — six rulings the 9.5b/9.6 promotion surfaced, plus an empirical correction to a Phase-4 binding
+
+Promoting the two specs (15 rows -> 30 for 9.5b, 13 -> 21 for 9.6) raised six questions C-037 did not
+cover. Rulings, so the implementers do not have to guess:
+
+1. **No-git makes the gate and the handler disagree about publish — the THIRD instance of this shape.**
+   `nextStageTool` maps REVIEWED -> conductor_publish UNCONDITIONALLY, and `legalTools` takes no
+   git-mode input, while §3.9:1502-1503 disables publish in no-git mode. Config carries no `noGit`
+   field and `git.mode:"read-only"` cannot distinguish the two modes — only `gitio.isRepo` can.
+   **RULING:** extend `legalTools` with a fifth parameter `gitAvailable = true`, beside the
+   `repoConfigured` boolean it already takes. It DEFAULTS to true, so every committed call site and
+   test is unaffected and no behaviour changes silently; the no-git case is pinned by new rows.
+   Deriving it inside core is impossible (that would need I/O), so a caller-supplied fact is correct.
+   NOTE the pattern: this is the third time one rule has lived in two places and drifted — after the
+   9.4a dependency rule and C-037's report predicate. Raise it as a THEME at the Phase 9 gate.
+
+2. **The closing verify has no subject item.** `runVerify`'s second argument is `itemId` and
+   `evidenceRecordSchema` REQUIRES itemId, but the done-report's closing verify is run-level.
+   **RULING:** pass the runId, with scopePattern `"**"`, and document at the write that on this ONE
+   record kind the subject is the run rather than an item. Widening SCHEMAS to make itemId optional is
+   a STOP-AND-PARK and is not taken. Flag the overload at the Phase 9 gate.
+
+3. **Serial publish invalidates the next item's green.** Publish is serial in item order and each
+   commit MOVES HEAD, so the next REVIEWED item's freshness check legitimately fails — its verify ran
+   against a different HEAD, even though its own code did not change. 9.5b denying it is correct and
+   honest; what the driver does with the denial was unruled.
+   **RULING:** the denied item routes back to RE-VALIDATE (GREEN->VALIDATED again), not to blocked. A
+   stale green must not ship, and the item is not in trouble — the world moved under it. This costs one
+   verify per published item; record that cost at the Phase 9 gate rather than trading correctness for
+   it.
+
+4. **Push failure (§3.3:1296 is silent).** **RULING:** the commit STANDS and the item stays PUBLISHED
+   — a commit is local and real, a push is a separate outward action — with the failure journaled at
+   warn and named in the report. A failed push must never silently look like a successful one.
+
+5. **`mergeBack`'s signature.** The plan sketches `mergeBack(workspace, itemId)` (2706), which cannot
+   compose the `conductor/<runId>/<itemId>` branch name it needs. **RULING:** `(workspace, runId,
+   itemId)`, recorded as a deviation from the plan's sketch.
+
+6. **The publish batch artifact.** **RULING:** `runs/<runId>/publish-batch.jsonl`, a recorded §1.2
+   (lines 426-437) layout deviation. It ships UNVALIDATED — adding a SCHEMAS entry for it is a
+   STOP-AND-PARK — with its shape pinned by assertions only.
+
+### An empirical correction to the Phase-4 binding (C-021), acknowledged
+The promotion pass tested the C-021 binding's own parenthetical suggestion, `--absolute-git-dir`, on a
+real fixture (git 2.50.1) and found it **WRONG**: in a linked worktree an exclude written into the
+per-worktree gitdir is INERT — the path stays untracked — and only the COMMON dir works.
+**ACKNOWLEDGED:** the 9.6 row pins `git rev-parse --git-common-dir`. A recorded binding that turns out
+to be empirically false gets corrected, not honoured; the binding's INTENT (don't crash, and actually
+exclude) is what survives. Supporting facts also verified on the fixture: `<wt>/.git` is a FILE, so
+`mkdir -p <wt>/.git/info` raises ENOTDIR; `isRepo()` returns true inside a linked worktree and so does
+NOT guard the call; a bare `worktree add` names the branch after the path basename; and
+`worktree remove --force` LEAVES THE BRANCH BEHIND, which is why removal is split into two rows.
+
+### One draft claim I had asserted that was itself wrong
+I told the promotion pass that the draft's `planLines [2700,2725]` "cut off the `git worktree prune`
+clause". It did not — that clause is at 2724, inside the range. The widening to [2699, 2728] is
+correct for section boundaries but is directive-driven, not defect-driven, and the record says so.
