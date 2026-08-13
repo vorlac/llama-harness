@@ -179,12 +179,25 @@ def _membench_binary() -> Optional[Path]:
     if override and Path(override).is_file():
         return Path(override)
 
-    built = _REPO_ROOT / "build" / "membench"
-    candidates = [
-        _REPO_ROOT / "build" / "tools" / "membench" / "membench",
-        _REPO_ROOT / "build" / "tools" / "membench" / "Release" / "membench",
-        built,
-    ]
+    # Every CMake tree in this workspace configures through CMakePresets.json,
+    # whose binaryDir is .out/build/<presetName>, so a preset-built membench lands
+    # at .out/build/<preset>/src/tools/membench/membench. Globbing the presets
+    # rather than naming one means any configured tree is found, newest first.
+    #
+    # The previous list looked under <repo>/build/tools/membench/ — a bare CMake
+    # dir that no preset produces, at a source path that moved when tools/ became
+    # src/tools/. Both halves were stale, so a preset-built binary was never found
+    # and this always fell through to the on-demand compile below.
+    out_root = _REPO_ROOT / ".out" / "build"
+    candidates = sorted(
+        out_root.glob("*/src/tools/membench/membench"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    # The on-demand fallback lands beside the preset trees rather than in a stray
+    # <repo>/build/, so there is exactly ONE place binaries are written.
+    built = out_root / "membench"
+    candidates.append(built)
     # With no source to compare against, any binary that exists is the best
     # available answer; otherwise a stale one is worse than none, because it
     # would silently measure old code.

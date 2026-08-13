@@ -7,22 +7,30 @@ builds either through the root CMake tree or with a single compiler invocation.
 
 A memory-bandwidth probe with every confound exposed as a flag.
 
-```
-cmake --build build --target membench      # or:
-c++ -std=c++23 -O3 tools/membench/membench.cpp -o build/membench
-```
-
-`scripts/hostinfo.py` compiles it on demand into `build/membench` if no binary is
-present, and falls back to a Python estimate only if that fails.
+Every CMake tree in this workspace configures through `CMakePresets.json`, whose
+`binaryDir` is `.out/build/<presetName>` — so membench builds there like anything
+else, and nothing in the repo writes to a bare `build/`.
 
 ```
-build/membench                  # one 512 MiB single-threaded copy
-build/membench --sweep          # relative phase: dst slides, src stays put
-build/membench --sweep-align    # alignment granularity: both slide together
-build/membench --sweep-threads  # thread scaling
-build/membench --sweep-qos      # P-core vs E-core placement
-build/membench --sweep-kernels  # memcpy vs load-only vs store-only vs NEON
-build/membench --json           # machine-readable
+cmake --preset clang-relwdebinfo                                  # or any preset
+cmake --build .out/build/clang-relwdebinfo --target membench      # or, no CMake:
+c++ -std=c++23 -O3 src/tools/membench/membench.cpp -o .out/build/membench
+```
+
+`scripts/hostinfo.py` prefers a preset-built binary (newest wins across presets)
+and otherwise compiles one on demand into `.out/build/membench`, falling back to a
+Python estimate only if that fails too.
+
+```
+BENCH=.out/build/clang-relwdebinfo/src/tools/membench/membench
+
+$BENCH                  # one 512 MiB single-threaded copy
+$BENCH --sweep          # relative phase: dst slides, src stays put
+$BENCH --sweep-align    # alignment granularity: both slide together
+$BENCH --sweep-threads  # thread scaling
+$BENCH --sweep-qos      # P-core vs E-core placement
+$BENCH --sweep-kernels  # memcpy vs load-only vs store-only vs NEON
+$BENCH --json           # machine-readable
 ```
 
 ### What this was built to answer

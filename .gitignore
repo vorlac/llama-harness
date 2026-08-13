@@ -1,7 +1,10 @@
 .out/
 .data/
 
-# CMake trees, plus where hostinfo.py drops its on-demand membench build
+# Stray CMake trees. Everything in this workspace configures through
+# CMakePresets.json, whose binaryDir is .out/build/<presetName>, so these two
+# should stay EMPTY — they are ignored to catch an ad-hoc `cmake -B build`
+# rather than to sanction one.
 build/
 out/
 # the conductor build-state directory is durable state, not a build tree
@@ -26,3 +29,8 @@ __pycache__/
 
 # Task 11.1: generated §2 JSON Schemas for the C++ router-tests (from core/types.ts SCHEMAS)
 src/tests/schemas/
+
+# The conductor build's scratch area: a red test file is authored here and parked
+# until the task that owns it starts, at which point the authoritative copy lands
+# in conductor/tests/ or src/tests/. Working files, never deliverables.
+staging/
