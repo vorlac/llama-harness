@@ -1099,7 +1099,7 @@ taking the count on faith.
 - **MAJOR — the admission integers had NO range validation.** The schema types them as bare `number`
   with no integer/minimum, and unlike the two PORTS — which the parser range-checks 1..65535 precisely
   because the schema cannot — admission got nothing. Zero or negative `maxInflightPerModel` makes
-  `hasFreeSlot`永 false so every request queues until it times out; fractional values truncate.
+  `hasFreeSlot` never true so every request queues until it times out; fractional values truncate.
   FIX: `checkAdmissionInteger`, written in the same shape as the existing `checkPort`, refusing
   non-integral first and then the range, throwing ConfigError NAMING the dotted field. Bounds:
   `maxInflightPerModel 1..1000000`, `maxQueued 0..1000000`, `queueTimeoutMs 0..86400000`. The slot
