@@ -24,7 +24,7 @@ project(myprogram
 option(
   AUTOFORMAT_SRC_ON_CONFIGURE
     "If enabled, clang-format will be used to format all sources in src/ during configuration"
-      OFF # ON
+      ON
 )
 
 string(TOLOWER "${CMAKE_SYSTEM_NAME}" host_os)
@@ -86,6 +86,7 @@ target_link_libraries(llama-router
 add_executable(router-tests
   "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/scaffold_test.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/config_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/tests/proxy_test.cpp"
 )
 target_compile_features(router-tests PRIVATE cxx_std_23)
 target_include_directories(router-tests
