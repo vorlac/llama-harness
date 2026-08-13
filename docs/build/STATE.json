@@ -1194,7 +1194,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "d6745de",
       "commitMessage": "conductor: 11.1 router scaffold + upstream contract",
       "planLines": [
         2755,

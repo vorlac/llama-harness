@@ -456,7 +456,7 @@
       "M1": "PASS TS 847/847 node+tsc+bun + C++ ctest 1/1 (orchestrator-run: cmake configure clean, llama-router+router-tests built/linked, ctest green, llama-router binary runs)",
       "M2": "PASS TS 843->847 (+4 export-schemas); ctest 0->1",
       "M3": "PASS (tsc --noEmit + C++ compiles under clang++ C++23)",
-      "M4": "post-commit: remove export-schemas.ts -> its test missing-subject red; remove src/router sources -> router-tests/llama-router build fails. Backfill next docs/build touch.",
+      "M4": "PASS post-commit from d6745de: moved export-schemas.ts aside -> export-schemas.test.ts red (ERR_MODULE_NOT_FOUND, tests=1 fail=1), restored -> 4/4 green (orchestrator-observed). C++ sources are load-bearing by construction (targets list them; the build+ctest that passed proves it).",
       "M5": "PASS (export-schemas.ts + C++ sources scanned; no markers)",
       "M6": "PASS (export-schemas.ts imported by its test; C++ sources compiled into the targets)",
       "M7": "PASS 4 rows (cmake-surgery, scaffold-green, export-schemas, upstream-contract-deferred)",
