@@ -469,7 +469,7 @@
       "M1": "PASS 864/864 node + tsc + bun leg + schema export (orchestrator-run full suite)",
       "M2": "PASS 847 -> 864 (+17: 10 authored + 7 review-fix tests)",
       "M3": "PASS (tsc --noEmit clean incl. the optional GateItem.debugging and the new handler types)",
-      "M4": "pending post-commit (remove a handler export -> tools-9.1.test.ts missing-subject red); backfilled next docs/build touch",
+      "M4": "PASS post-commit from ed3d407 (scratch worktree): dropped handleAnswer's export -> tools-9.1.test.ts red with 'does not provide an export named handleAnswer' (tests=1 fail=1); handlers load-bearing.",
       "M5": "PASS (tools.ts + journal-events.ts scanned; no markers)",
       "M6": "PASS (the 6 handlers imported/driven by tools-9.1.test.ts)",
       "M7": "PASS 15 rows (8 §3.4 tool assertions + 7 C-029 review-fix rows)",
