@@ -1,18 +1,71 @@
 {
   "taskId": "8.2",
-  "planLines": [2542, 2557],
+  "planLines": [
+    2542,
+    2557
+  ],
   "kind": "code (tier B). Depends on 0.2 (system.transform pin), 3.2 (legalTools), 8.1 (packs). Subagents read §6.4 (1892-1906), §4.1 (1512-1543), §4.4 headers (1636-1698), §3.8 (1478-1495).",
   "signatureNote": "The §6.4 ledger arg list for buildSystemAppend omits the scalars legalTools + the state block need, so this task adds a trailing ctx object: { repoConfigured, taintCount, overridesRemaining } (§2 schema untouched; a helper-signature extension, deviation recorded in STATE). loadPacks(doctrineDir) + initPlugin({doctrineDir,logError,writeBeacon}) carry the §6.4 fail-closed init; the init-failure channel is the injected logError seam (§7.1 stderr), NOT a journal event (closed vocab has no init event).",
   "assertions": [
-    { "id": "8.2-api", "text": "buildSystemAppend(registryEntry, run, items, questions, packs, ctx) -> string[] ([0]=role pack verbatim, last=state block); paramsForRole(role) -> {temperature, topP?}; headersFor(registryEntry, job?) -> Record<string,string>", "planLine": 2544, "coveredByTest": "inject.test.ts (8.2-api x2 + G9 purity)" },
-    { "id": "8.2-role-packs", "text": "orchestrator gets core.md + run state block; implementer gets tdd.md + its item block", "planLine": 2550, "coveredByTest": "inject.test.ts (8.2-role-packs)" },
-    { "id": "8.2-30-lines", "text": "state block stays <=30 lines with 40 items (summarization asserted)", "planLine": 2551, "coveredByTest": "inject.test.ts (8.2-30-lines)" },
-    { "id": "8.2-recommended", "text": "recommended-tool line matches legalTools(...).recommended for three run states AND names conductor_setup on an unconfigured repo", "planLine": 2552, "coveredByTest": "inject.test.ts (8.2-recommended)" },
-    { "id": "8.2-one-recommendation", "text": "two-item wave: block names ONE recommendation, reports others as a count - never contradictory instructions", "planLine": 2553, "coveredByTest": "inject.test.ts (8.2-one-recommendation)" },
-    { "id": "8.2-headers", "text": "header set per role (§4.4 tags): role, priority (interactive|review|batch), group when a tree is known, schema only when the job flags it", "planLine": 2555, "coveredByTest": "inject.test.ts (8.2-headers)" },
-    { "id": "8.2-missing-pack", "text": "missing pack file at init throws AND the throw is surfaced via the injected logError seam AND liveness beacon NOT written (so §3.8's absence signal is real)", "planLine": 2555, "coveredByTest": "inject.test.ts (8.2-missing-pack)" },
-    { "id": "8.2-null-recommendation", "text": "REVIEW-DRIVEN (C-027, major): a null recommendation renders legalTools(...).why verbatim, never a hardcoded 'terminal' claim - legalTools returns recommended=null in NON-terminal states (stalled EXECUTING wave, INTAKE non-work, default) too, so the injected block must not assert a false terminality", "planLine": 2545, "coveredByTest": "inject.test.ts (8.2-null-recommendation)" },
-    { "id": "8.2-empty-pack", "text": "REVIEW-DRIVEN (C-027, fail-closed hardening): a present-but-empty/whitespace-only pack is rejected - loadPacks/initPlugin throw naming it and the §3.8 beacon is never written (an empty pack is effectively-absent doctrine, the exact 'looks normal, enforces nothing' mode §3.8 guards)", "planLine": 2555, "coveredByTest": "inject.test.ts (8.2-empty-pack)" },
-    { "id": "8.2-debug-pack", "text": "PHASE-8-GATE-DRIVEN (C-028, major): §4.1 implementer pack is 'tdd.md (+debug.md in DEBUG)' - buildSystemAppend appends debug.md as a secondary pack (tdd.md stays primary) for an implementer whose active item has debugging:true (new optional GateItem.debugging field, ignored by legalTools); non-implementer roles / missing itemId / non-debugging items get nothing extra", "planLine": 1524, "coveredByTest": "inject.test.ts (8.2-debug-pack)" }
+    {
+      "id": "8.2-api",
+      "text": "buildSystemAppend(registryEntry, run, items, questions, packs, ctx) -> string[] ([0]=role pack verbatim, last=state block); paramsForRole(role) -> {temperature, topP?}; headersFor(registryEntry, job?) -> Record<string,string>",
+      "planLine": 2544,
+      "coveredByTest": "inject.test.ts (8.2-api x2 + G9 purity)"
+    },
+    {
+      "id": "8.2-role-packs",
+      "text": "orchestrator gets core.md + run state block; implementer gets tdd.md + its item block",
+      "planLine": 2550,
+      "coveredByTest": "inject.test.ts (8.2-role-packs)"
+    },
+    {
+      "id": "8.2-30-lines",
+      "text": "state block stays <=30 lines with 40 items (summarization asserted)",
+      "planLine": 2551,
+      "coveredByTest": "inject.test.ts (8.2-30-lines)"
+    },
+    {
+      "id": "8.2-recommended",
+      "text": "recommended-tool line matches legalTools(...).recommended for three run states AND names conductor_setup on an unconfigured repo",
+      "planLine": 2552,
+      "coveredByTest": "inject.test.ts (8.2-recommended)"
+    },
+    {
+      "id": "8.2-one-recommendation",
+      "text": "two-item wave: block names ONE recommendation, reports others as a count - never contradictory instructions",
+      "planLine": 2553,
+      "coveredByTest": "inject.test.ts (8.2-one-recommendation)"
+    },
+    {
+      "id": "8.2-headers",
+      "text": "header set per role (§4.4 tags): role, priority (interactive|review|batch), group when a tree is known, schema only when the job flags it",
+      "planLine": 2555,
+      "coveredByTest": "inject.test.ts (8.2-headers)"
+    },
+    {
+      "id": "8.2-missing-pack",
+      "text": "missing pack file at init throws AND the throw is surfaced via the injected logError seam AND liveness beacon NOT written (so §3.8's absence signal is real)",
+      "planLine": 2555,
+      "coveredByTest": "inject.test.ts (8.2-missing-pack)"
+    },
+    {
+      "id": "8.2-null-recommendation",
+      "text": "REVIEW-DRIVEN (C-027, major): a null recommendation renders legalTools(...).why verbatim, never a hardcoded 'terminal' claim - legalTools returns recommended=null in NON-terminal states (stalled EXECUTING wave, INTAKE non-work, default) too, so the injected block must not assert a false terminality",
+      "planLine": 2545,
+      "coveredByTest": "inject.test.ts (8.2-null-recommendation)"
+    },
+    {
+      "id": "8.2-empty-pack",
+      "text": "REVIEW-DRIVEN (C-027, fail-closed hardening): a present-but-empty/whitespace-only pack is rejected - loadPacks/initPlugin throw naming it and the §3.8 beacon is never written (an empty pack is effectively-absent doctrine, the exact 'looks normal, enforces nothing' mode §3.8 guards)",
+      "planLine": 2555,
+      "coveredByTest": "inject.test.ts (8.2-empty-pack)"
+    },
+    {
+      "id": "8.2-debug-pack",
+      "text": "PHASE-8-GATE-DRIVEN (C-028, major): §4.1 implementer pack is 'tdd.md (+debug.md in DEBUG)' - buildSystemAppend appends debug.md as a secondary pack (tdd.md stays primary) for an implementer whose active item has debugging:true (new optional GateItem.debugging field, ignored by legalTools); non-implementer roles / missing itemId / non-debugging items get nothing extra",
+      "planLine": 1524,
+      "coveredByTest": "inject.test.ts (8.2-debug-pack)"
+    }
   ]
 }

@@ -1,11 +1,30 @@
 {
   "taskId": "11.1",
-  "planLines": [2755, 2782],
+  "planLines": [
+    2755,
+    2782
+  ],
   "kind": "build scaffold + schema export (Branch B, C++/TS). Step 1 = CMake surgery + router targets + trivial ctest + export-schemas. Step 2 = LIVE upstream contract (deferred to 12.1, see src/router/UPSTREAM_CONTRACT.md). Run ON MAIN (branch-b-plan.md).",
   "assertions": [
-    { "id": "11.1-cmake-surgery", "text": "CMakeLists removes the myprogram GLOB target; adds llama-router (src/router, links httplib/nlohmann_json/nlohmann_json_schema_validator::validator/spdlog, NO llama/ftxui) and router-tests (doctest, add_test-registered with ctest); vcpkg.json += cpp-httplib/nlohmann-json/json-schema-validator/doctest", "coveredByTest": "cmake configure (7.2s clean) + build llama-router+router-tests (linked) + ctest 1/1 PASS (orchestrator-observed)" },
-    { "id": "11.1-scaffold-green", "text": "a trivial doctest case (real assertion on router_version()==0.0.1, not vacuous) builds and runs green via ctest; llama-router binary runs and prints its version", "coveredByTest": "src/router-tests/scaffold_test.cpp via ctest; llama-router binary output observed" },
-    { "id": "11.1-export-schemas", "text": "conductor/tools/export-schemas.ts writes all 17 core/types.ts SCHEMAS as <name>.schema.json (pretty JSON, lossless round-trip, exact dir contents, creates outDir); wired into scripts/test-conductor.sh; generated dir gitignored", "coveredByTest": "export-schemas.test.ts (11.1-export-schemas x4); gate 'schema export: OK'" },
-    { "id": "11.1-upstream-contract", "text": "LIVE STEP 2 (deferred to 12.1): src/router/UPSTREAM_CONTRACT.md records the exact probe procedure + confirmed assets (llama-server at .out/llamacpp/bin, qwen3.6-27b in .data/models) + the serve.py-vehicle rationale; NO fabricated measurements", "coveredByTest": "manual/live (M8); deferred-recorded, bound to 12.1" }
+    {
+      "id": "11.1-cmake-surgery",
+      "text": "CMakeLists removes the myprogram GLOB target; adds llama-router (src/router, links httplib/nlohmann_json/nlohmann_json_schema_validator::validator/spdlog, NO llama/ftxui) and router-tests (doctest, add_test-registered with ctest); vcpkg.json += cpp-httplib/nlohmann-json/json-schema-validator/doctest",
+      "coveredByTest": "cmake configure (7.2s clean) + build llama-router+router-tests (linked) + ctest 1/1 PASS (orchestrator-observed)"
+    },
+    {
+      "id": "11.1-scaffold-green",
+      "text": "a trivial doctest case (real assertion on router_version()==0.0.1, not vacuous) builds and runs green via ctest; llama-router binary runs and prints its version",
+      "coveredByTest": "src/router-tests/scaffold_test.cpp via ctest; llama-router binary output observed"
+    },
+    {
+      "id": "11.1-export-schemas",
+      "text": "conductor/tools/export-schemas.ts writes all 17 core/types.ts SCHEMAS as <name>.schema.json (pretty JSON, lossless round-trip, exact dir contents, creates outDir); wired into scripts/test-conductor.sh; generated dir gitignored",
+      "coveredByTest": "export-schemas.test.ts (11.1-export-schemas x4); gate 'schema export: OK'"
+    },
+    {
+      "id": "11.1-upstream-contract",
+      "text": "LIVE STEP 2 (deferred to 12.1): src/router/UPSTREAM_CONTRACT.md records the exact probe procedure + confirmed assets (llama-server at .out/llamacpp/bin, qwen3.6-27b in .data/models) + the serve.py-vehicle rationale; NO fabricated measurements",
+      "coveredByTest": "manual/live (M8); deferred-recorded, bound to 12.1"
+    }
   ]
 }

@@ -1,4 +1,4 @@
-#include <iostream>
+#include <print>
 
 #include "version.hpp"
 
@@ -7,7 +7,8 @@
 // main proves the target links and runs. "version.hpp" resolves via the target's
 // src/router include directory (where the router headers live).
 int main() {
-  std::cout << "conductor llama-router " << conductor::router::router_version()
-            << " (scaffold)\n";
-  return 0;
+    std::println("conductor llama-router {} (scaffold)",
+                 conductor::router::router_version());
+
+    return 0;
 }
