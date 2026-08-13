@@ -1590,3 +1590,45 @@ mechanisms, a green suite over an inert product. The build's instinct to make in
 constructions rather than conventions is the right one; what these four add is that a construction
 must also assert IT ACTUALLY RAN — a floor, an allowlist, a premise that fails when the fixture
 becomes unverifiable.
+
+## C-048 — C-043 ruling 1 is AMENDED: publishEnabled stays optional, and a construction replaces the requirement
+
+**What C-043 ruling 1 said.** That `publishEnabled` must be a REQUIRED fifth parameter of
+`legalTools`, on the grounds that an optional parameter defaulting to `true` is a compatibility
+shim (which `.claude/rules/patterns-and-conventions.md` prohibits) defaulting in the DANGEROUS
+direction — every existing call site silently keeps claiming publish is available.
+
+**Why it could not stand.** The delivered 9.5b red pins the signature as
+`(run, items, questions, repoConfigured, publishEnabled?: boolean)` and calls the gate with FOUR
+arguments in two rows. A function whose fifth parameter is required is not assignable to that type —
+verified rather than assumed, with a throwaway probe: TypeScript reports
+"Types of parameters 'e' and 'e' are incompatible ... 'boolean | undefined' is not assignable to
+'boolean'". Making it required would therefore have required editing the test, and the test is the
+contract. The rule against editing an assertion to make an implementation fit does not have an
+exception for the orchestrator's own earlier ruling.
+
+The red's rationale is also better than mine on a point I had not considered: `publishEnabled` is
+DERIVED (`gitio.isRepo(store.root)`), not configured, and `isRepo` shells out to git. `legalTools`
+runs on EVERY tool call through the gate hook; the two publish/report handlers run rarely. Making
+every gate evaluation pay a subprocess to answer a question only two handlers ask is a real cost my
+ruling would have imposed.
+
+**The amended ruling.** The parameter is optional and defaults to `true`. The DANGER the required
+form was meant to remove is removed a different way, and a stronger one: the handlers that need the
+answer compute it themselves and pass it explicitly, and `settledForReport` takes the same flag, so
+gate and handler cannot disagree. What remains is a default that no production decision depends on.
+
+**The residual, stated rather than buried.** `adapter/inject.ts:110` and the two gate-hook call
+sites in `adapter/tools.ts` still use the 4-argument form, so the state block the model reads can
+name `conductor_publish` as legal in a no-git run even though the handler would refuse it. That is
+a DISPLAY inconsistency, not a state one — the handler throws, no publish occurs — but it is real,
+it is outside 9.5b's rows, and it is exactly the "gate and handler disagree" shape this build keeps
+finding. Raised for the Phase 9 gate with the cost trade-off attached: fixing it means either
+threading a cached repo-ness flag through InjectCtx or paying `isRepo` per gate evaluation.
+
+**The lesson, which is the one worth keeping.** A ruling made from the spec can be wrong about the
+code. Mine was made before the red existed and reasoned only about defaults; the writer's was made
+against the actual type-assignability rules and the actual cost of the call. When a delivered
+contract contradicts an earlier ruling, the contract is evidence — check whether the ruling was
+reasoning from something it could not see, and say so plainly instead of forcing the code to match
+a decision that has been overtaken.

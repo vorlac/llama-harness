@@ -25,7 +25,7 @@
 // allow. Every deny journals its snapshot under gates/deny (§7.4).
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { decideGit } from "../core/gates-git.ts";
@@ -35,7 +35,7 @@ import { globMatch, isGitCommand, scopesIntersect, shellTokens, splitOnOperators
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
 import { legalRunTransition } from "../core/fsm-run.ts";
 import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
-import { legalTools } from "../core/gates-phase.ts";
+import { legalTools, settledForReport } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
 import { applyAmendOps } from "../core/queue-amend.ts";
@@ -69,6 +69,11 @@ import type {
 import { readJsonFileSync, writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
+import { headSha, indexMtimeMs, isRepo, worktreeMtimes } from "./gitio.ts";
+import { verifyFreshFor } from "../core/freshness.ts";
+import type { MetricsSummary } from "./router-client.ts";
+import { buildCommitMessage, denylistedTrailerToken } from "../core/commit-message.ts";
+import type { RedProof } from "../core/commit-message.ts";
 import type { Fanout, FanoutJob, TreeState } from "./fanout.ts";
 import { runTest, runVerify } from "./evidence.ts";
 import type { RunTestResult, ScopeSpec } from "./evidence.ts";
@@ -420,6 +425,28 @@ function trivialViolatesRecheck(trivialItem: TrivialItem, config: Config): boole
 // advances strictly PAST the highest id present, valid line or not. A leading BOM is
 // stripped as elsewhere. Over-counting (a D-<n> token in a free-text field) only skips
 // ids, never collides, so the id-field-anchored pattern stays conservative.
+// Read the §2.7 decision ledger. It had an appender and NO reader at HEAD, which
+// is why the report's decision-ledger section was uncovered: nothing had ever
+// needed to read back what the run decided. Torn-line tolerant for the same
+// reason the mint is — a crash artifact must not wedge the closing report.
+function readDecisions(runDir: string): DecisionRecord[] {
+  const ledgerPath = path.join(runDir, "decisions.jsonl");
+  if (!existsSync(ledgerPath)) return [];
+  let raw = readFileSync(ledgerPath, "utf8");
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  const out: DecisionRecord[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    try {
+      out.push(JSON.parse(trimmed) as DecisionRecord);
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
 function mintDecisionId(runDir: string): string {
   const ledgerPath = path.join(runDir, "decisions.jsonl");
   let maxNum = 0;
@@ -3623,7 +3650,111 @@ function normalizeRepoRel(rel: string): string {
 // runs, and is the only witness to a red test an EARLIER run abandoned. The
 // subject item's OWN tests are never excluded: quarantining them would let the
 // verify pass by not running the thing it is supposed to prove.
-function foreignRedSet(store: StateStore, runId: string, queue: Queue, itemId: string): string[] {
+// ===========================================================================
+// (10) Shared terminal-path helpers (Task 9.5b). Each exists because the SAME
+// operation is performed from more than one place, and this build has watched a
+// rule that lives in two places drift four separate times.
+// ===========================================================================
+
+/**
+ * The REVIEWED->GREEN drop (C-037 ruling 7). An item whose closing verify goes
+ * red after its review is returned to GREEN with the §3.3 DEBUG annotation set,
+ * so the debug protocol can take it.
+ *
+ * Deliberately NOT routed through legalItemTransition, and deliberately journaled
+ * as `state: item.updated` rather than `fsm: transition`: core/fsm-item.ts has no
+ * backward REVIEWED->GREEN edge, and it should not grow one. This is an
+ * ADMINISTRATIVE write — the run correcting its own bookkeeping after evidence
+ * changed — not a claim that the FSM permits the edge. Calling it a transition
+ * would either force a bogus edge into the table or make the journal lie.
+ *
+ * Shared with Task 9.6, whose merge-conflict path performs the identical drop.
+ */
+export function demoteReviewedToGreen(input: {
+  store: StateStore;
+  runId: string;
+  itemId: string;
+  journal: HandlerJournal;
+  reason: string;
+  hypothesis: string;
+  now?: () => number;
+}): Item {
+  const { store, runId, itemId, journal } = input;
+  const now = input.now ?? Date.now;
+
+  const item = store.loadItem(runId, itemId);
+  item.state = "GREEN";
+  item.debugging = { sinceMs: now(), hypothesis: input.hypothesis };
+  store.saveItem(runId, item);
+
+  journal.log(
+    "warn",
+    "state",
+    "item.updated",
+    { itemId, state: "GREEN", from: "REVIEWED", reason: input.reason, debugging: true },
+    { runId, itemId },
+  );
+  return item;
+}
+
+/**
+ * The §2.11 stale-red registration every terminal path owes (C-037 ruling 4).
+ * ONE helper, called by conductor_report and by 9.5c's stop-report, so a run that
+ * ends with a red test on disk discloses it exactly once and in one shape.
+ *
+ * Registers the testScope files of every item BELOW GREEN — those are the tests
+ * that may still be red — but only those that EXIST on disk. A declared-but-never-
+ * written test poisons nothing and would make the registry name a file no reader
+ * can open. Paths already in the workspace registry are not re-added and not
+ * re-reported, so a second terminal path in the same workspace is idempotent.
+ *
+ * Returns the paths it ADDED, so the caller's report can list exactly what this
+ * run disclosed rather than the whole accumulated registry.
+ */
+export function registerStaleRed(input: {
+  store: StateStore;
+  runId: string;
+  queue: Queue;
+  reason: string;
+  now?: () => number;
+}): string[] {
+  const { store, runId, queue } = input;
+  const now = input.now ?? Date.now;
+  const belowGreen = ITEM_STATES.indexOf("GREEN");
+
+  const known = new Set(store.readStaleRed().entries.map((entry) => normalizeRepoRel(entry.path)));
+  const added: string[] = [];
+
+  for (const entry of queue.items) {
+    let state: ItemState;
+    try {
+      state = store.loadItem(runId, entry.id).state;
+    } catch {
+      state = "PENDING";
+    }
+    if (ITEM_STATES.indexOf(state) >= belowGreen) continue;
+
+    for (const raw of entry.testScope) {
+      const file = normalizeRepoRel(raw);
+      if (known.has(file)) continue;
+      if (!existsSync(path.join(store.root, file))) continue;
+      store.addStaleRed({ path: file, itemId: entry.id, runId, sinceMs: now(), reason: input.reason });
+      known.add(file);
+      added.push(file);
+    }
+  }
+  return added;
+}
+
+export function foreignRedSet(
+  store: StateStore,
+  runId: string,
+  queue: Queue,
+  // The subject whose OWN tests must never be quarantined. NULL when there is no
+  // subject: conductor_report's closing verify judges the WHOLE run, so no item's
+  // tests are privileged and every below-GREEN test in the queue is foreign to it.
+  itemId: string | null,
+): string[] {
   const belowGreen = ITEM_STATES.indexOf("GREEN");
   const own = new Set<string>();
   for (const entry of queue.items) {
@@ -5999,4 +6130,753 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       questionId: question.id,
     };
   }
+}
+
+// ===========================================================================
+// (11) conductor_publish — the §3.3 step 1-6 sequence (Task 9.5b, plan lines
+// 2667-2686). REVIEWED->PUBLISHED, or an honest denial.
+//
+// Every step that can refuse RETURNS {ok:false, denial} rather than throwing:
+// a denial is a normal outcome the model is expected to read and act on, and
+// throwing would make an ordinary "not yet" indistinguishable from a bug. The
+// legality check at the top still throws — an illegal tool call IS a bug.
+//
+// Nothing is half-written on any denial path: the commit is the LAST mutation,
+// and every refusal precedes it.
+// ===========================================================================
+
+// The prepared-batch artifact (C-037 ruling 3). It is a runDir FILE and not a
+// journal payload for a specific reason: journal records are capped at 32 KiB and
+// shrinkToFit replaces an oversized payload with {truncated:true}. A truncated
+// diff in a report is a report that lies about what shipped, so the diff travels
+// as an artifact that has no cap.
+// Read ONE §2.6 evidence record by its ledger seq. Returns null when the ledger
+// has no such seq — a torn or absent record is a fact the caller must handle, not
+// an exception: a publish whose verify record cannot be found is denied, not
+// crashed. Torn lines are skipped for the same reason the journal heals them.
+function readEvidenceAt(runDir: string, seq: number): EvidenceRecord | null {
+  const ledger = path.join(runDir, "evidence.jsonl");
+  if (!existsSync(ledger)) return null;
+  let raw = readFileSync(ledger, "utf8");
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    let parsed: EvidenceRecord;
+    try {
+      parsed = JSON.parse(trimmed) as EvidenceRecord;
+    } catch {
+      continue;
+    }
+    if (parsed.seq === seq) return parsed;
+  }
+  return null;
+}
+
+const PUBLISH_BATCH_FILE = "publish-batch.jsonl";
+
+export interface PublishBatchRecord {
+  itemId: string;
+  tsMs: number;
+  mode: string;
+  files: string[];
+  diff: string;
+  suggestedMessage: string;
+  // The preexistingDirty "exclude" paths this publish left out of the commit.
+  // They belong in the report's Exclusions section: the human's WIP did not ship,
+  // and a report that does not say so misrepresents what was committed.
+  skipped: string[];
+  verify: { seq: number | null; green: boolean };
+}
+
+function appendPublishBatch(runDir: string, record: PublishBatchRecord): void {
+  // A plain append, mirroring appendDecision. state.ts's raw ledger-append export
+  // is RESERVED to evidence.ts by the committed G6 source scan
+  // ([4.1-evidence-append]) — which is textual, so this comment names it only by
+  // description. This is a handler-owned run-dir ledger like decisions.jsonl,
+  // not evidence, so the plain append is the right sibling to copy.
+  mkdirSync(runDir, { recursive: true });
+  appendFileSync(path.join(runDir, PUBLISH_BATCH_FILE), JSON.stringify(record) + "\n");
+}
+
+export function readPublishBatch(runDir: string): PublishBatchRecord[] {
+  const file = path.join(runDir, PUBLISH_BATCH_FILE);
+  if (!existsSync(file)) return [];
+  const out: PublishBatchRecord[] = [];
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      out.push(JSON.parse(line) as PublishBatchRecord);
+    } catch {
+      // A torn last line is the crash-safety case the journal healer already
+      // handles for its own ledger; here it simply means that batch is not
+      // reportable, which the report renders as such rather than throwing.
+    }
+  }
+  return out;
+}
+
+export interface PublishInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  itemId: string;
+  config: Config;
+  journal: HandlerJournal;
+  stateHome: string;
+  workspaceKey: string;
+  now?: () => number;
+  // The §3.3 step-5 template, injectable so the handler-side denylist refusal can
+  // be exercised against a generator that misbehaves. Defaults to the pure core
+  // template — the handler never builds a message itself.
+  messageBuilder?: (item: QueueItem, redProof: RedProof | null) => string;
+}
+
+export interface PublishResult {
+  ok: boolean;
+  itemState: ItemState;
+  denial: string | null;
+  commit: string | null;
+  pushed: boolean;
+  message: string | null;
+  staged: string[];
+  skipped: string[];
+  reverified: boolean;
+  verifySeq: number | null;
+  excluded: string[];
+  questionId: string | null;
+}
+
+function publishDenial(itemState: ItemState, denial: string, over: Partial<PublishResult> = {}): PublishResult {
+  return {
+    ok: false,
+    itemState,
+    denial,
+    commit: null,
+    pushed: false,
+    message: null,
+    staged: [],
+    skipped: [],
+    reverified: false,
+    verifySeq: null,
+    excluded: [],
+    questionId: null,
+    ...over,
+  };
+}
+
+// The §2.1 format rule that governs a path: FIRST match wins, so an operator
+// orders rules from most specific to least and the ordering is the rule.
+function formatRuleFor(config: Config, rel: string): Config["format"]["rules"][number] | null {
+  for (const rule of config.format.rules) {
+    if (globMatch(rule.pattern, rel)) return rule;
+  }
+  return null;
+}
+
+export async function handlePublish(input: PublishInput): Promise<PublishResult> {
+  const { store, runId, itemId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+  const root = store.root;
+
+  // §3.9: publish is DERIVED from the workspace, not configured — Config has no
+  // no-git field and git.mode "read-only" cannot distinguish "a repo I may not
+  // write" from "no repo at all". The gate consumes this same predicate, so no
+  // fixture exists in which the gate offers publish and the handler refuses it.
+  const publishEnabled = isRepo(root);
+
+  const queue = readJsonFileSync(path.join(runDir, "queue.json")) as Queue;
+  const queueItem = queue.items.find((entry) => entry.id === itemId);
+  if (queueItem === undefined) {
+    throw new Error(PUBLISH_TOOL + ': no queue item "' + itemId + '" in this run');
+  }
+  const item = store.loadItem(runId, itemId);
+
+  if (!publishEnabled) {
+    // A REFUSAL, not a denial. The gate consumes this same predicate and never
+    // offers conductor_publish in no-git mode, so arriving here is an illegal
+    // tool call rather than a "not yet" the model should read and retry.
+    throw new Error(
+      PUBLISH_TOOL +
+        ": this workspace is not a git repository, so §3.9 no-git mode is in force and publish is " +
+        "disabled — the item terminates at REVIEWED and its diff is recorded in the report",
+    );
+  }
+
+  if (item.state !== "REVIEWED") {
+    throw new Error(
+      PUBLISH_TOOL + ': item "' + itemId + '" is ' + item.state + ", not REVIEWED (§3.3)",
+    );
+  }
+
+  const gitMode = config.git.mode;
+  const readOnly = gitMode === "read-only";
+
+  // ---- step 1: the branch/HEAD check -------------------------------------
+  // The verify this publish rests on was produced against ONE tree. A branch
+  // switch moves HEAD without necessarily touching any staged file's mtime, so
+  // the mtime terms cannot see it — which is exactly why §2.6's freshness rule
+  // carries a head term at all, and why it is checked before anything is staged.
+  const validatedRef = item.evidence.validated ?? item.evidence.green ?? null;
+  const record =
+    validatedRef === null ? null : (readEvidenceAt(runDir, validatedRef.seq) as VerifyEvidence | null);
+  if (record === null) {
+    return publishDenial(
+      item.state,
+      PUBLISH_TOOL + ': item "' + itemId + '" carries no §2.6 verify record to publish on',
+    );
+  }
+
+  const currentHead = headSha(root) ?? "";
+  if (record.head !== currentHead) {
+    return publishDenial(
+      item.state,
+      PUBLISH_TOOL +
+        ': the verify this publish rests on was produced at commit "' +
+        record.head +
+        '" but HEAD is now "' +
+        currentHead +
+        '" — a green produced on one tree is not a green on another (§2.6). ' +
+        "Re-validate the item against the current tree.",
+    );
+  }
+
+  // ---- step 2: stage fileScope ∪ testScope MINUS the user's pre-existing WIP
+  const run = store.loadRun(runId);
+  const preexisting = new Set((run.startDirty ?? []).map((entry) => normalizeRepoRel(entry)));
+  const wanted = [...new Set(itemScopePaths(queueItem).map((entry) => normalizeRepoRel(entry)))].sort();
+
+  const conflicts = wanted.filter((rel) => preexisting.has(rel));
+  const skipped: string[] = [];
+  if (conflicts.length > 0) {
+    if (config.git.preexistingDirty === "refuse") {
+      // The human's uncommitted work sits inside the scope this run claims. That
+      // is a conflict between the run's scope and the human's, which is exactly
+      // what the closed `scope-conflict` origin names — no widening needed.
+      const question = appendQuestion(
+        runDir,
+        {
+          runId,
+          question:
+            "Publishing " +
+            itemId +
+            " would touch files you already had uncommitted work in (" +
+            conflicts.join(", ") +
+            "). Commit, stash, or set git.preexistingDirty to \"exclude\" to publish without them.",
+          askedBy: { role: "orchestrator", sessionID: "" },
+          humanTerritory: true,
+          origin: "scope-conflict",
+          blocksItems: [itemId],
+        },
+        now(),
+      );
+      journal.log(
+        "warn",
+        "state",
+        "question.surfaced",
+        { questionId: question.id, origin: "scope-conflict", itemId, conflicts },
+        { runId, itemId },
+      );
+      return publishDenial(
+        item.state,
+        PUBLISH_TOOL +
+          ": git.preexistingDirty is \"refuse\" and the item's scope contains pre-existing dirty files (" +
+          conflicts.join(", ") +
+          ") — nothing was staged",
+        { questionId: question.id },
+      );
+    }
+    skipped.push(...conflicts);
+  }
+
+  const staged = wanted.filter((rel) => !preexisting.has(rel)).filter((rel) => existsSync(path.join(root, rel)));
+
+  // ---- step 3: format ----------------------------------------------------
+  for (const rel of staged) {
+    const rule = formatRuleFor(config, rel);
+    if (rule === null) continue;
+    const abs = path.join(root, rel);
+    const before = readFileSync(abs, "utf8");
+
+    const out = spawnSync(rule.command[0] as string, rule.command.slice(1), {
+      cwd: root,
+      encoding: "utf8",
+      input: rule.mode === "stdin" ? before : undefined,
+      stdio: rule.mode === "stdin" ? ["pipe", "pipe", "pipe"] : ["ignore", "pipe", "pipe"],
+    });
+
+    // A formatter that could not run, or exited non-zero, or (in stdin mode)
+    // produced nothing from non-empty input, has not rendered a FORMATTING
+    // VERDICT — it has failed. Treating its empty stdout as "the formatted file"
+    // would silently truncate the source. Failure and dirty are distinct.
+    if (out.error !== undefined || out.status === null || out.status !== 0) {
+      return publishDenial(
+        item.state,
+        PUBLISH_TOOL +
+          ": the format rule " +
+          JSON.stringify(rule.pattern) +
+          " (" +
+          rule.command.join(" ") +
+          ") failed on " +
+          rel +
+          (out.error !== undefined ? " (" + String(out.error) + ")" : " (exit " + String(out.status) + ")") +
+          " — no commit was created",
+      );
+    }
+    if (rule.mode === "stdin") {
+      const formatted = out.stdout ?? "";
+      if (before.length > 0 && formatted.length === 0) {
+        return publishDenial(
+          item.state,
+          PUBLISH_TOOL +
+            ": the format rule " +
+            JSON.stringify(rule.pattern) +
+            " (" +
+            rule.command.join(" ") +
+            ") produced empty output for non-empty " +
+            rel +
+            " — a crashed formatter's stdout is not a formatting verdict",
+        );
+      }
+      if (formatted !== before) writeFileSync(abs, formatted);
+    }
+  }
+
+  if (!readOnly) {
+    const add = runReviewGit(root, ["add", "--", ...staged]);
+    if (add.status !== 0) {
+      return publishDenial(item.state, PUBLISH_TOOL + ": git add failed for " + staged.join(", "));
+    }
+  }
+
+  // ---- step 4: freshness, and at most ONE auto re-verify ------------------
+  const behavioral = staged.filter((rel) => existsSync(path.join(root, rel)));
+  const mtimes = [...worktreeMtimes(root, behavioral).values()];
+  const fresh = verifyFreshFor(
+    { startedMs: record.startedMs, head: record.head },
+    {
+      stagedMtimes: mtimes,
+      indexMtimeMs: indexMtimeMs(root),
+      hasStagedDeletion: false,
+      currentHead,
+      noGit: false,
+    },
+  );
+
+  let reverified = false;
+  let verifySeq: number | null = record.seq;
+  let excluded: string[] = [];
+
+  if (!fresh.fresh) {
+    reverified = true;
+    excluded = foreignRedSet(store, runId, queue, itemId);
+    const outcome = runVerify(runDir, itemId, config, verifyScopePathsOf(queueItem), {
+      cwd: root,
+      excludeTestFiles: excluded,
+      journal: evidenceJournalOf(journal),
+      stateHome: input.stateHome,
+      workspaceKey: input.workspaceKey,
+      runId,
+      tree: STAGE_TREE,
+      now,
+    });
+    if (outcome.refused) {
+      return publishDenial(
+        item.state,
+        PUBLISH_TOOL + ': item "' + itemId + '" cannot re-verify: ' + outcome.reason,
+      );
+    }
+    const reRecord = outcome.record as VerifyEvidence;
+    verifySeq = reRecord.seq;
+    if (!reRecord.green) {
+      // The item's own test still passes in this situation — it is the TREE that
+      // moved under it. So the item goes back to GREEN with the debug protocol
+      // armed rather than being blamed, and publish stops. No second attempt:
+      // looping here would burn the budget on a tree nobody has fixed yet.
+      demoteReviewedToGreen({
+        store,
+        runId,
+        itemId,
+        journal,
+        reason: "the auto re-verify at publish went red on the current tree",
+        hypothesis: "the tree changed after the review: " + verifyFailureText(reRecord),
+        now,
+      });
+      return publishDenial("GREEN", PUBLISH_TOOL + ": the auto re-verify failed; the item is back at GREEN for debugging", {
+        reverified: true,
+        verifySeq,
+        excluded,
+      });
+    }
+  }
+
+  // ---- step 5: the message, built by the pure template --------------------
+  const redRef = item.evidence.red ?? null;
+  const redRecord = redRef === null ? null : (readEvidenceAt(runDir, redRef.seq) as Extract<EvidenceRecord, { kind: "red" }> | null);
+  const redProof: RedProof | null =
+    redRecord === null
+      ? null
+      : { seq: redRecord.seq, command: [...redRecord.command], failureExcerpt: redRecord.failureExcerpt };
+
+  const build = input.messageBuilder ?? buildCommitMessage;
+  const message = build(queueItem, redProof);
+
+  // Defense in depth: the generator neutralizes, and the handler REFUSES. The
+  // generator is injectable and can be replaced; the rule cannot.
+  const token = denylistedTrailerToken(message);
+  if (token !== null) {
+    return publishDenial(
+      item.state,
+      PUBLISH_TOOL +
+        ": the commit message carries the denylisted trailer token " +
+        JSON.stringify(token) +
+        " (§3.3) — conductor does not sign another name to a commit, and no commit was created",
+      { staged, skipped, reverified, verifySeq, excluded },
+    );
+  }
+
+  // ---- step 6: commit, push, batch, advance ------------------------------
+  // Against HEAD rather than the index: in read-only mode nothing is staged, and
+  // a batch whose diff is empty because of the MODE would make the report claim
+  // the item changed nothing.
+  const diff = runReviewGit(root, ["diff", "HEAD", "--", ...staged]).stdout;
+
+  let commit: string | null = null;
+  let pushed = false;
+
+  if (!readOnly) {
+    const made = runReviewGit(root, ["commit", "--cleanup=default", "-m", message]);
+    if (made.status !== 0) {
+      return publishDenial(item.state, PUBLISH_TOOL + ": git commit failed", {
+        staged,
+        skipped,
+        reverified,
+        verifySeq,
+        excluded,
+      });
+    }
+    commit = headSha(root);
+
+    if (gitMode === "commit-and-push") {
+      // §3.3:1296. argv discipline, never a shell string — core/gates-git.ts
+      // denies a SESSION's `git push`, so the handler is the only thing that may
+      // perform it, and it performs it directly.
+      const push = runReviewGit(root, ["push"]);
+      pushed = push.status === 0;
+      if (!pushed) {
+        // The commit STANDS. Denying after a successful commit would leave
+        // conductor's state disagreeing with git, and no later step can repair
+        // that; a push that failed is an operator problem, loudly journaled.
+        journal.log(
+          "error",
+          "state",
+          "item.updated",
+          { itemId, push: "failed", commit },
+          { runId, itemId },
+        );
+      }
+    }
+  }
+
+  appendPublishBatch(runDir, {
+    itemId,
+    tsMs: now(),
+    mode: gitMode,
+    files: staged,
+    diff,
+    suggestedMessage: message,
+    skipped,
+    verify: { seq: verifySeq, green: true },
+  });
+
+  const edge = legalItemTransition("REVIEWED", "PUBLISHED", {
+    item: { behavioral: queueItem.behavioral, blocked: item.blocked },
+  });
+  if (!edge.ok) {
+    return publishDenial(item.state, PUBLISH_TOOL + ": " + (edge.why ?? "the FSM denies REVIEWED->PUBLISHED"));
+  }
+  item.state = "PUBLISHED";
+  store.saveItem(runId, item);
+
+  journal.log(
+    "info",
+    "state",
+    "item.updated",
+    { itemId, state: "PUBLISHED", commit, pushed, staged: staged.length, skipped: skipped.length, reverified },
+    { runId, itemId },
+  );
+
+  return {
+    ok: true,
+    itemState: "PUBLISHED",
+    denial: null,
+    commit,
+    pushed,
+    message,
+    staged,
+    skipped,
+    reverified,
+    verifySeq,
+    excluded,
+    questionId: null,
+  };
+}
+
+// ===========================================================================
+// (12) conductor_report — the §3.2 closing report (Task 9.5b, plan lines
+// 2667-2686). ONE writer with a MODE parameter, not two writers: the full and
+// lite reports differ in section CONTENT only, and 9.5c's stop-report drives
+// this same function in its stop mode.
+// ===========================================================================
+
+const REPORT_TOOL = "conductor_report";
+const REPORT_FILE = "report.md";
+
+export interface ReportInput {
+  store: StateStore;
+  // Taken for a uniform handler shape so the composition root can call every
+  // handler alike, and deliberately UNUSED: a report dispatches nothing. Reading
+  // it would be the bug, not ignoring it.
+  fanout: Fanout;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  stateHome: string;
+  workspaceKey: string;
+  now?: () => number;
+  // Task 7.2's fetchMetricsSummary, injected so the closing report never opens a
+  // socket in a test. Fail-soft by contract: a null result renders a line, never
+  // a throw and never a blocked report — a run that finished its work is not
+  // held hostage by a metrics endpoint that is down.
+  metrics?: () => Promise<MetricsSummary | null>;
+}
+
+export interface ReportResult {
+  runState: RunState;
+  mode: "full" | "lite";
+  reportPath: string;
+  verifySeq: number | null;
+  green: boolean;
+  excluded: string[];
+  staleRedAdded: string[];
+  metricsAvailable: boolean;
+  stop: { kind: string; reasonDisplay: string; tsMs: number } | null;
+}
+
+function reportSection(heading: string, lines: string[]): string {
+  return "## " + heading + "\n\n" + (lines.length > 0 ? lines.join("\n") : "(none)") + "\n";
+}
+
+export async function handleReport(input: ReportInput): Promise<ReportResult> {
+  const { store, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+  const root = store.root;
+
+  const queue = readJsonFileSync(path.join(runDir, "queue.json")) as Queue;
+  const run = store.loadRun(runId);
+  const trivial = run.classification !== null && run.classification.kind === "trivial";
+  const mode: "full" | "lite" = trivial ? "lite" : "full";
+
+  // §3.9 again, and from the SAME predicate the gate uses: with publish disabled
+  // an item terminating at REVIEWED is settled; with git it still owes a publish.
+  const publishEnabled = isRepo(root);
+
+  const items = queue.items.map((entry) => {
+    const persisted = store.loadItem(runId, entry.id);
+    return {
+      id: entry.id,
+      state: persisted.state,
+      behavioral: entry.behavioral,
+      dependsOn: entry.dependsOn,
+      fileScope: entry.fileScope,
+      blocked: persisted.blocked,
+      deferred: persisted.deferred,
+    };
+  });
+
+  // THE MANDATORY DEFERRED BINDING (C-018). This is a PRESENCE CHECK over the
+  // persisted items, and it runs BEFORE any verify — because the closing verify
+  // cannot answer it. An unsettled item below GREEN has its own red test in the
+  // §4.2 exclusion set, so the verify would pass WITHOUT EVER EXECUTING the
+  // failure that makes the run unfinished. Ordering it first is not an
+  // optimization; it is the only order in which the check means anything.
+  const settled = settledForReport(items, { publishEnabled });
+  if (!settled.allSettled) {
+    throw new Error(
+      REPORT_TOOL +
+        ": the run is not finished — " +
+        settled.unsettled.join(", ") +
+        " is neither published, blocked nor deferred (§3.2). No verify was run and no report was written.",
+    );
+  }
+
+  // The closing verify: fresh, full, and over the WHOLE run — so it has no
+  // subject item and nothing is privileged. Exclusions still apply, because a
+  // report is legal with blocked items whose red tests are still on disk.
+  const excluded = foreignRedSet(store, runId, queue, null);
+  const outcome = runVerify(runDir, runId, config, ["**"], {
+    cwd: root,
+    excludeTestFiles: excluded,
+    journal: evidenceJournalOf(journal),
+    stateHome: input.stateHome,
+    workspaceKey: input.workspaceKey,
+    runId,
+    tree: STAGE_TREE,
+    now,
+  });
+  if (outcome.refused) {
+    throw new Error(REPORT_TOOL + ": the closing verify could not run: " + outcome.reason);
+  }
+  const record = outcome.record as VerifyEvidence;
+
+  // §2.11 disclosure, through the ONE shared helper 9.5c also calls.
+  const staleRedAdded = registerStaleRed({
+    store,
+    runId,
+    queue,
+    reason: "left red when run " + runId + " terminated (§2.11)",
+    now,
+  });
+
+  const summary = input.metrics === undefined ? null : await input.metrics();
+
+  // ---- report.md ---------------------------------------------------------
+  const itemLines: string[] = [];
+  for (const entry of queue.items) {
+    const persisted = store.loadItem(runId, entry.id);
+    itemLines.push("### " + entry.id + " — " + persisted.state);
+    const disposition =
+      persisted.state === "PUBLISHED"
+        ? "published"
+        : persisted.deferred !== null
+          ? "deferred"
+          : persisted.blocked !== null
+            ? "blocked"
+            : publishEnabled
+              ? "unfinished"
+              : "terminated at REVIEWED (no-git)";
+    itemLines.push("Disposition: " + disposition);
+
+    const redRef = persisted.evidence.red ?? null;
+    const red = redRef === null ? null : (readEvidenceAt(runDir, redRef.seq) as Extract<EvidenceRecord, { kind: "red" }> | null);
+    itemLines.push(
+      red === null
+        ? "Red proof: none"
+        : "Red proof: seq " + String(red.seq) + " — " + red.command.join(" "),
+    );
+    itemLines.push("Review rounds: " + String(persisted.attempts.reviewRounds));
+    itemLines.push("Taints: " + (persisted.taint.length === 0 ? "(none)" : JSON.stringify(persisted.taint)));
+    if (persisted.blocked !== null) itemLines.push("Reason: " + persisted.blocked.reason);
+    if (persisted.deferred !== null) itemLines.push("Reason: " + persisted.deferred.reason);
+    itemLines.push("");
+  }
+
+  const openQuestions = readQuestions(runDir).filter((q) => q.answeredIso === null);
+  const questionLines = openQuestions.map((q) => "- " + q.id + " — " + q.question);
+
+  const decisions = readDecisions(runDir);
+  const decisionLines = decisions.map(
+    (d) => "- " + d.id + " (" + d.kind + ") " + d.question + " => " + d.choice + " — " + d.why,
+  );
+
+  const staleLines = staleRedAdded.map((file) => {
+    const owner = queue.items.find((entry) =>
+      entry.testScope.some((candidate) => normalizeRepoRel(candidate) === file),
+    );
+    return "- " + file + (owner === undefined ? "" : " (" + owner.id + ")");
+  });
+
+  const batches = readPublishBatch(runDir);
+  const skippedFromBatches = new Set<string>();
+  for (const batch of batches) {
+    for (const file of batch.skipped ?? []) skippedFromBatches.add(file);
+  }
+  const exclusionLines = [
+    ...excluded.map((file) => "- excluded from the closing verify: " + file),
+    ...[...skippedFromBatches].sort().map((file) => "- left out of its commit (preexisting dirty): " + file),
+  ];
+
+  const batchLines: string[] = [];
+  for (const batch of batches) {
+    batchLines.push("### " + batch.itemId + " (" + batch.mode + ")");
+    batchLines.push("Suggested message:");
+    batchLines.push(batch.suggestedMessage);
+    batchLines.push("Files: " + batch.files.join(", "));
+    batchLines.push("Diff:");
+    batchLines.push(batch.diff);
+    batchLines.push("");
+  }
+
+  const parts: string[] = [
+    "# conductor report — run " + runId,
+    "",
+    "Mode: " + mode,
+    "Closing verify: " + (record.green ? "green" : "RED") + " (evidence seq " + String(record.seq) + ")",
+    "",
+    reportSection("Items", itemLines),
+    reportSection("Open questions", questionLines),
+  ];
+
+  // G10: a trivial run has no decision ledger to speak of, so an EMPTY section is
+  // omitted entirely rather than rendered as "(none)" — lite reports do not carry
+  // headings for machinery the run never used. A NON-empty ledger is always shown.
+  if (!(mode === "lite" && decisionLines.length === 0)) {
+    parts.push(reportSection("Decisions", decisionLines));
+  }
+
+  parts.push(reportSection("Stale-red additions", staleLines));
+  parts.push(reportSection("Exclusions", exclusionLines));
+  parts.push(
+    "## Metrics\n\n" +
+      (summary === null ? "(unavailable)" : JSON.stringify(summary, null, 2)) +
+      "\n",
+  );
+  parts.push(reportSection("Prepared batches", batchLines));
+
+  const reportPath = path.join(runDir, REPORT_FILE);
+  writeFileAtomicSync(reportPath, parts.join("\n"));
+
+  // ---- close the run -----------------------------------------------------
+  const target: RunState = trivial ? "TRIVIAL_DONE" : "REPORTED";
+  const edge = legalRunTransition("EXECUTING", target, {
+    classification: trivial ? "trivial" : "work",
+  });
+  if (!edge.ok) {
+    throw new Error(REPORT_TOOL + ": " + (edge.why ?? "the run FSM denies EXECUTING->" + target));
+  }
+
+  const stop: { kind: "done"; reasonDisplay: string; tsMs: number } = {
+    kind: "done",
+    reasonDisplay:
+      "the run completed: " +
+      String(queue.items.length) +
+      " item(s), closing verify " +
+      (record.green ? "green" : "RED"),
+    tsMs: now(),
+  };
+  run.state = target;
+  run.stop = stop;
+  store.saveRun(run);
+
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    { from: "EXECUTING", to: target, stop: stop.kind, why: edge.why },
+    { runId },
+  );
+
+  return {
+    runState: target,
+    mode,
+    reportPath,
+    verifySeq: record.seq,
+    green: record.green,
+    excluded,
+    staleRedAdded,
+    metricsAvailable: summary !== null,
+    stop,
+  };
 }

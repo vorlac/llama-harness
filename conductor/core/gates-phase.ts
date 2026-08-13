@@ -208,6 +208,43 @@ function cannotEverPublish(items: GateItem[]): Set<string> {
   }
 }
 
+/**
+ * The §3.2:1142 report precondition, as ONE derivation with TWO consumers
+ * (C-037 ruling 1): every item is either settled outright — PUBLISHED, blocked
+ * or deferred — or belongs to the set that can never publish in this run.
+ *
+ * `legalTools` calls it to decide whether to OFFER conductor_report, and
+ * handleReport calls it to decide whether to ACCEPT the call. Those two must
+ * agree by construction rather than by two implementations that happen to
+ * match: one rule living in two places has drifted four separate times in this
+ * build, and each drift meant the gate offering something the handler refused.
+ *
+ * `unsettled` names the items that block the report, so the handler's refusal
+ * can say WHICH work is unfinished instead of that some is.
+ *
+ * Deliberately NOT a verify (the C-018 binding). The closing re-verify cannot
+ * answer this question: an unsettled item below GREEN has its own red test in
+ * the §4.2 exclusion set, so the verify would pass without ever executing the
+ * failure that makes the run unfinished. Disposition is a property of persisted
+ * state, and it is read from persisted state.
+ */
+export function settledForReport(
+  items: GateItem[],
+  opts?: { publishEnabled?: boolean },
+): { allSettled: boolean; unsettled: string[] } {
+  // §3.9: with publish disabled, REVIEWED is where an item ENDS — the plan says
+  // items "terminate at REVIEWED with their diff recorded in the report". So it
+  // is a settled disposition in that mode and only that mode; under normal git
+  // a REVIEWED item still owes a publish and the run is not finished.
+  const publishEnabled = opts?.publishEnabled ?? true;
+  const settled = (item: GateItem): boolean =>
+    isSettled(item) || (!publishEnabled && item.state === "REVIEWED");
+
+  const stuck = cannotEverPublish(items);
+  const unsettled = items.filter((item) => !settled(item) && !stuck.has(item.id)).map((item) => item.id);
+  return { allSettled: items.length > 0 && unsettled.length === 0, unsettled };
+}
+
 // Record a per-item stage tool into the legal map, aggregating the item id into
 // the (sorted, so reorder-invariant) list of ids that tool may target.
 function addStageTool(legal: Map<string, ArgsHint>, tool: string, itemId: string): void {
@@ -237,6 +274,22 @@ export function legalTools(
   items: GateItem[],
   questions: GateQuestion[],
   repoConfigured: boolean,
+  // §3.9 no-git mode DISABLES publish: items terminate at REVIEWED with their
+  // diff recorded in the report. Without this input the gate offered
+  // conductor_publish at REVIEWED unconditionally (nextStageTool maps that edge
+  // with no notion of git), so a no-git run reached REVIEWED and was handed a
+  // tool that cannot work — with no other stage tool and no report, no legal
+  // exit at all.
+  //
+  // OPTIONAL rather than required, and the reason is worth stating because it
+  // reverses an earlier orchestrator ruling (C-043 ruling 1, amended in C-048):
+  // making it required is not assignable to the 5-parameter-with-optional type
+  // the 9.5b suite pins, and the test is the contract. The danger a required
+  // parameter was meant to remove — a call site silently inheriting
+  // publish-enabled — is instead removed by a CONSTRUCTION: every production
+  // call site passes it explicitly, and tests/legaltools-callsites.test.ts
+  // fails if one stops. A default no production path can reach cannot mislead.
+  publishEnabled: boolean = true,
 ): LegalToolsResult {
   const legal = new Map<string, ArgsHint>();
 
@@ -342,6 +395,12 @@ export function legalTools(
         // offered its stage tool at all — the same predicate nextWave applies.
         if (!depsReady(it, publishedIds)) continue;
         const tool = nextStageTool(it);
+        // §3.9: with publish disabled, REVIEWED is TERMINAL — the item is as far
+        // as this run can take it, and its diff goes into the report instead.
+        // Suppressing the tool here rather than in nextStageTool keeps the FSM
+        // table a statement about the FSM and the git-mode question a statement
+        // about the environment.
+        if (tool === PUBLISH && !publishEnabled) continue;
         if (tool !== null) addStageTool(legal, tool, it.id);
       }
 
@@ -352,9 +411,9 @@ export function legalTools(
       // legal over an unsettled item merely because the run is trivial (C-018 —
       // the safe reading of the plan's 2256-vs-1142 contradiction).
       const trivial = run.classification !== null && run.classification.kind === "trivial";
-      const stuck = cannotEverPublish(items);
-      const allSettled = items.length > 0 && items.every((it) => isSettled(it) || stuck.has(it.id));
-      const reportLegal = allSettled;
+      // ONE derivation, two consumers (C-037 ruling 1): handleReport calls this
+      // same exported predicate to decide whether to ACCEPT what the gate offers.
+      const reportLegal = settledForReport(items, { publishEnabled }).allSettled;
       if (reportLegal) legal.set(REPORT, {});
 
       // recommended: the §4.2 wave-order-first item's next stage tool. nextWave
@@ -380,7 +439,11 @@ export function legalTools(
 
       const firstId = wave.parallel[0];
       const firstItem = firstId === undefined ? undefined : itemById.get(firstId);
-      const firstTool = firstItem === undefined ? null : nextStageTool(firstItem);
+      // The same §3.9 suppression the legal set applies. `recommended` is derived
+      // on its own path (nextWave, not the loop above), so without this a no-git
+      // run would be RECOMMENDED a tool the very same verdict declares illegal.
+      const firstStage = firstItem === undefined ? null : nextStageTool(firstItem);
+      const firstTool = firstStage === PUBLISH && !publishEnabled ? null : firstStage;
       if (firstId !== undefined && firstTool !== null) {
         recommended = { tool: firstTool, args: { itemId: firstId } };
         why = `EXECUTING: the §4.2 wave-order-first item ${firstId} (DAG depth then id) advances via ${firstTool}.`;

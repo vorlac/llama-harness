@@ -134,8 +134,43 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     ],
     fixed: NO_FIXED,
   },
-  conductor_publish: null,
-  conductor_report: null,
+  conductor_publish: {
+    handler: "handlePublish",
+    input: "PublishInput",
+    infrastructure: [
+      "store",
+      // Taken for a uniform handler shape and deliberately unused: a publish
+      // dispatches nothing. The §3.3 message is built by a pure template
+      // precisely because a commit message is a record, not a judgment.
+      "fanout",
+      "runId",
+      "config",
+      "journal",
+      "stateHome",
+      "workspaceKey",
+      // `messageBuilder` and `now` are OPTIONAL seams, so they are not listed:
+      // this list names the fields the root MUST supply. An optional seam the
+      // handler defaults for itself is not one of them, and claiming it here
+      // would assert a requirement the input does not carry.
+    ],
+    fixed: NO_FIXED,
+  },
+  conductor_report: {
+    handler: "handleReport",
+    input: "ReportInput",
+    infrastructure: [
+      "store",
+      "fanout",
+      "runId",
+      "config",
+      "journal",
+      "stateHome",
+      "workspaceKey",
+      // `metrics` (Task 7.2's fetchMetricsSummary) and `now` are OPTIONAL seams
+      // and are omitted for the same reason as publish's messageBuilder.
+    ],
+    fixed: NO_FIXED,
+  },
   conductor_surface: {
     handler: "handleSurface",
     input: "SurfaceInput",
