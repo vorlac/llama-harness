@@ -1299,20 +1299,33 @@
       "taskId": "9.5c",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "e6625f8",
       "commitMessage": "conductor: 9.5c stop reports + hatches",
       "planLines": [
         2687,
         2699
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
+      "tap": "tests=1103 pass=1103 fail=0 (suite); 9.5c file 24/24",
+      "redEvidence": {
+        "cmd": "conductor/node_modules/.bin/tsc -p conductor/tsconfig.json --noEmit",
+        "exitCode": 2,
+        "class": "missing-subject",
+        "excerpt": "3 missing exports: handleInlineClaim, handleOverride, inlineClaimScopeFor"
+      },
+      "filesTouched": [
+        "conductor/adapter/tools.ts",
+        "conductor/core/tool-bindings.ts",
+        "conductor/plugin/index.ts",
+        "conductor/tests/tools-9.5c.test.ts"
+      ],
+      "revertAssertion": "un-export handleInlineClaim => the 9.5c suite re-derives the missing-export red (tests=1 pass=0). M4 RUN in a detached worktree at e6625f8: baseline 24/24 green, mutated 1/0.",
       "attempts": 0,
-      "deviations": [],
+      "deviations": [
+        "C-043 ruling 2 APPLIED to the red's FIXTURE before it was moved in: 9.5c pinned handleReport WITHOUT the Fanout that 9.5b (the surface's owner) requires, because it was written before 9.5b existed. The orchestrator added `fanout` to the Bench, the local ReportInput restatement and reportInputFor. NO assertion changed - pre-authorised in C-043 precisely so this edit stays distinguishable from editing an assertion to make it pass.",
+        "The implementer was CUT OFF by a network error after finishing but before reporting its mutation table. The orchestrator verified the tree independently (gate 1103/1103, test file byte-identical to the parked red) and ran the mutations itself: per-run budget, per-item budget, one-shot grant consumption, the claim-active check and the claim scope source all discriminate. A sixth mutation did not typecheck and was DISCARDED rather than recorded as a survivor (the C-049 rule)."
+      ],
       "startedAt": null,
       "finishedAt": null
     },
