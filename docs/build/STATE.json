@@ -1004,7 +1004,7 @@
    "manifest": true,
    "tier": "B",
    "status": "COMMITTED",
-   "commitSha": null,
+   "commitSha": "75a2531",
    "commitMessage": "conductor: 9.2 planning tools",
    "planLines": [
     2584,
@@ -1048,22 +1048,45 @@
    "taskId": "9.3",
    "manifest": true,
    "tier": "B",
-   "status": "NOT_STARTED",
+   "status": "COMMITTED",
    "commitSha": null,
    "commitMessage": "conductor: 9.3 plan review",
    "planLines": [
     2596,
-    2611
+    2604
    ],
    "canonicalTestCmd": "bash scripts/test-conductor.sh",
-   "tap": null,
-   "redEvidence": null,
-   "filesTouched": [],
-   "revertAssertion": null,
-   "attempts": 0,
-   "deviations": [],
-   "startedAt": null,
-   "finishedAt": null
+   "tap": {
+    "tests": 901,
+    "pass": 901,
+    "fail": 0,
+    "skipped": 0,
+    "todo": 0
+   },
+   "redEvidence": {
+    "cmd": "node --test 'conductor/tests/tools-9.3.test.ts'",
+    "exitCode": 1,
+    "class": "missing-subject",
+    "excerpt": "SyntaxError: '../adapter/tools.ts' does not provide an export named 'handlePlanReview' (orchestrator-observed; tsc showed ONLY that one TS2305). The 6 review-fix tests (R1-R6) were each observed red against the un-fixed handler: 14 tests, 8 pass, 6 fail."
+   },
+   "filesTouched": [
+    "conductor/adapter/tools.ts",
+    "conductor/core/planning.ts",
+    "conductor/tests/tools-9.3.test.ts",
+    "docs/build/specs/task-9.3.assertions.json"
+   ],
+   "revertAssertion": "removing handlePlanReview re-reds tools-9.3.test.ts (missing-subject); reverting the Math.max lens roster re-reds [9.3-fix-lens-coverage]; reverting the file-shaped token rule re-reds [9.3-fix-blocks-no-directory-tokens]; reverting the citation normalisation re-reds [9.3-fix-blocks-common-citation-forms]; reverting cumulative claims re-reds [9.3-fix-overlapping-blocks]; reverting ID_BOUNDARY re-reds [9.3-fix-id-boundary]; reverting the k<1 guard re-reds [9.3-fix-zero-skeptics]",
+   "attempts": 1,
+   "deviations": [
+    "The staged red test came from the lookahead burst whose writer DIED on a session limit; the orchestrator verified completeness (1077 lines, 8 tests = 8 assertions, clean EOF, node --check, tsc showing only the missing export) before trusting it.",
+    "Lens ROSTER is max(readFanout('planReview'), 4), which can exceed workflow.planReviewers. \u00a73.2 mandates four lenses and they are the substance of the stage; the reader clamp is a concurrency knob the fan-out engine enforces internally. Raised at the Phase 9 gate.",
+    "blocksItems mapping is the pinned spec-gap resolution (\u00a72.10 findings carry no item reference): id tokens + file-shaped path tokens, over-match biased (a human unblocks) but never whole-queue. Raised at the Phase 9 gate.",
+    "Question origin/round semantics: planReviewRounds counts REVISION rounds; the cap exit itself performs no revision.",
+    "C-031 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 16 agents/1.4M tokens vs C-030's 79/5.7M): 5 MAJOR + 2 minor fixed test-first; 5 crash-class findings deferred to 10.1; 2 raised at the Phase 9 gate.",
+    "A first review run returned an EMPTY finding set because both lenses died to a connection error; treated as 'review did not run', not as a pass, and re-run."
+   ],
+   "startedAt": "2026-08-13T05:10:00Z",
+   "finishedAt": "2026-08-13T06:30:00Z"
   },
   "9.4a": {
    "taskId": "9.4a",

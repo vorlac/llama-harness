@@ -495,13 +495,26 @@
    "M1": "PASS 887/887 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
    "M2": "PASS 864 -> 873 (9 authored) -> 887 (14 review-fix)",
    "M3": "PASS (tsc --noEmit clean; pre-implementation tsc showed ONLY the 2 missing-export errors)",
-   "M4": "PENDING post-commit re-derivation (scratch worktree from the 9.2 commit)",
+   "M4": "PASS post-commit from 75a2531 in a detached scratch worktree: removed conductor/core/planning.ts -> ERR_MODULE_NOT_FOUND from adapter/tools.ts (tests=1 pass=0), restored -> 23/23 green. Orchestrator-observed both directions; worktree removed.",
    "M5": "PASS (production-scoped marker scan over planning.ts/tools.ts/types.ts)",
    "M6": "PASS (planning.ts imported by tools.ts + the test; both handlers exported and exercised)",
    "M7": "PASS 9 assertion rows, each with a name-prefixed test, + 14 review-fix rows",
    "M8": "n/a (no live-model observation in this task; the fake SDK drives every dispatch)",
    "M9": "PASS (bun leg green, 8 pass)",
    "orchestratorReverify": "observed the missing-export red MYSELF before implementation and the 887/887 green after; read the ENTIRE diff (planning.ts in full, the tools.ts diff, the types.ts diff); ran a 3-lens skeptic-verified adversarial panel PRE-COMMIT which found 19 real defects the 873-test suite missed, including 2 MAJORs that would break runs under the DEFAULT config; wrote all 14 fix-tests myself, observed 12 of them red, and fixed them myself. Honestly recorded: R13 passed pre-fix (guard, not red-driven), and 9 skeptics died on a session limit so their findings were counted as upheld rather than dropped."
+  },
+  "9.3": {
+   "at": "2026-08-13T06:30:00Z",
+   "M1": "PASS 901/901 node + tsc + bun(8) + schema-export (orchestrator-run, GATE PASS)",
+   "M2": "PASS 895 (8 authored) -> 901 (6 review-fix)",
+   "M3": "PASS (tsc clean; pre-implementation tsc showed ONLY the missing handlePlanReview export)",
+   "M4": "PENDING post-commit re-derivation",
+   "M5": "PASS (production-scoped marker scan)",
+   "M6": "PASS (handlePlanReview exported + exercised; findingBlocksItems imported by tools.ts and the test)",
+   "M7": "PASS 8 assertion rows each with a name-prefixed test + 6 review-fix rows",
+   "M8": "n/a (fake SDK drives every dispatch)",
+   "M9": "PASS (bun leg green)",
+   "orchestratorReverify": "vetted a staged test whose writer had DIED mid-run before trusting it; observed the missing-export red and the 901/901 green MYSELF; read the whole diff and independently verified the correctness-critical claim that dispatchWave preserves job order (groupByModel carries the ORIGINAL index; runGroup writes results[index]), which is what makes the index*k+i verdict binding sound; independently flagged the overlapping-block defect BEFORE the panel confirmed it; refused to accept an empty review result produced by two crashed lenses as a pass."
   }
  },
  "phaseGates": {

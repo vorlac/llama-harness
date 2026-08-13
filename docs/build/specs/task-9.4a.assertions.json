@@ -2,14 +2,87 @@
   "taskId": "9.4a",
   "planLines": [
     2612,
-    2624
+    2623
   ],
-  "kind": "code \u2014 created early to carry a Phase-3 gate binding; full rows authored when the phase is reached.",
-  "assertions": [],
-  "phaseGate3Bindings": {
-    "source": "Phase 3 adversarial gate",
-    "MUST": [
-      "Decide + implement: do direct per-item stage-tool calls (conductor_submit_test etc., called outside the wave driver for recovery) enforce dependency-readiness (deps PUBLISHED)? legalTools offers a stage tool for a dependency-unready item (matching \u00a73.4's 'first-class orchestrator-callable for recovery' intent) while its own recommended is null. Make the gate/handler consistent: either enforce deps-published on direct calls, or document the recovery bypass explicitly. (Phase 3 correctness lens.)"
-    ]
-  }
+  "kind": "code (tools MILESTONE, Phase 9 SERIAL \u2014 adapter/tools.ts). Tools: conductor_submit_test (PENDING->RED, behavioral items only; new export handleSubmitTest) + conductor_vet_test (RED->TEST_VETTED; new export handleVetTest), following the established handleX convention (handleClassify/handleStatus/handleDecide/handleSurface/handleAnswer/handleDefer, committed 9.1). Driven through the FAKE SDK + fixture repos. Each handler follows the invariant loop: legality -> derive -> persist -> journal -> compact return. Subagents read \u00a79 Task 9.4a (2612-2623), \u00a73.3 PENDING->RED and RED->TEST_VETTED (1184-1210), \u00a72.6/\u00a72.6.1 evidence + failure classes (797-843), \u00a72.10 TEST_VET (958-965), \u00a72.11 questions (984-993), \u00a72.7 decisions (852-875), and the config workflow knobs vetCritics/vetMaxRounds/testRepairAttempts (568-572). Carries the MANDATORY 9.4a/5.3 deferred binding (HANDOFF 'Deferred bindings'): dependency-readiness consistent between gate and handler.",
+  "reusesExisting": [
+    "adapter/evidence.ts runTest(runDir, itemId, opts) -> RunTestResult \u2014 the ONLY way either handler runs or re-runs the item test: it already substitutes the itemTest template, applies the \u00a72.1 zero-test guard + full-scope fallback, classifies the failure via core classifyFailure with the item's fileScope, appends AND journals the \u00a72.6 red|green evidence record (evidence.ts is that file's only writer), and returns {record.failureClass, legalRed, targeted, namesTestScopeFile}; the handler must never spawn its own child process or write evidence.jsonl itself",
+    "core/freshness.ts classifyFailure \u2014 already invoked inside evidence.runTest; the assertion/missing-subject/error split (\u00a72.6.1, including the inside-vs-outside-fileScope resolution rule) is decided THERE and only there; tools.ts never re-classifies",
+    "core/fsm-item.ts legalItemTransition(from, to, {item, testExit, failureClass}) \u2014 the PENDING->RED redEvidenceGate (exit!=0 AND class in {assertion, missing-subject}; a passing test is not a red) and the RED->TEST_VETTED edge already exist; handlers pass runTest's exit + class through it and never re-implement edge legality",
+    "core/gates-phase.ts legalTools / nextStageTool / GateItem (dependsOn already in the gate subset) \u2014 the handlers' legality step (invariant-loop step 1); the deferred-binding fix lands here: item stage-tool contribution gains the same deps-PUBLISHED readiness predicate schedule.nextWave already applies, so gate and handler cannot disagree",
+    "core/schedule.ts readFanout('vet', config) \u2014 the vet critic count (config.workflow.vetCritics clamped to parallel.maxReaders); never read the raw knob in the handler",
+    "adapter/fanout.ts Fanout.dispatch / Fanout.dispatchWave + FanoutJob (built by createFanout) \u2014 all sub-session dispatch; structured-output schema validation, <=2 re-prompt retries, and env-fail marking are the ENGINE's contract (\u00a72.10), never duplicated in the handler",
+    "core/types.ts SCHEMAS.TestVet + SCHEMAS.ImplementerResult + validate \u2014 both \u00a72.10 schemas are already registered; 9.4a authors NO schema and widens NO closed vocabulary",
+    "adapter/state.ts StateStore.loadItem/saveItem/setBlocked (+ appendLedgerLineRaw underneath the ledgers) \u2014 the only writers of persisted item state; setBlocked already takes {reason, stage, questionId}",
+    "adapter/questions.ts appendQuestion \u2014 the \u00a72.11 questions.jsonl writer (Q-id minting, blocksItems, isHumanTerritory handling per C-029 F4); never hand-append question lines",
+    "adapter/tools.ts handlerRunDir + mintDecisionId + appendDecision (committed 9.1 same-file helpers; mintDecisionId is torn-line-safe per C-029 F6) \u2014 the \u00a72.7 decisions.jsonl path for the ponytail-skip record, journaling the existing state:decision.recorded event (no new event name needed)",
+    "conductor/tests/fixtures/fake-sdk.ts makeFakeSdk \u2014 recorded calls/prompts/promptsFor + PromptResponder; the test-writer's file edits are simulated by responder side effects on the fixture repo, the tools-9.1.test.ts pattern"
+  ],
+  "specGaps": [
+    "GAP (question origin, submit_test exhaustion): \u00a72.11's origin vocabulary is closed (surface-tool | plan-review-cap | debug-architecture | implementer-blocked | review-round-cap | scope-conflict) and names no test-repair origin, yet \u00a73.3 requires submit_test to write a question at testRepairAttempts exhaustion. PROPOSED (no widening): origin 'implementer-blocked' \u2014 the blocked write-capable sub-session here IS the test-writer, the origin's literal meaning. Raise at the Phase 9 milestone gate + CORRECTIONS.md.",
+    "GAP (vet round-cap outcome): the plan says only 'mustFix loops bounded by vetMaxRounds' and never states the at-cap behaviour. PROPOSED (mirrors both sibling caps \u2014 \u00a73.3 reviewMaxRounds 'cap => question + blocked' and the submit-side exhaustion): the item STAYS at RED, store.setBlocked {stage:'TEST_VETTED', reason naming vetMaxRounds, questionId}, ONE \u00a72.11 question with origin 'review-round-cap' (the vet loop is a review-round cap over the test; no vocabulary widening) and blocksItems [itemId].",
+    "GAP (immediate-pass aftermath): the plan pins 'rejected and records the ponytail-skip decision' but not the item's resulting annotations or the record's \u00a72.7 shape. PROPOSED: the item remains PENDING, un-blocked, no question (the orchestrator chooses conductor_defer or a re-dispatch); the handler appends a kind:'derived' \u00a72.7 record with the two REAL scored options the plan itself names \u2014 'behavior-already-exists (ponytail rung skip; item may be unnecessary)' vs 'test-is-wrong (rewrite and resubmit)' \u2014 choice 'test-is-wrong' as the conservative default (the rejection already forces resubmission; skip stays available via conductor_defer reading the ledger). >=2 scored options keeps this consistent with decide.requireTwoOptions.",
+    "GAP (test-writer reply schema): \u00a72.10 defines no test-writer output schema, but the fan-out engine requires a schemaName per dispatch. PROPOSED (no new schema): every testWriter dispatch uses SCHEMAS.ImplementerResult \u2014 its status vocabulary (DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED) is exactly what the repair loop consumes; the deliverable is the test file the responder writes, the structured reply is the status envelope.",
+    "GAP (who dispatches the initial test-writer): \u00a73.3 assigns the test-writer sub-session to the PENDING->RED stage and \u00a73.4 makes conductor_submit_test that stage's tool, but no line says the handler performs the FIRST writer dispatch. PROPOSED: handleSubmitTest owns the whole stage \u2014 initial testWriter dispatch (role 'testWriter', writeCapable:true, tree 'main' until 9.6 worktrees), then the handler-run test, then the bounded repair loop \u2014 since the 9.4c wave driver only sequences stage tools and 'the handler returns the failure to the writer' presumes the handler holds the writer conversation.",
+    "GAP (stale red between vet rounds): \u00a73.3 gives the vet critics 'the captured red output', but after a mustFix repair changes the test the captured red is stale. PROPOSED (derived from \u00a73.3's changed-test rule 'the changed test re-enters the test discipline'): after every mustFix repair the handler re-runs the item test via evidence.runTest and requires a still-legal \u00a72.6.1 red BEFORE re-vetting, so each vet round's prompt carries a true red for the test it is judging; a repair that breaks the red (class 'error' or pass) is handled by the submit-side rules, not vetted.",
+    "GAP (writer BLOCKED mid-loop): the \u00a73.3 implementer-status escalation protocol is written for the TEST_VETTED->GREEN implementer; a testWriter replying status 'BLOCKED' inside submit_test's repair loop is unspecified. PROPOSED: exit the loop early into the same exhaustion path (setBlocked + \u00a72.11 question, origin 'implementer-blocked' \u2014 literally true here) rather than burning the remaining attempts on a writer that has declared it cannot proceed. No assertion row requires this; recorded for the implementer and the milestone gate."
+  ],
+  "assertions": [
+    {
+      "id": "9.4a-submit-legal-red",
+      "text": "handleSubmitTest (conductor_submit_test {itemId}) owns the PENDING->RED stage: legality first (gates-phase), then it dispatches the test-writer sub-session through the injected Fanout (role 'testWriter', writeCapable:true, schema ImplementerResult per the pinned specGaps resolution), then THE HANDLER \u2014 not the model \u2014 runs the item test via adapter/evidence.ts runTest; exit!=0 with failureClass 'assertion' is a legal red: the item advances PENDING->RED through core legalItemTransition, the \u00a72.6 red record lands on evidence.jsonl (written by runTest, that file's only writer), and the tool returns a compact result naming exit code + failureClass + excerpt \u2014 the new state asserted by reading the persisted item file via store.loadItem, never a log line",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-submit-missing-subject",
+      "text": "GREENFIELD legal red: a fixture repo whose test imports a module inside the item's declared fileScope that DOES NOT EXIST yet yields failureClass 'missing-subject' (classified by core classifyFailure inside the real evidence.runTest \u2014 not stubbed) and is ACCEPTED as a legal RED exactly like 'assertion' \u2014 the \u00a72.6.1 case that makes ordinary TDD possible at all; PENDING->RED advances and the evidence record carries failureClass 'missing-subject'",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-submit-error-repair-loop",
+      "text": "failureClass 'error' (fixture: the test itself is broken \u2014 stderr shape with no legal-red class) is REJECTED as a red: no transition occurs; the handler returns the captured failure to the test-writer as a repair re-dispatch whose prompt carries the failure excerpt, bounded by config.workflow.testRepairAttempts \u2014 asserted by counting the fake SDK's recorded testWriter dispatches: a writer that repairs the test on attempt 2 reaches RED, and the dispatch count NEVER exceeds testRepairAttempts",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-submit-repair-exhausted-blocks",
+      "text": "when testRepairAttempts is exhausted with the red still illegal, the handler sets blocked:{stage:'RED', reason, questionId} via store.setBlocked AND writes exactly ONE \u00a72.11 question via adapter/questions.appendQuestion whose blocksItems names exactly this item (origin per the pinned specGaps resolution: 'implementer-blocked') \u2014 asserted by READING the persisted item file (state remains PENDING; blocked is an annotation, not a state) and questions.jsonl",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-submit-pass-rejected",
+      "text": "an immediately-PASSING test (exit 0) is REJECTED: PENDING->RED is refused (fsm-item redEvidenceGate \u2014 a passing test is not a red), the item stays PENDING and UN-blocked, and the handler records the ponytail-skip fork as a \u00a72.7 decision record (kind 'derived', >=2 scored options per the pinned specGaps resolution: behavior-already-exists/rung-skip vs test-is-wrong) through the existing torn-line-safe mintDecisionId/appendDecision helpers, journaling the existing state:decision.recorded event; the compact return names the fork so the orchestrator can conductor_defer or re-dispatch",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-submit-nonbehavioral-illegal",
+      "text": "conductor_submit_test for a behavioral:false item is ILLEGAL: the handler denies at the legality step \u2014 consistent with gates-phase nextStageTool, which offers conductor_mark_green for a non-behavioral PENDING, and the deny message names conductor_mark_green as the legal path \u2014 BEFORE any dispatch or persisted write: zero fake-SDK calls recorded, the item file byte-identical, no evidence record appended",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-deps-ready-binding",
+      "text": "MANDATORY DEFERRED BINDING 9.4a/5.3 (HANDOFF 'Deferred bindings'): dependency-readiness is enforced CONSISTENTLY by gate and handler, pinned decision ENFORCE (no recovery bypass): (a) core/gates-phase.ts legalTools no longer offers a stage tool for a dependency-unready item \u2014 in a two-item fixture where I2 dependsOn I1 and I1 is not yet PUBLISHED, the EXECUTING legal set contains NO conductor_submit_test/conductor_vet_test entry targeting I2 (while I1's own stage tool is still offered), matching schedule.nextWave's deps-PUBLISHED readiness rule; and (b) a DIRECT handleSubmitTest/handleVetTest call for I2 is DENIED naming the unpublished dependency, before any dispatch or write \u2014 both surfaces asserted against the SAME fixture so gate and handler provably agree",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-vet-fanout-composition",
+      "text": "handleVetTest (conductor_vet_test {itemId}) fans out exactly readFanout('vet', config) critics (vetCritics clamped to parallel.maxReaders) as ONE parallel group via fanout.dispatchWave \u2014 role 'reviewer', writeCapable:false, schemaName 'TestVet', fresh sub-sessions (one session.create per critic on the fake) \u2014 and every critic's received prompt contains the item spec (title + acceptance), the test content, and the captured red output, and does NOT contain the implementation: the fixture plants a distinctive marker string in a fileScope production file and that marker is asserted ABSENT from every recorded fake prompt (critics cannot be anchored by code that already passes \u2014 none exists)",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-vet-mustfix-loop",
+      "text": "a vet round in which any critic returns a non-empty mustFix routes the UNION of mustFix items back to the test-writer (one write-capable re-dispatch whose prompt carries the mustFix list), re-runs the repaired test through evidence.runTest requiring a still-legal \u00a72.6.1 red before re-vetting (pinned specGaps resolution \u2014 the next round's prompt carries a TRUE captured red), then re-vets; the loop is bounded by config.workflow.vetMaxRounds (the knob distinct from reviewMaxRounds) \u2014 fake returns mustFix in round 1 and clean verdicts in round 2 => TEST_VETTED with exactly 2 vet rounds and exactly 1 writer re-dispatch in the recorded call log",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-vet-pass-advances",
+      "text": "a vet round in which EVERY critic returns empty mustFix advances RED->TEST_VETTED through core legalItemTransition, persists via store.saveItem (asserted by re-loading the item file), journals through closed-vocabulary events only (fsm:transition / state:item.updated \u2014 driven through the REAL throwing journal, no vocabulary widening), and returns a compact result summarizing the per-criterion verdicts",
+      "coveredByTest": null
+    },
+    {
+      "id": "9.4a-vet-cap-blocks",
+      "text": "reaching vetMaxRounds with mustFix still outstanding leaves the item at state RED and sets blocked:{stage:'TEST_VETTED', reason naming vetMaxRounds, questionId} plus exactly ONE \u00a72.11 question (origin per the pinned specGaps resolution: 'review-round-cap') whose blocksItems names the item \u2014 asserted by reading the persisted item file and questions.jsonl, mirroring the submit-side exhaustion row; no further critic or writer dispatch occurs after the cap",
+      "coveredByTest": null
+    }
+  ],
+  "orchestratorReview": "PROMOTED from the lookahead draft after orchestrator review. Spec-gap resolutions APPROVED as proposed, with these rulings: (1) question origin at submit_test repair exhaustion uses the EXISTING 'implementer-blocked' and the vet cap uses the EXISTING 'review-round-cap' \u2014 the \u00a72.11 origin vocabulary is CLOSED and widening it would be a STOP-AND-PARK, so reusing the closest legal origin is correct; both are raised at the Phase 9 gate. (2) The test-writer reply uses the already-registered SCHEMAS.ImplementerResult \u2014 9.4a authors NO new schema (unlike 9.2, where SCHEMAS.Plan was forced by fanout's mandatory schemaName). (3) The 9.4a/5.3 deferred binding is ENFORCE, not warn: gates-phase legalTools must not offer a stage tool for a dependency-unready item, and the handler must refuse it too \u2014 gate and handler consistent, no recovery bypass. All 11 rows keep coveredByTest:null until the test file exists."
 }

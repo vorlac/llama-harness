@@ -30,7 +30,9 @@ import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
 import { isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
 import { legalRunTransition } from "../core/fsm-run.ts";
-import { scanPlaceholders, validateQueue } from "../core/planning.ts";
+import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
+import { readFanout } from "../core/schedule.ts";
+import { findingSurvives } from "../core/verdict.ts";
 import { validate } from "../core/types.ts";
 import type {
   Classification,
@@ -38,6 +40,7 @@ import type {
   ClassificationKind,
   Config,
   DecisionRecord,
+  Findings,
   Item,
   Plan,
   PlanDecision,
@@ -45,6 +48,7 @@ import type {
   QueueItem,
   RunState,
   TrivialItem,
+  Verdict,
 } from "../core/types.ts";
 import { writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
@@ -1398,4 +1402,653 @@ export async function handlePlan(input: PlanInput): Promise<PlanResult> {
   );
 
   return { planPath, decisionIds, runState: run.state };
+}
+
+// ===========================================================================
+// (6) The §3.2 PLAN_REVIEWED handler (Task 9.3, plan lines 2596-2604): the
+// plan-level adversarial loop. Same §3.4 invariant loop as sections (4) and (5)
+// — legality -> derive -> persist -> journal -> compact return — wrapped around
+// a BOUNDED round loop:
+//
+//   review  : readFanout("planReview") fresh `reviewer` sub-sessions, ONE §3.2
+//             lens each, every prompt carrying the plan AND the queue;
+//   refute  : every `major` finding gets skepticsPerFinding `skeptic`
+//             sub-sessions, adjudicated by core findingSurvives (⌈k/2⌉,
+//             TIE-UPHOLDS — never re-derived here);
+//   exit?   : core legalRunTransition's planReviewGate decides — it admits
+//             PLANNED->PLAN_REVIEWED on a clean round (zero surviving majors)
+//             OR at the round cap. The handler NEVER re-derives that rule;
+//   revise  : below the cap with majors alive, the planner is re-prompted with
+//             the surviving findings, plan.md is re-written and
+//             run.planReviewRounds increments by exactly one (§3.2 "plan
+//             revised, round++"), and the REVISED plan is re-reviewed;
+//   cap     : at the cap each still-surviving major becomes a §2.11 question
+//             (origin "plan-review-cap") and every item its blocksItems names is
+//             set blocked:{questionId, reason, stage:"plan-review"} — a FIELD ON
+//             THE ITEM and a row in a ledger with an unblock path
+//             (conductor_answer), never an English sentence. The run then
+//             PROCEEDS on the remaining items.
+// ===========================================================================
+
+// The §3.2 four lenses (plan line 1121). They are four different INSTRUMENTS
+// over the same plan+queue, not four samples of one judgement: each reviewer
+// sub-session is told exactly one of them and told that the others are held by
+// someone else, so the four prompts are pairwise different and no lens is
+// silently reviewed twice while another goes unreviewed.
+interface ReviewLens {
+  id: string;
+  charge: string;
+}
+
+const PLAN_REVIEW_LENSES: readonly ReviewLens[] = [
+  {
+    id: "correctness",
+    charge:
+      "judge whether the plan's design is sound and its steps actually work: are the stated " +
+      "approach, the ordering assumptions and the data flow true of the code the plan will " +
+      "touch, do the named interfaces line up, and is any step unsound or self-contradictory " +
+      "as written? A step that cannot work as written is a major.",
+  },
+  {
+    id: "completeness",
+    charge:
+      "judge the plan against the user's request: is every part of the request covered by an " +
+      "item and by a step that carries it out, and does the plan quietly drop, defer or " +
+      "half-answer any of it? The placeholder scan is folded into this lens: \"TBD\", \"to be " +
+      'determined", a TODO or FIXME marker, "add error handling", "similar to task N", a bare ' +
+      '"..." elision, or a placeholder standing in for real content is a plan defect BY NAME — ' +
+      "report every one you find, quoting it.",
+  },
+  {
+    id: "decomposition",
+    charge:
+      "judge the queue's decomposition quality: is each item ONE bite (a small fileScope and " +
+      "an acceptance list about one subject), are the items' write scopes really disjoint " +
+      "where the plan has them run together, and is dependsOn honest — every real ordering " +
+      "edge declared, none invented, and no cycle?",
+  },
+  {
+    id: "minimality",
+    charge:
+      "judge the plan for minimality (the ponytail law): does it introduce abstractions, " +
+      "layers, options or configuration the request never asked for, and does it write new " +
+      "code where something that already exists would serve? Name each unrequested piece and " +
+      "each skipped reuse.",
+  },
+];
+
+// The plan + queue every plan-review dispatch carries. Lens (c) judges scope
+// disjointness and DAG honesty, so the queue rides along WHOLE (raw §2.4 JSON),
+// never summarised.
+function planReviewContext(userPrompt: string, planMd: string, queue: Queue): string {
+  return (
+    "\n\nTHE USER'S REQUEST:\n" +
+    userPrompt +
+    "\n\nTHE PLAN (plan.md):\n" +
+    planMd +
+    "\n\nTHE QUEUE (queue.json):\n" +
+    JSON.stringify(queue, null, 2)
+  );
+}
+
+// The `review.md` doctrine, inlined at plan level: one lens per reviewer, the
+// severity rubric by real-world impact, one concern per finding, a citation in
+// `evidence` — and the rule that an empty findings list IS the approval, so a
+// reviewer never invents a finding to look thorough.
+function lensPrompt(lens: ReviewLens, userPrompt: string, planMd: string, queue: Queue): string {
+  return (
+    "You are a plan reviewer holding ONE lens over the whole plan and its queue. Reply with a " +
+    "single JSON object matching the Findings schema (findings: id, severity, lens, claim, " +
+    "evidence, suggestedFix).\n" +
+    'Your lens is "' +
+    lens.id +
+    '": ' +
+    lens.charge +
+    "\n" +
+    "Report ONLY what your lens sees — a different reviewer holds each of the other lenses, so " +
+    "anything outside yours is not your seat.\n" +
+    "An EMPTY findings list is a valid, finished review — it IS the approval. Never invent a " +
+    "finding to look thorough.\n" +
+    'Severity by real impact: "major" is a genuine defect that must be fixed before this plan ' +
+    'is executed (wrong result, a broken contract, a missing requirement); "minor" is a smaller ' +
+    'robustness issue; "nit" is cosmetic and blocks nothing. One concern per finding — never ' +
+    "bundle a defect and a quibble into one.\n" +
+    'Set `lens` to "' +
+    lens.id +
+    "\" and make `evidence` cite the plan section or the queue item id your claim rests on: a " +
+    "claim naming the item id or the file path it is about is the one that can be acted on.\n" +
+    "Give each finding a short stable `id` and a `suggestedFix` that is the smallest correct " +
+    "change." +
+    planReviewContext(userPrompt, planMd, queue)
+  );
+}
+
+// The `skeptic.md` doctrine, inlined: refute this ONE finding in isolation,
+// uphold only what you personally could not refute, and default to REFUTED when
+// undecided. The finding travels alone — a skeptic is never shown its siblings
+// (cross-contamination is how noise survives).
+function skepticRefutePrompt(
+  finding: Findings["findings"][number],
+  lens: string,
+  k: number,
+  userPrompt: string,
+  planMd: string,
+  queue: Queue,
+): string {
+  return (
+    "You are a skeptic. Your job is to REFUTE the finding below — not to appreciate it, not to " +
+    "improve it, and not to wave it through. Reply with a single JSON object matching the " +
+    "Verdict schema (findingId, upheld, reasoning).\n" +
+    "Set `findingId` to exactly \"" +
+    finding.id +
+    '". Set `upheld` true ONLY if you personally could not refute the claim against the plan; ' +
+    "when you cannot decide, the verdict is REFUTED (upheld false) — uncertainty is not " +
+    "evidence of a defect. You are one of " +
+    String(k) +
+    " independent skeptics on this ONE finding and it survives iff at least ⌈k/2⌉ of you " +
+    "uphold it, so do not uphold to be agreeable. Judge exactly this finding, in isolation; " +
+    "never invent a defect the reviewer did not raise. `reasoning` names the plan section you " +
+    "checked and either the failing case you constructed or the reproduction you tried and " +
+    "could not make fail.\n\nTHE FINDING UNDER REVIEW (id " +
+    finding.id +
+    ", severity " +
+    finding.severity +
+    ", lens " +
+    lens +
+    "):\nclaim: " +
+    finding.claim +
+    "\nevidence: " +
+    finding.evidence +
+    "\nsuggested fix: " +
+    finding.suggestedFix +
+    planReviewContext(userPrompt, planMd, queue)
+  );
+}
+
+// A finding as the handler carries it between the round's stages: the §2.10
+// record, the lens that raised it, and the sub-session that did — the provenance
+// a cap question records in `askedBy`.
+interface RaisedFinding {
+  finding: Findings["findings"][number];
+  lens: string;
+  sessionID: string;
+}
+
+function renderFinding(raised: RaisedFinding): string {
+  return (
+    "- [" +
+    raised.finding.id +
+    " | " +
+    raised.lens +
+    "] " +
+    raised.finding.claim +
+    "\n  evidence: " +
+    raised.finding.evidence +
+    "\n  suggested fix: " +
+    raised.finding.suggestedFix
+  );
+}
+
+// The revision re-prompt (§3.2 "handler re-prompts the planner with the
+// findings, plan revised"). It is the SAME plan.md doctrine handlePlan states
+// (so the revision is judged by the same law it will be judged by), plus the
+// plan as it stands, plus the surviving findings, plus the demand for a
+// stand-alone replacement document — plan.md is re-written, never appended to.
+function planRevisionPrompt(
+  userPrompt: string,
+  queue: Queue,
+  config: Config,
+  planMd: string,
+  survivors: readonly RaisedFinding[],
+  round: number,
+): string {
+  return (
+    planPrompt(userPrompt, queue, config) +
+    "\n\nTHIS IS A REVISION (plan-review round " +
+    String(round) +
+    "). Your previous plan was reviewed by four independent lenses and these MAJOR findings " +
+    "each survived a panel of skeptics whose job was to refute them:\n" +
+    survivors.map(renderFinding).join("\n") +
+    "\n\nYOUR PREVIOUS PLAN (plan.md as it stands):\n" +
+    planMd +
+    "\n\nResolve EVERY finding above — fix it in the plan, or state in the plan why the finding " +
+    "is wrong and what the plan does instead. Reply with the COMPLETE revised document in " +
+    "`markdown`: it REPLACES plan.md wholesale, so it must stand alone."
+  );
+}
+
+// The §2.11 question a surviving major becomes when the round cap is reached.
+// It carries the claim verbatim (that is what the human is being asked about),
+// the evidence, and the concrete choices — this is the ask, not a status line.
+function capQuestionText(raised: RaisedFinding, rounds: number, max: number): string {
+  return (
+    "Plan review reached its round cap (" +
+    String(rounds) +
+    " of " +
+    String(max) +
+    " revision round(s) spent) with this major finding from the " +
+    raised.lens +
+    " lens still surviving its skeptics: " +
+    raised.finding.claim +
+    "\nEvidence: " +
+    raised.finding.evidence +
+    "\nSuggested fix: " +
+    raised.finding.suggestedFix +
+    "\nThe plan stands as written and the items named below are blocked until you answer: say " +
+    "how the plan should handle this, or that it should proceed as written."
+  );
+}
+
+export interface PlanReviewInput {
+  store: StateStore;
+  fanout: Fanout;
+  runId: string;
+  config: Config;
+  journal: HandlerJournal;
+  sessionID?: string;
+  now?: () => number;
+}
+
+export interface PlanReviewResult {
+  runState: RunState; // PLAN_REVIEWED on both exits (clean round and round cap)
+  rounds: number; // the final run.planReviewRounds (REVISION rounds spent)
+  questionIds: string[]; // the cap's §2.11 questions ([] on a clean exit)
+  blockedItemIds: string[]; // the items those questions blocked ([] on a clean exit)
+}
+
+// One review round: the lens fan-out, then the per-major skeptic panels, then
+// the survival adjudication. Returns every finding raised (for the journal's
+// counts) and the majors that survived their panels.
+async function planReviewRound(
+  fanout: Fanout,
+  config: Config,
+  userPrompt: string,
+  planMd: string,
+  queue: Queue,
+): Promise<{ raised: RaisedFinding[]; survivors: RaisedFinding[]; lenses: string[] }> {
+  // (a) the lens fan-out.
+  // COVERAGE FIRST. §3.2 names four lenses and they are the substance of this
+  // stage, so the roster is never smaller than the lens set: sizing it by
+  // readFanout alone (min(planReviewers, parallel.maxReaders)) silently dropped
+  // lenses (c) and (d) whenever the reader clamp was below four, and at
+  // maxReaders 0 dispatched NOTHING while still advancing the run to
+  // PLAN_REVIEWED — a plan that "passed review" on evidence nobody gathered.
+  // The clamp is a CONCURRENCY knob and the fan-out engine already enforces it
+  // internally (it admits at most maxReaders jobs at a time), so honouring
+  // coverage here costs nothing operationally; a larger readFanout still buys a
+  // second independent holder for a lens rather than a fifth kind of review.
+  const count = Math.max(readFanout("planReview", config), PLAN_REVIEW_LENSES.length);
+  const lenses: ReviewLens[] = [];
+  for (let i = 0; i < count; i += 1) {
+    lenses.push(PLAN_REVIEW_LENSES[i % PLAN_REVIEW_LENSES.length]);
+  }
+  const lensJobs: FanoutJob[] = lenses.map((lens) => ({
+    role: "reviewer",
+    itemId: "",
+    tree: "",
+    writeCapable: false,
+    prompt: lensPrompt(lens, userPrompt, planMd, queue),
+    schemaName: "Findings",
+    priority: "interactive",
+    lens: lens.id,
+  }));
+  const lensResults = await fanout.dispatchWave(lensJobs);
+
+  const raised: RaisedFinding[] = [];
+  for (const [index, result] of lensResults.entries()) {
+    const findings = result.value as Findings | undefined;
+    // A lens that produced nothing is a BLIND SPOT, not a clean bill of health:
+    // reporting "no findings" for a lens that never ran would advance the run on
+    // evidence nobody gathered. The four lenses are different instruments and
+    // none substitutes for another, so a missing one aborts the review (the run
+    // is untouched and the tool can simply be run again).
+    if (findings === undefined) {
+      throw new Error(
+        'conductor_plan_review: the "' +
+          lenses[index].id +
+          '" lens sub-session produced no valid Findings (' +
+          JSON.stringify(result.error) +
+          ")",
+      );
+    }
+    for (const finding of findings.findings) {
+      raised.push({ finding, lens: lenses[index].id, sessionID: result.sessionID });
+    }
+  }
+
+  // (b) skeptics: exactly skepticsPerFinding refuters per MAJOR (§3.2). Minors
+  //     and nits get none — they gate nothing, so refuting them buys nothing.
+  const majors = raised.filter((entry) => entry.finding.severity === "major");
+  const k = config.workflow.skepticsPerFinding;
+  // skepticsPerFinding is schema-valid at 0, and findingSurvives([], 0) is
+  // vacuously true — so an empty panel would have made EVERY major auto-survive
+  // with no adjudication at all, silently choosing the most consequential
+  // reading of "no skeptics configured". A major that cannot be adjudicated is
+  // a configuration error, said out loud, before anything is spent.
+  if (majors.length > 0 && k < 1) {
+    throw new Error(
+      "conductor_plan_review: workflow.skepticsPerFinding is " +
+        String(k) +
+        ", so the " +
+        String(majors.length) +
+        " major finding(s) this round cannot be adjudicated by any skeptic panel; " +
+        "configure at least one skeptic per finding (§3.2)",
+    );
+  }
+  const skepticJobs: FanoutJob[] = [];
+  for (const major of majors) {
+    for (let i = 0; i < k; i += 1) {
+      skepticJobs.push({
+        role: "skeptic",
+        itemId: "",
+        tree: "",
+        writeCapable: false,
+        prompt: skepticRefutePrompt(major.finding, major.lens, k, userPrompt, planMd, queue),
+        schemaName: "Verdict",
+        priority: "interactive",
+      });
+    }
+  }
+  const verdictResults = skepticJobs.length > 0 ? await fanout.dispatchWave(skepticJobs) : [];
+
+  // (c) survival, adjudicated by the core rule (⌈k/2⌉, TIE-UPHOLDS) over the
+  //     panel each major was given. A verdict is bound to its finding by the JOB
+  //     that asked for it, not by the reply's self-declared findingId, so a
+  //     confused skeptic cannot vote in another finding's panel. A panel member
+  //     that env-failed contributes no uphold (the skeptic doctrine's default is
+  //     refuted), but a panel where EVERY member failed adjudicated nothing —
+  //     that major is neither refuted nor upheld, so the review aborts rather
+  //     than guessing in either direction.
+  const survivors: RaisedFinding[] = [];
+  for (const [index, major] of majors.entries()) {
+    const panel: Verdict[] = [];
+    for (let i = 0; i < k; i += 1) {
+      const verdict = verdictResults[index * k + i]?.value as Verdict | undefined;
+      if (verdict !== undefined) panel.push(verdict);
+    }
+    if (k > 0 && panel.length === 0) {
+      throw new Error(
+        'conductor_plan_review: no skeptic verdict came back for major finding "' +
+          major.finding.id +
+          '" — it is unadjudicated, so the review cannot say whether it survives',
+      );
+    }
+    if (findingSurvives(panel, k)) survivors.push(major);
+  }
+
+  return { raised, survivors, lenses: lenses.map((lens) => lens.id) };
+}
+
+// Re-prompt the planner for a revised plan and accept it under the SAME plan.md
+// law handlePlan applies (placeholder doctrine + the §2.7 >=2-scored-options
+// gate), with the same ONE bounded re-prompt. A revision that still violates the
+// law is REJECTED: the throw leaves plan.md and the run exactly as they were.
+async function reviseAcceptedPlan(
+  fanout: Fanout,
+  basePrompt: string,
+  journal: HandlerJournal,
+  runId: string,
+  sessionID: string | undefined,
+  round: number,
+): Promise<{ plan: Plan; proposals: PlanDecision[] }> {
+  let promptText = basePrompt;
+  let defects: string[] = [];
+  for (let attempt = 1; attempt <= PLANNER_ATTEMPTS; attempt += 1) {
+    const result = await fanout.dispatch(plannerJob(promptText, "Plan"));
+    const candidate = result.value as Plan | undefined;
+    if (candidate === undefined) {
+      throw new Error(
+        "conductor_plan_review: the planner sub-session produced no valid revised Plan (" +
+          JSON.stringify(result.error) +
+          ")",
+      );
+    }
+    const proposals = candidate.decisions.map(planDecisionFields);
+    const found = planDefects(candidate, proposals);
+    if (found.length === 0) return { plan: candidate, proposals };
+    defects = found;
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "plan-review-revision", round, attempt, defects: found },
+      { runId, sessionID },
+    );
+    if (attempt < PLANNER_ATTEMPTS) {
+      promptText = rejectionReprompt(
+        basePrompt,
+        "Your revised plan was REJECTED for these defects:",
+        defects,
+      );
+    }
+  }
+  throw new Error(
+    "conductor_plan_review: the revised plan is REJECTED — these defects survive the one " +
+      "bounded re-prompt: " +
+      defects.join("; "),
+  );
+}
+
+/**
+ * conductor_plan_review (§3.2 PLAN_REVIEWED). Runs the bounded plan-level
+ * adversarial loop over the run's plan.md + queue.json and settles it: a clean
+ * round advances PLANNED->PLAN_REVIEWED with nothing blocked; the round cap
+ * advances it too, after converting every still-surviving major into a §2.11
+ * question (origin "plan-review-cap") and blocking exactly the items that
+ * question names — the run then proceeds on the rest.
+ */
+export async function handlePlanReview(input: PlanReviewInput): Promise<PlanReviewResult> {
+  const { store, fanout, runId, config, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+  const run = store.loadRun(runId);
+
+  // (1) legality FIRST, before a single sub-session is spent. The §3.1 edge is
+  //     probed with the most permissive context (a clean round), so this rejects
+  //     exactly the runs that can NEVER reach PLAN_REVIEWED from where they are;
+  //     the real exit gate is re-asked below each round with the round's actual
+  //     counts, and it — not this handler — owns the clean/cap exit rule.
+  const edge = legalRunTransition(run.state, "PLAN_REVIEWED", { survivingMajors: 0 });
+  if (!edge.ok) {
+    throw new Error(
+      "conductor_plan_review: " + (edge.why ?? "this run may not advance to PLAN_REVIEWED"),
+    );
+  }
+  const queue = readQueueJson(runDir, "conductor_plan_review");
+  const planPath = path.join(runDir, "plan.md");
+  if (!existsSync(planPath)) {
+    throw new Error(
+      "conductor_plan_review: this run has no plan.md at " +
+        planPath +
+        "; conductor_plan must run first (§3.2)",
+    );
+  }
+  let planMd = readFileSync(planPath, "utf8");
+  const max = config.workflow.planReviewMaxRounds;
+
+  // (2) derive: review -> refute -> adjudicate -> (revise and go again). The
+  //     loop is bounded by the cap the gate enforces, and every iteration either
+  //     exits or consumes one revision round, so it always terminates.
+  let survivors: RaisedFinding[] = [];
+  let lensRoster: string[] = [];
+  let raisedCounts = { major: 0, minor: 0, nit: 0 };
+  for (;;) {
+    const outcome = await planReviewRound(fanout, config, run.prompt, planMd, queue);
+    survivors = outcome.survivors;
+    lensRoster = outcome.lenses;
+    raisedCounts = {
+      major: outcome.raised.filter((e) => e.finding.severity === "major").length,
+      minor: outcome.raised.filter((e) => e.finding.severity === "minor").length,
+      nit: outcome.raised.filter((e) => e.finding.severity === "nit").length,
+    };
+
+    const exit = legalRunTransition(run.state, "PLAN_REVIEWED", {
+      survivingMajors: survivors.length,
+      round: run.planReviewRounds,
+      max,
+    });
+    if (exit.ok) break;
+
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      {
+        stage: "plan-review",
+        round: run.planReviewRounds,
+        max,
+        findings: outcome.raised.length,
+        survivingMajors: survivors.length,
+        why: exit.why,
+      },
+      { runId, sessionID: input.sessionID },
+    );
+
+    // A surviving major below the cap: re-prompt the planner with the findings,
+    // re-write plan.md, round++ — then re-review the REVISED plan (§3.2).
+    const nextRound = run.planReviewRounds + 1;
+    const revision = await reviseAcceptedPlan(
+      fanout,
+      planRevisionPrompt(run.prompt, queue, config, planMd, survivors, nextRound),
+      journal,
+      runId,
+      input.sessionID,
+      nextRound,
+    );
+    planMd = revision.plan.markdown;
+    writeFileAtomicSync(planPath, planMd);
+    for (const fields of revision.proposals) {
+      const record: DecisionRecord = {
+        id: mintDecisionId(runDir),
+        tsIso: new Date(now()).toISOString(),
+        ...fields,
+      };
+      appendDecision(runDir, record);
+      journal.log(
+        "info",
+        "state",
+        "decision.recorded",
+        { decisionId: record.id, kind: record.kind, choice: record.choice, origin: "plan-review" },
+        { runId },
+      );
+    }
+    run.planReviewRounds = nextRound;
+    store.saveRun(run);
+  }
+
+  // (3) persist the cap products, if this was a cap exit. `survivors` is empty on
+  //     a clean round, so this whole block is a no-op there.
+  //
+  //     Legality before persist, again: every item a surviving major names must
+  //     exist as a runtime item, checked for ALL survivors BEFORE the first
+  //     question is written, so a corrupt queue cannot leave a half-applied set
+  //     of questions and blocks behind.
+  //     An Item carries ONE `blocked` disposition, so two survivors naming the
+  //     same item cannot both own it. The claim is therefore resolved HERE,
+  //     cumulatively: the first survivor to name an item owns it, and later
+  //     survivors drop it from their own blocksItems. Recording it in both
+  //     ledgers made the second row FALSE on disk — and worse, answering the
+  //     first question released an item the second surviving major still
+  //     condemned. A question's blocksItems now names exactly the items whose
+  //     blocked.questionId is that question.
+  const claimed = new Set<string>();
+  const mapped = survivors.map((survivor) => {
+    const named = findingBlocksItems(survivor.finding, queue.items);
+    const owned = named.filter((itemId) => !claimed.has(itemId));
+    for (const itemId of owned) claimed.add(itemId);
+    return { survivor, itemIds: owned };
+  });
+  for (const entry of mapped) {
+    for (const itemId of entry.itemIds) {
+      try {
+        store.loadItem(runId, itemId);
+      } catch {
+        throw new Error(
+          'conductor_plan_review: surviving finding "' +
+            entry.survivor.finding.id +
+            '" names queue item "' +
+            itemId +
+            '", which has no runtime item file; refusing to surface a half-applied cap',
+        );
+      }
+    }
+  }
+
+  const questionIds: string[] = [];
+  const blockedItemIds: string[] = [];
+  for (const entry of mapped) {
+    const question = capQuestionText(entry.survivor, run.planReviewRounds, max);
+    // §2.11 keeps humanTerritory the core VERDICT on the text, never a flag the
+    // caller fabricates. (Asking is legal here regardless: §3.2 spends the whole
+    // bounded machine loop first, so the cap is the point where the machine has
+    // provably run out of moves.)
+    const record = appendQuestion(
+      runDir,
+      {
+        runId,
+        question,
+        askedBy: { role: "reviewer", sessionID: entry.survivor.sessionID },
+        humanTerritory: isHumanTerritory(question),
+        origin: "plan-review-cap",
+        blocksItems: [...entry.itemIds],
+      },
+      now(),
+    );
+    questionIds.push(record.id);
+
+    for (const itemId of entry.itemIds) {
+      // An item carries ONE `blocked` disposition, so the first surviving major
+      // that names it owns the block; a later question still records the item in
+      // its own blocksItems (that is what the finding says), but it does not
+      // overwrite the questionId the unblock path (conductor_answer) keys on.
+      if (blockedItemIds.includes(itemId)) continue;
+      store.setBlocked(runId, itemId, {
+        reason:
+          "blocked on plan-review question " +
+          record.id +
+          ": " +
+          entry.survivor.finding.claim,
+        stage: "plan-review",
+        questionId: record.id,
+      });
+      blockedItemIds.push(itemId);
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId, blocked: true, questionId: record.id, stage: "plan-review" },
+        { runId, itemId },
+      );
+    }
+  }
+
+  run.state = "PLAN_REVIEWED";
+  store.saveRun(run);
+
+  // (4) journal the run FSM transition; (5) compact return. The run PROCEEDS:
+  //     items no surviving major named stay actionable and the wave scheduler
+  //     schedules them next (§3.2 "the run proceeds on the remaining items").
+  journal.log(
+    "info",
+    "fsm",
+    "transition",
+    {
+      to: run.state,
+      rounds: run.planReviewRounds,
+      lenses: lensRoster,
+      findingsRaised: raisedCounts,
+      survivingMajors: survivors.length,
+      questions: questionIds.length,
+      blockedItems: blockedItemIds.length,
+      tsMs: now(),
+    },
+    { runId, sessionID: input.sessionID },
+  );
+
+  return {
+    runState: run.state,
+    rounds: run.planReviewRounds,
+    questionIds,
+    blockedItemIds,
+  };
 }

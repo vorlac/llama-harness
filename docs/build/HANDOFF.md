@@ -49,9 +49,19 @@ Updated: 2026-08-13 (Phases 0-8 + Branch B 11.1 done+gated; Phase 9 milestone un
    **19** surviving defects incl. 2 MAJOR the 873-test suite missed — the size row was wired to
    trivialMaxFiles (default 2, spec says ~5) so every 3-file item was rejected under the DEFAULT
    config, and acceptance clustering broke on any criterion starting with "the". All fixed test-first
-   (14 R-tests). M4 pending. **NEXT: 9.3** (a staged test exists at scratchpad staging/task-9.3/ from
-   the lookahead burst — its writer died on a session limit, so VERIFY COMPLETENESS before trusting
-   it). Then 9.4a-9.6. The Phase 9 MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   (14 R-tests). M4 PASS. **9.3 DONE** (conductor_plan_review; findingBlocksItems in core/planning.ts;
+   901/901). C-031 THROTTLED review (2 lenses, majors-only skeptics, spec quoted inline = 16 agents vs
+   C-030's 79) found **5 MAJOR**: plan review could pass having dispatched ZERO reviewers (roster sized
+   by the reader clamp); a bare `src/` token blocked the WHOLE queue; the ordinary citation forms
+   (`./x`, bare filename, markdown link, possessive) blocked NOTHING; and two survivors naming one item
+   made the ledger lie + released the item early. All fixed test-first (6 R-tests).
+   **NEXT: 9.4a** (assertions PROMOTED + signed off at docs/build/specs/task-9.4a.assertions.json —
+   11 rows, 7 spec gaps resolved; ruling: reuse EXISTING question origins 'implementer-blocked'
+   (submit exhaustion) + 'review-round-cap' (vet cap), NEVER widen the closed §2.11 vocabulary).
+   Then 9.4b-9.6. The Phase 9 MILESTONE gate runs after 9.6. Then 10.1, 12, 13, 14, 15.
+   - **REVIEW-RESULT TRAP (seen at 9.3):** a workflow returning an EMPTY finding set can mean the
+     lenses CRASHED, not that the diff is clean. Always check the run's failures + journal.jsonl
+     before treating an empty review as a pass.
    - **Assertion drafts exist in scratchpad staging/assertions-drafts/ for 9.4a, 9.4b, 9.4c, 9.5a,
      9.5b, 9.6, 10.1, 11.3, 11.4, 11.5, 11.6, 11.7, 12.1, 12.2** (14 files, each with a specGaps
      section + verified reusesExisting). They are DRAFTS: review each before promoting it to

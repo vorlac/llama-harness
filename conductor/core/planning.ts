@@ -382,6 +382,168 @@ export function validateQueue(queue: Queue, config: Config): QueueValidation {
 }
 
 // ---------------------------------------------------------------------------
+// §3.2 PLAN_REVIEWED — which items a plan-level finding blocks
+// (plan lines 1119-1131; the spec gap resolved in task-9.3.assertions.json)
+// ---------------------------------------------------------------------------
+//
+// PLAN GAP, resolved here once: a §2.10 FINDING carries id/severity/lens/claim/
+// evidence/suggestedFix and NO item reference, yet §3.2 requires "every item its
+// blocksItems names" to be blocked when the plan-review round cap is reached. The
+// PINNED resolution (no schema widening): the finding's own prose IS the
+// reference, so a finding blocks an item when its claim+evidence (a) names that
+// item's id, or (b) names a file path that intersects the item's fileScope under
+// the same conservative core scopesIntersect the wave scheduler uses. A finding
+// that names neither blocks nothing — it still becomes a question, and the run
+// proceeds on every item (§3.2 "the run proceeds on the remaining items").
+//
+// The bias is deliberate and one-directional: an over-match blocks an item that
+// a human then unblocks with `conductor_answer`, while an under-match lets the
+// run execute an item a surviving major says is wrong. So the id scan is
+// boundary-anchored (never a substring of a longer word) and the path scan
+// refuses a wildcard-headed token, whose empty literal head would otherwise
+// intersect EVERY scope and block the whole queue on one sloppy sentence.
+
+// A queue item as this mapping sees it: its id and its write scope.
+export interface BlockableItem {
+  id: string;
+  fileScope: readonly string[];
+}
+
+// A §2.10 finding as this mapping sees it: the two prose fields that can name an
+// item. `suggestedFix` is deliberately NOT scanned — it describes the FIX, and a
+// fix that mentions another file must not block the item that file belongs to.
+export interface FindingReference {
+  claim: string;
+  evidence: string;
+}
+
+// Characters that continue an identifier. An id matches only when neither
+// neighbour is one of these, so "I1" is found in "item I1 loads…" but not inside
+// "I10" or "MAJ-I1-CLAIM".
+// '.' and '/' are boundary characters too: queue ids are unconstrained strings
+// (§2.4 types them as plain strings), so without them "I1" matched INSIDE
+// "I1.2" and blocked the wrong item.
+const ID_BOUNDARY = /[A-Za-z0-9_./-]/;
+
+/** True iff `text` names `id` as a standalone token. */
+function mentionsId(text: string, id: string): boolean {
+  if (id.trim().length === 0) return false;
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(id, from);
+    if (at === -1) return false;
+    const before = at === 0 ? "" : text.charAt(at - 1);
+    const after = text.charAt(at + id.length); // "" past the end of the string
+    if (!ID_BOUNDARY.test(before) && !ID_BOUNDARY.test(after)) return true;
+    from = at + 1;
+  }
+}
+
+// Prose punctuation that can wrap a path inside a sentence: stripped from each
+// end so "…in src/beta/parse.ts, which…" still yields the bare path. Curly
+// quotes are included — an editor that smart-quotes a plan must not make its
+// citations invisible to the mapping.
+const LEADING_PUNCTUATION = /^["'`([{<“”‘’]+/;
+const TRAILING_PUNCTUATION = /["'`)\]}>,;:!?.“”‘’]+$/;
+// "src/beta/parse.ts's reader" — the possessive is prose, not part of the path.
+const POSSESSIVE = /['’]s$/;
+
+// A path-shaped token: either it carries a directory separator, or it is a bare
+// dotted filename ("parse.ts"). Everything else in a sentence is a word.
+const DOTTED_FILENAME = /^[A-Za-z0-9_@~+-]+(?:\.[A-Za-z0-9_+-]+)+$/;
+// The wildcard constructs core/shell-parse.ts's literalHead breaks on. A token
+// whose FIRST segment carries one has an empty literal head, which intersects
+// every scope — such a token is dropped rather than allowed to block the queue.
+const WILDCARD = /[*?{[]/;
+
+/**
+ * Every FILE-shaped token in `text`, de-duplicated, in first-seen order.
+ *
+ * "File-shaped" is the load-bearing word, and it is stricter than "path-shaped"
+ * for a reason discovered the hard way: core/shell-parse.ts's scopesIntersect
+ * compares literal-head PREFIXES segment-wise, so a head with fewer segments
+ * prefixes every longer one. A bare directory token therefore has exactly the
+ * blast radius the wildcard guard was written to prevent — one sentence saying
+ * "both items write into src/" matched EVERY item and blocked the whole queue,
+ * nullifying §3.2's "the run proceeds on the remaining items". So a token counts
+ * only when its LAST segment is a real dotted filename and no segment carries a
+ * wildcard: "src/beta/parse.ts" and "parse.ts" qualify; "src/", "src/**",
+ * "src/beta/*.ts" and "tests/" do not.
+ *
+ * The other half is the opposite failure: the ordinary ways a reviewer cites a
+ * file — "./src/x.ts", a bare filename, a markdown link, a comma-joined list, a
+ * possessive, smart quotes — all resolved to nothing, so a surviving major
+ * blocked no item and the run executed what the review condemned. Each of those
+ * shapes is normalised here.
+ */
+function pathLikeTokens(text: string): string[] {
+  // "[the parser](src/beta/parse.ts)" -> the path becomes its own token.
+  const normalised = text.replace(/\]\(/g, " ");
+  const tokens: string[] = [];
+  // Commas and semicolons separate citations as often as spaces do.
+  for (const raw of normalised.split(/[\s,;]+/)) {
+    let token = raw.replace(LEADING_PUNCTUATION, "").replace(TRAILING_PUNCTUATION, "");
+    token = token.replace(POSSESSIVE, "");
+    token = token.replace(/^\.\//, ""); // "./src/x.ts" and "src/x.ts" are one path
+    if (token.length === 0) continue;
+    if (!token.includes("/") && !DOTTED_FILENAME.test(token)) continue;
+    const segments = token.split("/").filter((segment) => segment.length > 0);
+    if (segments.length === 0) continue; // a bare "/" names nothing
+    if (segments.some((segment) => WILDCARD.test(segment))) continue; // over-matches
+    // The last segment must be a real filename — this is what keeps a bare
+    // directory from prefix-matching the entire queue.
+    if (!DOTTED_FILENAME.test(segments[segments.length - 1])) continue;
+    if (!tokens.includes(token)) tokens.push(token);
+  }
+  return tokens;
+}
+
+/** The final segment of a path ("src/beta/parse.ts" -> "parse.ts"). */
+function basenameOf(pathLike: string): string {
+  const segments = pathLike.split("/").filter((segment) => segment.length > 0);
+  return segments.length > 0 ? segments[segments.length - 1] : pathLike;
+}
+
+/**
+ * The queue items a plan-level finding blocks, in queue order and without
+ * duplicates: those whose id the finding's claim/evidence names as a token, plus
+ * those whose fileScope a path named there intersects (core scopesIntersect).
+ * An empty result is a legal answer — the finding still owes a question, it just
+ * blocks no item.
+ */
+export function findingBlocksItems(
+  finding: FindingReference,
+  items: readonly BlockableItem[],
+): string[] {
+  const text = finding.claim + "\n" + finding.evidence;
+  const tokens = pathLikeTokens(text);
+  const blocked: string[] = [];
+  for (const item of items) {
+    if (blocked.includes(item.id)) continue; // a duplicate queue id names one item
+    if (mentionsId(text, item.id)) {
+      blocked.push(item.id);
+      continue;
+    }
+    const scope = [...item.fileScope];
+    for (const token of tokens) {
+      // A token carrying a directory is judged by the same conservative overlap
+      // rule the wave scheduler uses; a BARE filename ("parse.ts") cannot be —
+      // its literal head would never prefix "src/beta/parse.ts" — so it is
+      // matched against each scope's basename instead. Both arms fold case, so
+      // an id and a path never disagree about it.
+      const matched = token.includes("/")
+        ? scopesIntersect([token], scope)
+        : scope.some((entry) => basenameOf(entry).toLowerCase() === token.toLowerCase());
+      if (matched) {
+        blocked.push(item.id);
+        break;
+      }
+    }
+  }
+  return blocked;
+}
+
+// ---------------------------------------------------------------------------
 // plan.md doctrine (§3.2 PLANNED, plan lines 1112-1117)
 // ---------------------------------------------------------------------------
 

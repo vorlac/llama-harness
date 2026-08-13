@@ -665,3 +665,67 @@ zero returned verdicts, which is exactly the defect that binding exists to preve
   (derived planDecisionSchema), `conductor/adapter/tools.ts` (readQueueJson, planDefects, unified
   re-prompt, ponytailLaw), `conductor/tests/tools-9.2.test.ts` (9 authored + 14 review-fix = 23 tests).
   887/887 green.
+
+## C-031 — Task 9.3 pre-commit adversarial review (THROTTLED: 2 lenses, skeptics for MAJORS only)
+
+**Throttle applied** after the C-030 burst exhausted a 5-hour account window (~79 agents / 5.7M tokens):
+2 lenses instead of 3, the §3.2 spec QUOTED INLINE so no agent re-read the 3,399-line plan, and skeptic
+panels for MAJOR findings only (minors/nits triaged by the orchestrator). Result: 16 agents / 1.4M tokens
+— and it still found 5 majors. Both reviewers RAN the real handler over the fake SDK to produce evidence
+rather than reasoning from the source alone, which is why the findings carry concrete traces.
+
+**A first attempt returned `{surviving: [], ...}` — NOT a clean bill of health.** Both lenses had died to
+a mid-response connection error; the journal held zero findings. Reporting that as "review passed" would
+have been a false green of exactly the kind these gates exist to catch. Re-run; the re-run found the 5.
+
+- **MAJOR (F1/E3) — plan review could pass having dispatched NOTHING.** The lens roster was sized by
+  `readFanout("planReview", config)` = min(planReviewers, parallel.maxReaders). With maxReaders < 4 it
+  silently dropped lenses (c) decomposition and (d) minimality; at maxReaders 0 it dispatched zero
+  reviewers and STILL advanced PLANNED->PLAN_REVIEWED as a "clean round" — a plan certified on evidence
+  nobody gathered, which is the precise failure the handler's own blind-spot doctrine forbids. FIX:
+  coverage first — the roster is never smaller than the lens set (`Math.max(readFanout, 4)`); the clamp
+  is a CONCURRENCY knob the fan-out engine already enforces internally. The lens roster that actually ran
+  is now journaled on the transition, so a dropped lens can never again be invisible.
+- **MAJOR (F2/E5) — one bare directory token blocked the ENTIRE queue.** `scopesIntersect` compares
+  literal-head PREFIXES segment-wise, so a shorter head prefixes every longer one: evidence reading
+  "both items write into src/" mapped to every item, nullifying §3.2's "the run proceeds on the remaining
+  items". The wildcard guard inspected only segment[0], so `src/`, `src/**` and `src/beta/*.ts` all sailed
+  past it. FIX: file-shaped tokens only — the LAST segment must be a real dotted filename and no segment
+  may carry a wildcard.
+- **MAJOR (E1) — the opposite failure in the same function: common citations blocked NOTHING.**
+  `./src/x.ts`, a bare `parse.ts`, a markdown `[link](src/x.ts)`, a comma-joined list, a possessive
+  `parse.ts's`, and smart-quoted paths ALL resolved to `[]`, so a surviving major blocked no item and the
+  run executed what the review condemned — the under-match the module's own header says must not happen.
+  FIX: normalise each shape (markdown link split, comma/semicolon separators, `./` prefix, possessive,
+  curly quotes) and match a bare filename against each scope's BASENAME, case-folded.
+- **MAJOR (F3/E2) — the block ledger lied, and the unblock path fired early.** An Item carries ONE
+  `blocked` disposition, so with two survivors naming the same item the second question still listed it in
+  `blocksItems` while the block pointed at the FIRST question. answerQuestion clears by questionId, so
+  answering the first RELEASED the item while the second surviving major was still open. FIX: claims are
+  resolved cumulatively — first survivor owns the item, later ones drop it from their own `blocksItems`,
+  so a question names exactly the items whose `blocked.questionId` is that question. (Orchestrator had
+  independently flagged this before the panel reported.)
+- **MINOR (E9, fixed) — `skepticsPerFinding: 0` made every major auto-survive** with zero adjudication:
+  the panel guard was stepped around at k=0 and `findingSurvives([], 0)` is vacuously true. FIX: a major
+  with k < 1 is a named configuration refusal before anything is spent.
+- **MINOR (E6, fixed) — id matching crossed dotted/slashed boundaries**, so "I1" matched inside "I1.2"
+  and blocked the wrong item. FIX: '.' and '/' are boundary characters.
+- **MINOR (F6, partially fixed)** — minors/nits and the raised counts were discarded without a trace; the
+  transition now journals per-severity counts alongside the roster.
+- **DEFERRED to Task 10.1 (recorded bindings, NOT fixed here)** — all crash/partial-write class, which is
+  where the run lifecycle + continuation engine belongs, and consistent with C-030's E10 deferral:
+  (a) **E4** the cap's per-survivor loop writes a question then blocks its items, so a failure after the
+  first question persists leaves a half-applied cap with no resume key — a retry appends duplicate
+  questions and re-points blocks; (b) **E7** the revision counter is saved AFTER the plan it counts, so a
+  crash in that window leaves the revised plan with the old counter and a re-run gets the whole
+  planReviewMaxRounds budget again; (c) **E8** a surviving major naming a queue item whose runtime item
+  file is missing aborts the review and wedges the run at PLANNED with no recovery path; (d) **F4** the
+  lens/panel aborts leave a partially advanced run from round 2 onward, contradicting the comment that
+  promises the run is untouched; (e) **F5** each revision round re-appends the planner's decisions with no
+  dedupe, accumulating duplicate §2.7 rows.
+- **Raised at the Phase 9 milestone gate:** F7 (the cap question's text promises a list of blocked items
+  it never prints, and asserts a block even for a finding that blocks nothing) and E10 (the panel stride
+  `index * k + i` assumes integer k, which numberSchema permits to be fractional).
+- **Blast radius:** `conductor/core/planning.ts` (findingBlocksItems + pathLikeTokens + ID_BOUNDARY),
+  `conductor/adapter/tools.ts` (lens roster, skeptic guard, cumulative claims, journal), and
+  `conductor/tests/tools-9.3.test.ts` (8 authored + 6 review-fix = 14). 901/901 green.
