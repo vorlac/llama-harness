@@ -103,6 +103,11 @@ const EXPECTED_DYNAMIC_SITES: readonly string[] = [
   'adapter/evidence.ts: .log(component="evidence", event=record.kind)',
   "adapter/tools.ts: .log(component=component, event=event)",
   "adapter/tools.ts: .log(component=component, event=event)",
+  // The §7.1 -> JSONL rebind seam: the plugin holds ONE journal whose sink swaps
+  // from stderr to the run's journal.jsonl the moment a run dir exists, so this
+  // forward carries a name its caller already chose. Every one of those callers
+  // is a literal site audited above.
+  "plugin/index.ts: .log(component=component, event=event)",
 ];
 
 interface CallSite {

@@ -2646,3 +2646,84 @@ workspace **lazily**, and its `5.4a-construction-failure-denies-loudly` row requ
 be loud on the stderr sink AND the gate to still DENY. A throw is therefore caught at the lazy
 open, is loud, and fails closed. The throw stands; 12.2's leg was written tolerant of either and
 passes unchanged.
+
+---
+
+## C-065 — task-let 5.4a lands, and my own fix brief was wrong about the git gate
+
+5.4a is green: 15/15, full suite 1201/1201, all five legs. The plugin now opens a real workspace
+(lazily, against `realpathSync(input.directory)`), journals through a two-phase sink that rebinds
+to `<runDir>/journal.jsonl` when a run appears, holds ONE registry Map with a thin view over it
+for both consumers, and calls `handleChatMessage` from a real `chat.message` hook. The 22 tools
+remain bound to `handlerNotBound` and still throw — the fence held, and a test asserts it.
+
+M4 both directions, snapshot-restored and `cmp`-verified: removing `config-io.ts` re-derives the
+missing-subject red; disabling the `chat.message` hook fails 8 of 14.
+
+### The sixth consecutive disclosed survivor, and it was security-relevant
+
+The implementer wired the gate's git policy from the loaded config — `gitMode: config.git.mode`,
+`branchPolicy: config.git.branchPolicy` — beyond what any test demanded, on the grounds that "a
+config that is loaded and then ignored is the same downgrade as a config not loaded". It then
+disclosed that hardcoding both back to `"commit"`/`"pin"` left the **whole suite** at 1200/1200.
+
+The direction is strictly safer: an unconfigured repo now defaults to `read-only` rather than
+unconditional `commit`. Which is exactly why it needed an assertion.
+
+### MY BRIEF FOR THAT ASSERTION WAS WRONG, and the test-writer caught it
+
+I briefed: assert `git commit -m x` is denied with the READ-ONLY reason under
+`git.mode: "read-only"` and with a DIFFERENT reason under `"commit"`.
+
+`conductor/core/gates-git.ts:459-467` does this:
+
+```ts
+export function decideGit(command, sessionRole, gitMode, runActive, branchPolicy): GitDecision {
+  void sessionRole;
+  void gitMode;
+```
+
+under a doc comment stating the design deliberately: the publish handler runs git through
+`execFile` inside the plugin, which is not a tool call and never reaches this gate, so `gitMode`
+does not branch the decision. Probed directly, `git commit` returns the **byte-identical** reason
+under both modes.
+
+**So the assertion I specified would have FAILED against a correct implementation.** I wrote a
+brief that assumed a behaviour I had not checked, in the same session in which I recorded twice
+that reading the interface beats inferring it.
+
+The writer's replacement is better than what I asked for, in three parts:
+
+1. **The discriminator moves to `branchPolicy`**, which IS observable at this seam:
+   `git switch feature-x` is DENIED under `"pin"` and **ALLOWED** under `"check-only"`. Allow-vs-deny
+   is a sharper control than two different denials, and it kills both hardcodings.
+2. **The `git commit` pair from my brief is kept — pinned as EQUAL**, as a trip-wire. If the core
+   ever starts branching on `gitMode`, that line goes red and the discriminator can move onto it.
+3. **A source guard for `gitMode`**, because it is threaded on the adjacent line and inert *only at
+   this seam*, so no runtime probe can observe that half. It requires the call site to read
+   `gitMode: config.git.mode` and to not match a literal, with comments stripped and a length floor
+   so a broken extraction fails red rather than vacuously passing.
+
+Verified by the writer in three runs: unmutated 15/15; both fields hardcoded → the new test fails
+on the allow-vs-deny control; `gitMode` hardcoded ALONE → part (a) still passes (as it must, since
+the core voids it) and only the source guard fires. That third run is what proves part (c) is
+load-bearing rather than decoration.
+
+**LESSON, and it is the same one twice in one session: when briefing an assertion, state the
+OBSERVABLE and let the writer find the discriminator. I named a discriminator I had not probed,
+and the only reason it did not become a test that passes for the wrong reason — or worse, a
+correct implementation "fixed" to satisfy a wrong test — is that the writer probed the core
+before writing.**
+
+### Two implementer decisions accepted over my recommendations
+
+- **The event name is `state`/`hook.failed`, not the `chat.message.failed` I recommended.** One
+  record shape is needed at TWO call sites: the `chat.message` catch, and the workspace-open
+  failure, which `5.4a-construction-failure-denies-loudly` reaches through `tool.execute.before` —
+  where "chat.message.failed" would be a straight lie. `journal-events.ts`'s own widening note
+  forbids exactly that: "a record filed under someone else's name is a record no replay filter can
+  trust." One widening, honest at both sites, with `data.hook` naming which.
+- **The implementer also edited the prose above the event array** — "The last three follow the SAME
+  rule" became "four" — which is one line beyond my "change nothing else in that file". It flagged
+  this rather than hiding it, and it was right to: leaving a comment asserting something the code
+  below no longer does is the C-033 shape this build keeps punishing.

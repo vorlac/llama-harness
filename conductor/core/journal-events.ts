@@ -58,7 +58,7 @@ export const EVENTS: Record<Component, readonly string[]> = {
   // (§7.4 observability widening: a decide/defer records no run/item state, so it
   // owns its own grep-able name rather than borrowing item.updated).
   //
-  // The last three follow the SAME rule, each for a fact no other name states
+  // The last four follow the SAME rule, each for a fact no other name states
   // truthfully (see the widening note at the foot of this file):
   //   lock.contended    — §4.1: the lock was NOT acquired because a live foreign
   //                       writer holds it, so this session drops to read-only.
@@ -66,6 +66,14 @@ export const EVENTS: Record<Component, readonly string[]> = {
   //                       state (the decision.recorded case, one ledger over).
   //   run.stop-report   — §2.9: the terminal artifact was written for a run whose
   //                       stop some OTHER component already recorded.
+  //   hook.failed       — §3.5/§3.2: a conductor opencode hook could not do its
+  //                       conductor-side work (the workspace would not open, or
+  //                       the chat.message body threw). G5 fail-soft swallows the
+  //                       throw so the user's session survives, which makes this
+  //                       record the ONLY trace of it; data.hook names the hook.
+  //                       No gate/fsm/state name states that fact — the call was
+  //                       not adjudicated, no transition was attempted, and
+  //                       nothing was persisted.
   state: [
     "run.created",
     "lock.acquired",
@@ -77,6 +85,7 @@ export const EVENTS: Record<Component, readonly string[]> = {
     "decision.recorded",
     "question.surfaced",
     "run.stop-report",
+    "hook.failed",
   ],
 };
 

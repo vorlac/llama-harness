@@ -2025,7 +2025,7 @@
       "taskId": "5.4a",
       "manifest": false,
       "tier": "A",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 5.4a chat.message plugin wiring",
       "planLines": [
@@ -2033,16 +2033,36 @@
         null
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
+      "tap": {
+        "file": "15/15",
+        "suite": "tests=1201 pass=1201 fail=0 skipped=0 todo=0; all five legs green (orchestrator-observed)"
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/composition.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../conductor/adapter/config-io.ts' imported from .../conductor/tests/composition.test.ts (tests=1 pass=0 fail=1)"
+      },
+      "filesTouched": [
+        "conductor/adapter/config-io.ts",
+        "conductor/plugin/index.ts",
+        "conductor/core/journal-events.ts",
+        "conductor/tests/journal-vocab.test.ts",
+        "conductor/tests/composition.test.ts",
+        "docs/build/specs/task-5.4a.assertions.json"
+      ],
+      "revertAssertion": "RUN, not reasoned, both directions, cp-snapshotted and cmp-verified. (1) mv conductor/adapter/config-io.ts aside => missing-subject red (tests=1 pass=0, ERR_MODULE_NOT_FOUND). (2) TARGETED: renaming the returned `chat.message` hook key so the factory no longer exposes it => 8 of 14 fail. (3) The row-15 discriminator was verified by the TEST-WRITER in three runs: unmutated 15/15; gitMode AND branchPolicy hardcoded to \"commit\"/\"pin\" => the new test fails on the allow-vs-deny control; gitMode hardcoded ALONE => only the source guard fires, which is what proves that half is load-bearing rather than decoration.",
+      "attempts": 1,
       "deviations": [
-        "C-059 (as AMENDED): a task-let the plan does not contain, taking the SESSION/RUN LIFECYCLE HALF of the composition root. At HEAD conductor/plugin/index.ts never calls openWorkspace (no state store), journals to a console.error stub, holds a bare Map instead of a SessionRegistry, binds all 22 tools to handlerNotBound (which THROWS), and does not register chat.message - so handleChatMessage (Task 5.4's whole deliverable) has NO production caller and no session is ever registered as orchestrator. C-044 Finding 1 already recorded that the product is inert and that plan:2958's 'glue fixes' assigns the composition root to Task 13.1; its own criticism was that the TIMING is wrong. 5.4a therefore takes only openWorkspace + the real JSONL journal + a real SessionRegistry + the chat.message hook. The 22 tool-to-handler bindings stay 13.1's glue and the tools keep throwing until then. Reason it cannot wait: Task 10.1's ask gate and continuation engine need a registered orchestrator session, and without one 10.1 would be implemented against a reconstruction rather than the product. Sequenced AFTER 15.0 (holds the TS leg's red) and BEFORE 10.1 (same plugin/index.ts hooks object; C-056's same-file rule)."
+        "C-059 (amended): opened because Task 5.4's handleChatMessage had NO production caller - the plugin returned only {tool, 'tool.execute.before'}, never called openWorkspace, journaled to a console.error stub and held a bare Map. C-044 Finding 1 had already recorded that the product is inert and that plan:2958's 'glue fixes' assigns the composition root to Task 13.1; its own criticism was the TIMING. 5.4a acts on that criticism for the LIFECYCLE HALF ONLY.",
+        "SCOPE FENCE HELD: all 22 tools remain bound to handlerNotBound (plugin/index.ts:407) and still throw. Row 5.4a-tools-still-throw-scope-fence asserts it, so the boundary is visible rather than forgotten. The tool-to-handler binding stays Task 13.1's.",
+        "FOUR files touched, two of them committed by earlier tasks and authorized narrowly in the brief: ONE event name added to core/journal-events.ts (EVENTS.state gains 'hook.failed') under that file's own documented widening rule - the same rule C-056 used to ratify three names - and ONE entry added to tests/journal-vocab.test.ts EXPECTED_DYNAMIC_SITES, because the rebindable sink forwards a caller-chosen component/event and is therefore a new dynamic .log( site.",
+        "IMPLEMENTER OVERRODE THE ORCHESTRATOR'S RECOMMENDED EVENT NAME, correctly. I recommended 'chat.message.failed'; it chose 'hook.failed' because ONE record shape is needed at TWO call sites - the chat.message catch and the workspace-open failure reached through tool.execute.before, where a chat.message name would be a lie. journal-events.ts's own widening note forbids borrowing a near-miss name.",
+        "SIXTH consecutive disclosed surviving mutation, and security-relevant: the implementer wired gitMode/branchPolicy from the loaded config beyond what any test demanded, and disclosed that hardcoding them back left the WHOLE suite at 1200/1200. An unconfigured repo now defaults to git.mode 'read-only' rather than unconditional 'commit'. Closed by row 15, added after green.",
+        "C-065: THE ORCHESTRATOR'S BRIEF FOR ROW 15 WAS WRONG and the test-writer caught it. I specified asserting two DIFFERENT deny reasons for `git commit` under git.mode read-only vs commit. core/gates-git.ts:459-467 explicitly `void gitMode` - the git gate is mode-uniform BY DESIGN because the publish handler runs git through execFile inside the plugin and never reaches this gate - so `git commit` returns the BYTE-IDENTICAL reason under both, and my assertion would have failed against a CORRECT implementation. The writer moved the behavioural discriminator to branchPolicy (pin DENIES / check-only ALLOWS - allow-vs-deny, sharper than two denials), kept my commit pair pinned as EQUAL as a trip-wire against future gitMode branching, and added a source guard for the gitMode half because it is inert at this seam and no runtime probe can see it."
       ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T12:20:00Z"
     }
   }
 }
