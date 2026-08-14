@@ -1911,22 +1911,38 @@
       "taskId": "14.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "9a0d939",
       "commitMessage": "conductor: 14.1 bench driver",
       "planLines": [
         2979,
         3015
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "suite": "bash scripts/test-conductor.sh in a DETACHED worktree of HEAD c6289e2 with its own npm install, carrying only 14.1's three files: TAP tests=1277 pass=1277 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; typecheck OK; bun leg OK (8 pass); schema export OK; python leg OK (Ran 64 tests); GATE PASS, exit 0.",
+        "baselineDelta": "The SAME worktree was gated first WITHOUT 14.1: 1277/1277 node, python leg Ran 31 tests, GATE PASS. Adding 14.1 moves node 1277 -> 1277 (unchanged, correct: 14.1 is python-only and touches nothing under conductor/) and python 31 -> 64, i.e. +33, exactly the 33 rows of task-14.1.assertions.json. M2 monotonicity holds on both legs.",
+        "coverage": "33 assertion ids, 33 test methods, every id present in scripts/test_conductor_bench.py by literal string match."
+      },
+      "redEvidence": {
+        "cmd": "/usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py'",
+        "class": "RE-DERIVED, NOT OBSERVED AT AUTHORING TIME - stated plainly because it is a deviation.",
+        "excerpt": "14.1's test and product were written by the previous run's agents and then orphaned uncommitted; no red observation for the original authoring exists in JOURNAL.jsonl or anywhere else, so none is claimed here. The orchestrator re-derived the red itself under M4 by mutating production and watching the suite fail: score_cell's exit-status branches replaced by an unconditional pass -> 2 failures; build_run_plan's inner arm loop collapsed to arms[0] -> 4 failures; summarize_ledger_window's routerErrors pinned to 0 -> 1 failure. Each mutation was applied in a disposable worktree, never the main tree, and restored from a `cp` snapshot with cmp-verified equality afterwards."
+      },
+      "filesTouched": [
+        "bench/conductor-tasks.json",
+        "scripts/conductor_bench.py",
+        "scripts/test_conductor_bench.py"
+      ],
+      "revertAssertion": "RUN by the orchestrator, in a disposable worktree, restored from a cp snapshot and cmp-verified clean. The load-bearing pair: score_cell's `if exit_code == 0` / fall-through branches replaced by an unconditional `{passed: True, outcome: pass, exitCode: 0}` takes the python leg from 64/64 to 2 failures, so the scoring row is bound to the hidden test's real exit status; and build_run_plan's `for arm in arms` collapsed to `arms[0]` takes it to 4 failures, so the 90-cell balanced plan is bound to the arm fan-out rather than to a count. Five further mutations were run against the report's honesty formatters - see the C-077 deviation below.",
+      "attempts": 1,
+      "deviations": [
+        "The red was not observed at authoring time; it was re-derived by mutation at the gate. See redEvidence.class. The task's test and product were produced by the previous run and left uncommitted in the working tree, so the write-test -> observe-red -> implement -> observe-green ordering cannot be evidenced for them. What IS evidenced is that the committed suite fails when the committed product is broken, on seven distinct load-bearing mutations.",
+        "C-077, a MAJOR found by this gate and FIXED before the commit, test-only. Three of the report's honesty formatters could be made to lie with the suite staying green: format_recorded printing `30 of 30 recorded` for 22 recorded cells, format_rate printing the recorded count as the pass count, and format_outcomes collapsing every per-repetition spread to `none recorded` all left the python leg at 64/64 OK. Cause: the assertions searched the rendered report for a string built by CALLING the same formatter under test, so the oracle moved with the mutation. Fixed by pinning each formatter's output to a literal the test states itself, inside the three tests that already own those rows - no new assertion id, still 33 tests for 33 rows. All five formatter mutations (format_recorded, format_rate, format_outcomes, format_ms, format_tokens) are now caught, one failure each.",
+        "Note for 14.2, not a defect in 14.1: conductor_bench.py's REPORT_PATH is `.data/benchmark/conductor-report.md` (gitignored, and .data/ is the never-touch tree). C-075's open path conflict - spec row `14.2-committed-copy` naming `bench/conductor-report.md` against verify-acceptance.sh:163 checking `docs/build/artifacts/conductor-report.md` - is therefore a THREE-way split, and 14.2 must land committed copies at both committed paths from the one generated file. Fix the spec before the campaign, not after."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T18:45:00Z"
     },
     "14.2": {
       "taskId": "14.2",

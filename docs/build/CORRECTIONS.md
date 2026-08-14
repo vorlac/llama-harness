@@ -3481,3 +3481,58 @@ because its staged test contradicted itself; the implementer correctly returned 
 edit the test. The orchestration then parked the task **with its partial work still in the tree**, so
 the phase gate was dispatched over unfinished work and every later task's clean-tree precondition
 blocked on it. Parking a task must also park its files.
+
+## C-077 — 14.1's gate: a report that could lie about its own coverage, and the suite agreeing
+
+14.1 arrived at its gate already green — 33 tests for 33 assertion rows, the python leg clean, every
+id present by literal match. The M4 red re-derivation is what found the hole, and it found it only
+because the mutations were aimed at the honesty surface rather than at the arithmetic.
+
+**The finding.** Three mutations to `scripts/conductor_bench.py` left the python leg at `Ran 64
+tests … OK`:
+
+| mutation | what the report would then say |
+|---|---|
+| `format_recorded(recorded, planned)` → `(planned, planned)` | "30 of 30 recorded" when 22 cells ran |
+| `format_rate(passes, recorded)` → `(recorded, recorded)` | every arm passing every cell it recorded |
+| `format_outcomes(...)` → `"none recorded"` | every per-repetition spread erased |
+
+The POC's whole deliverable is a quality delta with its spread and its coverage attached. All three
+of those numbers could be made to lie, and the suite would not notice.
+
+**Why the suite did not notice.** The assertions searched the rendered report for a string they
+built by *calling the formatter under test*:
+
+```python
+self.assertIn(cb.format_recorded(22, 30), report, "the arm's coverage must be stated")
+```
+
+Mutate `format_recorded` and both sides of that assertion move together. It is a tautology with
+respect to the one function it appears to pin — the test asserts that the report contains whatever
+the formatter produces, which is true by construction for every possible formatter.
+
+**The fix, test-only, no new row.** Each formatter's output is pinned to a literal the test states
+itself, inside the three tests that already own those assertions, so the round-trip assertions below
+them become anchored rather than self-referential:
+
+```python
+self.assertEqual(cb.format_recorded(22, 30), "22 of 30 recorded")
+self.assertIn("22 of 30 recorded", report, "the arm's coverage must be stated")
+```
+
+Still 33 tests for 33 rows. Five formatter mutations (`format_recorded`, `format_rate`,
+`format_outcomes`, `format_ms`, `format_tokens`) now fail, one failure each; the two arithmetic
+mutations from the same M4 pass (`score_cell` → 2 failures, `build_run_plan` → 4) were already
+caught. Seven of seven.
+
+**The generalisation, which is the point.** This is C-071's lesson wearing new clothes — *a caught
+mutation is not a closed defect; ask what the fixture supplies that production does not* — and its
+sharper form: **an oracle computed by the code under test proves nothing about that code.** It is the
+same shape as the scanner defect class (C-044…C-047, C-063, C-072, C-075): a check that reports PASS
+while inspecting less than it appears to. Here the check inspected nothing at all. Whenever a test
+searches an output for `f(x)`, `f` itself is outside the test's reach and needs its own literal pin.
+
+**Where this pointed next, and it is not academic.** 14.1 is the driver that will render 14.2's
+`conductor-report.md` — the live artifact acceptance row 8 reads and the one HANDOFF calls the worst
+thing to fabricate. An unpinned honesty formatter in the driver is a fabrication route that needs no
+one to fabricate anything.
