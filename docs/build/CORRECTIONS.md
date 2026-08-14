@@ -2127,3 +2127,80 @@ small". The sequencing must come from the file they touch, not from how big the 
 5 of 5. The agent was running alongside eight others; this matches the already-recorded behaviour of
 the wire-contract suite under concurrent load. Recorded as load-sensitive rather than chased — but
 recorded, because a test that fails under load will fail a gate someday and someone will believe it.
+
+---
+
+## C-057 — M5 stopped scanning the C++ half at the layout move, and nobody noticed for eleven commits
+
+`scripts/conductor-gate.sh` (the M5 stub scan) selects its files with
+
+```
+git ls-files 'conductor/*.ts' 'conductor/**/*.ts' 'src/router/*' 'src/router/**'
+```
+
+The user-directed layout move (0a893e0) hoisted `src/` to `router/`. The two C++ globs have
+matched **zero files** ever since. `git ls-files` reports no error for a glob that matches
+nothing, so the scan printed `M5 PASS (86 file(s) scanned)` and looked exactly like a clean
+tree. Twenty-two tracked C++ files — every router header, every doctest file, `main.cpp` — went
+unscanned across 11.6, 11.7, 11.8, 9.6, and the whole Phase 9 gate fix round.
+
+This is the recurring defect class again, the fifth time: **a check that PASSED while inspecting
+less than it appeared to.** It is the same shape as C-045 (a grep blind to a binary file) and
+C-047 (a green suite over a product whose tools all throw.)
+
+### Why the no-argument mode had rotted
+
+Running the whole-tree scan surfaces the reason it was never run: it fails on the enforcement
+machinery itself. `conductor/core/planning.ts` **is** the placeholder detector — its source
+contains the literal regexes `/<placeholder>|\[placeholder\]/` and comments explaining them.
+`conductor/adapter/tools.ts` writes the prompts that forbid stubbing, so it quotes
+`"not implemented"` and `"Do NOT write, stub or sketch the production code"` verbatim. A
+word-level scan reads all of that as the violation.
+
+So M5 was run per-task with an explicit file list, where those modules rarely appeared — and the
+one mode that would have caught a moved path was the mode nobody could run.
+
+### Three changes, each closing one half of that
+
+1. **The globs follow the tree**: `router/*`, `router/**`, `tools/*`, `tools/**`. 86 files
+   scanned becomes 108.
+2. **A floor on each half.** The TypeScript glob must match ≥ 40 tracked files and the C++ glob
+   ≥ 10, or the scan FAILS naming the moved path. This is the standing lesson applied literally:
+   a construction that enforces an invariant must also assert that it actually ran. Self-tested
+   by pointing the C++ glob at a nonexistent path — `M5 FAIL: the C++ glob matched 4 tracked
+   files (floor 10)`.
+3. **The patterns match marker SHAPES, not words** — `TODO:` with a colon, or a marker at the
+   start of a comment; `<placeholder>` / `[placeholder]` / `placeholder for|here|text|value`;
+   `is a stub` / `stub implementation` / `stubbed out` / a comment that opens with `stub`. These
+   deliberately mirror the shapes the PRODUCT pins for the same job at
+   `conductor/core/planning.ts:562-577`, and the comment above them says so — this is a
+   one-rule-in-two-places instance, entered knowingly, because bash cannot import a TS regex.
+
+That leaves six lines that are genuinely the scanner reading its own subject matter. They are
+**line-level exemptions**, not file-level: any other marker in those same files still fails. And
+each exemption is verified LIVE on every whole-tree run — an exemption whose anchor line no
+longer trips the scan it exempts is itself a FAIL, so an exemption cannot outlive its reason.
+
+### The one real finding underneath
+
+`router/version.hpp:5` read "The router's build version. **Scaffold placeholder for Task 11.1**;
+later tasks wire the real config/version surface." That stopped being true at 11.8: the constant
+is the shipping version, and `/conductor/health` served exactly `{"status":"ok","version":
+"0.0.1"}` in the live smoke and again when this session re-verified it. Comment corrected to say
+what the constant now is.
+
+Eleven commits of an unscanned C++ tree produced exactly one stale comment. The scan was not
+finding much — but "it would not have found much anyway" is a conclusion available only after
+you run it, and it was not available before.
+
+### And I walked straight into the recorded trap while fixing it
+
+To prove the repaired scan still catches a real violation I appended `// TODO: finish this` to
+`router/version.hpp`, confirmed exit 1, and reverted with `git checkout router/version.hpp` —
+which also discarded the comment fix sitting uncommitted in the same file. That is the mutation
+harness trap already written down in `IN_PROGRESS.json` under `mutationRevertTrap`, committed
+after it cost half of C-035. Reading it did not stop me from repeating it.
+
+Redone with the discipline the note prescribes: `cp` snapshot first, restore from the snapshot,
+`cmp` to confirm. **The note was not enough; the habit has to be to snapshot BEFORE the first
+mutation, every time, including when the mutation is "just one line I will obviously undo".**
