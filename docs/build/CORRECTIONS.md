@@ -2044,3 +2044,86 @@ changed underneath it.
 tried; the code was trusted because the comment was confident. That is C-054's lesson wearing
 different clothes — and the two were found by the same gate, hours apart, in code written months
 apart. The gate earned its cost on these two alone.
+
+## C-056 — the Phase 9 gate's fix round: nine defects closed, three rulings ratified
+
+Nine agents, all reporting fixed, none blocked. Suite 1129 -> 1158 (+29 rows across five new test
+files). Every fix was verified PRESENT afterwards rather than taken on report — see the
+orchestrator error at the end for why that mattered.
+
+### Ratified: the closed §7.4 vocabulary gains three names
+
+The journal-vocab agent found SIX live breaches, not the three it was briefed on — it also caught
+`handleOverride`'s grant record, its budget-refusal record, and `openWorkspace`'s live-foreign-lock
+record in adapter/state.ts. All six would THROW in any non-production NODE_ENV.
+
+It fixed three with EXISTING names and no widening (the override grant now rides
+`gates: override-granted`, which had zero producers; the gate decision that SPENDS a grant rides
+`gates: allow` with `data.via`; an over-budget refusal rides `gates: deny`) — the right preference
+order, stated in the file as a rule for the next reader.
+
+The other three are RATIFIED, each because every existing name would make the record lie:
+
+- **`state: lock.contended`** — this is not a widening at all. `docs/developer/architecture.md:511`
+  and `CORRECTIONS.md:285` ALREADY specify this exact name ("A LIVE foreign lock journals
+  `warn state lock.contended`"); the code never had it. Verified both citations directly. This is a
+  code/spec disagreement resolved in the spec's favour.
+- **`state: question.surfaced`** — handlePublish's refuse arm appends a §2.11 question and changes
+  NOTHING about the item, so `item.updated` with `blocked:true` would assert a state change that
+  did not happen. `decision.recorded` already exists in this file for exactly this shape, one
+  ledger over.
+- **`state: run.stop-report`** — the §2.9 terminal artifact for a run whose stop another component
+  already recorded. `fsm/transition` would claim an edge that did not happen — the same reasoning
+  C-037 ruling 7 applied to the REVIEWED->GREEN demotion. The agent's first attempt invented a
+  `report` COMPONENT, which was outside the closed eight and had to go regardless.
+
+### Ratified: first-block-wins when two questions block one item
+
+`handleSurface` overwrote `item.blocked` wholesale, losing the first question's id. The agent chose
+FIRST-BLOCK-WINS over widening `blocked` to hold several ids, because §2.5 defines it as carrying
+ONE questionId and widening a persisted record is a spec change. Ratified.
+
+RESIDUAL, recorded rather than fixed: under first-block-wins, answering the FIRST question releases
+the item while the SECOND is still open and still names it. Strictly better than losing the first
+question silently, but not obviously right. Left for the Phase 10 continuation work, which is where
+the answer path lives.
+
+### Ratified: an abandoned stage is FENCED, not awaited
+
+`awaitHeld`'s budget expiry stopped the member while its executor kept running and could still
+write. The agent did NOT make the driver wait — pinned interpretation P8 forbids it (a held job
+nothing will release must not wedge the wave). Instead the abandoned stage's StateStore view is
+REVOKED, so its later writes are refused rather than landing silently.
+
+DISCLOSED LIMIT, and it is a real one: the fence covers the StateStore, not raw ledger appends. An
+abandoned stage can still append to evidence.jsonl before its next store call. Recorded here rather
+than papered over.
+
+### A behaviour change worth naming
+
+With `staged` empty and git.mode not read-only, publish now SKIPS the commit leg entirely instead
+of running a pathspec-less `git commit`. Before, that case committed whatever happened to be in the
+index — which is the defect — or failed. Skipping is the honest outcome: an item that staged
+nothing has nothing to commit.
+
+### ORCHESTRATOR ERROR — I designed a collision into the workflow
+
+The fix workflow ran its clusters sequentially precisely because they all edit adapter/tools.ts.
+Then I put THREE tools.ts fixes in a final `Remainder` phase and ran them in PARALLEL. One agent
+noticed and said so plainly: "CONCURRENT EDITS TO tools.ts, and a window where I may have clobbered
+another agent."
+
+A clobbered fix does not fail the gate — it is simply absent, and the suite stays green because the
+test that would have caught it was clobbered with it. So every one of the nine fixes was verified
+present afterwards by grepping for its own marker and running its own test file. All nine are
+there; the parallel window happened to be harmless. It was luck, not design.
+
+RULE: agents that edit the SAME FILE run sequentially, with no exception for "these three are
+small". The sequencing must come from the file they touch, not from how big the change looks.
+
+### A load-sensitive test, not a flake in the product
+
+`[9.4c-abandoned-stage-cannot-write]` was reported failing 1 run in 3. On a quiet machine it passed
+5 of 5. The agent was running alongside eight others; this matches the already-recorded behaviour of
+the wire-contract suite under concurrent load. Recorded as load-sensitive rather than chased — but
+recorded, because a test that fails under load will fail a gate someday and someone will believe it.

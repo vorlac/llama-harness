@@ -178,7 +178,7 @@ cannot grep by name are logs you cannot debug with.
 | `continuation`  | `reprompt`, `idle`, `disengage`                                                                                                |
 | `inject`        | `system-append`                                                                                                                |
 | `router-client` | `request`, `response`, `failover`, `retry`                                                                                     |
-| `state`         | `run.created`, `lock.acquired`, `lock.released`, `lock.stale-break`, `item.updated`, `user.midrun-prompt`, `decision.recorded` |
+| `state`         | `run.created`, `lock.acquired`, `lock.released`, `lock.stale-break`, `lock.contended`, `item.updated`, `user.midrun-prompt`, `decision.recorded`, `question.surfaced`, `run.stop-report` |
 
 ### Levels and what they cost
 

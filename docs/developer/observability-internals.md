@@ -61,11 +61,19 @@ never inventing one at a call site.
 | `continuation`  | `reprompt`, `idle`, `disengage`                                                                                                | idle re-prompts and the futile-re-prompt wedge detector                                    |
 | `inject`        | `system-append`                                                                                                                | the doctrine + live-state append made to each request's system array                       |
 | `router-client` | `request`, `response`, `failover`, `retry`                                                                                     | request tagging and the fail-soft failover to the upstream base URL                        |
-| `state`         | `run.created`, `lock.acquired`, `lock.released`, `lock.stale-break`, `item.updated`, `user.midrun-prompt`, `decision.recorded` | run and lock lifecycle, item mutations, a prompt arriving mid-run, decision-ledger appends |
+| `state`         | `run.created`, `lock.acquired`, `lock.released`, `lock.stale-break`, `lock.contended`, `item.updated`, `user.midrun-prompt`, `decision.recorded`, `question.surfaced`, `run.stop-report` | run and lock lifecycle, item mutations, a prompt arriving mid-run, decision- and question-ledger appends, the §2.9 stop-report artifact |
 
 `decision.recorded` shows the rule working. A `conductor_decide` or `conductor_defer`
 changes no run or item state, so borrowing `item.updated` would have made every decision
-ungreppable; it gets its own name instead.
+ungreppable; it gets its own name instead. `question.surfaced` is the same case one ledger
+over: `handlePublish`'s `git.preexistingDirty: "refuse"` arm appends a §2.11 question and
+changes nothing about the item, so it does not borrow `item.updated` either.
+
+The rule cuts the other way just as hard, and the §3.6 override hatch is the example. Its
+three records all reuse names that already existed: minting a grant is `gates: override-granted`,
+the gate decision that spends it is `gates: allow` (with the spent grant in `data`), and an
+over-budget refusal is `gates: deny`. None of them earned a new name, because each of those
+names already says what happened.
 
 ## The journal writer
 

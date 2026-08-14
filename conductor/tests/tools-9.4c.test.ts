@@ -2333,3 +2333,144 @@ test("[9.4c-default-table-serves-every-stage] the DEFAULT executor table serves 
   // exactly zero (the row above pins that zero for the unserved case).
   assert.ok(wiring.sdk.calls.length > 0, "the served stages dispatched real work rather than stopping before it");
 });
+
+// ===========================================================================
+// [9.4c-abandoned-stage-cannot-write] — C-054 (Phase 9 milestone gate, CONFIRMED).
+//
+// The P8 bound above is honest about WAITING — a held write-capable job nothing
+// will release is env-failed rather than awaited forever — but it was not honest
+// about STOPPING. When the budget expired the driver marked the member stopped
+// and RETURNED while the stage's promise was still live. Nothing cancelled it.
+// A sibling's stage (or the next dispatch_wave call) then fires notifyClear on
+// the same tree, the engine releases the held job, and the abandoned stage walks
+// on and writes the item's PERSISTED state — after the compact return already
+// said that member stopped at PENDING. The return and the state store then
+// disagree with no record of why, and a second dispatch_wave can schedule an
+// item another stage is still writing.
+//
+// The driver cannot cancel a promise, and it must not wait forever (P8, and the
+// row above pins the return). So the resolution is the other half: the driver
+// hands each stage execution a REVOCABLE view of the StateStore and REVOKES it
+// at the moment it abandons the stage. The abandoned stage keeps running — that
+// much is unavoidable — but it can no longer touch the run's persisted facts:
+// its next store call throws, so the write is REFUSED rather than landing behind
+// the driver's back, and the stage dies at that point instead of drifting on.
+//
+// This row is written so it cannot pass vacuously:
+//   * the freeze premise (a really frozen tree) is asserted before the call;
+//   * the stage is proven to have ENTERED and to be still mid-flight when the
+//     driver returned (`attempted === false`) — otherwise there is no LATER
+//     write to refuse and the row would prove nothing;
+//   * the abandoned stage is then proven to have REACHED its write and been
+//     REFUSED — a refusal that never happened, or a write that silently no-oped,
+//     is a failure here, not a pass;
+//   * the item's on-disk bytes are compared before and after, so "the state did
+//     not change" is read off the file rather than off a handler's word.
+// ===========================================================================
+
+test("[9.4c-abandoned-stage-cannot-write] a stage the driver ABANDONS on the held-job budget can never afterwards advance the item's PERSISTED state: the driver revokes that stage's view of the StateStore as it stops the member, so the abandoned stage's later write is REFUSED and the compact return keeps agreeing with what is on disk", { timeout: 60_000 }, async () => {
+  const root = committedRepo();
+  const stateHome = freshStateHome();
+  // A short budget: the FAILURE path is quick and no assertion below depends on
+  // any duration (the bound itself is the operator's existing sub-session knob).
+  const config = makeConfig({ subSessionTimeoutMs: 60 });
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const runDir = runDirOf(store, runId);
+
+  // ONE member, whose only offered stage is write-capable (a non-behavioral item
+  // at PENDING owes conductor_mark_green, a SERIAL stage).
+  const queue: Queue = { items: [docsItem("I1", "docs/a.md")] };
+  seedPlanReviewed(store, runId, queue);
+  assert.deepEqual(expectedWave(store, runId, queue, config).parallel, ["I1"], "premise: I1 is the wave");
+
+  // THE FREEZE premise: a leaked verify marker (a provably dead pid) really does
+  // freeze the member's tree, which is what puts the stage on the held-job budget.
+  writeFileSync(markerPathOf(runDir), JSON.stringify({ pid: deadPid(), startMs: START_MS - 1_000 }));
+  const wiring = makeWiring(runId, runDir, config, journal.sink, () => ({ kind: "reply", text: implJson() }));
+  assert.equal(wiring.treeState.isFrozen(TREE), true, "premise: the marker-backed TreeState reports the member's tree FROZEN");
+
+  // The abandoned stage, under the test's control. It is still running when the
+  // driver's budget expires, and only afterwards does it try to advance the item
+  // — exactly what a released hold does.
+  let gateOpen = (): void => undefined;
+  const gate = new Promise<void>((resolve) => {
+    gateOpen = resolve;
+  });
+  let stageDone = (): void => undefined;
+  const finished = new Promise<void>((resolve) => {
+    stageDone = resolve;
+  });
+  let entered = false;
+  let attempted = false;
+  let wrote = false;
+  let refusal: unknown = null;
+
+  const abandoned: StageExecutor = async (ctx: StageExecutorContext): Promise<StageOutcome> => {
+    entered = true;
+    try {
+      await gate;
+      // Everything below happens AFTER the driver has reported this member stopped.
+      attempted = true;
+      const item = ctx.store.loadItem(ctx.runId, ctx.itemId);
+      item.state = "GREEN";
+      ctx.store.saveItem(ctx.runId, item);
+      wrote = true;
+      return { ok: true, itemState: "GREEN" };
+    } catch (error) {
+      refusal = error;
+      return { ok: false, itemState: "PENDING" };
+    } finally {
+      stageDone();
+    }
+  };
+
+  const result: DispatchWaveResult = await handleDispatchWave({
+    store,
+    fanout: wiring.fanout,
+    treeState: wiring.treeState,
+    runId,
+    config,
+    journal: journal.sink,
+    stateHome,
+    workspaceKey: "wkey",
+    packs: PACKS,
+    now: () => START_MS,
+    executors: { conductor_mark_green: abandoned },
+  });
+
+  // (1) The driver really took the ABANDONMENT path (P8's bound), and really did
+  //     run the stage — a row where the stage never started proves nothing.
+  assert.equal(entered, true, "premise: the stage executor was entered, so there IS a running stage to abandon");
+  const d1 = dispositionOf(result, "I1");
+  assert.ok(typeof d1.envError === "string" && d1.envError.length > 0, "the member is env-failed on the held-job budget");
+  assert.match(d1.envError as string, /subSessionTimeoutMs/, "…and the env failure names the budget that expired");
+  assert.equal(d1.stoppedAt, "conductor_mark_green", "…stopping at the write-capable stage");
+  assert.equal(d1.state, "PENDING", "the compact return says the member did NOT advance");
+
+  // (2) The stage is STILL RUNNING at the moment the driver returned. Without
+  //     this the row could pass on a stage that had already finished, and there
+  //     would be no LATER write for the fix to refuse.
+  assert.equal(attempted, false, "premise: the abandoned stage had NOT yet reached its write when dispatch_wave returned");
+  const bytesAtReturn = itemFileBytes(runDir, "I1");
+
+  // (3) Let the abandoned stage walk on, exactly as a released hold would.
+  gateOpen();
+  await finished;
+  await turns(4);
+
+  assert.equal(attempted, true, "the abandoned stage really did carry on and reach its write after the driver returned");
+  assert.equal(wrote, false, "…and that write was REFUSED: an abandoned stage may not advance the run's persisted state");
+  assert.ok(refusal instanceof Error, "…refused by a thrown error, not by a silent no-op the stage could not tell from success");
+  assert.match(
+    (refusal as Error).message,
+    /abandon/i,
+    "…and the refusal SAYS the stage was abandoned, so the reason is on the record rather than looking like a store fault",
+  );
+
+  // (4) The compact return still agrees with what is on disk — read off the
+  //     item's own bytes, not off anything a handler reported.
+  assert.equal(store.loadItem(runId, "I1").state, "PENDING", "the PERSISTED item state still matches the disposition");
+  assert.equal(itemFileBytes(runDir, "I1"), bytesAtReturn, "…and the item file is byte-for-byte what it was when dispatch_wave returned");
+});

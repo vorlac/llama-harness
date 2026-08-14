@@ -40,6 +40,25 @@ function isAmendable(state: ItemState): boolean {
   return (AMENDABLE_ITEM_STATES as readonly string[]).includes(state);
 }
 
+// Two scope lists describe the same scope only if they are the same sequence of
+// the same strings. Anything else — a reorder, an entry that is not a string, a
+// missing list on a malformed op — counts as CHANGED: this rule is a proof that
+// the item's §2.6 evidence still describes the item, and a scope we cannot
+// establish to be identical is not that proof.
+function sameScopeList(before: unknown, after: unknown): boolean {
+  if (!Array.isArray(before) || !Array.isArray(after)) return false;
+  if (before.length !== after.length) return false;
+  return before.every((entry, index) => typeof entry === "string" && entry === after[index]);
+}
+
+// Which halves of an item's scope an update rewrites: [] when it rewrites neither.
+function changedScopes(before: QueueItem, after: QueueItem): string[] {
+  const changed: string[] = [];
+  if (!sameScopeList(before.fileScope, after.fileScope)) changed.push("fileScope");
+  if (!sameScopeList(before.testScope, after.testScope)) changed.push("testScope");
+  return changed;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -186,6 +205,30 @@ export function applyAmendOps(
             `${at}: cannot ${op.op} ${id} at ${state} — the queue is amendable only while nothing of an item's ` +
             `work is integrated (${AMENDABLE_ITEM_STATES.join("/")})`,
         };
+      }
+      // An `update` KEEPS the item's §2.5 FSM position and its evidence pointers,
+      // which is only honest while the update leaves the item's scope alone. Past
+      // PENDING the item may already carry a §2.6 red or green, and those records
+      // were produced under the scope this op would replace: kept across a
+      // re-scope they would leave the item sitting at RED/GREEN on the strength of
+      // runs over files it no longer owns, and the §2.6 freshness rule — stamps
+      // and HEAD, never the scope a record was produced under — would rest on
+      // them. An item whose scope changed has been proven of nothing, so the
+      // re-scope must be stated as the rebirth it is: remove then add, one net
+      // birth, reborn PENDING with no evidence and no attempts. At PENDING there
+      // is nothing to invalidate (no §3.3 edge into PENDING exists, so no evidence
+      // can have been written), and the re-scope applies as an ordinary update.
+      if (op.op === "update" && state !== "PENDING") {
+        const changed = changedScopes(items[found], op.item);
+        if (changed.length > 0) {
+          return {
+            ok: false,
+            why:
+              `${at}: cannot update ${id} at ${state} — the update rewrites its ${changed.join(" and ")}, and an ` +
+              `update keeps the item's §2.6 evidence, which was produced under the scope being replaced; state the ` +
+              `re-scope as a remove then an add of ${id}, which reborns it PENDING with no evidence`,
+          };
+        }
       }
     }
 

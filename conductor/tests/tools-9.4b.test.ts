@@ -3171,3 +3171,262 @@ test("[C035-remove-then-readd-is-one-net-birth] remove-then-add of ONE id inside
   );
   assert.equal(itemFileExists(laundry.runDir, "I2"), true, "the published item is untouched");
 });
+
+// ===========================================================================
+// [C056-update-cannot-re-scope-a-proven-item] — Phase 9 MILESTONE GATE finding.
+//
+// AMENDABLE_ITEM_STATES admits GREEN, and an `update` deliberately KEEPS the
+// item's §2.5 history — "the FSM position and the item's history are the
+// amendment's to keep, not reset". That holds only while the update leaves the
+// item's SCOPE alone. An update may re-scope the entry, and the kept
+// evidence.red / evidence.green then point at runs of a scope the item no longer
+// owns: the item sits at GREEN carrying a green produced over files it does not
+// have, and the §2.6 freshness rule — which compares stamps and HEAD, never the
+// scope the record was produced under — rests on it happily.
+//
+// The rule this row pins: an item whose scope changed has been proven of
+// nothing. The module already carries the honest re-scope — remove-then-add, ONE
+// net birth, reborn PENDING with no evidence — so a re-scoping `update` is
+// refused in every state where something can already have been proven, which is
+// everything except PENDING. Nothing is destroyed behind the caller's back and
+// no capability is lost: the caller states the re-scope as the rebirth it is.
+// ===========================================================================
+
+test("[C056-update-cannot-re-scope-a-proven-item] an `update` may not change an item's fileScope or testScope once the item is past PENDING: the §2.5 evidence and FSM position an update KEEPS were produced under the old scope, so the re-scope is refused (remove-then-add is the honest path) — while a scope-preserving update at the very same state still keeps the item's history, and a re-scope at PENDING, where nothing is proven, still applies", async (t) => {
+  const BEFORE = { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"] };
+  const rescopes: Array<{ label: string; after: { fileScope: string[]; testScope: string[] } }> = [
+    { label: "the fileScope changes", after: { fileScope: ["src/b2.mjs"], testScope: ["tests/b.test.mjs"] } },
+    { label: "the testScope changes", after: { fileScope: ["src/b.mjs"], testScope: ["tests/b2.test.mjs"] } },
+  ];
+
+  // -------------------------------------------------------------------------
+  // (a) core applyAmendOps, over EVERY amendable state. Each state runs both the
+  //     re-scoping update and a scope-preserving one built from the SAME state
+  //     and the SAME queue: the second is the premise that the state itself is
+  //     amendable, so a refusal of the first cannot be the amendable-state check
+  //     (or the id/precondition checks) reported under another name.
+  // -------------------------------------------------------------------------
+  const queue: Queue = {
+    items: [
+      makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+      makeQueueItem("I2", BEFORE),
+    ],
+  };
+  let refusedStates = 0;
+  for (const state of AMENDABLE_ITEM_STATES) {
+    for (const row of rescopes) {
+      const states: Record<string, ItemState> = { I1: "PENDING", I2: state };
+
+      const retitled = makeQueueItem("I2", BEFORE);
+      retitled.title = "a narrower I2";
+      const kept = applyAmendOps(queue, [{ op: "update", item: retitled }], states);
+      assert.equal(kept.ok, true, `premise: at ${state} an update that leaves the scope alone IS accepted, so ${state} is amendable`);
+      assert.deepEqual(kept.ok ? kept.updated : null, ["I2"], `premise: at ${state} that update is an update, not a birth`);
+      assert.equal(kept.ok ? kept.queue.items[1].title : null, "a narrower I2", `premise: at ${state} the accepted update landed`);
+
+      const rescoped = applyAmendOps(queue, [{ op: "update", item: makeQueueItem("I2", row.after) }], states);
+
+      if (state === "PENDING") {
+        assert.equal(rescoped.ok, true, `at PENDING nothing has been proven about the item, so an update where ${row.label} still applies`);
+        assert.deepEqual(
+          rescoped.ok ? rescoped.queue.items[1] : null,
+          makeQueueItem("I2", row.after),
+          "and it lands verbatim — the PENDING carve-out is the whole of the exception",
+        );
+        assert.deepEqual(rescoped.ok ? rescoped.updated : null, ["I2"], "reported as an update");
+        continue;
+      }
+
+      refusedStates += 1;
+      assert.equal(rescoped.ok, false, `at ${state} the item may already carry evidence, so an update where ${row.label} is REFUSED`);
+      const why = rescoped.ok ? "" : rescoped.why;
+      assert.match(why, /I2/, "the refusal names the item it is about");
+      assert.match(why, /scope/i, "and names the scope change that caused it");
+      assert.match(why, /remove/i, "and names the honest re-scope the caller must state instead: remove-then-add");
+      assert.doesNotMatch(
+        why,
+        /amendable only while/,
+        "and it is NOT the amendable-state refusal wearing a different hat — this state IS amendable, as the row above proved",
+      );
+    }
+  }
+  assert.equal(
+    refusedStates,
+    (AMENDABLE_ITEM_STATES.length - 1) * rescopes.length,
+    "every amendable state except PENDING was actually exercised — a shrunken AMENDABLE_ITEM_STATES must red this row, not silently test less",
+  );
+
+  // An id THIS amendment created is exempt: it is PENDING by construction and has
+  // no evidence, so an add followed by an update that re-scopes it is one birth.
+  const bornThenRescoped = applyAmendOps(
+    queue,
+    [
+      { op: "add", item: makeQueueItem("I3", { fileScope: ["src/c.mjs"], testScope: ["tests/c.test.mjs"] }) },
+      { op: "update", item: makeQueueItem("I3", { fileScope: ["src/c2.mjs"], testScope: ["tests/c.test.mjs"] }) },
+    ],
+    { I1: "PENDING", I2: "GREEN" },
+  );
+  assert.equal(bornThenRescoped.ok, true, "an id born inside this amendment can still be re-scoped by a later op in it");
+  assert.deepEqual(bornThenRescoped.ok ? bornThenRescoped.added : null, ["I3"], "and it stays a birth");
+  assert.deepEqual(
+    bornThenRescoped.ok ? bornThenRescoped.queue.items[2].fileScope : null,
+    ["src/c2.mjs"],
+    "carrying the last op's scope",
+  );
+
+  // -------------------------------------------------------------------------
+  // (b) the handler, over an item that ACTUALLY carries §2.6 evidence.
+  // -------------------------------------------------------------------------
+  for (const row of rescopes) {
+    await t.test(`handleQueueAmend refuses the GREEN re-scope where ${row.label}`, () => {
+      const bench = seedAmendBenchWith(
+        {
+          items: [
+            makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+            makeQueueItem("I2", BEFORE),
+          ],
+        },
+        { I1: "PENDING", I2: "GREEN" },
+      );
+      const proven = bench.store.loadItem(bench.runId, "I2");
+      proven.evidence = { red: { ledger: "evidence", seq: 3 }, green: { ledger: "evidence", seq: 5 } };
+      bench.store.saveItem(bench.runId, proven);
+
+      // Premises: the item really is at an amendable state, really carries the
+      // evidence the rule is about, and the re-scoped queue is §2.4-LEGAL — so
+      // neither the state check nor core validateQueue can be what refuses.
+      assert.ok(
+        (AMENDABLE_ITEM_STATES as readonly string[]).includes("GREEN"),
+        "premise: GREEN is amendable, so this refusal is the scope rule and not the FSM-position rule",
+      );
+      const seeded = bench.store.loadItem(bench.runId, "I2");
+      assert.equal(seeded.state, "GREEN", "premise: the item is at GREEN");
+      assert.deepEqual(seeded.evidence.green, { ledger: "evidence", seq: 5 }, "premise: it carries a §2.6 green pointer");
+      const candidate: Queue = {
+        items: [makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }), makeQueueItem("I2", row.after)],
+      };
+      assert.equal(validateQueue(candidate, bench.config).ok, true, "premise: the re-scoped queue is §2.4-legal");
+      assert.notDeepEqual(
+        [readQueueFile(bench.runDir).items[1].fileScope, readQueueFile(bench.runDir).items[1].testScope],
+        [row.after.fileScope, row.after.testScope],
+        "premise: the update really does re-scope the entry the run is executing",
+      );
+
+      const beforeQueue = readFileSync(path.join(bench.runDir, "queue.json"), "utf8");
+      const beforeItem = itemFileBytes(bench.runDir, "I2");
+
+      let why = "";
+      assert.throws(
+        () => {
+          try {
+            handleQueueAmend({
+              store: bench.store,
+              runId: bench.runId,
+              config: bench.config,
+              journal: bench.journal.sink,
+              now: () => START_MS,
+              ops: [{ op: "update", item: makeQueueItem("I2", row.after) }],
+              ...AMEND_DECISION,
+            });
+          } catch (error) {
+            why = (error as Error).message;
+            throw error;
+          }
+        },
+        /scope/i,
+        "the amendment is refused, naming the scope change",
+      );
+      assert.match(why, /I2/, "the refusal names the item");
+      assert.doesNotMatch(why, /amendable only while/, "and it is the scope rule, not the amendable-state rule");
+
+      assert.equal(readFileSync(path.join(bench.runDir, "queue.json"), "utf8"), beforeQueue, "queue.json is BYTE-IDENTICAL");
+      assert.equal(itemFileBytes(bench.runDir, "I2"), beforeItem, "the item file is BYTE-IDENTICAL — its evidence still describes the scope it still has");
+      assert.equal(readDecisions(bench.runDir).length, 0, "no §2.7 record was appended");
+      assert.equal(existsSync(path.join(bench.runDir, "decisions.jsonl")), false, "decisions.jsonl was never created");
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // (c) the CONTROL, through the handler and at the same GREEN state: an update
+  //     that leaves both scopes alone still behaves exactly as it does today —
+  //     blocked cleared, FSM position kept, evidence kept.
+  // -------------------------------------------------------------------------
+  await t.test("a scope-preserving update at GREEN still keeps the item's FSM position and evidence", () => {
+    const bench = seedAmendBenchWith(
+      {
+        items: [
+          makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+          makeQueueItem("I2", BEFORE),
+        ],
+      },
+      { I1: "PENDING", I2: "GREEN" },
+    );
+    const proven = bench.store.loadItem(bench.runId, "I2");
+    proven.evidence = { red: { ledger: "evidence", seq: 3 }, green: { ledger: "evidence", seq: 5 } };
+    bench.store.saveItem(bench.runId, proven);
+    bench.store.setBlocked(bench.runId, "I2", { reason: "the title misdescribes the item", stage: "implement" });
+
+    const retitled = makeQueueItem("I2", BEFORE);
+    retitled.rationale = "the same files, described honestly";
+    const res: QueueAmendResult = handleQueueAmend({
+      store: bench.store,
+      runId: bench.runId,
+      config: bench.config,
+      journal: bench.journal.sink,
+      now: () => START_MS,
+      ops: [{ op: "update", item: retitled }],
+      ...AMEND_DECISION,
+    });
+
+    assert.equal(res.ok, true, "the amendment is accepted");
+    assert.deepEqual(res.updated, ["I2"], "reported as an update");
+    const after = bench.store.loadItem(bench.runId, "I2");
+    assert.equal(after.state, "GREEN", "the FSM position is the amendment's to KEEP when the scope is untouched");
+    assert.deepEqual(
+      after.evidence,
+      { red: { ledger: "evidence", seq: 3 }, green: { ledger: "evidence", seq: 5 } },
+      "and so is the evidence — it still describes the scope the item still owns",
+    );
+    assert.equal(after.blocked, null, "and §2.5's clearer still clears `blocked`");
+    assert.deepEqual(readQueueFile(bench.runDir).items[1], retitled, "the queue entry IS the update");
+  });
+
+  // -------------------------------------------------------------------------
+  // (d) the refusal points somewhere: the re-scope the caller wanted is still
+  //     reachable in ONE amendment, as the rebirth it actually is.
+  // -------------------------------------------------------------------------
+  await t.test("the re-scope the refusal names is still available in one amendment, as a rebirth", () => {
+    const bench = seedAmendBenchWith(
+      {
+        items: [
+          makeQueueItem("I1", { fileScope: ["src/a.mjs"], testScope: ["tests/a.test.mjs"] }),
+          makeQueueItem("I2", BEFORE),
+        ],
+      },
+      { I1: "PENDING", I2: "GREEN" },
+    );
+    const proven = bench.store.loadItem(bench.runId, "I2");
+    proven.evidence = { red: { ledger: "evidence", seq: 3 }, green: { ledger: "evidence", seq: 5 } };
+    bench.store.saveItem(bench.runId, proven);
+
+    const res: QueueAmendResult = handleQueueAmend({
+      store: bench.store,
+      runId: bench.runId,
+      config: bench.config,
+      journal: bench.journal.sink,
+      now: () => START_MS,
+      ops: [
+        { op: "remove", id: "I2" },
+        { op: "add", item: makeQueueItem("I2", rescopes[0].after) },
+      ],
+      ...AMEND_DECISION,
+    });
+
+    assert.equal(res.ok, true, "remove-then-add of the re-scoped id is accepted");
+    assert.deepEqual(res.added, ["I2"], "as ONE net birth");
+    const reborn = bench.store.loadItem(bench.runId, "I2");
+    assert.equal(reborn.state, "PENDING", "reborn at the head of the FSM");
+    assert.deepEqual(reborn.evidence, {}, "carrying NO evidence — which is exactly what the refused update failed to arrange");
+    assert.deepEqual(readQueueFile(bench.runDir).items[1].fileScope, rescopes[0].after.fileScope, "and the queue entry carries the new scope");
+  });
+});

@@ -835,6 +835,16 @@ function buildPublishBench(specs: PublishItemSpec[]): PublishBench {
   const runId = createRunFor(store);
   const runDir = runDirOf(store, runId);
 
+  // The run is EXECUTING: that is the §3.2 position from which a REVIEWED item is
+  // offered conductor_publish at all, and publish consults core legalTools (via
+  // the shared requireStageTool) exactly as every other stage handler does. A
+  // bench left at INTAKE describes a run in which nothing this file drives could
+  // legally happen.
+  const created = store.loadRun(runId);
+  created.state = "EXECUTING";
+  store.saveRun(created);
+  assert.equal(store.loadRun(runId).state, "EXECUTING", "premise: the publish bench's run is EXECUTING");
+
   const queue: Queue = {
     items: specs.map((spec) =>
       makeQueueItem(spec.id, {
@@ -2254,5 +2264,97 @@ test("[9.6-nogit-refuses-worktree] §3.9:1503 — no-git mode disables worktree 
     existsSync(path.join(plain, ".git")),
     false,
     "and the refusal did not manufacture a repository either",
+  );
+});
+
+// ===========================================================================
+// [9.6-recreate-after-crash-reuses-branch]
+// ===========================================================================
+
+test("[9.6-recreate-after-crash-reuses-branch] a crashed run's item can be RESUMED: after the worktree directory is lost but its branch survives holding the item's commits, createWorktree for the SAME runId/itemId succeeds by REUSING that branch (the recreated tree's HEAD is the crashed run's own commit and its file content is intact — a branch -D + fresh -b would have reset HEAD to the base commit and dropped the file), the branch count is unchanged, and a further call while the worktree is live is an idempotent no-op returning the same path with the same HEAD", () => {
+  const workspace = committedRepo();
+  const stateHome = freshStateHome();
+  const runId = "r-96-resume";
+  const branch = wtBranchOf(runId, "I1");
+  const baseSha = mustHead(workspace);
+  const RESUME_MARKER = "CRASHED-ITEM-WORK-MARKER-9006";
+  const RESUME_REL = "crashed-item-work-9006.txt";
+
+  // The run's first attempt: the item does real work and COMMITS it on its branch.
+  const first = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  assert.equal(first, wtPathOf(stateHome, runId, "I1"), "premise: the worktree is at the §4.2 path");
+  writeFileSync(path.join(first, RESUME_REL), `${RESUME_MARKER}\n`);
+  git(first, ["add", "."]);
+  git(first, ["commit", "-m", "item work before the crash"]);
+  const itemSha = mustHead(first);
+  assert.notEqual(itemSha, baseSha, "premise: the item's commit really advanced its branch past the base");
+
+  // The crash: the DIRECTORY vanishes; removeWorktree never runs, so the branch —
+  // and the only copy of that commit — is left behind.
+  rmSync(first, { recursive: true, force: true });
+  assert.equal(existsSync(first), false, "premise: the worktree directory is gone");
+  assert.equal(branchListed(workspace, branch), true, "premise: the crashed run's branch survived");
+  assert.equal(
+    gitOut(workspace, ["rev-parse", branch]),
+    itemSha,
+    "premise: and that branch still points at the item's commit — the work only exists there",
+  );
+  const branchesBefore = gitOut(workspace, ["branch", "--list", "--format=%(refname:short)"])
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .sort();
+  assert.ok(branchesBefore.includes(branch), "premise: the branch inventory is readable and names it");
+
+  // THE RESUME. This is the call that throws at HEAD ("a branch named ... already exists").
+  const second = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+
+  assert.equal(second, first, "the resumed worktree is at the same §4.2 path");
+  assert.equal(isRepo(second), true, "and it is a live git work tree again");
+  assert.equal(currentBranch(second), branch, "with the item's own branch checked out");
+  // The ONE assertion only branch REUSE can satisfy: a delete-and-recreate would
+  // have put HEAD back at baseSha with no such file.
+  assert.equal(mustHead(second), itemSha, "HEAD is the CRASHED RUN'S commit — the branch was reused, not recreated");
+  assert.equal(
+    readFileSync(path.join(second, RESUME_REL), "utf8"),
+    `${RESUME_MARKER}\n`,
+    "and the crashed run's committed work is present in the tree — nothing was discarded",
+  );
+  assert.equal(
+    gitOut(workspace, ["branch", "--list", "--format=%(refname:short)"])
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .sort()
+      .join(","),
+    branchesBefore.join(","),
+    "the branch inventory is unchanged — no orphan branch was manufactured and none was deleted",
+  );
+
+  // Exactly one administrative entry for the path (a scan floor: the list must be
+  // non-empty AND contain the path exactly once).
+  const listed = worktreeListPaths(workspace);
+  assert.ok(listed.length >= 2, "scan floor: `git worktree list` reports the main tree plus at least one linked tree");
+  assert.equal(
+    listed.filter((p) => p === second).length,
+    1,
+    "the resumed worktree is registered exactly once — no duplicate administrative entry",
+  );
+
+  // The workspace itself was never touched.
+  assert.equal(mustHead(workspace), baseSha, "the workspace's HEAD is untouched");
+  assert.equal(currentBranch(workspace), "main", "and it is still on its own branch");
+
+  // IDEMPOTENCE: calling again while the worktree is LIVE is a no-op.
+  const third = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  assert.equal(third, second, "a repeat call on a live worktree returns the same path");
+  assert.equal(mustHead(third), itemSha, "with HEAD still at the item's commit");
+  assert.equal(
+    readFileSync(path.join(third, RESUME_REL), "utf8"),
+    `${RESUME_MARKER}\n`,
+    "and the work still present — the repeat call rebuilt nothing",
+  );
+  assert.equal(
+    worktreeListPaths(workspace).filter((p) => p === third).length,
+    1,
+    "still exactly one administrative entry after the repeat call",
   );
 });

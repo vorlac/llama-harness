@@ -392,6 +392,18 @@ function reviewRepo(trackSubject: boolean): string {
   return dir;
 }
 
+// A REAL `git worktree` on its own branch — the §4.2 isolation the wave driver
+// creates and persists onto the item as `item.worktree`. Real rather than a made-up
+// path because the handler EXECUTES in it (the re-validate's cwd), not just dispatches
+// into it.
+function worktreeFor(repo: string, itemId: string): string {
+  const parent = mkdtempSync(path.join(tmpdir(), "conductor-tools95a-wt-"));
+  tmpDirs.push(parent);
+  const wt = path.join(parent, itemId);
+  git(repo, ["worktree", "add", "-b", `conductor/${itemId}`, wt]);
+  return wt;
+}
+
 function subjectOnDisk(root: string): string {
   return readFileSync(path.join(root, SUBJECT_REL), "utf8");
 }
@@ -2170,7 +2182,6 @@ test('[9.5a-skeptics-cover-non-major] a finding below "major" severity is adjudi
 
 test("[9.5a-worktree-scopes-review-sessions] under worktree mode every session conductor_item_review dispatches — lens reviewers, skeptics AND the write-capable fix — is bound to the ITEM'S worktree, never the shared tree: a reviewer pointed at main would judge a tree without the change, and a fix pointed at main would write outside the isolation §4.2 created", async () => {
   const F_WT = "F-WT-9053";
-  const WORKTREE = "/tmp/conductor-worktrees/r-95a/I1";
 
   const bench = seedBench({
     itemReviewers: 6,
@@ -2184,7 +2195,11 @@ test("[9.5a-worktree-scopes-review-sessions] under worktree mode every session c
   });
 
   // The item is being worked in its own worktree — exactly what the wave driver
-  // persists under parallel.writes:"worktrees".
+  // persists under parallel.writes:"worktrees". A REAL `git worktree`, because the
+  // handler's own execution follows the item's tree too (C-055): the fix round's
+  // re-validate runs with cwd = this path, so a fictional one would only prove that
+  // nothing ever ran there.
+  const WORKTREE = worktreeFor(bench.root, ITEM_ID);
   const seeded = bench.store.loadItem(bench.runId, ITEM_ID);
   seeded.worktree = WORKTREE;
   bench.store.saveItem(bench.runId, seeded);

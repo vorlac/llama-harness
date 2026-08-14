@@ -301,7 +301,10 @@ function reasonOf(decision: Decision, fallback: string): string {
 // action in the session, the same one repeated or a different one, meets the
 // gate on its ordinary terms. The consumption is journaled at warn so the
 // bypassed deny stays as visible as a deny itself (§2.8 taints the item; this
-// journals the moment the grant was spent).
+// journals the moment the grant was spent). It rides `gates: allow` — the §7.4
+// name for this gate's disposition, which is exactly what the grant produced —
+// with the spent grant in the record's data; `gates: override-granted` names the
+// hatch MINTING a grant (handleOverride), not a gate spending one.
 function consumeOverrideGrant(input: GateHookInput, gate: string): boolean {
   const grants = input.overrideGrants;
   if (grants === undefined) return false;
@@ -314,8 +317,15 @@ function consumeOverrideGrant(input: GateHookInput, gate: string): boolean {
   input.journal.log(
     "warn",
     "gates",
-    "override-consumed",
-    { gate, itemId, grantedAction: grant.grantedAction, reason: grant.reason, toolName: input.toolName },
+    "allow",
+    {
+      via: "override-grant",
+      gate,
+      itemId,
+      grantedAction: grant.grantedAction,
+      reason: grant.reason,
+      toolName: input.toolName,
+    },
     input.corr,
   );
   return true;
@@ -884,12 +894,17 @@ export function handleSurface(input: SurfaceInput): SurfaceResult {
 
   // (1) legality before persist (§3.4): every named item must exist. A bad id aborts
   //     the whole call with ZERO writes — no orphan question, no half-applied block.
+  //     The same pass records which named items are ALREADY blocked, for the
+  //     first-block-wins rule below.
+  const alreadyBlocked = new Set<string>();
   for (const itemId of input.blocksItems) {
+    let existing: Item;
     try {
-      store.loadItem(runId, itemId);
+      existing = store.loadItem(runId, itemId);
     } catch {
       throw new Error('conductor_surface: item "' + itemId + '" does not exist; refusing to surface');
     }
+    if (existing.blocked !== null && existing.blocked !== undefined) alreadyBlocked.add(itemId);
   }
 
   // §2.11 makes humanTerritory the core isHumanTerritory VERDICT, not a caller flag: a
@@ -911,11 +926,22 @@ export function handleSurface(input: SurfaceInput): SurfaceResult {
 
   const blockedItemIds: string[] = [];
   for (const itemId of input.blocksItems) {
+    // FIRST-BLOCK-WINS. §2.5 gives an item exactly ONE `blocked` disposition and
+    // conductor_answer keys the release on blocked.questionId, so the first block that
+    // names an item owns it. Overwriting would erase every trace of the earlier question
+    // from the item: answering THIS question would then release an item the earlier one
+    // still gates, with nothing on disk pointing back at it (§2.11 forbids hand-editing
+    // state to resume). The later question is still appended and still records the item in
+    // its own blocksItems — that is what the caller asserted — but the item keeps the block
+    // it already had, and blockedItemIds names only what this question actually blocked.
+    // The plan-review cap path applies the identical rule.
+    if (alreadyBlocked.has(itemId)) continue;
     store.setBlocked(runId, itemId, {
       reason: "blocked on surfaced question " + question.id,
       stage: "surface",
       questionId: question.id,
     });
+    alreadyBlocked.add(itemId); // a repeated id in blocksItems must not re-block either
     blockedItemIds.push(itemId);
     journal.log(
       "info",
@@ -2220,6 +2246,29 @@ export function verifyInFlightTreeFor(store: StateStore, runId: string, markerTr
   return store.loadItem(runId, markerTree).worktree;
 }
 
+// The tree a stage handler's OWN execution belongs to, as the TWO DISTINCT TYPES the
+// C-037 ruling 5 keeps apart:
+//   `slug` — the evidence layer's tree name ("main" | "<itemId>"). markerPathOf runs
+//            assertSafeId over it to compose verify-running-<slug>.json, so a PATH can
+//            never go here;
+//   `root` — the filesystem PATH a command's cwd and a file read resolve against.
+// Conflating them is how a worktree freeze silently never fires, which is why they are
+// derived together, once, and never re-derived at a call site.
+//
+// Neither half is a new derivation: whether the item has a tree of its own is
+// sessionTreeOf's answer (item.worktree ?? the shared tree), and slug->path is
+// verifyInFlightTreeFor's. With item.worktree null both collapse to the shared tree and
+// store.root, which is why the non-worktree behaviour is bit-for-bit unchanged.
+interface ItemTree {
+  slug: string;
+  root: string;
+}
+
+function itemTreeOf(store: StateStore, runId: string, item: Item): ItemTree {
+  const slug = sessionTreeOf(item) === STAGE_TREE ? STAGE_TREE : item.id;
+  return { slug, root: verifyInFlightTreeFor(store, runId, slug) ?? store.root };
+}
+
 // The §2.10 TEST_VET criteria, READ OUT OF THE REGISTERED SCHEMA rather than
 // restated here (G6 single source): the compact return's tally rows are exactly
 // the criteria the fan-out engine validates each critic receipt against, in
@@ -2504,6 +2553,20 @@ function itemScopePaths(queueItem: QueueItem): string[] {
   return [...queueItem.testScope, ...queueItem.fileScope];
 }
 
+// The paths a RUN-LEVEL verify's required scopes are resolved over: the union of
+// every item's, deduped. The closing verify has no subject item, so its subject is
+// the whole queue — and a run touching two path families owes what §2.1 requires of
+// both. Deduped because a repeated path would only make the same pattern match twice.
+function runScopePaths(queue: Queue): string[] {
+  const paths: string[] = [];
+  for (const entry of queue.items) {
+    for (const p of itemScopePaths(entry)) {
+      if (!paths.includes(p)) paths.push(p);
+    }
+  }
+  return paths;
+}
+
 // The §2.1 verify scope this item's test runs under: every requiredScopes entry
 // whose pattern matches one of the item's own paths contributes its scopes, and a
 // scope carrying an itemTest template (the TARGETED run §3.3 depends on) wins over
@@ -2540,17 +2603,20 @@ function itemVerifyScope(config: Config, queueItem: QueueItem, tool: string): Sc
 }
 
 // One handler-run of the item test. evidence.runTest appends AND journals the
-// §2.6 record; the fixture repo IS the store root, which is the test's cwd.
+// §2.6 record; the test runs in the tree the ITEM is being worked in (itemTreeOf's
+// root — the item's worktree under §4.2, else the workspace), because a test run
+// against a tree the implementer never edited is evidence about the wrong subject.
 function runItemTest(
   input: { store: StateStore; runId: string; journal: HandlerJournal; now: () => number },
   queueItem: QueueItem,
   scope: ScopeSpec,
   runDir: string,
+  treeRoot: string,
 ): RunTestResult {
   return runTest(runDir, queueItem.id, {
     scope,
     testFiles: [...queueItem.testScope],
-    cwd: input.store.root,
+    cwd: treeRoot,
     fileScope: [...queueItem.fileScope],
     journal: evidenceJournalOf(input.journal),
     runId: input.runId,
@@ -2884,6 +2950,10 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
   //     spent and before anything is written.
   const stage = requireStageTool(SUBMIT_TEST_TOOL, store, runId, itemId, runDir);
   const queueItem = stage.queueItem;
+  // The tree this stage EXECUTES against — the same tree its sub-sessions are
+  // dispatched into (sessionTreeOf). The writer's test lands there, so that is where
+  // the test must be run from and read back.
+  const tree = itemTreeOf(store, runId, stage.item);
   const scope = itemVerifyScope(config, queueItem, SUBMIT_TEST_TOOL);
   // The §2.1 schema types the knob `number` and the subset validator has no integer
   // keyword, so a fractional value loads. Floor it: `repairs >= maxRepairs` with 1.5
@@ -3014,7 +3084,7 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
 
     // THE HANDLER runs the test (§3.3) — evidence.ts appends and journals the
     // §2.6 record; nothing here re-classifies it.
-    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir, tree.root);
     const record = outcome.record;
 
     if (record.kind === "green") {
@@ -3198,7 +3268,7 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
     prompt = testRepairPrompt(
       queueItem,
       record,
-      testScopeContent(store.root, queueItem),
+      testScopeContent(tree.root, queueItem),
       repairs,
       maxRepairs,
     );
@@ -3314,6 +3384,10 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
   // (1) legality — same derivation, same throw-before-anything discipline.
   const stage = requireStageTool(VET_TEST_TOOL, store, runId, itemId, runDir);
   const queueItem = stage.queueItem;
+  // The tree this stage EXECUTES against: the critics judge the test text AS IT STANDS
+  // in the item's own tree, and a repair re-run must exercise the file the writer just
+  // edited there.
+  const tree = itemTreeOf(store, runId, stage.item);
   const criteria = testVetCriteria();
   // Floored for the same reason as testRepairAttempts: a fractional fan-out would
   // dispatch MORE critics than configured (2.5 -> 3), which can also breach a
@@ -3352,7 +3426,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       { runId, itemId },
     );
   }
-  let testText = testScopeContent(store.root, queueItem);
+  let testText = testScopeContent(tree.root, queueItem);
   let rounds = 0;
   // Both are the FINAL round's products; every exit below runs at least one round
   // and overwrites them, so the initializers are only the empty starting state.
@@ -3435,7 +3509,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
   // needs only exit 0, publishing an item whose shipped test never had a red.
   // P6 is intact: on the normal path the red IS the newest run, so nothing re-runs.
   if (captured.stale) {
-    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir, tree.root);
     const admission = redAdmission(outcome, queueItem);
     if (!admission.ok) {
       return blockVetAndAsk(
@@ -3447,7 +3521,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
     const item = store.loadItem(runId, itemId);
     item.evidence.red = { ledger: "evidence.jsonl", seq: red.seq };
     store.saveItem(runId, item);
-    testText = testScopeContent(store.root, queueItem);
+    testText = testScopeContent(tree.root, queueItem);
     journal.log(
       "info",
       "state",
@@ -3649,7 +3723,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       );
     }
 
-    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const outcome = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir, tree.root);
     const record = outcome.record;
     // The repaired test must STILL be a §2.6.1-legal red — admitted by the SAME rule
     // the submit side applies (class split + targeting), never re-derived here.
@@ -3668,7 +3742,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
     }
 
     red = record as RedEvidence;
-    testText = testScopeContent(store.root, queueItem);
+    testText = testScopeContent(tree.root, queueItem);
   }
 }
 
@@ -3835,6 +3909,13 @@ export function foreignRedSet(
   // subject: conductor_report's closing verify judges the WHOLE run, so no item's
   // tests are privileged and every below-GREEN test in the queue is foreign to it.
   itemId: string | null,
+  // The tree this set will be quarantined OUT OF — the same cwd the verify runs in.
+  // The existence probe below must ask THAT tree and no other: under §4.2 worktree mode
+  // a sibling's test can exist in the worktree and not in the workspace (and the
+  // reverse), so probing the workspace either leaves a foreign red loose inside the
+  // verified tree or hands quarantineFiles a path that ENOENTs out of renameSync.
+  // Defaults to the workspace, which is what every non-worktree caller means.
+  treeRoot: string = store.root,
 ): string[] {
   const belowGreen = ITEM_STATES.indexOf("GREEN");
   const own = new Set<string>();
@@ -3856,7 +3937,7 @@ export function foreignRedSet(
     // quarantine would ENOENT out of renameSync and sink the whole run. A sibling still
     // at PENDING has not had its test WRITTEN yet (conductor_submit_test writes it), so
     // this is the ordinary case, not the exotic one.
-    if (!existsSync(path.join(store.root, file))) return;
+    if (!existsSync(path.join(treeRoot, file))) return;
     seen.add(file);
     foreign.push(file);
   };
@@ -3989,6 +4070,10 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
   const stage = requireStageTool(MARK_GREEN_TOOL, store, runId, itemId, runDir);
   const queueItem = stage.queueItem;
   const from = stage.item.state;
+  // The tree this stage EXECUTES against — the same one the implementer below is
+  // dispatched into. Running the item test anywhere else would let a tree nobody
+  // edited hand the item its GREEN.
+  const tree = itemTreeOf(store, runId, stage.item);
 
   // (2) derive. The implementer runs for BOTH kinds of item: a non-behavioral item
   //     still needs its production change written, it just owes no test.
@@ -4094,12 +4179,12 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
   // (3b) a behavioral item: THE HANDLER runs the test, under the §4.2 foreign red
   //      set so a sibling's deliberate red cannot fail this item's run (the
   //      no-template fallback needs it exactly as much as the verify does).
-  const excluded = foreignRedSet(store, runId, stage.queue, itemId);
+  const excluded = foreignRedSet(store, runId, stage.queue, itemId, tree.root);
   const scope = itemVerifyScope(config, queueItem, MARK_GREEN_TOOL);
   const outcome = runTest(runDir, itemId, {
     scope,
     testFiles: [...queueItem.testScope],
-    cwd: store.root,
+    cwd: tree.root,
     fileScope: [...queueItem.fileScope],
     excludeTestFiles: excluded,
     stateHome: input.stateHome,
@@ -4235,7 +4320,13 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
   // (1) legality.
   const stage = requireStageTool(VALIDATE_TOOL, store, runId, itemId, runDir);
   const queueItem = stage.queueItem;
-  const excluded = foreignRedSet(store, runId, stage.queue, itemId);
+  // The tree this stage EXECUTES against: `root` is the verify's cwd (and the tree the
+  // §4.2 quarantine moves the foreign red set out of), `slug` is the per-tree marker key
+  // whose freeze denies every edit in that tree while the verify is in flight. Verifying
+  // the workspace while the change lives in the item's worktree would judge a tree the
+  // change never reached, and marking "main" would freeze a tree nobody is editing.
+  const tree = itemTreeOf(store, runId, stage.item);
+  const excluded = foreignRedSet(store, runId, stage.queue, itemId, tree.root);
   const scopePaths = verifyScopePathsOf(queueItem);
   // An item no requiredScopes entry covers selects NO scope, and `every` over an empty
   // scope map is vacuously true — the verify would report green having executed nothing
@@ -4260,13 +4351,13 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
 
   const verify = (): VerifyEvidence => {
     const outcome = runVerify(runDir, itemId, config, scopePaths, {
-      cwd: store.root,
+      cwd: tree.root,
       excludeTestFiles: excluded,
       journal: evidenceJournalOf(journal),
       stateHome: input.stateHome,
       workspaceKey: input.workspaceKey,
       runId,
-      tree: STAGE_TREE,
+      tree: tree.slug,
       now,
     });
     if (outcome.refused) {
@@ -4550,9 +4641,12 @@ export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
   for (const itemId of applied.removed) {
     store.removeItem(runId, itemId);
   }
-  // §2.5: conductor_queue_amend is a legal clearer of `blocked`. An update re-scopes
+  // §2.5: conductor_queue_amend is a legal clearer of `blocked`. An update rewrites
   // the entry the block was raised against, so the item is released — and only that:
   // the FSM position and the item's history are the amendment's to keep, not reset.
+  // Core holds that honest by refusing an update that re-scopes an item past
+  // PENDING, whose kept evidence would then describe a scope the item does not own;
+  // a re-scope arrives here as remove-then-add, which reborns the item PENDING.
   for (const itemId of applied.updated) {
     if (store.loadItem(runId, itemId).blocked !== null) store.clearBlocked(runId, itemId);
   }
@@ -4732,6 +4826,51 @@ interface WaveMember {
 // A stage execution's fate, captured so a rejection is a VALUE the driver can
 // dispose of rather than a throw that would abandon the wave's other members.
 type StageSettlement = { kind: "done"; outcome: StageOutcome } | { kind: "failed"; error: unknown };
+
+// A REVOCABLE view of the StateStore, handed to ONE stage execution (C-054).
+//
+// The driver bounds a HELD write-capable job (P8: env-failed, never awaited
+// forever), but a JavaScript promise cannot be cancelled: when the budget
+// expires the stage is still running, and a sibling's notifyClear — or the next
+// dispatch_wave call — can release its held job later. Without this fence that
+// stage walks on and advances the item's PERSISTED state after the compact
+// return already said the member stopped, so the return and the store disagree
+// with no record of why, and a second wave can schedule an item something else
+// is still writing.
+//
+// So the driver revokes the stage's access to the run's facts at the moment it
+// abandons it. The stage keeps running — that much is unavoidable — but its next
+// store call throws instead of writing: the late write is REFUSED, the refusal
+// NAMES the abandonment, and the stage dies there rather than drifting on. The
+// fence is per-execution, so revoking one member's view never touches another's.
+interface FencedStore {
+  store: StateStore;
+  abandon: (why: string) => void;
+}
+
+function fenceStore(store: StateStore): FencedStore {
+  let refusal: string | null = null;
+  const fenced = new Proxy(store, {
+    get(target: StateStore, prop: string | symbol): unknown {
+      const value = Reflect.get(target, prop);
+      // Data members (store.root) pass through; every OPERATION goes through the
+      // fence, reads included — an abandoned stage has no business reading the
+      // facts either, and stopping it at its first touch is what makes the
+      // refusal prompt rather than "at whichever call happens to write".
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]): unknown => {
+        if (refusal !== null) throw new Error(refusal);
+        return (value as (this: StateStore, ...rest: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return {
+    store: fenced,
+    abandon: (why: string): void => {
+      refusal = why;
+    },
+  };
+}
 
 // The executor-facing sink, forwarded to the handler's own sink verbatim. Built
 // rather than cast so the executors' records land in the SAME journal as the
@@ -5091,9 +5230,13 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
         "marker cleared (§3.5)";
     }
 
+    // The stage runs against a REVOCABLE view of the store (C-054), so a stage
+    // this driver has to abandon on the held-job budget below cannot write the
+    // run's facts behind the driver's back.
+    const fence = fenceStore(store);
     const settle: Promise<StageSettlement> = executor({
       tool,
-      store,
+      store: fence.store,
       fanout,
       runId,
       itemId: member.itemId,
@@ -5110,6 +5253,29 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
 
     const settlement = frozen ? await awaitHeld(settle) : await settle;
     if (settlement === null) {
+      // ABANDONMENT (C-054). The budget expired with the stage STILL RUNNING, and
+      // nothing here can cancel it: a released hold — a sibling's notifyClear, or
+      // the next dispatch_wave call — would let it walk on and advance the item
+      // long after this return said the member stopped. Revoking its store view
+      // is what makes the stop TRUE: from here the stage may read and write
+      // nothing of the run's, so the compact return below stays the last word on
+      // this item and the next wave may schedule it without racing a writer.
+      fence.abandon(
+        DISPATCH_WAVE_TOOL +
+          ": the " +
+          tool +
+          ' stage for item "' +
+          member.itemId +
+          '" was ABANDONED when its held-job budget (parallel.subSessionTimeoutMs=' +
+          String(heldBudgetMs) +
+          "ms) expired; the wave stopped waiting on it and reported it stopped, so this " +
+          "abandoned stage may no longer read or write the run's state (C-054)",
+      );
+      member.anomaly =
+        (member.anomaly === null ? "" : member.anomaly + "; ") +
+        "the budget expired with the stage still running, so the driver ABANDONED it: it was " +
+        "fenced out of the run's state rather than left able to write after this wave reported " +
+        "the member stopped";
       stop(
         member,
         tool,
@@ -5700,6 +5866,14 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   // §4.2 created.
   const itemTree = sessionTreeOf(stage.item);
 
+  // C-055. The same tree as an EXECUTION target: the prompts' git diff and testScope
+  // read, the reverted-behavior probe's stash, the re-run of the item test and the
+  // re-validate all belong to `tree.root`, and the re-validate's marker to `tree.slug`.
+  // Dispatching the reviewers into the worktree while reading the workspace would show
+  // them a tree without the change they were convened for — the same defect one layer
+  // down.
+  const tree = itemTreeOf(store, runId, stage.item);
+
   // The §3.3 session count (the rosterSizingRule): clamp(readFanout, 3, 6), and the
   // trivial composition for a trivial-classified run. The floor is the named
   // coverage set speaking — three sessions still cover all five mandatory lenses.
@@ -5720,20 +5894,20 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
 
   const scope = itemVerifyScope(config, queueItem, ITEM_REVIEW_TOOL);
   const scopePaths = verifyScopePathsOf(queueItem);
-  const excluded = foreignRedSet(store, runId, stage.queue, itemId);
+  const excluded = foreignRedSet(store, runId, stage.queue, itemId, tree.root);
 
   // The re-validate (§3.3 fix => re-validate): evidence.runVerify over the §4.2
   // foreign-red set, exactly as conductor_validate composes it. A red re-validate is
   // conductor_validate's DEBUG business, not another review round's — said out loud.
   const revalidate = (): VerifyEvidence => {
     const outcome = runVerify(runDir, itemId, config, scopePaths, {
-      cwd: store.root,
+      cwd: tree.root,
       excludeTestFiles: excluded,
       journal: evidenceJournalOf(journal),
       stateHome: input.stateHome,
       workspaceKey: input.workspaceKey,
       runId,
-      tree: STAGE_TREE,
+      tree: tree.slug,
       now,
     });
     if (outcome.refused) {
@@ -5968,23 +6142,23 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   // never replaces them.
   const probeReverted = (): { ran: boolean; stillFails: boolean } => {
     if (queueItem.fileScope.length === 0) return { ran: false, stillFails: false };
-    const push = runReviewGit(store.root, ["stash", "push", "--", ...queueItem.fileScope]);
+    const push = runReviewGit(tree.root, ["stash", "push", "--", ...queueItem.fileScope]);
     if (push.status !== 0) return { ran: false, stillFails: false };
-    if (runReviewGit(store.root, ["rev-parse", "--verify", "--quiet", "refs/stash"]).status !== 0) {
+    if (runReviewGit(tree.root, ["rev-parse", "--verify", "--quiet", "refs/stash"]).status !== 0) {
       return { ran: false, stillFails: false };
     }
     try {
-      const probe = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+      const probe = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir, tree.root);
       return { ran: true, stillFails: probe.record.kind === "red" };
     } finally {
-      runReviewGit(store.root, ["stash", "pop"]);
+      runReviewGit(tree.root, ["stash", "pop"]);
     }
   };
 
   // The changed-test discipline (§3.3 table row 2): re-run through evidence, probe
   // where cheap, then re-vet with fresh critics — all BEFORE re-validate.
   const runTestDiscipline = async (): Promise<{ ok: true } | { ok: false; result: ItemReviewResult }> => {
-    const rerun = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir);
+    const rerun = runItemTest({ store, runId, journal, now }, queueItem, scope, runDir, tree.root);
     const probe = probeReverted();
     if (probe.ran && !probe.stillFails) {
       return {
@@ -6006,7 +6180,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
           " critic(s), so the changed test cannot be re-vetted; configure at least one (§4.3)",
       );
     }
-    const testText = testScopeContent(store.root, queueItem);
+    const testText = testScopeContent(tree.root, queueItem);
     const rerunRecord = rerun.record;
     const rerunLine =
       rerunRecord.kind === "red"
@@ -6060,8 +6234,8 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   //     by reviewMaxRounds. Every iteration either exits or consumes one round.
   for (;;) {
     rounds += 1;
-    const diffBlock = itemDiffBlock(store.root, queueItem);
-    const testText = testScopeContent(store.root, queueItem);
+    const diffBlock = itemDiffBlock(tree.root, queueItem);
+    const testText = testScopeContent(tree.root, queueItem);
 
     // (2a) the lens fan-out. The sub-3 clamp warning rides the FIRST review
     //      dispatch, on the EXISTING fanout event, at level warn (G2) — whichever
@@ -6436,6 +6610,17 @@ function formatRuleFor(config: Config, rel: string): Config["format"]["rules"][n
   return null;
 }
 
+// The subset of `rels` git already knows about. `git ls-files` lists a path that
+// is in the index whether or not it still exists in the worktree, which is
+// exactly the question a deleted-inside-scope path has to answer. -z so a path
+// with a quote-worthy byte comes back verbatim rather than C-quoted.
+function trackedPaths(treeRoot: string, rels: string[]): Set<string> {
+  if (rels.length === 0) return new Set();
+  const out = runReviewGit(treeRoot, ["ls-files", "-z", "--", ...rels]);
+  if (out.status !== 0) return new Set();
+  return new Set(out.stdout.split("\0").filter((entry) => entry.length > 0));
+}
+
 // A §2.4 scope entry is either a literal path or a glob ("src/parser/**"). A
 // literal passes through untouched — the staging filter judges its existence
 // exactly where it always did — while a glob expands to the files that exist
@@ -6485,17 +6670,12 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   // fixture exists in which the gate offers publish and the handler refuses it.
   const publishEnabled = isRepo(root);
 
-  const queue = readJsonFileSync(path.join(runDir, "queue.json")) as Queue;
-  const queueItem = queue.items.find((entry) => entry.id === itemId);
-  if (queueItem === undefined) {
-    throw new Error(PUBLISH_TOOL + ': no queue item "' + itemId + '" in this run');
-  }
-  const item = store.loadItem(runId, itemId);
-
   if (!publishEnabled) {
     // A REFUSAL, not a denial. The gate consumes this same predicate and never
     // offers conductor_publish in no-git mode, so arriving here is an illegal
-    // tool call rather than a "not yet" the model should read and retry.
+    // tool call rather than a "not yet" the model should read and retry. Named
+    // here rather than left to the generic not-offered refusal below because the
+    // reader needs the MODE, not "no tool is offered for this item".
     throw new Error(
       PUBLISH_TOOL +
         ": this workspace is not a git repository, so §3.9 no-git mode is in force and publish is " +
@@ -6503,10 +6683,26 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     );
   }
 
-  if (item.state !== "REVIEWED") {
-    throw new Error(
-      PUBLISH_TOOL + ': item "' + itemId + '" is ' + item.state + ", not REVIEWED (§3.3)",
-    );
+  // LEGALITY BEFORE PERSIST. Publish is a §3.3 stage tool and asks the SAME
+  // question every other stage handler asks, through the SAME helper: does core
+  // legalTools offer THIS tool for THIS item right now. The hand-rolled
+  // precondition this replaced (`item.state !== "REVIEWED"`) was a second
+  // derivation of one rule, and it was the weaker one: it could not see the §2.5
+  // `blocked`/`deferred` annotations, the run's own FSM position or a stop, nor
+  // an unpublished dependency — so a deferred item at REVIEWED published.
+  const stage = requireStageTool(PUBLISH_TOOL, store, runId, itemId, runDir);
+  const { run, queue, queueItem, item } = stage;
+
+  // The item FSM, consulted BEFORE the first side effect rather than after the
+  // commit, the push and the merge-back. Asked late it could refuse nothing: the
+  // work was already integrated by the time it answered. `blocked` is the rule
+  // that lives here (§3.3, applied before the transition table), and a commit is
+  // the least reversible write in the system.
+  const edge = legalItemTransition("REVIEWED", "PUBLISHED", {
+    item: { behavioral: queueItem.behavioral, blocked: item.blocked },
+  });
+  if (!edge.ok) {
+    return publishDenial(item.state, PUBLISH_TOOL + ": " + (edge.why ?? "the FSM denies REVIEWED->PUBLISHED"));
   }
 
   const gitMode = config.git.mode;
@@ -6554,7 +6750,6 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   }
 
   // ---- step 2: stage fileScope ∪ testScope MINUS the user's pre-existing WIP
-  const run = store.loadRun(runId);
   const preexisting = new Set((run.startDirty ?? []).map((entry) => normalizeRepoRel(entry)));
   const wanted = [
     ...new Set(
@@ -6605,9 +6800,15 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     skipped.push(...conflicts);
   }
 
-  const staged = wanted
-    .filter((rel) => !preexisting.has(rel))
-    .filter((rel) => existsSync(path.join(treeRoot, rel)));
+  // A path the item DELETED inside its own scope is still the item's to publish,
+  // and existsSync cannot tell "the item removed this file" from "this declared
+  // path was never created": both are absent from disk. Git can tell them apart,
+  // so it is asked — a TRACKED path stays in the pathspec (`git add` records the
+  // removal, and the commit ships it), while a path git has never heard of is
+  // dropped, because `git add` aborts on a pathspec matching nothing.
+  const claimed = wanted.filter((rel) => !preexisting.has(rel));
+  const tracked = trackedPaths(treeRoot, claimed);
+  const staged = claimed.filter((rel) => existsSync(path.join(treeRoot, rel)) || tracked.has(rel));
 
   // ---- step 3: format ----------------------------------------------------
   for (const rel of staged) {
@@ -6660,7 +6861,7 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     }
   }
 
-  if (!readOnly) {
+  if (!readOnly && staged.length > 0) {
     const add = runReviewGit(treeRoot, ["add", "--", ...staged]);
     if (add.status !== 0) {
       return publishDenial(item.state, PUBLISH_TOOL + ": git add failed for " + staged.join(", "));
@@ -6687,7 +6888,9 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
 
   if (!fresh.fresh) {
     reverified = true;
-    excluded = foreignRedSet(store, runId, queue, itemId);
+    // The set is quarantined out of the tree the verify runs in — the worktree in
+    // worktree mode — so its existence probe must ask THAT tree (C-055).
+    excluded = foreignRedSet(store, runId, queue, itemId, treeRoot);
     const outcome = runVerify(runDir, itemId, config, verifyScopePathsOf(queueItem), {
       cwd: treeRoot,
       excludeTestFiles: excluded,
@@ -6758,14 +6961,25 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   // ---- step 6: commit, push, batch, advance ------------------------------
   // Against HEAD rather than the index: in read-only mode nothing is staged, and
   // a batch whose diff is empty because of the MODE would make the report claim
-  // the item changed nothing.
-  const diff = runReviewGit(treeRoot, ["diff", "HEAD", "--", ...staged]).stdout;
+  // the item changed nothing. The empty pathspec is guarded because `git diff
+  // HEAD --` with NO pathspec is not the empty diff — it is the WHOLE-WORKTREE
+  // diff, which would put every unrelated edit in the tree into this item's batch
+  // line and let the report attribute them to it. An item that staged nothing
+  // changed nothing, and its diff is empty.
+  const diff = staged.length === 0 ? "" : runReviewGit(treeRoot, ["diff", "HEAD", "--", ...staged]).stdout;
 
   let commit: string | null = null;
   let pushed = false;
 
-  if (!readOnly) {
-    const made = runReviewGit(treeRoot, ["commit", "--cleanup=default", "-m", message]);
+  if (!readOnly && staged.length > 0) {
+    // The commit carries the item's OWN pathspec, so what it commits is what this
+    // handler staged — not whatever else the index happens to hold. The index is a
+    // singleton (§4.3) shared with the human and with every earlier publish that
+    // denied BETWEEN its `git add` and this line, and a pathspec-less `git commit`
+    // would sweep all of it into this item's commit under this item's message.
+    // With a pathspec git commits those paths' worktree content (deletions
+    // included) and leaves the rest of the index staged and untouched.
+    const made = runReviewGit(treeRoot, ["commit", "--cleanup=default", "-m", message, "--", ...staged]);
     if (made.status !== 0) {
       return publishDenial(item.state, PUBLISH_TOOL + ": git commit failed", {
         staged,
@@ -6843,7 +7057,7 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     // in isolation is not a green in company. The completed merge STANDS either
     // way (the push-failure precedent: conductor's state never disagrees with
     // git history it cannot rewrite); a red holds back the ITEM, not the merge.
-    const integratedExcluded = foreignRedSet(store, runId, queue, itemId);
+    const integratedExcluded = foreignRedSet(store, runId, queue, itemId, root);
     const integrated = runVerify(runDir, itemId, config, verifyScopePathsOf(queueItem), {
       cwd: root,
       excludeTestFiles: integratedExcluded,
@@ -6913,12 +7127,9 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     verify: { seq: verifySeq, green: true },
   });
 
-  const edge = legalItemTransition("REVIEWED", "PUBLISHED", {
-    item: { behavioral: queueItem.behavioral, blocked: item.blocked },
-  });
-  if (!edge.ok) {
-    return publishDenial(item.state, PUBLISH_TOOL + ": " + (edge.why ?? "the FSM denies REVIEWED->PUBLISHED"));
-  }
+  // The edge was judged legal before any of this ran (see the top of the
+  // handler). It is NOT re-asked here: a second consultation after the commit
+  // could only report a refusal nothing can act on.
   item.state = "PUBLISHED";
   store.saveItem(runId, item);
 
@@ -7128,8 +7339,8 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
 
     journal.log(
       "info",
-      "report",
-      "stop-report",
+      "state",
+      "run.stop-report",
       { kind: stop.kind, reasonDisplay: stop.reasonDisplay, staleRedAdded },
       { runId },
     );
@@ -7180,8 +7391,28 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   // The closing verify: fresh, full, and over the WHOLE run — so it has no
   // subject item and nothing is privileged. Exclusions still apply, because a
   // report is legal with blocked items whose red tests are still on disk.
+  //
+  // Its §2.1 scopes are selected against the paths the RUN declares (every item's
+  // testScope ∪ fileScope), through the SAME `requiredScopeNames` union every
+  // other stage resolves with — the C-039 resolution. The selector matches each
+  // requiredScopes PATTERN against a PATH, so a literal "**" handed in as the
+  // path selects nothing unless a pattern happens to match that two-character
+  // string, and `Object.values({}).every(...)` would then close the run REPORTED
+  // on a verify that executed no command at all.
   const excluded = foreignRedSet(store, runId, queue, null);
-  const outcome = runVerify(runDir, runId, config, ["**"], {
+  const scopePaths = runScopePaths(queue);
+  // C-039 layer (b): a NAMED refusal before anything runs. A run whose paths no
+  // §2.1 entry covers has no closing verify to give, and the report's whole claim
+  // is that verify — so it is refused rather than written on nothing.
+  if (requiredScopeNames(config, scopePaths).length === 0) {
+    throw new Error(
+      REPORT_TOOL +
+        ": no verify.requiredScopes entry covers this run's declared paths " +
+        JSON.stringify(scopePaths) +
+        ", so the closing verify would run no scope at all (§2.1). No report was written.",
+    );
+  }
+  const outcome = runVerify(runDir, runId, config, scopePaths, {
     cwd: root,
     excludeTestFiles: excluded,
     journal: evidenceJournalOf(journal),
@@ -7195,6 +7426,17 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
     throw new Error(REPORT_TOOL + ": the closing verify could not run: " + outcome.reason);
   }
   const record = outcome.record as VerifyEvidence;
+  // C-039 layer (c), the same belt-and-braces handleValidate carries: the run IS
+  // covered, but every scope its §2.1 entries name is missing from verify.scopes,
+  // so nothing executed. An empty scope map is not admissible evidence for closing
+  // a run — `green` over it is vacuously true and would say the opposite.
+  if (Object.keys(record.scopes).length === 0) {
+    throw new Error(
+      REPORT_TOOL +
+        ": the closing verify ran no scope (this run's §2.1 required scopes name nothing " +
+        "verify.scopes defines), so there is no evidence to close the run on",
+    );
+  }
 
   // §2.11 disclosure, through the ONE shared helper 9.5c also calls.
   const staleRedAdded = registerStaleRed({
@@ -7536,11 +7778,14 @@ export async function handleOverride(input: OverrideInput): Promise<OverrideResu
     };
     run.stop = stop;
     store.saveRun(run);
+    // The hatch's own decision, under the §7.4 name for a gate saying no: an
+    // override request that meets an exhausted budget is refused, and `gates:
+    // deny` is what a refusal by the gate system is called.
     journal.log(
       "warn",
-      "state",
-      "override.refused",
-      { itemId: input.itemId, gate: input.gate, exhausted },
+      "gates",
+      "deny",
+      { gate: input.gate, itemId: input.itemId, reason: "override budget exhausted", exhausted },
       { runId, itemId: input.itemId, sessionID: input.sessionID },
     );
 
@@ -7604,8 +7849,8 @@ export async function handleOverride(input: OverrideInput): Promise<OverrideResu
   // stays live and no report is written.
   journal.log(
     "warn",
-    "state",
-    "override.granted",
+    "gates",
+    "override-granted",
     {
       itemId: input.itemId,
       gate: input.gate,

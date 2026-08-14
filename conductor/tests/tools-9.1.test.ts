@@ -1296,3 +1296,136 @@ test("[9.1-fix-known-events] decide/defer/classify journal only closed-vocab §7
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// C-054 [9.1-fix-surface-first-block-wins] (MAJOR): §2.5 gives an item exactly ONE
+// `blocked` disposition, and conductor_answer keys the release on blocked.questionId. A
+// second surfaced question that names an already-blocked item must therefore NOT overwrite
+// the block: overwriting erases every trace of the first question from the item, so
+// answering the SECOND one releases the item while the FIRST is still open and no longer
+// reachable from any item (§2.11 forbids hand-editing state to resume).
+//
+// The rule is FIRST-BLOCK-WINS — the same rule the plan-review cap path already applies
+// (adapter/tools.ts, "an item carries ONE `blocked` disposition, so the first surviving
+// major that names it owns the block"): the later question is still appended and still
+// records the item in its own blocksItems, the item keeps the block it already had, and
+// the call's blockedItemIds names only the items THIS question actually blocked.
+// ---------------------------------------------------------------------------
+
+test("[9.1-fix-surface-first-block-wins] a second surfaced question naming an already-blocked item leaves the first block intact — answering the second does not release it, answering the first does", () => {
+  const root = scratchDir();
+  try {
+    const config = makeConfig();
+    const journal = makeJournal();
+    const store = openStore(root, journal.sink, config);
+    const runId = createIntakeRun(store);
+    const runDir = runDirOf(store, runId);
+
+    store.saveItem(runId, makeItem("I1")); // named by BOTH questions
+    store.saveItem(runId, makeItem("I2")); // named by the second question only
+
+    // Q1 blocks I1.
+    const first = handleSurface({
+      store,
+      runId,
+      journal: journal.sink,
+      now: () => START_MS,
+      question: "Should unknown config keys fail the load, or collect and report?",
+      blocksItems: ["I1"],
+      askedBy: { role: "orchestrator", sessionID: "ses_orchestrator" },
+      humanTerritory: false,
+    });
+
+    // PREMISE: the fixture really is an item blocked on Q1 — the whole record, not just a
+    // non-null field. Everything below compares against THIS exact object.
+    const blockedOnQ1 = store.loadItem(runId, "I1").blocked;
+    assert.ok(blockedOnQ1 !== null && blockedOnQ1 !== undefined, "premise: I1 is blocked after the first surface");
+    assert.equal(blockedOnQ1?.questionId, first.questionId, "premise: I1's block names the FIRST question");
+    assert.ok((blockedOnQ1?.reason ?? "").includes(first.questionId), "premise: I1's block reason names the first question id");
+    const q1Snapshot = JSON.parse(JSON.stringify(blockedOnQ1)) as Record<string, unknown>;
+
+    // Q2 names the already-blocked I1 AND the free I2.
+    const journalBefore = journal.records.length;
+    const second = handleSurface({
+      store,
+      runId,
+      journal: journal.sink,
+      now: () => START_MS + 60_000,
+      question: "Should the retry budget be per-request or per-session?",
+      blocksItems: ["I1", "I2"],
+      askedBy: { role: "orchestrator", sessionID: "ses_orchestrator" },
+      humanTerritory: false,
+    });
+    assert.notEqual(second.questionId, first.questionId, "premise: the second surface mints a DIFFERENT question id");
+
+    // The ledger holds BOTH questions (floor on what the reads below inspected), and the
+    // second one still records the item it names, so the linkage is never lost.
+    const afterSurface = readQuestions(runDir);
+    assert.equal(afterSurface.length, 2, "both surfaced questions are persisted (the scan below has two records to inspect)");
+    const q2 = afterSurface.find((x) => x.id === second.questionId);
+    assert.ok(q2 !== undefined, "the second question is in the ledger");
+    assert.deepEqual([...(q2?.blocksItems ?? [])].sort(), ["I1", "I2"], "the second question still records BOTH items it names");
+
+    // The already-blocked item keeps its FIRST block, byte for byte.
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(store.loadItem(runId, "I1").blocked)) as Record<string, unknown>,
+      q1Snapshot,
+      "I1's blocked record is untouched by the second surface (reason, stage, sinceMs and questionId all still the first question's)",
+    );
+    // The free item IS blocked on the second question.
+    const i2 = store.loadItem(runId, "I2");
+    assert.ok(i2.blocked !== null && i2.blocked.questionId === second.questionId, "the previously-unblocked I2 is blocked on the second question");
+
+    // The compact return must not CLAIM the item it did not block — a caller told "I1 is
+    // blocked on Q2" would expect answering Q2 to release it.
+    assert.deepEqual(second.blockedItemIds, ["I2"], "blockedItemIds names only the item this question actually blocked");
+    assert.ok(
+      !journal.records
+        .slice(journalBefore)
+        .some((r) => JSON.stringify(r).includes(second.questionId) && JSON.stringify(r.corr.itemId) === '"I1"'),
+      "no journal record claims I1 was blocked on the second question",
+    );
+
+    // Answering the SECOND question releases only I2; I1 stays blocked on the still-open first.
+    const ansSecond = handleAnswer({
+      store,
+      runId,
+      journal: journal.sink,
+      now: () => START_MS + 120_000,
+      questionId: second.questionId,
+      answer: "per-session",
+    });
+    assert.deepEqual(ansSecond.clearedItemIds, ["I2"], "answering the second question clears only the item it blocked");
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(store.loadItem(runId, "I1").blocked)) as Record<string, unknown>,
+      q1Snapshot,
+      "I1 is STILL blocked on the first question after the second is answered",
+    );
+    const midLedger = readQuestions(runDir);
+    assert.equal(midLedger.length, 2, "the ledger still holds both questions");
+    assert.equal(
+      midLedger.find((x) => x.id === first.questionId)?.answeredIso,
+      null,
+      "the first question is still OPEN — it was never answered, and the item still points at it",
+    );
+
+    // Answering the FIRST question is what finally releases I1.
+    const ansFirst = handleAnswer({
+      store,
+      runId,
+      journal: journal.sink,
+      now: () => START_MS + 180_000,
+      questionId: first.questionId,
+      answer: "collect and report all",
+    });
+    assert.deepEqual(ansFirst.clearedItemIds, ["I1"], "answering the first question releases the item it blocked");
+    assert.equal(store.loadItem(runId, "I1").blocked, null, "I1 is unblocked once its own question is answered");
+    assert.equal(
+      readQuestions(runDir).filter((x) => x.answeredIso === null).length,
+      0,
+      "both questions end answered — no question was stranded by the second surface",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

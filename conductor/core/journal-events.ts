@@ -57,7 +57,27 @@ export const EVENTS: Record<Component, readonly string[]> = {
   // and the §2.7 decision/deferral ledger append the Phase-9 stage tools emit
   // (§7.4 observability widening: a decide/defer records no run/item state, so it
   // owns its own grep-able name rather than borrowing item.updated).
-  state: ["run.created", "lock.acquired", "lock.released", "lock.stale-break", "item.updated", "user.midrun-prompt", "decision.recorded"],
+  //
+  // The last three follow the SAME rule, each for a fact no other name states
+  // truthfully (see the widening note at the foot of this file):
+  //   lock.contended    — §4.1: the lock was NOT acquired because a live foreign
+  //                       writer holds it, so this session drops to read-only.
+  //   question.surfaced — a §2.11 question-ledger append that changes no item
+  //                       state (the decision.recorded case, one ledger over).
+  //   run.stop-report   — §2.9: the terminal artifact was written for a run whose
+  //                       stop some OTHER component already recorded.
+  state: [
+    "run.created",
+    "lock.acquired",
+    "lock.released",
+    "lock.stale-break",
+    "lock.contended",
+    "item.updated",
+    "user.midrun-prompt",
+    "decision.recorded",
+    "question.surfaced",
+    "run.stop-report",
+  ],
 };
 
 // True iff `event` is listed under a KNOWN `component`. An unknown component or
@@ -69,6 +89,16 @@ export function isKnownEvent(component: string, event: string): boolean {
   return list.includes(event);
 }
 
+// The widening rule, stated once so the next reader applies it the same way. A
+// call site that needs a name NOT listed above has two honest options, in this
+// order: (1) use an existing name that truthfully describes what happened —
+// which is what the §3.6 override hatch does (its grant is `gates: override-granted`,
+// the gate decision that spends the grant is `gates: allow`, and an over-budget
+// refusal is `gates: deny`); or (2) add a name HERE, in the same commit as the
+// call site and a test that greps for it, and only when option (1) would make the
+// record lie. Borrowing a near-miss name is worse than widening: a record filed
+// under someone else's name is a record no replay filter can trust (§7.4).
+//
 // §7.1 sink table: the journal's global default level and the console sink's
 // (stderr) default level.
 export const DEFAULT_LEVEL: LogLevel = "info";

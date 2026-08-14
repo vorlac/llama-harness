@@ -28,7 +28,7 @@
 //   removeWorktree(workspace, runId, itemId, ctx) -> void
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 
 import { assertSafeId } from "./state.ts";
@@ -95,6 +95,55 @@ function tryGit(cwd: string, args: string[]): number {
   }
 }
 
+// Run git and return its stdout. Used only for the state QUERIES create makes about
+// what a crashed run left behind; a non-zero exit or a spawn failure is rethrown by
+// runGit's error discipline.
+function gitOut(cwd: string, args: string[]): string {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      env: gitEnv(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    const status = (err as { status?: unknown }).status;
+    if (typeof status !== "number") throw err;
+    throw new Error("worktrees: `git " + args.join(" ") + "` exited " + String(status));
+  }
+}
+
+// Resolve symlinks so a COMPOSED path and git's own (always real) report compare
+// exactly — on macOS /var is a symlink to /private/var, and a literal comparison
+// there would wrongly conclude a live worktree is unregistered. A path that does not
+// exist cannot be realpath'd and compares as itself.
+function realOrSelf(target: string): string {
+  try {
+    return realpathSync(target);
+  } catch {
+    return target;
+  }
+}
+
+// True iff `worktree` is one of the workspace's CURRENTLY registered linked worktrees.
+// Read after `git worktree prune`, so a crashed run's stale entry is already gone and
+// a true answer means the directory is really there.
+function isRegisteredWorktree(workspace: string, worktree: string): boolean {
+  const target = realOrSelf(worktree);
+  return gitOut(workspace, ["worktree", "list", "--porcelain"])
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => realOrSelf(line.slice("worktree ".length)))
+    .includes(target);
+}
+
+// True iff the local branch already exists — the ref a crashed run leaves behind
+// holding that item's commits. Fully qualified (refs/heads/) so a same-named tag or
+// remote-tracking ref can never be mistaken for it.
+function branchExists(workspace: string, branch: string): boolean {
+  return tryGit(workspace, ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch]) === 0;
+}
+
 // The ONE pure branch-name rule, shared by create, merge-back and remove. An
 // explicit name is load-bearing: a bare `git worktree add` names the branch after
 // the path BASENAME (the itemId), which collides across runs.
@@ -123,6 +172,23 @@ function worktreePathOf(ctx: WorktreeContext, runId: string, itemId: string): st
  * — crash healing at the next worktree operation, the stale-marker-break idiom: a
  * crashed run that deleted its directory but left git's administrative entry
  * behind never wedges a later run. No daemon, no persisted state.
+ *
+ * IDEMPOTENT, and work-preserving in both crash shapes the prune leaves behind:
+ *
+ *   - the worktree is STILL REGISTERED after the prune (its directory survived):
+ *     the add is skipped entirely and the existing path is returned, after
+ *     verifying it has this item's branch checked out — a foreign branch at that
+ *     path is REFUSED rather than silently adopted.
+ *   - the directory is gone but the BRANCH survives: the branch is REUSED
+ *     (`git worktree add <path> <branch>`, no -b) instead of created. That branch
+ *     is the only copy of the crashed run's commits for this item, so it is never
+ *     deleted and re-cut: `-D` + `-b` would succeed just as loudly while silently
+ *     discarding that work. Reuse resumes the item exactly where it stopped, and
+ *     because the branch tip is preserved, mergeBack later integrates those
+ *     commits normally.
+ *
+ * Only the genuinely-fresh case cuts a new branch (`-b`), which is also what keeps
+ * the explicit branch name load-bearing (a bare add names it after the basename).
  */
 export function createWorktree(
   workspace: string,
@@ -140,9 +206,31 @@ export function createWorktree(
         " is not a git repository, so §3.9 no-git mode is in force and worktree mode is disabled",
     );
   }
+  const branch = branchOf(runId, itemId);
   runGit(workspace, ["worktree", "prune"]);
+  if (isRegisteredWorktree(workspace, worktree)) {
+    const checkedOut = currentBranch(worktree);
+    if (checkedOut !== branch) {
+      throw new Error(
+        'worktrees: refusing to reuse the worktree at ' +
+          worktree +
+          ' for item "' +
+          itemId +
+          '": it has "' +
+          String(checkedOut) +
+          '" checked out where branch "' +
+          branch +
+          '" was expected — a foreign or renamed branch is never adopted silently',
+      );
+    }
+    return worktree;
+  }
   mkdirSync(path.dirname(worktree), { recursive: true });
-  runGit(workspace, ["worktree", "add", "-b", branchOf(runId, itemId), worktree]);
+  if (branchExists(workspace, branch)) {
+    runGit(workspace, ["worktree", "add", worktree, branch]);
+  } else {
+    runGit(workspace, ["worktree", "add", "-b", branch, worktree]);
+  }
   return worktree;
 }
 
