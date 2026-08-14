@@ -1,17 +1,19 @@
 # HANDOFF — read this first on every start
-## Position — updated 2026-08-14, after **acceptance repair round 2 (no rows closed; record only)**
-**52 of 55 ledger rows COMMITTED**; only `13.2`, `14.1`, `14.2` are NOT_STARTED. `STATE.json` is
-machine truth (`status` + `commitSha`); `NOW.md` is the human view. `bash scripts/verify-acceptance.sh`
-→ **17 PASS / 4 FAIL**, unchanged by round 2 and unchangeable by any text edit: every failure needs
-one of those three unbuilt rows and none is a defect in shipped code — rows 6 and 8 (and detector E,
-their union) want `conductor/SMOKE.md` (13.2) and `docs/build/artifacts/conductor-report.md` (14.2);
-row 12 lists manifest commits missing `13.2,14.1,14.2`. **Both artifacts are live measurements;
-authoring either is fabrication (`verify-acceptance.sh:143-147`).** Gate **1280/1280, five legs, GATE
-PASS**; C++ 92 cases / 27,726 assertions; M5 clean (117 files) — but that ran on the DIRTY tree, so it
-does not measure HEAD; HEAD's greenness is round 1's, proven in a worktree at **1277/1277** (C-075).
+## Position — **CLOSEOUT**, 2026-08-14. Full record: **`docs/build/COMPLETION-REPORT.md`** — read it first
+**The build is NOT complete.** `bash scripts/verify-acceptance.sh`, re-run at closeout in a clean
+worktree of HEAD `dc42d88` (after `npm install`), **exits 1 — 16 PASS / 5 FAIL**. That report holds the
+verbatim output, the 55-row ledger, all 76 corrections, and what closeout is least sure of. **52 of 55
+rows COMMITTED**; only `13.2`, `14.1`, `14.2` are NOT_STARTED (`STATE.json` = machine truth, four
+`commitSha` backfilled at closeout; `NOW.md` = human view). Four failures need one of those three
+rows — rows 6/8 (and detector E, their union) want `conductor/SMOKE.md` (13.2) and
+`docs/build/artifacts/conductor-report.md` (14.2); row 12 lists those three missing commits. **Both
+artifacts are live measurements; authoring either is fabrication (`verify-acceptance.sh:143-147`).**
+Row 3 is ENVIRONMENTAL: a worktree has no submodules, so the cmake preset is disabled; C++ last read
+92 cases / 27,726 assertions in the main tree. Node at HEAD is **1277/1277** — trust that, not the
+main tree's 1280, which counts uncommitted peer work (C-075).
 
-**The tree does NOT match HEAD; expected — two peer sessions are live.** Modified
-`conductor/adapter/tools.ts` (setup region ~8051-9033), `conductor/tests/setup.test.ts`,
+**The tree does NOT match HEAD; expected — peer sessions are live.** Modified
+`conductor/adapter/tools.ts`, `conductor/tests/setup.test.ts`,
 `scripts/{conductor_wiring,test_conductor_wiring,serve}.py`; untracked: 14.1's three files (below)
 and `docs/{plans,reviews}/` the repo owner owns. **`git add` explicit paths only.**
 
@@ -81,8 +83,7 @@ and `docs/{plans,reviews}/` the repo owner owns. **`git add` explicit paths only
 ## Lessons that keep paying
 - **A green main tree proves nothing about a fresh checkout** (C-069); **a fresh checkout proves
   nothing about the phase** (C-072); **green legs prove nothing when the phase is empty** — 14.1's
-  1,847 uncommitted lines are inside the 1280 (C-075). Cut the worktree, load the file set you will
-  commit, `cmp`, `npm install`, run it **before** committing.
+  1,847 uncommitted lines are inside the 1280 (C-075). Cut the worktree, `npm install`, run it FIRST.
 - **A scanner that PASSES while inspecting less than it appears to** is THE recurring defect class
   (C-044…C-047, C-063, C-072, C-075: M5 skips untracked files and never reaches `scripts/`). Make
   every scanner report how much it saw — **and check that against what you meant it to see.**
@@ -91,9 +92,8 @@ and `docs/{plans,reviews}/` the repo owner owns. **`git add` explicit paths only
   defect**: ask what the FIXTURE supplies that production does not (C-069, C-071).
 - **A failing acceptance row is not an invitation to write the artifact.** Rows 6/8/detector E want
   live measurements; a hand-written `SMOKE.md` flips the meter green and the truth false (C-075).
-- Pass plan EXCERPTS, never the 3,399-line plan. `wire-contract.test.ts` spawns a real `opencode
-  serve` — under load all 15 subtests CANCEL, so re-run quiet before calling a regression.
+- Pass plan EXCERPTS, never the 3,399-line plan. `wire-contract.test.ts` spawns real `opencode serve`
+  — under load all 15 subtests CANCEL; re-run quiet before calling a regression.
 - **Layout.** C++ tree is `router/`, `router/tests/`, `tools/`; include ROOT is the repo root (plan
   §1.1 is stale). Targets `llama-router`, `router-tests`, `membench`; schemas → `router/tests/schemas/`
-  (gitignored). Build in `.out/build/clang-relwdebinfo`, **only** a named target — bare `--build` hits
-  `llama`.
+  (gitignored). Build in `.out/build/clang-relwdebinfo`, **only** a named target (bare `--build` hits `llama`).

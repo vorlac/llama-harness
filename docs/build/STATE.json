@@ -1954,7 +1954,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "2774e2d",
       "commitMessage": "conductor: 15.0 replay tool",
       "planLines": [
         3028,
@@ -2027,7 +2027,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "1d7074b",
       "commitMessage": "conductor: 15.2 dashboard",
       "planLines": [
         3045,
@@ -2106,7 +2106,7 @@
       "manifest": false,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "3506dda",
       "commitMessage": "conductor-build: close acceptance rows round 1",
       "planLines": [
         2866,
@@ -2142,7 +2142,7 @@
       "manifest": false,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "4fa91c4",
       "commitMessage": "conductor: 5.4a chat.message plugin wiring",
       "planLines": [
         null,
