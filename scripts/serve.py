@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import conductor_wiring as cw  # noqa: E402
 import fetch_models as fm  # noqa: E402
 
 REPO_ROOT = fm.REPO_ROOT
@@ -192,11 +193,13 @@ def resolve_port(host: str, wanted: int, interactive: bool) -> int:
     raise SystemExit(fm.red("error: ") + "no free port near %d" % wanted)
 
 
-def write_session_opencode_config(model_id: str, host: str, port: int) -> Path:
+def write_session_opencode_config(model_id: str, base_url: str) -> Path:
     """A session-scoped opencode config defaulting to the served model.
 
     Written beside - never over - the main opencode.json, so switching models
-    for one session cannot corrupt the checked-in-style config.
+    for one session cannot corrupt the checked-in-style config. ``base_url`` is
+    the routing decision already made: the router origin when the router is up,
+    the llama-server origin otherwise, so this function never has to guess.
     """
     base_path = fm.CONFIGS_DIR / "opencode.json"
     config: Dict[str, object] = {}
@@ -210,12 +213,9 @@ def write_session_opencode_config(model_id: str, host: str, port: int) -> Path:
             fm.red("error: ") + "no opencode config yet - run: scripts/fetch_models.py config"
         )
 
-    provider = (config.get("provider") or {}).get(fm.PROVIDER_ID)
-    if isinstance(provider, dict):
-        options = provider.setdefault("options", {})
-        if isinstance(options, dict):
-            options["baseURL"] = "http://%s:%d/v1" % (host, port)
+    config = cw.apply_conductor_wiring(config, base_url, root=REPO_ROOT)
 
+    provider = (config.get("provider") or {}).get(fm.PROVIDER_ID)
     models = (provider or {}).get("models") or {}
     if model_id in models:
         config["model"] = "%s/%s" % (fm.PROVIDER_ID, model_id)
@@ -226,7 +226,7 @@ def write_session_opencode_config(model_id: str, host: str, port: int) -> Path:
 
 
 def build_server_command(
-    model_id: str, host: str, port: int, models_max: int, ctx: Optional[int]
+    model_id: str, host: str, port: int, models_max: int, ctx: Optional[int], slots: int
 ) -> List[str]:
     server = fm.tool_path("llama-server")
     preset = fm.CONFIGS_DIR / "llama-models.ini"
@@ -249,7 +249,34 @@ def build_server_command(
     ]
     if ctx:
         cmd += ["--ctx-size", str(ctx)]
+    # --ctx-size is llama-server's TOTAL context, divided among slots, so the
+    # slot count carries its own context term (router/UPSTREAM_CONTRACT.md F3).
+    cmd += cw.parallel_server_args(slots)
     return cmd
+
+
+def write_router_config(
+    path: Path,
+    listen_host: str,
+    listen_port: int,
+    upstream_host: str,
+    upstream_port: int,
+    slots: int,
+    fresh: bool,
+) -> Path:
+    """Refresh the machine-derived keys of the hand-editable router config."""
+    existing: Optional[Dict[str, object]] = None
+    if path.is_file() and not fresh:
+        try:
+            loaded = json.loads(path.read_text())
+            existing = loaded if isinstance(loaded, dict) else None
+        except (OSError, ValueError):
+            existing = None
+    generated = cw.generate_router_config(
+        listen_host, listen_port, upstream_host, upstream_port, slots, root=REPO_ROOT
+    )
+    fm.write_json(path, cw.merge_router_config(existing, generated, fresh=fresh))
+    return path
 
 
 def wait_until_ready(host: str, port: int, proc: subprocess.Popen, timeout: int = 600) -> bool:
@@ -270,7 +297,7 @@ def wait_until_ready(host: str, port: int, proc: subprocess.Popen, timeout: int 
 
 
 def make_rcfile(
-    model_id: str, config_path: Path, host: str, port: int, server_pid: int, log_path: Path
+    model_id: str, env: Dict[str, str], server_pid: int, log_path: Path
 ) -> Path:
     """Bash rcfile for the session subshell.
 
@@ -286,11 +313,7 @@ def make_rcfile(
 if [ -f /etc/bashrc ]; then . /etc/bashrc; fi
 if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi
 
-export OPENCODE_CONFIG=%(config)s
-export LLAMA_HARNESS_MODEL=%(model)s
-export LLAMA_HARNESS_URL=http://%(host)s:%(port)d
-export LLAMA_HARNESS_SERVER_PID=%(pid)d
-
+%(exports)s
 __llama_harness_cleanup() {
   if kill -0 %(pid)d 2>/dev/null; then
     printf '\\n\\033[2mstopping %(model)s (pid %(pid)d)...\\033[0m\\n'
@@ -321,10 +344,8 @@ printf '\\033[2m%%s\\033[0m\\n' "llama_status / llama_log to inspect; exit to st
 printf '\\n'
 """
         % {
-            "config": _shquote(str(config_path)),
+            "exports": cw.rcfile_export_block(env),
             "model": model_id,
-            "host": host,
-            "port": port,
             "pid": server_pid,
             "log": _shquote(str(log_path)),
         }
@@ -421,6 +442,31 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="run the server in the foreground; do not open a shell",
     )
     parser.add_argument(
+        "--router",
+        dest="router",
+        action="store_true",
+        default=None,
+        help="launch llama-router and point opencode at it "
+        "(the default whenever the binary is present)",
+    )
+    parser.add_argument(
+        "--no-router",
+        dest="router",
+        action="store_false",
+        help="talk to llama-server directly; run the identical workflow without the router",
+    )
+    parser.add_argument(
+        "--router-port",
+        type=int,
+        help="router listen port (default %d)" % cw.DEFAULT_LISTEN_PORT,
+    )
+    parser.add_argument(
+        "--max-readers",
+        type=int,
+        help="concurrent sub-sessions to size --parallel and admission from (default %d)"
+        % cw.DEFAULT_MAX_READERS,
+    )
+    parser.add_argument(
         "--print-env",
         action="store_true",
         help="print the session env and exit (for scripting)",
@@ -461,6 +507,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     port = resolve_port(host, wanted_port, interactive and not args.port)
     models_max = args.models_max or int(saved.get("models_max") or 1)
     ctx = args.ctx or (int(saved["ctx"]) if saved.get("ctx") else None)
+    max_readers = args.max_readers or int(saved.get("max_readers") or cw.DEFAULT_MAX_READERS)
+    slots = cw.derive_slots(max_readers)
+
+    environ = dict(os.environ)
+    decision = cw.router_preflight(
+        args.router,
+        cw.find_router_binary(REPO_ROOT, environ),
+        REPO_ROOT / cw.ROUTER_SCHEMA_RELPATH,
+        searched=cw.router_search_paths(REPO_ROOT, environ),
+        # --no-shell execs into llama-server and --print-env returns before
+        # anything starts, so neither leaves a process able to supervise a router.
+        no_shell=args.no_shell or args.print_env,
+    )
+    if decision.action == "refuse":
+        raise SystemExit(fm.red("error: ") + decision.error)
+    if decision.notice:
+        info(yellow("notice: ") + decision.notice)
+
+    router_port = int(args.router_port or saved.get("router_port") or cw.DEFAULT_LISTEN_PORT)
+    if decision.action == "launch":
+        router_port = resolve_port(host, router_port, False)
 
     save_session(
         {
@@ -469,20 +536,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             "port": port,
             "models_max": models_max,
             "ctx": ctx,
+            "max_readers": max_readers,
+            "router_port": router_port,
         }
     )
 
-    config_path = write_session_opencode_config(model.id, host, port)
-
     if args.print_env:
-        print("OPENCODE_CONFIG=%s" % config_path)
-        print("LLAMA_HARNESS_MODEL=%s" % model.id)
-        print("LLAMA_HARNESS_URL=http://%s:%d" % (host, port))
+        routing = cw.finalize_routing(decision, host, router_port, host, port)
+        config_path = write_session_opencode_config(model.id, routing.base_url)
+        for line in cw.print_env_lines(
+            cw.session_env(model.id, config_path, host, port, None, routing)
+        ):
+            print(line)
         return 0
 
-    cmd = build_server_command(model.id, host, port, models_max, ctx)
+    cmd = build_server_command(model.id, host, port, models_max, ctx, slots)
 
     if args.no_shell:
+        write_session_opencode_config(model.id, cw.openai_base_url(host, port))
         info("%s %s on http://%s:%d" % (bold("serving"), cyan(model.id), host, port))
         os.execv(cmd[0], cmd)
         return 0  # unreachable
@@ -508,10 +579,43 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(fm.red("error: ") + "llama-server failed to start.\n" + tail)
 
     info("    %s ready on http://%s:%d" % (green("ok"), host, port))
+
+    router_config_path = fm.CONFIGS_DIR / "conductor-router.json"
+    routing = cw.Routing(False, cw.openai_base_url(host, port), None)
+    if decision.action == "launch":
+        write_router_config(
+            router_config_path, host, router_port, host, port, slots, args.fresh
+        )
+        # exec keeps this pid, so the shell we are about to become is the pid
+        # the supervisor polls - the same trick start_watchdog uses.
+        cw.start_router_supervisor(
+            cw.find_router_binary(REPO_ROOT, environ),
+            router_config_path,
+            Path(decision.schema),
+            os.getpid(),
+            REPO_ROOT,
+        )
+        routing = cw.finalize_routing(decision, host, router_port, host, port)
+        if routing.router_enabled:
+            info("    %s router on http://%s:%d" % (green("ok"), host, router_port))
+        elif routing.notice:
+            info(yellow("notice: ") + routing.notice)
+
+    # Written only once the routing decision is final: a session config aimed
+    # at a router that never came up 502s from its first prompt.
+    config_path = write_session_opencode_config(model.id, routing.base_url)
+    env = cw.session_env(
+        model.id,
+        config_path,
+        host,
+        port,
+        proc.pid,
+        routing,
+        router_config_path=router_config_path if routing.router_enabled else None,
+    )
+
     bash = shutil.which("bash") or "/bin/bash"
-    rc = make_rcfile(model.id, config_path, host, port, proc.pid, log_path)
-    # exec replaces this process but keeps the pid, so the shell we become is
-    # both the server's parent and the pid the watchdog waits on.
+    rc = make_rcfile(model.id, env, proc.pid, log_path)
     start_watchdog(os.getpid(), proc.pid)
     os.execv(bash, [bash, "--rcfile", str(rc), "-i"])
     return 0  # unreachable

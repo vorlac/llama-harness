@@ -65,6 +65,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import conductor_wiring as cw  # noqa: E402
 import models_catalog as catalog  # noqa: E402
 import ui  # noqa: E402
 from models_catalog import CATEGORIES, Model  # noqa: E402
@@ -1298,7 +1299,13 @@ def generate_opencode_config(
     if small:
         config["small_model"] = "%s/%s" % (PROVIDER_ID, small)
 
-    return config
+    # The base config carries the conductor wiring too, so regenerating it
+    # mid-session cannot strip the plugin and agents out from under a live
+    # session. Its baseURL stays direct: no router port exists at this point,
+    # and the router rewrite is a session-time decision (serve.py).
+    return cw.apply_conductor_wiring(
+        config, cw.openai_base_url(host, port), root=REPO_ROOT
+    )
 
 
 def generate_launch_sh() -> str:

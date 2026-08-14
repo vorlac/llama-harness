@@ -1,6 +1,6 @@
 # llama-server upstream contract (Task 11.1 Step 2, executed at Task 12.1)
 
-`WIRE_CONTRACT_VERIFIED: 2026-08-14 12.1 — qwen3.6-27b on llama-server 10298, all six Step 2 items observed`
+`WIRE_CONTRACT_VERIFIED: 2026-08-14 12.1 — all six Step 2 items observed; items 1-4 at 11.8 on ornith-9b, items 5-6 on qwen3.6-27b, llama-server 10298`
 
 Every command below is reproduced verbatim with its raw output. Nothing here is reconstructed,
 and nothing is inferred from a value that was not printed. Run from the repo root
@@ -10,6 +10,8 @@ Port 8080 was confirmed free before each server start and confirmed free after t
 no pre-existing server was disturbed and no server this run did not start was killed.
 
 ## Task 12.1 — Step 2 live measurement
+
+Every command in this section was run from `/Users/sal/development/vorlac/llama-harness`.
 
 ```
 STEP2_ITEM_1: 11.8 docs/build/artifacts/11.8-live-smoke.md
@@ -23,8 +25,8 @@ EFFECTIVE_SLOT_COUNT: 6
 CTX_PER_SLOT_NO_PARALLEL: 8192
 CTX_PER_SLOT_WITH_PARALLEL: 1536
 CTX_PER_SLOT_PINNED_ARGV: 8192
-PER_SLOT_CONTEXT_ARGV: --parallel 6 --ctx-size 49152
-AUTOLOAD_LATENCY_MS: 2040
+PER_SLOT_CONTEXT_ARGV: --parallel <slots> --ctx-size 49152
+AUTOLOAD_LATENCY_MS: 9120
 ```
 
 Items 1–4 (the `/v1/models` shape, `response_format` + GBNF constraining, `usage`+`timings` on a
@@ -139,17 +141,102 @@ proportionally. It is not a reason to reduce `maxReaders` — the work still has
 any claim that fan-out makes the pipeline *faster* on this hardware is not supported by this
 measurement.
 
-### Item 5 — autoload latency
+### Item 5 — autoload latency, MEASURED
 
 ```
-AUTOLOAD_LATENCY_MS: 2040
+AUTOLOAD_LATENCY_MS: 9120
 ```
 
-Measured from process start to the first `/health` returning `{"status":"ok"}`, with the 21 GB
-GGUF already warm in the page cache (2040 ms). The **cold** figure from the first start of this
-session, same model, was **10 514 ms** — read directly off llama-server's own timestamped
-`listening on` line. Both are recorded because a supervisor's readiness budget has to cover the
-cold case.
+Item 5 asks for the latency of a request naming a model that is **not currently resident**,
+against a server started in router mode. It was first recorded as BLOCKED, then attempted and
+discharged; both states are kept in the history because the reason it was blocked was a real
+error and is worth reading.
+
+**What was wrong the first time.** An earlier pass recorded `AUTOLOAD_LATENCY_MS: 2040` from a
+`--model`-direct start, measuring **cold process startup to first healthy `/health`**. That is a
+different quantity from on-demand autoload, and the Task 12.1 test caught it: the row requires
+`--models-preset` with `--models-max 1`, and the string `--models-max` appeared nowhere in this
+file. The implementer marked the item BLOCKED rather than sprinkling the missing flag into prose
+to turn its own test green. That was the correct call and the measurement below is the result.
+
+**The measurement.** Two chat models are installed, so an eviction can be forced:
+
+```
+$ .data/tools/llama-server --models-preset .data/configs/llama-models.ini \
+    --models-max 1 --host 127.0.0.1 --port 8080
+
+$ python3 autoload.py
+cold autoload (9B)           model=ornith-9b        wall=  2936 ms  finish=length
+resident, no load            model=ornith-9b        wall=   145 ms  finish=length
+autoload + evict (27B)       model=qwen3.6-27b      wall=  9683 ms  finish=length
+resident, no load            model=qwen3.6-27b      wall=   563 ms  finish=length
+
+AUTOLOAD_9B_MS=2936  RESIDENT_9B_MS=145  DELTA_9B_MS=2791
+AUTOLOAD_27B_MS=9683 RESIDENT_27B_MS=563 DELTA_27B_MS=9120
+```
+
+`AUTOLOAD_LATENCY_MS: 9120` is the G13 model's figure — the 27B request's wall clock minus the
+same request's resident wall clock, so it is the load cost alone and not the generation. The 9B
+figure, 2791 ms, is recorded beside it because the cost scales with the file, not with a constant.
+
+A verbatim exchange, forcing `ornith-9b` back in and evicting the 27B:
+
+```
+$ curl -s -w '\nHTTP=%{http_code} total=%{time_total}s\n' \
+    -X POST http://127.0.0.1:8080/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"ornith-9b","messages":[{"role":"user","content":"Say ok."}],"max_tokens":8,"temperature":0}'
+
+{"choices":[{"finish_reason":"length","index":0,"message":{"role":"assistant","content":"",
+ "reasoning_content":"Thinking Process:\n1.  **"}}],"created":1786703889,"model":"ornith-9b",
+ "system_fingerprint":"b10298-15586e2d7","object":"chat.completion",
+ "usage":{"completion_tokens":8,"prompt_tokens":13,"total_tokens":21},
+ "timings":{"prompt_n":13,"prompt_ms":98.69,"predicted_n":8,"predicted_ms":104.007}}
+HTTP=200 total=2.359449s
+```
+
+#### FINDING F4 (MAJOR for how Task 12.1 must be read) — preset mode is a PARENT that spawns CHILD servers
+
+The server log shows what `--models-preset` actually does, and it is not what the flag name
+suggests:
+
+```
+0.41.415.215 I srv  ensure_model: model name=ornith-9b is not loaded, loading...
+0.41.415.218 I srv    unload_lru: models_max limit reached, removing LRU name=qwen3.6-27b
+0.41.415.218 I srv        unload: stopping model instance name=qwen3.6-27b
+0.41.584.481 I srv          load: spawning server instance with name=ornith-9b on port 55496
+0.41.584.730 I srv  ensure_model: waiting until model name=ornith-9b is fully loaded...
+[55496] 0.01.973.289 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 65536, kv_unified = 'true'
+0.43.570.375 I srv  proxy_reques: proxying request to model ornith-9b on port 55496
+```
+
+The process on port 8080 is a **router**. Each model runs in its own child `llama-server` on its
+own ephemeral port, and the parent proxies to it. `--models-max` bounds how many children may be
+resident; eviction is LRU.
+
+**This raised a question that had to be settled, because F3's whole derivation depends on it:**
+the child's argv is assembled from the preset INI — the `[*]` section plus the model's own
+section — so if the parent's `--parallel` and `--ctx-size` did NOT reach the child, then Task
+12.1's entire slot derivation would be inert in the only mode `serve.py` uses, and the fan-out
+would silently run on llama-server's default 4 slots.
+
+Tested directly rather than assumed. Parent started with `--parallel 6 --ctx-size 49152`:
+
+```
+0.02.011.353 I srv          load:   --ctx-size
+0.02.011.353 I srv          load:   49152
+...
+0.02.011.354 I srv          load:   --parallel
+0.02.011.354 I srv          load:   6
+
+[56637] 0.00.720.327 I srv    load_model: initializing, n_slots = 6, n_ctx_slot = 8192, kv_unified = 'false'
+```
+
+**The parent forwards both, and they OVERRIDE the preset INI.** The ini says
+`[ornith-9b] ctx-size = 65536`; the child was started with 49152 and came up with
+`n_slots = 6, n_ctx_slot = 8192` — exactly F3's intended result. So Task 12.1's
+`parallel_server_args` derivation is effective end to end through preset mode, and that is now
+verified rather than hoped. Precedence, recorded: **parent CLI beats the preset file.**
 
 #### A readiness-probe trap worth recording
 
@@ -227,14 +314,14 @@ token budgets must be set with the thinking phase either disabled or explicitly 
 Choosing to leave thinking ON for some role is defensible; leaving it on *by accident*, with a
 budget sized for a non-reasoning model, is the failure this measurement exists to prevent.
 
-## `/v1/models` on the G13 model
+## `/v1/models` — and it depends on which mode the server was started in
 
-```
-$ curl -s http://127.0.0.1:8080/v1/models
-```
+This matters to Task 12.2, whose setup proof fails when `models.default` is absent from
+`/v1/models`. The id to match is NOT the same in both modes, and an earlier pass of this document
+recorded only one of them.
 
-The response carries BOTH an ollama-style `models[]` array and an OpenAI-style `data[]` array.
-The OpenAI `data[0].id` is the **full gguf path**, not a friendly name:
+**Started with `--model <path>` directly**, the OpenAI-shaped `data[0].id` is the **full gguf
+path**:
 
 ```json
 "data": [{ "id": ".data/models/qwen3.6-27b/Qwen3.6-27B-Q6_K.gguf",
@@ -243,10 +330,25 @@ The OpenAI `data[0].id` is the **full gguf path**, not a friendly name:
                      "size": 22512244736, "ftype": "Q6_K" } }]
 ```
 
-Two consequences for Task 12.2's setup proof table, which fails setup when `models.default` is
-absent from `/v1/models`: the id to match is the **path**, not `qwen3.6-27b`, when the server is
-started with `--model`; and `data[0].meta.n_ctx` reports the **per-slot** context (1536 in the
-run above), which is a second, independent way to read the F3 finding off the wire.
+**Started with `--models-preset` — the mode `scripts/serve.py` actually uses** — the ids are the
+preset's **friendly names**, because the parent passes each child an `--alias`:
+
+```
+$ curl -s http://127.0.0.1:8080/v1/models | python3 -c "import json,sys; print([m['id'] for m in json.load(sys.stdin)['data']])"
+['embeddinggemma-300m', 'ornith-9b', 'qwen3-coder-30b', 'qwen3-coder-next', 'qwen3.6-27b', 'qwen3.6-35b-a3b']
+```
+
+So a setup probe matching `models.default` against `/v1/models` sees `qwen3.6-27b` in the mode
+that ships, and would only see a gguf path in the `--model`-direct mode nothing in this build
+uses. **Task 12.2 should match the friendly id** and treat a path-shaped id as the direct-mode
+case. An earlier revision of this file asserted the path form without naming the mode; that was
+half the picture and is corrected here.
+
+Also mode-dependent: the response carries BOTH an ollama-style `models[]` array and an
+OpenAI-style `data[]` array, and in `--model`-direct mode `data[0].meta.n_ctx` reports the
+**per-slot** context (1536 in the run above) — a second, independent way to read F3 off the wire.
+In preset mode the list is the preset's contents whether or not a model is resident, so presence
+in `/v1/models` does NOT imply the model is loaded.
 
 ## What this run does NOT discharge
 

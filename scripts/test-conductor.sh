@@ -95,5 +95,33 @@ if [ -f conductor/tools/export-schemas.ts ]; then
   echo "schema export: OK (router/tests/schemas/)"
 fi
 
+# §12.1 python leg: scripts/conductor_wiring.py and its unittest, on the pinned
+# /usr/bin/python3 (3.9.6, STATE.json meta.environment). Placed AFTER the schema
+# export so router/tests/schemas/RouterConfig.schema.json is fresh when the
+# RouterConfig parity test reads it. The leg starts no server, opens no socket and
+# writes nothing under .data/ or .out/.
+if ! /usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py' >/tmp/python-leg.out 2>&1; then
+  echo "GATE FAIL: python leg (/usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py')"
+  tail -60 /tmp/python-leg.out
+  exit 1
+fi
+# unittest discover exits 0 on "Ran 0 tests" — the same vacuous-green hole the node
+# leg exists to close (a zero-match glob also exits 0). A leg that silently stops
+# discovering is indistinguishable from a passing one, so assert the count itself.
+PY_RAN=$(grep -Eo '^Ran ([0-9]+) tests?' /tmp/python-leg.out | grep -Eo '[0-9]+' | head -1)
+PY_RAN=${PY_RAN:-0}
+if [ "$PY_RAN" -lt 1 ]; then
+  echo "GATE FAIL: python leg discovered ZERO tests (scripts/test_*.py moved or renamed?)"
+  tail -20 /tmp/python-leg.out
+  exit 1
+fi
+# unittest reports skips in the trailer, e.g. "OK (skipped=3)". Skips are forbidden (G4).
+if grep -qE '\(.*(skipped|expected failures)=' /tmp/python-leg.out; then
+  echo "GATE FAIL: python leg reported skipped/expected-failure tests (skips forbidden, G4)"
+  grep -E '\(.*(skipped|expected failures)=' /tmp/python-leg.out
+  exit 1
+fi
+echo "python leg: OK (Ran $PY_RAN tests)"
+
 echo "GATE PASS"
 exit 0

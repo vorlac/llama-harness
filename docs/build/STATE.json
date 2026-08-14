@@ -1716,7 +1716,7 @@
       "taskId": "12.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 12.1 serve wiring",
       "planLines": [
@@ -1724,14 +1724,37 @@
         2889
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "python": "Ran 29 tests OK (orchestrator-observed)",
+        "suite": "tests=1186 pass=1186; all five legs green (node, tsc, bun, schema-export, python)"
+      },
+      "redEvidence": {
+        "cmd": "cd scripts && /usr/bin/python3 -m unittest test_conductor_wiring",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "ModuleNotFoundError: No module named 'conductor_wiring' (Ran 1 test, FAILED errors=1)"
+      },
+      "filesTouched": [
+        "scripts/conductor_wiring.py",
+        "scripts/test_conductor_wiring.py",
+        "scripts/serve.py",
+        "scripts/fetch_models.py",
+        "scripts/test-conductor.sh",
+        "router/UPSTREAM_CONTRACT.md",
+        "docs/build/specs/task-12.1.assertions.json"
+      ],
+      "revertAssertion": "RUN, not reasoned, both directions, cp-snapshotted and cmp-verified. (1) mv scripts/conductor_wiring.py aside => ModuleNotFoundError, the missing-subject red. (2) TARGETED, and it pins the F3 finding: deleting the two lines `if count > 1: args += ['--ctx-size', str(PER_SLOT_CONTEXT_TOKENS * count)]` from parallel_server_args() - i.e. the plan's literal 'append --parallel N' reading - fails 2 of 29 ([12.1-ctx-per-slot-preserved] and [12.1-live-ctx-per-slot]). Without those two lines every sub-session's context window silently drops from 8192 to 1536 tokens.",
+      "attempts": 1,
+      "deviations": [
+        "C-060: scripts/serve.py and scripts/fetch_models.py are orchestrator-only, and are also 12.1's deliverable. Resolution: the implementer wrote scripts/conductor_wiring.py (where the plan itself puts the logic, 'so they're testable without serving') and returned a unified diff for the files it may not edit. The orchestrator read it hunk by hunk and applied it. The diff touched FOUR files, not the two anticipated - it also carried the new python leg for scripts/test-conductor.sh and the UPSTREAM_CONTRACT.md update.",
+        "C-062: the 12.1 test caught the ORCHESTRATOR's own live artifact in a wrong measurement. AUTOLOAD_LATENCY_MS: 2040 was cold PROCESS STARTUP measured with --model direct; item 5 asks for on-demand autoload under --models-preset --models-max 1. The implementer marked it BLOCKED rather than writing the missing flag into prose to green its own test. The orchestrator then RAN the real probe (two models installed, so eviction can be forced): AUTOLOAD_LATENCY_MS is now 9120 for the G13 model, measured as the non-resident request's wall clock minus the same request's resident wall clock. All six Step 2 items are now observed and WIRE_CONTRACT_VERIFIED is real.",
+        "FINDING F4 (C-062): --models-preset makes llama-server a PARENT that spawns a child server per model on an ephemeral port and proxies to it. The child's argv is built from the preset INI, which raised the question of whether 12.1's derivation reaches it at all. TESTED, not assumed: the parent forwards --parallel and --ctx-size to the child AND they override the INI (ini said ctx-size 65536; child came up n_slots=6 n_ctx_slot=8192). F3's formula is effective end to end in the only mode serve.py uses.",
+        "C-062: the delivered python leg used `unittest discover || exit 1`, and unittest discover EXITS 0 on 'Ran 0 tests' - the same vacuous-green hole the node leg exists to close. The orchestrator added a Ran>=1 floor and a rejection of (skipped=)/(expected failures=) trailers, and self-tested the floor by pointing discovery at an empty directory.",
+        "FIVE disclosed surviving mutations, one serious: ROUTER_SUPERVISOR_SOURCE is GREPPED for os.kill/SIGTERM/SIGKILL and their order, never EXECUTED - so a supervisor that keeps every token and never signals passes, i.e. 'a router that outlives every session would not fail this suite'. The implementer compensated out-of-band with real runs against fake router binaries (fatal exit 3 stops; exit 1 restarts at 500ms then 1000ms; killing the fake shell reaped the router in 0.1s) but that is a transcript, not a test. Also surviving: wait_for_router_health is never called by any test (a `return True` stub survives - exactly the curl -s 503 trap); ROUTER_TERM_GRACE_S is only asserted >=5.0; derive_slots' bool guard is unpinned. RECORDED AS AN OBLIGATION ON THE PHASE 12 GATE: these need an execution-level supervisor test. Four of the five are 'the test inspects text where it should run code' - the C-044/C-047 class.",
+        "Behaviour worth naming: because parallel_server_args(slots) takes only slots, the derived args append a SECOND --ctx-size that overrides the user's --ctx whenever slots > 1. `serve.py --ctx 4096 --max-readers 6` therefore serves 8192 per slot, not 4096. F3-correct and forced by the assertion's shape, but surprising. At slots == 1 the user's --ctx is left alone."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T11:20:00Z"
     },
     "12.2": {
       "taskId": "12.2",

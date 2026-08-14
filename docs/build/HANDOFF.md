@@ -4,7 +4,7 @@ Updated: 2026-08-14 (boot reconciliation. Phases 0–9 and 11 COMPLETE; Phase 9 
 
 ## Position
 
-**44 of 55 ledger rows COMMITTED.** Suite **1186/1186 GATE PASS** (tsc + bun + schema-export
+**45 of 55 ledger rows COMMITTED.** Suite **1186/1186 GATE PASS** (tsc + bun + schema-export
 green, orchestrator-observed at this boot). C++ 73 cases / 26,392 assertions.
 
 `docs/build/STATE.json` is the machine truth (`status` + `commitSha`).
@@ -21,7 +21,7 @@ adversarial pass was skipped when Branch B ran parallel to the spine. It is owed
 | Task | State | Notes |
 |---|---|---|
 | 10.1 continuation + ask gate | NOT_STARTED | 32 assertion rows promoted. NEW `adapter/continuation.ts`. |
-| 12.1 serve wiring | NOT_STARTED | NEW `scripts/conductor_wiring.py` (python 3.9!). |
+| ~~12.1 serve wiring~~ | COMMITTED | 29 rows. Python leg now in the gate, with a zero-tests floor. F3+F4 measured. |
 | 12.2 first-run setup | NOT_STARTED | `conductor_setup` tool + detection matrix. |
 | 13.1 e2e scripted | NOT_STARTED | Largest task in the plan. Five scenarios, all five must appear in TAP. |
 | 12.1-G5 | NOT_STARTED | Runs 13.1's e2e with and without the router. After 13.1. |

@@ -2412,3 +2412,120 @@ with the diff that mattered.
 **RULE: a staged file is ready when its AGENT RETURNS, never when the file appears.** Watching
 the filesystem for a path is watching the wrong signal — writers edit in place, repeatedly, and
 an intermediate save is indistinguishable from a finished one by any file-level test.
+
+---
+
+## C-062 — Task 12.1, and the test catching the ORCHESTRATOR's live artifact in a wrong measurement
+
+### The row that failed, and why that is the system working
+
+`12.1-live-autoload` asserts the string `--models-max` appears in the contract's Task 12.1
+section. It did not, and the implementer traced why: `AUTOLOAD_LATENCY_MS: 2040`, which I had
+written into `router/UPSTREAM_CONTRACT.md` at C-058, was **cold process startup to first healthy
+`/health`** measured with `--model <path>` directly. Item 5 asks for something else — the latency
+of a request naming a model that is **not resident**, against a server started with
+`--models-preset` and `--models-max 1`. Different quantity, same units, and the units are what
+made it look right.
+
+The implementer could have made its own test green by writing `--models-max` into the prose. It
+refused, marked `STEP2_ITEM_5: 12.1 BLOCKED`, reverted the stamp to `<pending>`, kept the 2040 ms
+number but relabelled it as cold start, and wrote out the un-run probe verbatim. That is exactly
+the behaviour the live-task discipline is for, and it was applied against the orchestrator's own
+artifact.
+
+### Discharged, not left blocked
+
+Two chat models are installed, so an eviction can be forced and the probe CAN run. It was run:
+
+```
+cold autoload (9B)     wall= 2936 ms      resident, no load  wall=  145 ms   -> 2791 ms
+autoload + evict (27B) wall= 9683 ms      resident, no load  wall=  563 ms   -> 9120 ms
+```
+
+`AUTOLOAD_LATENCY_MS: 9120` — the G13 model's load cost with the wall clock of the same request
+when resident subtracted, so it is the load and not the generation. Item 5 is discharged, all six
+Step 2 items are observed, and the stamp is now real rather than pending.
+
+### FINDING F4 (MAJOR for how 12.1 must be read) — preset mode is a parent that spawns children
+
+`--models-preset` does not load models into the listening process. It makes that process a
+**router** that spawns a child `llama-server` per model on an ephemeral port and proxies to it;
+`--models-max` bounds residency and eviction is LRU. The child's argv is assembled from the INI.
+
+That raised a question F3's whole derivation depends on: **if the parent's `--parallel` and
+`--ctx-size` do not reach the child, Task 12.1's slot derivation is inert in the only mode
+`serve.py` uses**, and the fan-out silently runs on llama-server's default 4 slots.
+
+Tested rather than assumed. Parent started with `--parallel 6 --ctx-size 49152`, child argv:
+
+```
+load:   --ctx-size
+load:   49152
+load:   --parallel
+load:   6
+[56637] load_model: initializing, n_slots = 6, n_ctx_slot = 8192, kv_unified = 'false'
+```
+
+The parent forwards both and they **override the preset INI** (which said `ctx-size = 65536`).
+F3's formula is effective end to end. Precedence recorded: parent CLI beats the preset file.
+
+### A second correction to my own artifact — `/v1/models` is mode-dependent
+
+C-058 recorded that `data[0].id` is the full gguf path. True with `--model` direct; **false in
+preset mode**, where the parent gives each child an `--alias` and the ids are the friendly names:
+
+```
+['embeddinggemma-300m', 'ornith-9b', 'qwen3-coder-30b', 'qwen3-coder-next', 'qwen3.6-27b', ...]
+```
+
+Task 12.2's setup proof matches `models.default` against `/v1/models`, so it must match the
+**friendly id** — the shipping mode — and treat a path-shaped id as the direct-mode case. Also:
+in preset mode the list is the preset's contents whether or not a model is resident, so presence
+does NOT imply loaded.
+
+### C-060 applied: the four-file patch
+
+Per C-060 the implementer wrote `scripts/conductor_wiring.py` (824 lines) and returned a unified
+diff for the files it may not edit. The diff touched **four**, not the two anticipated:
+`scripts/serve.py`, `scripts/fetch_models.py`, `scripts/test-conductor.sh` (the new python leg)
+and `router/UPSTREAM_CONTRACT.md`. Read hunk by hunk and applied by the orchestrator;
+`patch --dry-run` clean, `py_compile` and `bash -n` clean afterwards.
+
+### The python leg got a floor before it was trusted
+
+The delivered leg was `unittest discover … || exit 1`. **`unittest discover` exits 0 on "Ran 0
+tests"** — the identical vacuous-green hole the node leg exists to close, and one renamed file
+would have made the whole Python half silently stop enforcing. Added: a `Ran N` floor of ≥ 1, and
+a rejection of `(skipped=…)` / `(expected failures=…)` in the trailer, mirroring the node leg's
+SKIP/TODO rejection. Self-tested by pointing discovery at an empty directory — `GATE FAIL: python
+leg discovered ZERO tests`.
+
+### Five disclosed survivors, one of which matters a great deal
+
+The implementer disclosed five mutations that no row catches. The serious one:
+
+**`ROUTER_SUPERVISOR_SOURCE` is grepped, never executed.** `12.1-supervisor-lifecycle` searches
+the supervisor's source text for `os.kill(shell_pid, 0)`, `SIGTERM`, `SIGKILL` and their order. A
+supervisor keeping every token while never signalling passes. In the implementer's words: **"a
+router that outlives every session would not fail this suite."** It compensated out of band by
+running the real supervisor against fake router binaries — fatal exit 3 stops immediately, exit 1
+restarts at 500 ms then 1000 ms, killing the fake shell reaped the router in 0.1 s — but that is
+a transcript, not a test.
+
+Also surviving: `wait_for_router_health` is never called by any test (only the injected seam is),
+so a `return True` stub survives — which is precisely the `curl -s` 503 trap; `ROUTER_TERM_GRACE_S`
+is only asserted `>= 5.0`; and `derive_slots`'s bool guard is unpinned.
+
+Recorded as an obligation on the Phase 12 gate rather than fixed here: these need an
+execution-level supervisor test, and adding one now would mean the implementer writing its own
+test. Four of five are "the test inspects text where it should run code" — the same class as
+C-044/C-047.
+
+### One behaviour worth naming for whoever runs serve.py
+
+Because `parallel_server_args(slots)` takes only `slots`, and `build_server_command`'s output must
+equal the head command plus those args, the derived args **append a second `--ctx-size` that
+overrides the user's `--ctx`** whenever `slots > 1`. So `serve.py --ctx 4096 --max-readers 6`
+serves 8192 per slot, not 4096. That is F3-correct and forced by the assertion's shape, but a user
+passing `--ctx` and getting a different per-slot window may reasonably be surprised. At
+`slots == 1` the user's `--ctx` is left alone.
