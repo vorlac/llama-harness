@@ -1805,7 +1805,8 @@
         "C-062: the delivered python leg used `unittest discover || exit 1`, and unittest discover EXITS 0 on 'Ran 0 tests' - the same vacuous-green hole the node leg exists to close. The orchestrator added a Ran>=1 floor and a rejection of (skipped=)/(expected failures=) trailers, and self-tested the floor by pointing discovery at an empty directory.",
         "FIVE disclosed surviving mutations, one serious: ROUTER_SUPERVISOR_SOURCE is GREPPED for os.kill/SIGTERM/SIGKILL and their order, never EXECUTED - so a supervisor that keeps every token and never signals passes, i.e. 'a router that outlives every session would not fail this suite'. The implementer compensated out-of-band with real runs against fake router binaries (fatal exit 3 stops; exit 1 restarts at 500ms then 1000ms; killing the fake shell reaped the router in 0.1s) but that is a transcript, not a test. Also surviving: wait_for_router_health is never called by any test (a `return True` stub survives - exactly the curl -s 503 trap); ROUTER_TERM_GRACE_S is only asserted >=5.0; derive_slots' bool guard is unpinned. RECORDED AS AN OBLIGATION ON THE PHASE 12 GATE: these need an execution-level supervisor test. Four of the five are 'the test inspects text where it should run code' - the C-044/C-047 class.",
         "Behaviour worth naming: because parallel_server_args(slots) takes only slots, the derived args append a SECOND --ctx-size that overrides the user's --ctx whenever slots > 1. `serve.py --ctx 4096 --max-readers 6` therefore serves 8192 per slot, not 4096. F3-correct and forced by the assertion's shape, but surprising. At slots == 1 the user's --ctx is left alone.",
-        "CLOSED by the phase-12 gate stage-1 re-run (C-073): the serious survivor above - ROUTER_SUPERVISOR_SOURCE grepped, never executed - now has two executed tests, [12.1-supervisor-signals-executed] and [12.1-supervisor-sigkill-executed], in a new RouterSupervisorExecution class that runs the real supervisor source against a fake router binary and a real stand-in shell process. The gatekeeper re-ran C-072's exact mutation itself (stop() replaced by a bare `return`, every grepped token preserved in comments): the two new tests FAIL and the old string test test_12_1_supervisor_lifecycle stays GREEN - 31 run, 2 failed - which is the demonstration C-072 asked for. The other four disclosed survivors (wait_for_router_health uncalled, ROUTER_TERM_GRACE_S asserted only >=5.0, derive_slots' bool guard) are NOT closed and carry forward."
+        "CLOSED by the phase-12 gate stage-1 re-run (C-073): the serious survivor above - ROUTER_SUPERVISOR_SOURCE grepped, never executed - now has two executed tests, [12.1-supervisor-signals-executed] and [12.1-supervisor-sigkill-executed], in a new RouterSupervisorExecution class that runs the real supervisor source against a fake router binary and a real stand-in shell process. The gatekeeper re-ran C-072's exact mutation itself (stop() replaced by a bare `return`, every grepped token preserved in comments): the two new tests FAIL and the old string test test_12_1_supervisor_lifecycle stays GREEN - 31 run, 2 failed - which is the demonstration C-072 asked for. The other four disclosed survivors (wait_for_router_health uncalled, ROUTER_TERM_GRACE_S asserted only >=5.0, derive_slots' bool guard) are NOT closed and carry forward.",
+        "G5 EQUIVALENCE STEP CLOSED (acceptance row 9b), which was blocked on 13.1's e2e existing. docs/build/artifacts/12.1-g5-equivalence.md records a real two-arm run: both baseURLs derived from scripts/conductor_wiring.py (--router -> 127.0.0.1:8088/v1, --no-router -> 127.0.0.1:8080/v1), a real llama-server + llama-router both healthy, the committed e2e run green under EACH baseURL with identical verdict lines, then the router killed and its absence proven before arm B. Plus the traffic half the plan's step omits: the same request body through 8088 and 8080 returns the same status, the same finish_reason and the same body shape, and the router writes its SS4.4 ledger row (status 200, queueWaitMs 0) while rejecting nothing. DISCLOSED in the artifact: the scripted e2e sends NO model traffic (its sub-sessions are the fake SDK by design), measured -- the ledger gained zero rows during arm A -- so the pipeline half and the traffic half are each necessary and the plan's step as written is only the first half."
       ],
       "startedAt": null,
       "finishedAt": "2026-08-14T11:20:00Z"
@@ -1815,8 +1816,8 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
-      "commitMessage": "conductor: 12.2 first-run setup",
+      "commitSha": "eb39500",
+      "commitMessage": "conductor-build: phase 12 gate stage 1 repair",
       "planLines": [
         2890,
         2913
@@ -1844,7 +1845,8 @@
       "attempts": 1,
       "deviations": [
         "C-073: 12.2's product is committed under the phase-gate message `conductor-build: phase 12 gate stage 1 repair`, NOT under its own commitMessage `conductor: 12.2 first-run setup`. The task was left uncommitted when the phase-12 gate was dispatched over it; the gate found it, the fix round finished it, and the gatekeeper - the only role permitted to write git - committed the repair under the message its brief specified. Consequence to know: `git log --grep='^conductor: 12.2'` finds NOTHING. This row's status plus commitSha is the receipt, per meta.convention.commitSha.",
-        "The gate's red row was a defect in the TEST, not the product: its expectation table mapped ecosystem -> profile by identity except cmake->ctest, but RUNNER_PROFILES is keyed by RUNNER (node/pytest/go/ctest, and [12.2-detect-cargo] pins that there is no fifth), so the python scope compared 'pytest' against 'python'. The test already contradicted itself ten lines above. Replaced with an explicit PROFILE_FOR_ECOSYSTEM map plus an assertion that every non-cargo ecosystem has a mapping, so an unmapped ecosystem fails loudly instead of comparing against undefined. No product code changed for it."
+        "The gate's red row was a defect in the TEST, not the product: its expectation table mapped ecosystem -> profile by identity except cmake->ctest, but RUNNER_PROFILES is keyed by RUNNER (node/pytest/go/ctest, and [12.2-detect-cargo] pins that there is no fifth), so the python scope compared 'pytest' against 'python'. The test already contradicted itself ten lines above. Replaced with an explicit PROFILE_FOR_ECOSYSTEM map plus an assertion that every non-cargo ecosystem has a mapping, so an unmapped ecosystem fails loudly instead of comparing against undefined. No product code changed for it.",
+        "ACCEPTANCE REPAIR (row 12): this row's commitMessage was the message the task WOULD have carried, not the one that landed. C-073 already recorded that the work shipped under the phase-gate message `conductor-build: phase 12 gate stage 1 repair` (eb39500), so `git log --grep='^conductor: 12.2'` found nothing and scripts/verify-acceptance.sh row 12 reported 12.2 as a missing manifest commit. The field is corrected to the message that actually landed the work and commitSha is backfilled; the task is NOT reopened, because the product and its 28 assertions are committed and green."
       ],
       "startedAt": null,
       "finishedAt": "2026-08-14T12:35:00Z"
@@ -1853,22 +1855,36 @@
       "taskId": "13.1",
       "manifest": true,
       "tier": "A",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "71c45a9",
       "commitMessage": "conductor: 13.1 e2e scripted",
       "planLines": [
         2916,
         2960
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "suite": "tests=1280 pass=1280 fail=0 cancelled=0 skipped=0 todo=0; all five legs green (node, tsc, bun, schema-export, python)",
+        "e2eOnly": "node --test --test-reporter=tap conductor/tests/e2e.test.ts: tests=5 pass=5 fail=0, one test per plan scenario"
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/verify-acceptance.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "row 5: conductor/tests/e2e.test.ts does not exist (Task 13.1 not built)"
+      },
+      "filesTouched": [
+        "conductor/tests/e2e.test.ts"
+      ],
+      "revertAssertion": "RUN, not reasoned; three TARGETED mutations, each cp-snapshotted and cmp-verified clean afterwards. (1) PRODUCT: replacing the disjoint-path guard's `firstIntersectingGlob(item.fileScope, config.verify.behavioralPaths)` with `null` in conductor/core/planning.ts fails [13.1-non-behavioral] (a behavioral:false item over src/** would be silently accepted). (2) PRODUCT: replacing the SS2.6 head-mismatch guard in handlePublish (`if (record.head !== currentHead)` -> `if (false)`) fails [13.1-full-pipeline] (a green measured before a sibling's commit would publish). (3) FIXTURE, proving the suite is not self-fulfilling: making the implementer sub-session return DONE WITHOUT writing the module fails [13.1-full-pipeline] and [13.1-worktree] -- the greens are re-derived by spawning the fixture repo's own test command, not taken from the sub-session's word.",
+      "attempts": 1,
+      "deviations": [
+        "TWO behaviours the suite MEASURED and the plan sketched differently, recorded in the test file's header rather than smoothed over. (a) `blocked` is a FINAL disposition, so conductor_report CLOSES a run holding a blocked item rather than refusing it; the refusal the plan describes is real but fires on UNSETTLED work (items still PENDING), which is what scenario 5 asserts. (b) The wave driver does NOT itself recover an item stranded by a sibling's commit: when one member publishes, HEAD moves and every sibling's green fails SS2.6 condition 2; publish refuses it by name and the REVIEWED->GREEN drop back to re-validation is left to the orchestrator. Scenario 1 asserts the refusal; the suite's drainWaves helper performs the documented recovery.",
+        "SCOPE: the plan's Step 2 (\"red -> glue fixes -> green\") also implies binding the 22 conductor tools in conductor/plugin/index.ts to the real handlers -- composition.test.ts:1537 names that as 13.1's work. This task-let did NOT do it: conductor/adapter/tools.ts had uncommitted in-flight edits from a concurrent task, and rebinding the tool map would have collided with it and inverted a committed assertion. The e2e drives the REAL plugin hooks (chat.message creates the run; tool.execute.before adjudicates every gate denial) and the REAL handler layer directly. The tool-map binding remains open and is NOT claimed here.",
+        "The scenarios use a scripted responder over the FAKE SDK whose replies are schema-valid SS2.10 payloads and whose SIDE EFFECTS ARE REAL (a testWriter writes the test file, an implementer writes the module). Every red and green is then re-derived by the handlers spawning the fixture repo's own node --test command."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T00:00:00Z"
     },
     "13.2": {
       "taskId": "13.2",
@@ -1975,22 +1991,36 @@
       "taskId": "15.1",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "c64c805",
       "commitMessage": "conductor: 15.1 ops docs",
       "planLines": [
         3036,
         3044
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "acceptance": "scripts/verify-acceptance.sh rows 11a and 11b both PASS: OPERATIONS.md present, HONEST-LIMITS.md carries all 15 SS9 limits",
+        "suite": "tests=1280 pass=1280 fail=0 cancelled=0 skipped=0 todo=0; all five legs green (node, tsc, bun, schema-export, python)"
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/verify-acceptance.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "row 11a: conductor/docs/OPERATIONS.md missing (Task 15.1 not built); row 11b: conductor/docs/HONEST-LIMITS.md missing (Task 15.1 not built)"
+      },
+      "filesTouched": [
+        "conductor/docs/OPERATIONS.md",
+        "conductor/docs/HONEST-LIMITS.md"
+      ],
+      "revertAssertion": "The acceptance meter is the assertion and it counts rather than greps: row 11b compares the number of `^[0-9]+\\. \\*\\*` items in HONEST-LIMITS.md against the same count taken from the plan's SS9, so dropping or duplicating any single limit fails the row. Verified by running the meter's own counting command against both files: plan=15 doc=15.",
+      "attempts": 1,
+      "deviations": [
+        "OPERATIONS.md's factual claims are read off the shipped code rather than composed: the serve.py flag table from scripts/serve.py's own add_argument calls, the replay flags and exit codes from conductor/tools/replay.ts parseArgs/EXIT_USAGE, CONDUCTOR_LOG's grammar from adapter/journal.ts parseEnvLog, the halt path from adapter/state.ts, and the closed vocabularies (8 components, 5 levels, 6 stop kinds, 3 failure classes) from core. The one worked example (`node --input-type=module -e ...` printing exactly ['ConductorPlugin']) was RUN.",
+        "An export-schemas.ts exit-code row was written from memory in the first draft, then corrected against the source: it has no usage errors of its own, so the row now says so instead of inventing a code 2."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T00:00:00Z"
     },
     "15.2": {
       "taskId": "15.2",
@@ -2075,23 +2105,37 @@
       "taskId": "12.1-G5",
       "manifest": false,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
-      "commitMessage": null,
+      "commitMessage": "conductor-build: close acceptance rows round 1",
       "planLines": [
         2866,
         2889
       ],
-      "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "canonicalTestCmd": "bash scripts/verify-acceptance.sh",
+      "tap": {
+        "acceptance": "scripts/verify-acceptance.sh row 9b PASS: docs/build/artifacts/12.1-g5-equivalence.md present, 194 lines, with a command transcript",
+        "armA": "CONDUCTOR_OPENAI_BASE_URL=http://127.0.0.1:8088/v1 (router) -- e2e tests=5 pass=5 fail=0",
+        "armB": "CONDUCTOR_OPENAI_BASE_URL=http://127.0.0.1:8080/v1 (no router) -- e2e tests=5 pass=5 fail=0, identical verdict lines"
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/verify-acceptance.sh",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "row 9b: docs/build/artifacts/12.1-g5-equivalence.md missing (12.1 G5 step never run)"
+      },
+      "filesTouched": [
+        "docs/build/artifacts/12.1-g5-equivalence.md"
+      ],
+      "revertAssertion": "The artifact is a transcript, not a test, and is labelled as one. What makes it load-bearing is that BOTH arms ran the COMMITTED e2e (conductor/tests/e2e.test.ts, itself mutation-tested under 13.1) and that the router was proven ABSENT before arm B rather than merely unused: curl against 127.0.0.1:8088 found no listener. The equivalence therefore rests on 13.1 revertAssertion, not on this row.",
+      "attempts": 1,
+      "deviations": [
+        "The plan's G5 step as written is only HALF a test and the artifact says so. Running the scripted e2e under each baseURL proves the PIPELINE is indifferent to the wiring, but the scripted e2e sends NO model traffic (its sub-sessions are the fake SDK, by 13.1's design) -- measured, not assumed: the router's metrics ledger gained ZERO rows during arm A. So a second half was added that the plan does not ask for: the same request body through 8088 and 8080 returns the same status, the same finish_reason and the same body shape, and the router writes its SS4.4 ledger row (status 200, queueWaitMs 0) while rejecting nothing. Neither half alone would support the claim 'the identical process runs without the router'.",
+        "Disclosed in the artifact: one request is not a load test. Section 6 shows the router does not change a request's outcome; it does not characterise behaviour under admission pressure. That is Phase 14's job and the SS4.4 admission tests' job."
+      ],
       "startedAt": null,
-      "finishedAt": null,
-      "note": "G5 equivalence half of Task 12.1 (run 13.1 e2e with and without router). Executes after 13.1 green; no separate commit; \u00a711 acceptance row 9."
+      "finishedAt": "2026-08-14T16:00:00Z",
+      "note": "G5 equivalence half of Task 12.1 (run 13.1 e2e with and without router). Executed after 13.1 went green; no separate commit of its own -- the artifact rides the acceptance repair commit, and commitSha is backfilled by the next STATE.json touch per meta.convention.commitSha. Closes SS11 acceptance row 9b."
     },
     "5.4a": {
       "taskId": "5.4a",
