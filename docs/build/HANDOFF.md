@@ -4,7 +4,7 @@ Updated: 2026-08-14 (boot reconciliation. Phases 0–9 and 11 COMPLETE; Phase 9 
 
 ## Position
 
-**43 of 55 ledger rows COMMITTED.** Suite **1158/1158 GATE PASS** (tsc + bun + schema-export
+**44 of 55 ledger rows COMMITTED.** Suite **1186/1186 GATE PASS** (tsc + bun + schema-export
 green, orchestrator-observed at this boot). C++ 73 cases / 26,392 assertions.
 
 `docs/build/STATE.json` is the machine truth (`status` + `commitSha`).
@@ -28,7 +28,7 @@ adversarial pass was skipped when Branch B ran parallel to the spine. It is owed
 | 13.2 live smoke | NOT_STARTED | LIVE. `conductor/SMOKE.md`. |
 | 14.1 bench driver | NOT_STARTED | Must write one result file per cell and resume. |
 | 14.2 POC run | NOT_STARTED | LIVE, 90 headless runs, **launch detached**. |
-| 15.0 replay tool | NOT_STARTED | Only needs 2.1 — free parallel work, do it early. |
+| ~~15.0 replay tool~~ | COMMITTED | 28 rows. SG-3 ruling recorded in STATE; row 28 closed a disclosed survivor. |
 | 15.1 ops docs | NOT_STARTED | HONEST-LIMITS.md verbatim from §9 + the G7 residuals below. |
 | 15.2 dashboard | NOT_STARTED | ftxui optional target, doctest on pure aggregation. |
 

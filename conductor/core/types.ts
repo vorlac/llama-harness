@@ -19,7 +19,7 @@ export const CONDUCTOR_NAME = "conductor";
 // ---------------------------------------------------------------------------
 
 // §7.1, plan line 1911.
-const LOG_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
+export const LOG_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 // §3.1, plan lines 1032-1043.

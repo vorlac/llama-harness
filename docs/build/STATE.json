@@ -1842,7 +1842,7 @@
       "taskId": "15.0",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 15.0 replay tool",
       "planLines": [
@@ -1850,14 +1850,31 @@
         3035
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "file": "28/28",
+        "suite": "tests=1186 pass=1186 fail=0 skipped=0 todo=0 (orchestrator-observed)"
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh 'conductor/tests/replay.test.ts'",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../conductor/tools/replay.ts' imported from .../conductor/tests/replay.test.ts (tests=1 pass=0 fail=1)"
+      },
+      "filesTouched": [
+        "conductor/tools/replay.ts",
+        "conductor/tests/replay.test.ts",
+        "conductor/core/types.ts",
+        "docs/build/specs/task-15.0.assertions.json"
+      ],
+      "revertAssertion": "RUN, not reasoned, both directions, snapshot-restored with cp and verified with cmp. (1) mv conductor/tools/replay.ts aside => the whole file re-derives the missing-subject red (tests=1 pass=0, ERR_MODULE_NOT_FOUND). (2) TARGETED: deleting the single line `if (numberOrNull(record.data.survivingMajors) === null) return null;` in roundKind() => 2 of 28 fail, including [15.0-guard-reject-needs-surviving-majors]. That row was added AFTER the implementation went green, because the implementer DISCLOSED that reverting the SG-3 ruling left all 27 original tests passing - no fixture carried the plan-review-revision shape. Before row 28 this mutation survived silently; it no longer does.",
+      "attempts": 1,
+      "deviations": [
+        "SG-3 RULING (orchestrator, binding): a 'fsm'/'guard-reject' record is a review ROUND only if it carries data.stage AND data.survivingMajors !== undefined. The assertions file's SG-3 said data.stage alone, which collides with the SECOND committed producer of that component/event pair - adapter/tools.ts:1939-1945 journals {stage:'plan-review-revision', round, attempt, defects} for every failed planner-revision ATTEMPT, with no survivingMajors. Under SG-3 as written a single round 1 that took two planner attempts renders as THREE rows, two of them reporting survivingMajors:0 for a round where two majors survived. Verified by simulation in both directions.",
+        "Row 28 (15.0-guard-reject-needs-surviving-majors) was added to the assertions file AFTER the implementation was green, to close the implementer's disclosed surviving mutation. Four consecutive implementers have now disclosed a survivor and every disclosure became a real assertion.",
+        "conductor/core/types.ts edited by ONE word: `export` added to the existing LOG_LEVELS const (:22), which the test imports. Diff read by the orchestrator and confirmed to contain nothing else - M6 requires written justification for touching a file an earlier task added, and this is it."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T10:45:00Z"
     },
     "15.1": {
       "taskId": "15.1",
