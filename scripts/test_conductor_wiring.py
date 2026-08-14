@@ -5,11 +5,16 @@ llama-router, generate its config, derive one slot count for both sides of the
 concurrency contract, and merge the conductor opencode fragment lives in
 ``scripts/conductor_wiring.py`` so it can be exercised without serving anything.
 
-The whole leg is offline: no server is started, no socket is opened, no process
-is spawned, and nothing under ``.data/`` or ``.out/`` is written. Filesystem
-writes go to ``tempfile`` directories; the two committed files this leg *reads*
-are the exported RouterConfig schema and ``router/UPSTREAM_CONTRACT.md``, which
-is where Task 11.1's deferred live measurement is recorded.
+The whole leg is offline: no server is started, no socket is opened, and nothing
+under ``.data/`` or ``.out/`` is written. Filesystem writes go to ``tempfile``
+directories; the two committed files this leg *reads* are the exported
+RouterConfig schema and ``router/UPSTREAM_CONTRACT.md``, which is where Task
+11.1's deferred live measurement is recorded.
+
+``RouterSupervisorExecution`` is the one part that spawns: it runs the real
+supervisor source over a fake router binary and a fake session shell, entirely
+inside a temp dir, because reading that source as a string proves nothing about
+the signals it sends (C-072).
 
 Run as::
 
@@ -23,10 +28,12 @@ import inspect
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -982,6 +989,193 @@ class RouterLaunchDecision(WiringTestCase):
             for name, value in env.items():
                 self.assertIn("export %s=" % name, block)
                 self.assertIn("%s=%s" % (name, value), lines)
+
+
+_FAKE_ROUTER = '''#!%(python)s
+import os
+import signal
+import sys
+import time
+
+EVENTS = os.path.join(os.getcwd(), "router-events.log")
+STUBBORN = %(stubborn)r
+
+
+def record(line):
+    with open(EVENTS, "a") as handle:
+        handle.write(line + "\\n")
+
+
+def on_term(signum, frame):
+    record("sigterm")
+    if not STUBBORN:
+        record("exited-on-sigterm")
+        sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, on_term)
+record("argv " + " ".join(sys.argv[1:]))
+record("started " + str(os.getpid()))
+while True:
+    time.sleep(0.05)
+'''
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
+def _line(path: Path, prefix: str) -> str:
+    for line in _read(path).splitlines():
+        if line.startswith(prefix):
+            return line
+    raise AssertionError("no %r line in %s: %r" % (prefix, path, _read(path)))
+
+
+def _pid_alive(pid: int) -> bool:
+    """The same liveness probe the supervisor uses on the session shell."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _wait_until(predicate, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+class RouterSupervisorExecution(WiringTestCase):
+    """The supervisor source, EXECUTED.
+
+    ``test_12_1_supervisor_lifecycle`` reads ``cw.ROUTER_SUPERVISOR_SOURCE`` as a
+    string, so a supervisor carrying every one of those tokens in a comment while
+    signalling nothing would satisfy it (C-062, C-072). These two cases run the
+    real source in a real interpreter, against a fake router binary and a fake
+    session shell, and assert the signals the router actually receives and the
+    reap that follows. Everything - the binary, the shell, the router's event log
+    and the supervisor's own ``router.log`` - lives under the per-test temp dir.
+    """
+
+    def plant_fake_router(self, root: Path, stubborn: bool) -> Path:
+        target = root / "fake-llama-router"
+        target.write_text(_FAKE_ROUTER % {"python": sys.executable, "stubborn": stubborn})
+        target.chmod(target.stat().st_mode | stat.S_IXUSR)
+        return target
+
+    def reap(self, proc) -> None:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+    def stop_tree(self, supervisor, found: Dict[str, Optional[int]]) -> None:
+        """End the supervisor first, then the router.
+
+        The router is a GRANDchild. Killing it while the supervisor still lives
+        would only earn it a restart, and killing the supervisor first reparents
+        a router the supervisor failed to signal - which is exactly the state a
+        red run leaves behind, so both halves are unconditional.
+        """
+        self.reap(supervisor)
+        pid = found.get("router_pid")
+        if pid is None:
+            return
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            return
+        _wait_until(lambda: not _pid_alive(pid), 5.0)
+
+    def start_fake_shell(self):
+        """A real process standing in for the session shell, so its pid is a real pid."""
+        shell = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        self.addCleanup(self.reap, shell)
+        return shell
+
+    def start_supervisor(self, stubborn: bool):
+        root = self.tmp / ("supervisor-stubborn" if stubborn else "supervisor-polite")
+        root.mkdir(parents=True)
+        binary = self.plant_fake_router(root, stubborn)
+        schema = self.plant_schema(root)
+        config_path = root / cw.ROUTER_CONFIG_RELPATH
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("{}\n")
+
+        shell = self.start_fake_shell()
+        supervisor = cw.start_router_supervisor(binary, config_path, schema, shell.pid, root)
+        found: Dict[str, Optional[int]] = {"router_pid": None}
+        self.addCleanup(self.stop_tree, supervisor, found)
+
+        events = root / "router-events.log"
+        self.assertTrue(
+            _wait_until(lambda: "started " in _read(events), 20.0),
+            "the supervisor never spawned the router binary (events: %r)" % _read(events),
+        )
+        router_pid = int(_line(events, "started ").split()[1])
+        found["router_pid"] = router_pid
+        self.assertTrue(_pid_alive(router_pid), "the fake router is not running")
+        return root, shell, supervisor, events, router_pid
+
+    def test_12_1_supervisor_signals_and_reaps(self) -> None:
+        """[12.1-supervisor-signals-executed] the shell dies, the router is SIGTERMed and reaped."""
+        root, shell, supervisor, events, router_pid = self.start_supervisor(stubborn=False)
+
+        # The supervisor opens its log under its own cwd, so a wrong cwd shows up here,
+        # and the router is launched with exactly the router_supervisor_argv tail.
+        self.assertTrue((root / cw.ROUTER_LOG_RELPATH).is_file())
+        argv_line = _line(events, "argv ")
+        for piece in cw.router_supervisor_argv(
+            root / "fake-llama-router", root / cw.ROUTER_CONFIG_RELPATH, self.plant_schema(root)
+        )[1:]:
+            self.assertIn(piece, argv_line)
+
+        self.reap(shell)
+        self.assertTrue(
+            _wait_until(lambda: "sigterm" in _read(events), 20.0),
+            "the router was never signalled after the session shell died: %r" % _read(events),
+        )
+        self.assertIn("exited-on-sigterm", _read(events))
+        supervisor.wait(timeout=20)
+        self.assertEqual(supervisor.returncode, 0)
+        self.assertTrue(
+            _wait_until(lambda: not _pid_alive(router_pid), 15.0),
+            "the router outlived the session shell",
+        )
+
+    def test_12_1_supervisor_escalates_to_sigkill(self) -> None:
+        """[12.1-supervisor-sigkill-executed] a router that ignores SIGTERM is killed after the grace."""
+        _root, shell, supervisor, events, router_pid = self.start_supervisor(stubborn=True)
+
+        self.reap(shell)
+        began = time.monotonic()
+        self.assertTrue(
+            _wait_until(lambda: "sigterm" in _read(events), 20.0),
+            "the router was never signalled after the session shell died: %r" % _read(events),
+        )
+        supervisor.wait(timeout=cw.ROUTER_TERM_GRACE_S + 30.0)
+        elapsed = time.monotonic() - began
+        self.assertEqual(supervisor.returncode, 0)
+        # SIGKILL cannot be caught, so the router records nothing for it. What it does
+        # record is that it never exited of its own accord - and it is gone regardless.
+        self.assertNotIn("exited-on-sigterm", _read(events))
+        self.assertTrue(
+            _wait_until(lambda: not _pid_alive(router_pid), 15.0),
+            "a router that ignores SIGTERM was never killed",
+        )
+        self.assertGreaterEqual(
+            elapsed,
+            cw.ROUTER_TERM_GRACE_S - 1.0,
+            "SIGKILL landed before the %.1fs grace elapsed (%.1fs)"
+            % (cw.ROUTER_TERM_GRACE_S, elapsed),
+        )
 
 
 class GateAndLiveRecord(WiringTestCase):

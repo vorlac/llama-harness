@@ -179,6 +179,16 @@
       "coveredByTest": null
     },
     {
+      "id": "12.1-supervisor-signals-executed",
+      "text": "THE EXECUTED COMPLEMENT to [12.1-supervisor-lifecycle], which asserts against cw.ROUTER_SUPERVISOR_SOURCE as a STRING through an injected spawn seam and therefore cannot tell a supervisor that signals from one that merely carries the tokens 'SIGTERM' and 'SIGKILL' in a comment (C-062 disclosed it; C-072 adjudicated it a confirmed major — 'a router that outlives every session would not fail this suite'). This row RUNS the real cw.ROUTER_SUPERVISOR_SOURCE in a real interpreter via cw.start_router_supervisor, against a planted fake router binary and a real throwaway process standing in for the session shell, and asserts on OBSERVED behaviour, never on source text: the supervisor spawns the binary with exactly the cw.router_supervisor_argv tail and opens its router.log under ITS OWN cwd; then the session shell is killed and the fake router records the SIGTERM it actually received, exits of its own accord, is reaped, and its pid is gone, while the supervisor itself exits 0. Every artifact — binary, config, schema, event log, router.log — lives under the per-test temp dir, and cleanup ends the supervisor BEFORE the router, because a grandchild killed first would only be restarted",
+      "coveredByTest": null
+    },
+    {
+      "id": "12.1-supervisor-sigkill-executed",
+      "text": "the SIGKILL escalation half of the same executed pair, binned distinctly from [12.1-supervisor-signals-executed] so that losing the signal and losing the escalation fail different rows: a fake router that CATCHES SIGTERM and refuses to exit is gone anyway once the session shell dies, having never exited voluntarily (SIGKILL cannot be caught, so the router records nothing for it — what it records is the ABSENCE of a voluntary exit), and it is not killed before cw.ROUTER_TERM_GRACE_S has elapsed, so a supervisor that skips the grace and a supervisor that never escalates both fail. The case necessarily spends the real grace in wall clock: the python leg grows from ~1s to ~13s and the whole gate to ~105s, which is the price of running the real source instead of reading it",
+      "coveredByTest": null
+    },
+    {
       "id": "12.1-readiness-fallback-direct",
       "text": "no session is ever handed a config pointing at a router that is not up: the session opencode config is written only AFTER the routing decision is final, and if the launched router does not answer GET /conductor/health within the bounded readiness wait, serve.py falls back to the DIRECT baseURL, prints a loud notice, and does not leave a supervisor chasing a router the session is not using. The test drives the decision function with a health probe seam returning healthy / never-healthy / connection-refused and asserts the resulting baseURL and router-enabled flag in each case. This is the startup half of G5 that the plugin's mid-session failover (Task 7.2) structurally cannot cover — a session whose every request 502s from the first prompt never gets far enough to fail over",
       "coveredByTest": null

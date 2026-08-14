@@ -24,8 +24,8 @@
 // accepts it, and optionality means no binding decision hangs on them. The table
 // carries only the fields a handler REQUIRES.
 //
-// A `null` entry is a tool whose handler does not exist yet (setup,
-// forget_stale). The guard test
+// A `null` entry is a tool whose handler does not exist yet (forget_stale). The
+// guard test
 // asserts null-ness against the adapter source, so the moment such a handler is
 // exported the guard goes red until its binding is declared here — a new handler
 // is born under the guard, never retrofitted into it.
@@ -245,6 +245,16 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     infrastructure: ["store", "runId", "journal"],
     fixed: NO_FIXED,
   },
-  conductor_setup: null,
+  // The ONE handler that takes no store and no runId: §2.3's OpenOptions requires
+  // the very Config setup is producing, so the first-run path cannot go through
+  // openWorkspace at all (Task 12.2). Its infrastructure is therefore the
+  // workspace root, the runId-OPTIONAL journal sink, and the §4.4 origin context
+  // the three §2.1:628-632 proofs run against.
+  conductor_setup: {
+    handler: "handleSetup",
+    input: "SetupInput",
+    infrastructure: ["root", "journal", "router", "upstream", "failoverState"],
+    fixed: NO_FIXED,
+  },
   conductor_forget_stale: null,
 };

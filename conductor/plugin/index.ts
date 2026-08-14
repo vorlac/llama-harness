@@ -438,7 +438,26 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     },
     conductor_setup: {
       description: "Run first-run setup/reconfigure with the setup proofs (§2.1).",
-      args: { reconfigure: S.boolean().optional().describe("re-run setup on an already-configured repo") },
+      args: {
+        reconfigure: S.boolean().optional().describe("re-run setup on an already-configured repo"),
+        // §3.4's args table lists `reconfigure` alone, but §2.1:622's two
+        // undefaultable answers (and §3.9:1500's no-git choice) have to REACH the
+        // handler: a call without them returns the asks and writes nothing, and a
+        // call carrying them writes. Tool arguments are not one of the LAW closed
+        // vocabularies — no §2 schema, state field or journal event is touched —
+        // so this is a recorded plan deviation, raised at the Phase 12 gate.
+        answers: S.object({
+          gitMode: S.string().optional().describe("§2.1:622 question 1 — the repo's git mode; never defaulted"),
+          behavioralPaths: S.array(S.string())
+            .optional()
+            .describe("§2.1:622 question 2 — the confirmed (or corrected) behavioralPaths"),
+          initRepo: S.boolean()
+            .optional()
+            .describe("§3.9:1500 — true initializes a repo here, false runs in no-git mode"),
+        })
+          .optional()
+          .describe("the human's answers to setup's interactive asks (§6.2:1875)"),
+      },
     },
     conductor_forget_stale: {
       description: "Remove a resolved stale-red entry (§2.11) by path.",

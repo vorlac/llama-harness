@@ -1804,7 +1804,8 @@
         "FINDING F4 (C-062): --models-preset makes llama-server a PARENT that spawns a child server per model on an ephemeral port and proxies to it. The child's argv is built from the preset INI, which raised the question of whether 12.1's derivation reaches it at all. TESTED, not assumed: the parent forwards --parallel and --ctx-size to the child AND they override the INI (ini said ctx-size 65536; child came up n_slots=6 n_ctx_slot=8192). F3's formula is effective end to end in the only mode serve.py uses.",
         "C-062: the delivered python leg used `unittest discover || exit 1`, and unittest discover EXITS 0 on 'Ran 0 tests' - the same vacuous-green hole the node leg exists to close. The orchestrator added a Ran>=1 floor and a rejection of (skipped=)/(expected failures=) trailers, and self-tested the floor by pointing discovery at an empty directory.",
         "FIVE disclosed surviving mutations, one serious: ROUTER_SUPERVISOR_SOURCE is GREPPED for os.kill/SIGTERM/SIGKILL and their order, never EXECUTED - so a supervisor that keeps every token and never signals passes, i.e. 'a router that outlives every session would not fail this suite'. The implementer compensated out-of-band with real runs against fake router binaries (fatal exit 3 stops; exit 1 restarts at 500ms then 1000ms; killing the fake shell reaped the router in 0.1s) but that is a transcript, not a test. Also surviving: wait_for_router_health is never called by any test (a `return True` stub survives - exactly the curl -s 503 trap); ROUTER_TERM_GRACE_S is only asserted >=5.0; derive_slots' bool guard is unpinned. RECORDED AS AN OBLIGATION ON THE PHASE 12 GATE: these need an execution-level supervisor test. Four of the five are 'the test inspects text where it should run code' - the C-044/C-047 class.",
-        "Behaviour worth naming: because parallel_server_args(slots) takes only slots, the derived args append a SECOND --ctx-size that overrides the user's --ctx whenever slots > 1. `serve.py --ctx 4096 --max-readers 6` therefore serves 8192 per slot, not 4096. F3-correct and forced by the assertion's shape, but surprising. At slots == 1 the user's --ctx is left alone."
+        "Behaviour worth naming: because parallel_server_args(slots) takes only slots, the derived args append a SECOND --ctx-size that overrides the user's --ctx whenever slots > 1. `serve.py --ctx 4096 --max-readers 6` therefore serves 8192 per slot, not 4096. F3-correct and forced by the assertion's shape, but surprising. At slots == 1 the user's --ctx is left alone.",
+        "CLOSED by the phase-12 gate stage-1 re-run (C-073): the serious survivor above - ROUTER_SUPERVISOR_SOURCE grepped, never executed - now has two executed tests, [12.1-supervisor-signals-executed] and [12.1-supervisor-sigkill-executed], in a new RouterSupervisorExecution class that runs the real supervisor source against a fake router binary and a real stand-in shell process. The gatekeeper re-ran C-072's exact mutation itself (stop() replaced by a bare `return`, every grepped token preserved in comments): the two new tests FAIL and the old string test test_12_1_supervisor_lifecycle stays GREEN - 31 run, 2 failed - which is the demonstration C-072 asked for. The other four disclosed survivors (wait_for_router_health uncalled, ROUTER_TERM_GRACE_S asserted only >=5.0, derive_slots' bool guard) are NOT closed and carry forward."
       ],
       "startedAt": null,
       "finishedAt": "2026-08-14T11:20:00Z"
@@ -1813,7 +1814,7 @@
       "taskId": "12.2",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 12.2 first-run setup",
       "planLines": [
@@ -1821,14 +1822,32 @@
         2913
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "suite": "tests=1272 pass=1272 fail=0 cancelled=0 skipped=0 todo=0; all five legs green (node, tsc, bun, schema-export, python). Run twice in the main tree, identical, and again in a fresh detached worktree with its own npm install: identical there too.",
+        "setupOnly": "conductor/tests/setup.test.ts alone through the same wrapper: tests=28 pass=28, one per the 28 rows of docs/build/specs/task-12.2.assertions.json."
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "class": "wrong-expectation (the gate's own red row, observed by the phase-12 gate stage 1)",
+        "excerpt": "setup.test.ts:726 [12.2-detect-itemtest-templates] python: detectRunner([python3,-m,pytest]) must be the python profile, 'pytest' !== 'python'. TAP tests=1272 pass=1271 fail=1, run twice identically."
+      },
+      "filesTouched": [
+        "conductor/tests/setup.test.ts",
+        "conductor/adapter/tools.ts",
+        "conductor/adapter/gitio.ts",
+        "conductor/core/journal-events.ts",
+        "conductor/core/tool-bindings.ts",
+        "conductor/plugin/index.ts"
+      ],
+      "revertAssertion": "RUN by the gatekeeper itself, in a disposable worktree so the main tree was never mutated, and cmp-verified clean afterwards. TARGETED: dropping the `base.startsWith(\"python\") && rest.includes(\"pytest\")` arm from detectRunner in conductor/adapter/evidence.ts - so `python3 -m pytest` falls through to the node profile - takes setup.test.ts from 28/28 to tests=28 pass=26 fail=2, failing [12.2-detect-itemtest-templates] and [12.2-c003-pytest-measured]. The suite therefore binds the python leg to a real committed runner profile rather than to whatever detectRunner returns.",
+      "attempts": 1,
+      "deviations": [
+        "C-073: 12.2's product is committed under the phase-gate message `conductor-build: phase 12 gate stage 1 repair`, NOT under its own commitMessage `conductor: 12.2 first-run setup`. The task was left uncommitted when the phase-12 gate was dispatched over it; the gate found it, the fix round finished it, and the gatekeeper - the only role permitted to write git - committed the repair under the message its brief specified. Consequence to know: `git log --grep='^conductor: 12.2'` finds NOTHING. This row's status plus commitSha is the receipt, per meta.convention.commitSha.",
+        "The gate's red row was a defect in the TEST, not the product: its expectation table mapped ecosystem -> profile by identity except cmake->ctest, but RUNNER_PROFILES is keyed by RUNNER (node/pytest/go/ctest, and [12.2-detect-cargo] pins that there is no fifth), so the python scope compared 'pytest' against 'python'. The test already contradicted itself ten lines above. Replaced with an explicit PROFILE_FOR_ECOSYSTEM map plus an assertion that every non-cargo ecosystem has a mapping, so an unmapped ecosystem fails loudly instead of comparing against undefined. No product code changed for it."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T12:35:00Z"
     },
     "13.1": {
       "taskId": "13.1",

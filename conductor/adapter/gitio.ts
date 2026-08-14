@@ -33,6 +33,7 @@
 //   currentBranch(cwd)              -> string | null
 //   isRepo(cwd)                     -> boolean
 //   gitCommonDir(cwd)               -> string | null  (the effective exclude target, C-021)
+//   initRepo(cwd)                   -> boolean        (§3.9's "initialize a repo here")
 
 import { execFileSync } from "node:child_process";
 import { statSync } from "node:fs";
@@ -283,6 +284,25 @@ export function currentBranch(cwd: string): string | null {
 export function isRepo(cwd: string): boolean {
   const out = tryGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
   return out !== null && out.trim() === "true";
+}
+
+// The §3.9:1500-1502 "initialize a repo here" branch: `git init` in `cwd`, run
+// by the HANDLER under the same execFileSync/argv discipline as every read above
+// (never a shell string, never a model session — core/gates-git.ts denies
+// session-side git writes outright). The ONLY write this module performs, and it
+// is deliberately narrow: no commit, no config, no remote, no branch rename.
+//
+// Returns true when this call created the repository, false when `cwd` already
+// was one (idempotent, so a caller that re-derives isRepo sees the same answer
+// either way). A git that cannot run, or an init that leaves `cwd` still outside
+// a work tree, throws — an init nobody can see is worse than a loud failure.
+export function initRepo(cwd: string): boolean {
+  if (isRepo(cwd)) return false;
+  runGit(cwd, ["init", "-q"]);
+  if (!isRepo(cwd)) {
+    throw new Error(`gitio: \`git init\` in ${cwd} left it outside a work tree`);
+  }
+  return true;
 }
 
 // Absolute path to the repository's COMMON gitdir — `rev-parse --git-common-dir`,

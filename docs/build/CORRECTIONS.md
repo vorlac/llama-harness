@@ -3229,3 +3229,84 @@ survived only because C-062 also wrote it into this file. Durable obligations be
 
 Also backfilled here: `STATE.json` had task 12.1 `COMMITTED` with `commitSha: null`. The commit is
 `589d22e`. A status without a sha is a claim without a receipt.
+
+## C-073 — the Phase 12 gate, re-run: stage 1 PASS, and the string test kept passing
+
+One fix round, and stage 1 clears. `bash scripts/test-conductor.sh`: **tests=1272 pass=1272 fail=0**,
+five legs, run twice identically. C++ 92 cases / 27,726 assertions. M5 clean in both modes. The
+fresh worktree — this time cut from HEAD, loaded with the exact file set about to be committed,
+`cmp`-verified byte-identical, given its own `npm install` — also reports **1272/1272, GATE PASS**.
+That ordering is deliberate: run the fresh checkout *before* the commit and over the *intended* set,
+and a forgotten `git add` fails there instead of six commits later.
+
+### C-072's major is closed by a test that runs, and the old test proves why that mattered
+
+`scripts/test_conductor_wiring.py` gains `class RouterSupervisorExecution`: two cases that execute
+the real `cw.ROUTER_SUPERVISOR_SOURCE` in a real interpreter via `cw.start_router_supervisor`,
+against a planted fake router binary and a real throwaway process standing in for the session shell.
+`[12.1-supervisor-signals-executed]` kills the shell and asserts the router records the SIGTERM it
+*actually received*, exits, is reaped, and its pid is gone, while the supervisor exits 0.
+`[12.1-supervisor-sigkill-executed]` gives the router a SIGTERM handler and a refusal to die, and
+asserts it is gone anyway, never exited voluntarily, and not before `ROUTER_TERM_GRACE_S` elapsed.
+
+The gate ran C-072's mutation itself rather than taking the fix round's word for it — `stop()`
+replaced by a bare `return`, with the SIGTERM kill, the grace deadline and the SIGKILL escalation
+demoted to comments so every token the string test greps for survives, in order:
+
+    Ran 31 tests ... FAILED (failures=2)
+    FAIL: test_12_1_supervisor_escalates_to_sigkill  — the router was never signalled
+    FAIL: test_12_1_supervisor_signals_and_reaps     — the router was never signalled
+
+`test_12_1_supervisor_lifecycle` — the four `assertIn`/`assertLess` checks over the source string —
+**passed**, against a supervisor that signals nothing. C-062 wrote the consequence down and C-072
+adjudicated it; this is the run that shows it. The string test is kept, not deleted: it pins the
+argv and flag shape cheaply, and the pair now bins distinctly, so losing the signal and losing the
+escalation fail different rows.
+
+Cost, disclosed: the escalation case must spend the real 10.0s grace in wall clock. The python leg
+goes ~1s → ~13s and the gate ~90s → ~105s. Shortening it would mean not running the real source.
+
+### The red row was the test being wrong about its own subject
+
+`[12.2-detect-itemtest-templates]` mapped ecosystem → profile by identity except `cmake→ctest`. But
+`RUNNER_PROFILES` is keyed by **runner** — `node/pytest/go/ctest`, and `[12.2-detect-cargo]` pins
+that there is no fifth — so the python scope compared `'pytest'` against `'python'`. Ten lines
+above, the same test asserts `detectRunner(pyScope.command).runner === "pytest"`. It contradicted
+itself, and the product was right the whole time. Replaced with an explicit `PROFILE_FOR_ECOSYSTEM`
+map plus an assertion that every non-cargo ecosystem *has* a mapping, so an unmapped ecosystem fails
+loudly instead of silently comparing against `undefined`. The gate's second mutation — dropping the
+`python3 -m pytest` arm from `detectRunner` — takes `setup.test.ts` to 26/28, so the repaired
+expectation still binds to a real committed profile rather than to whatever `detectRunner` returns.
+
+### Two rows added to a committed spec, and one commit message that will not answer the usual query
+
+`docs/build/specs/task-12.1.assertions.json` had 29 rows against 31 named tests once the executed
+pair landed — M7 would have flipped red for the opposite reason. The two rows are added as **text**,
+not by re-serialising the file: a `json.dump` round-trip reformatted all 86 lines (the file keeps
+`"planLines": [2866, 2889]` inline and its em dashes unescaped) and made the diff unreadable. The
+surgical edit is +10 lines. `GATES.json` and `STATE.json` *do* round-trip byte-stably under
+`indent=2, ensure_ascii=True`; that was checked with a no-op dump before either was touched, not
+assumed.
+
+Deviation worth knowing before you trust the usual query: **task 12.2's product is committed under
+`conductor-build: phase 12 gate stage 1 repair`, not under its own `conductor: 12.2 first-run
+setup`.** 12.2 was left uncommitted when the phase gate was dispatched over it, and the gatekeeper —
+the only role permitted to write git — committed the repair under the message its brief specified.
+So `git log --grep='^conductor: 12.2'` finds nothing. `STATE.json`'s `status` + `commitSha` is the
+receipt, which is exactly what `meta.convention.commitSha` says it is for.
+
+### Still open, and one of them is now three gates old
+
+`scripts/conductor-gate.sh` still cannot see `scripts/`. Its `git ls-files` globs are
+`conductor/**/*.ts`, `router/**`, `tools/**`, so task 12.1's entire product — including the executed
+supervisor tests this correction is about — is not in the 115 files M5 reports. The file is
+orchestrator-owned and says so on line 2, so neither the fix round nor the gate could widen it;
+both passed the files explicitly instead, and M5 is clean over them. The untracked half self-heals
+here: `setup.test.ts` becomes tracked with this commit and the default glob picks it up. The
+`scripts/*.py` half is an orchestrator edit and is still owed.
+
+Four of C-062's five disclosed 12.1 survivors also remain: `wait_for_router_health` is still called
+by no test, `ROUTER_TERM_GRACE_S` has no upper bound, and `derive_slots`' bool guard is unpinned.
+Only the serious one closed.
+
+Stage 1 passing is permission to convene a reviewer, not a phase verdict. Stage 2 has not run.

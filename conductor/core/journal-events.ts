@@ -74,6 +74,13 @@ export const EVENTS: Record<Component, readonly string[]> = {
   //                       No gate/fsm/state name states that fact — the call was
   //                       not adjudicated, no transition was attempted, and
   //                       nothing was persisted.
+  //   config.updated    — §2.1/§3.4: conductor_setup rewrote .conductor/config.json
+  //                       on a reconfigure, and data.changes carries the diff (the
+  //                       changed keys with their old and new values). Setup
+  //                       precedes every run, writes no item and records no
+  //                       decision, so item.updated and decision.recorded would
+  //                       both LIE about what happened; the widening follows the
+  //                       decision.recorded precedent exactly (C-029 F7).
   state: [
     "run.created",
     "lock.acquired",
@@ -86,6 +93,7 @@ export const EVENTS: Record<Component, readonly string[]> = {
     "question.surfaced",
     "run.stop-report",
     "hook.failed",
+    "config.updated",
   ],
 };
 

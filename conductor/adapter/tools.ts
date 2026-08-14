@@ -26,6 +26,7 @@
 
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import * as path from "node:path";
 
 import { decideGit } from "../core/gates-git.ts";
@@ -68,18 +69,21 @@ import type {
   TrivialItem,
   Verdict,
 } from "../core/types.ts";
-import { readJsonFileSync, writeFileAtomicSync } from "./state.ts";
+import { readJsonFileSync, registerConductorExclude, writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
+import { DEFAULT_CONFIG, configPath, loadConfig } from "./config-io.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import type { NewQuestion } from "./questions.ts";
-import { headSha, indexMtimeMs, isRepo, worktreeMtimes } from "./gitio.ts";
+import { headSha, indexMtimeMs, initRepo, isRepo, worktreeMtimes } from "./gitio.ts";
 import { createWorktree, mergeBack } from "./worktrees.ts";
 import { verifyFreshFor } from "../core/freshness.ts";
-import type { MetricsSummary } from "./router-client.ts";
+import { isTerminal } from "../core/stops.ts";
+import { noteRouterFailure, resolveBaseUrl } from "./router-client.ts";
+import type { FailoverState, MetricsSummary } from "./router-client.ts";
 import { buildCommitMessage, denylistedTrailerToken } from "../core/commit-message.ts";
 import type { RedProof } from "../core/commit-message.ts";
 import type { Fanout, FanoutJob, TreeState } from "./fanout.ts";
-import { runTest, runVerify } from "./evidence.ts";
+import { childEnv, detectRunner, runTest, runVerify, substituteItemTest } from "./evidence.ts";
 import type { RunTestResult, ScopeSpec } from "./evidence.ts";
 import type { Journal } from "./journal.ts";
 
@@ -7999,5 +8003,1004 @@ export async function handleOverride(input: OverrideInput): Promise<OverrideResu
     overridesUsedRun: run.counters.overridesUsed,
     stop: null,
     reportPath: null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// (12.2) conductor_setup — first-run repo setup (plan 2890-2913).
+//
+// The ONE handler that takes no StateStore and no runId. adapter/state.ts
+// OpenOptions REQUIRES a Config, and a Config is exactly what setup produces, so
+// the first-run path cannot go through openWorkspace at all: handleSetup reads
+// and writes the workspace directly, journals through a runId-OPTIONAL sink
+// (the shape adapter/state.ts StateJournal already defines for the lock/beacon
+// events that precede any run), and never takes the run lock.
+//
+// TWO PHASES, because §2.1:622's two questions have NO default. A call WITHOUT
+// every required answer runs detection + the smoke spawn, returns the proposals
+// and the open asks, and WRITES NOTHING. A call carrying every required answer
+// additionally runs the three §2.1:628-632 live proofs and — only if all of them
+// pass — writes .conductor/config.json atomically. The proofs run against the
+// CANDIDATE config in memory: §2.1:634 makes a failed check a setup FAILURE, and
+// core/gates-phase.ts keys the whole tool surface off the file's presence, so a
+// half-proven config on disk is strictly worse than no config at all.
+//
+// An out-of-contract CALL throws (the committed handleX convention): an
+// already-configured repo without reconfigure:true, and a reconfigure while a run
+// is live. A failed setup CHECK returns {ok:false, written:false, failures:[…]}
+// so every named remedy is narrated at once.
+// ---------------------------------------------------------------------------
+
+// The tiny schema the §2.1:630 probe constrains its request with AND validates
+// its reply against — ONE object at both ends, resolved through core validate()
+// like every other §2 artifact. Registering it widens no §2 schema: SCHEMAS is
+// deliberately a mutable name→schema record (core/types.ts), and this is a PROBE
+// schema, not an artifact one.
+export const SETUP_PROBE_SCHEMA_NAME = "SetupProbe";
+
+const SETUP_PROBE_SCHEMA = {
+  type: "object",
+  properties: { ok: { type: "boolean" } },
+  required: ["ok"],
+  additionalProperties: false,
+};
+
+SCHEMAS[SETUP_PROBE_SCHEMA_NAME] = SETUP_PROBE_SCHEMA;
+
+// §2.1:483's example scope timeout, applied to every proposed scope.
+const SETUP_SCOPE_TIMEOUT_MS = 600000;
+// The smoke probe's own kill timeout. A probe exists to answer "can this be
+// spawned at all"; one that hangs has answered nothing and must never wedge setup.
+const SETUP_SMOKE_TIMEOUT_MS = 10000;
+// The representative testScope the itemTest templates are substituted against
+// before their argv[0] is probed (P6): a template is only probeable once its
+// §2.1 tokens are gone.
+const SETUP_REPRESENTATIVE_TEST_FILES = ["pkg/example/example_test.go"];
+// The §2.1:499 pytest default, and the C-003 fallback interpreters tried in order
+// when its argv[0] is not on this machine's PATH.
+const SETUP_PYTEST_INTERPRETERS = ["python3", "python"];
+
+const ASK_GIT_MODE = "git.mode";
+const ASK_BEHAVIORAL_PATHS = "verify.behavioralPaths";
+const ASK_GIT_INIT = "git.init";
+
+export interface SetupAnswers {
+  gitMode?: GitMode;
+  behavioralPaths?: string[];
+  initRepo?: boolean;
+}
+
+// One §6.2:1875 sanctioned interactive ask. These are the handler's RESULT, not
+// §2.11 questions: adapter/questions.ts is keyed to a run dir setup has not got,
+// and QUESTION_ORIGINS has no setup origin — widening it would file a workspace
+// question under a run that does not exist.
+export interface SetupAsk {
+  id: string;
+  question: string;
+  options: string[];
+  proposal: string[] | null;
+}
+
+// A detected ecosystem's proposal. `command`/`timeoutMs`/`itemTest` are the §2.1
+// scope fields verbatim; `ecosystem`, `behavioralPaths` and `sourceGlob` ride
+// alongside so a multi-ecosystem repo cannot silently overwrite one scope with
+// another and each requiredScopes pattern has a source.
+export interface ProposedScope {
+  name: string;
+  ecosystem: string;
+  command: string[];
+  timeoutMs: number;
+  itemTest?: string[];
+  behavioralPaths: string[];
+  sourceGlob: string;
+}
+
+// One smoke probe, recorded so "the check covers every command" is verifiable
+// rather than asserted: a scope command and its itemTest almost always share an
+// argv[0], so a count would not distinguish "both probed" from "one probed".
+export interface SmokeProbe {
+  source: string;
+  argv0: string;
+  ok: boolean;
+}
+
+export interface SetupProposals {
+  scopes: ProposedScope[];
+  behavioralPaths: string[];
+  requiredScopes: Array<{ pattern: string; scopes: string[] }>;
+  notes: string[];
+  smoked: SmokeProbe[];
+}
+
+export interface ConfigChange {
+  key: string;
+  from: unknown;
+  to: unknown;
+}
+
+// The workspace-level journal sink (adapter/state.ts StateJournal's shape): runId
+// is OPTIONAL because setup precedes every run.
+export interface SetupJournalSink {
+  log: (
+    level: string,
+    component: string,
+    event: string,
+    data: Record<string, unknown>,
+    corr: { runId?: string; itemId?: string; sessionID?: string },
+  ) => void;
+}
+
+export interface SetupInput {
+  root: string;
+  journal: SetupJournalSink;
+  router: { listen: { host: string; port: number }; probeTimeoutMs: number };
+  upstream: { host: string; port: number };
+  failoverState: FailoverState;
+  reconfigure?: boolean;
+  answers?: {
+    gitMode?: GitMode;
+    behavioralPaths?: string[];
+    initRepo?: boolean;
+  };
+  // The session's served model id when the caller knows it (Task 12.1 does).
+  modelId?: string;
+  now?: () => number;
+}
+
+export interface SetupResult {
+  ok: boolean;
+  written: boolean;
+  repoConfigured: boolean;
+  isRepo: boolean;
+  asks: SetupAsk[];
+  proposals: SetupProposals;
+  config: Config | null;
+  failures: string[];
+  diff: ConfigChange[] | null;
+}
+
+function setupIsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Read + parse a JSON file, or null when it is absent or unreadable. Setup reads
+// the TARGET repo's files, which it does not own: a package.json it cannot parse
+// is a repo fact, not a conductor fault.
+function setupReadJsonFile(file: string): Record<string, unknown> | null {
+  if (!existsSync(file)) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    return setupIsRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function setupReadTextFile(file: string): string | null {
+  if (!existsSync(file)) return null;
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// The §2.1 git modes, read off the REGISTERED schema rather than restated here,
+// so the ask can never offer a mode the config would reject.
+function setupGitModes(): string[] {
+  const schema = SCHEMAS.Config as Record<string, unknown>;
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  const gitProperties = properties.git.properties as Record<string, Record<string, unknown>>;
+  const modes = gitProperties.mode.enum;
+  return Array.isArray(modes) ? modes.map((mode) => String(mode)) : [];
+}
+
+// ONE spawn probe: [argv0, "--version"], shell:false, under evidence.childEnv,
+// with closed stdin and a bounded kill. The verdict is SPAWNABILITY alone — a
+// command that exists and exits non-zero (`go --version` exits 2 on a perfectly
+// good toolchain) has answered the question the plan asks. `error` is set when
+// the process could not be spawned at all, and when the kill timeout fired.
+function setupSmokeProbe(
+  root: string,
+  source: string,
+  argv0: string,
+  smoked: SmokeProbe[],
+): boolean {
+  const result = spawnSync(argv0, ["--version"], {
+    cwd: root,
+    env: childEnv(),
+    timeout: SETUP_SMOKE_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+  const ok = result.error === undefined;
+  smoked.push({ source, argv0, ok });
+  return ok;
+}
+
+function setupUnspawnableFailure(argv0: string, source: string): string {
+  return (
+    `setup: the command "${argv0}" (${source}) could not be spawned on this machine — ` +
+    "remedy: install it, put it on PATH, or correct the command in .conductor/config.json " +
+    "before running conductor_setup again"
+  );
+}
+
+// The node leg's template rule (P7). evidence.detectRunner falls back to the node
+// profile for EVERY unrecognized command, so keying the attachment on it would
+// staple `node --test {files}` onto a jest repo — the silent wrong answer §2.1's
+// absent-template fallback exists to avoid. Recognition is the argv itself.
+function setupIsNodeCommand(command: string[]): boolean {
+  if (command.length === 0) return false;
+  const base = path.basename(command[0]).toLowerCase();
+  return base.startsWith("node") || command.includes("--test");
+}
+
+// pyproject.toml's project name, as the python behavioralPaths package dir. A
+// deliberately narrow read: the first `name = "…"` line, which is what §2.1's
+// detection needs and all a proposal the human must confirm should claim.
+function setupPyprojectPackage(text: string): string | null {
+  const match = /^\s*name\s*=\s*["']([^"']+)["']/m.exec(text);
+  if (match === null) return null;
+  return match[1].replace(/-/g, "_");
+}
+
+interface SetupDetection {
+  scopes: ProposedScope[];
+  notes: string[];
+}
+
+// The §2.1:620 detection matrix. Every proposal is an argv ARRAY (never a shell
+// string), carries the §2.1:499 itemTest default for its runner (cargo has none,
+// and none is invented), and is proposed — never written — until the human
+// answers.
+function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
+  const scopes: ProposedScope[] = [];
+  const notes: string[] = [];
+
+  const pkg = setupReadJsonFile(path.join(root, "package.json"));
+  if (pkg !== null) {
+    const scripts = setupIsRecord(pkg.scripts) ? pkg.scripts : {};
+    const scriptTest = typeof scripts.test === "string" ? scripts.test : null;
+    let command: string[] = ["node", "--test"];
+    if (scriptTest !== null) {
+      const tokens = shellTokens(scriptTest);
+      if (tokens.length > 0) {
+        command = tokens;
+        notes.push(`node: verify command taken from package.json scripts.test (${scriptTest})`);
+      }
+    }
+    const scope: ProposedScope = {
+      name: "node",
+      ecosystem: "node",
+      command,
+      timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
+      behavioralPaths: ["src/**", "lib/**"],
+      sourceGlob: "src/**",
+    };
+    if (setupIsNodeCommand(command)) {
+      scope.itemTest = ["node", "--test", "{files}"];
+    } else {
+      notes.push(
+        `node: ${command[0]} is not node's own runner, so no itemTest template is proposed ` +
+          "(§2.1's absent-template fallback runs the whole scope command instead)",
+      );
+    }
+    scopes.push(scope);
+  }
+
+  const cmakeText = setupReadTextFile(path.join(root, "CMakeLists.txt"));
+  if (cmakeText !== null && cmakeText.includes("enable_testing")) {
+    scopes.push({
+      name: "cmake",
+      ecosystem: "cmake",
+      command: ["ctest"],
+      timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
+      itemTest: ["ctest", "-R", "{name}"],
+      behavioralPaths: ["src/**", "include/**"],
+      sourceGlob: "src/**",
+    });
+    notes.push(
+      "cmake: `ctest` is proposed unqualified — most CMake projects run it from a build " +
+        "directory, and setup guesses none rather than pointing the scope at a directory that " +
+        "may not exist",
+    );
+  }
+
+  const pyproject = setupReadTextFile(path.join(root, "pyproject.toml"));
+  if (pyproject !== null) {
+    // C-003: §2.1:499's `pytest {files}` is the FIRST choice, and it is MEASURED
+    // rather than assumed — bare pytest is not on every machine's PATH (it is not
+    // on this one). Only a genuinely failed probe swaps in an interpreter, and the
+    // swap is named in the notes rather than made silently.
+    let command = ["pytest"];
+    let itemTest = ["pytest", "{files}"];
+    const bareOk = setupSmokeProbe(root, "verify.scopes.python.command(§2.1 default)", "pytest", smoked);
+    if (bareOk) {
+      notes.push("python: the §2.1:499 default `pytest {files}` is spawnable here and is used as-is");
+    } else {
+      let chosen: string | null = null;
+      for (const interpreter of SETUP_PYTEST_INTERPRETERS) {
+        const probe = spawnSync(interpreter, ["-m", "pytest", "--version"], {
+          cwd: root,
+          env: childEnv(),
+          timeout: SETUP_SMOKE_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+          maxBuffer: 1024 * 1024,
+        });
+        if (probe.error === undefined && probe.status === 0) {
+          chosen = interpreter;
+          break;
+        }
+      }
+      if (chosen !== null) {
+        command = [chosen, "-m", "pytest"];
+        itemTest = [chosen, "-m", "pytest", "{files}"];
+        notes.push(
+          `python: bare \`pytest\` is not on PATH here, so the scope runs pytest through ` +
+            `${chosen} (-m pytest); evidence.detectRunner reads that argv as the pytest profile, ` +
+            "so nothing downstream sees a different runner",
+        );
+      } else {
+        notes.push(
+          "python: neither bare `pytest` nor an interpreter carrying `-m pytest` could be " +
+            "spawned here, so the §2.1:499 default is proposed unchanged and will fail its " +
+            "smoke check until pytest is installed",
+        );
+      }
+    }
+    const pkgDir = setupPyprojectPackage(pyproject);
+    const sourceGlob = pkgDir === null ? "**/*.py" : `${pkgDir}/**`;
+    scopes.push({
+      name: "python",
+      ecosystem: "python",
+      command,
+      timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
+      itemTest,
+      behavioralPaths: [sourceGlob],
+      sourceGlob,
+    });
+  }
+
+  if (existsSync(path.join(root, "go.mod"))) {
+    // §2.1:503-506: the template targets package DIRS. `-run` matches test
+    // FUNCTION names, so handed file basenames it exits 0 having run zero tests —
+    // a green that proves nothing. No go argv this matrix proposes carries it.
+    scopes.push({
+      name: "go",
+      ecosystem: "go",
+      command: ["go", "test", "./..."],
+      timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
+      itemTest: ["go", "test", "{dirs}"],
+      behavioralPaths: ["**/*.go"],
+      sourceGlob: "**/*.go",
+    });
+  }
+
+  if (existsSync(path.join(root, "Cargo.toml"))) {
+    // No itemTest: §2.1 pins no cargo template, and inventing one would be a
+    // guess the human is not asked to confirm. No fifth RUNNER_PROFILE either —
+    // that is a §2.6.1 classification change, and detectRunner's conservative
+    // node fallback bins an unfamiliar cargo failure as `error`, the safe bin.
+    scopes.push({
+      name: "cargo",
+      ecosystem: "cargo",
+      command: ["cargo", "test"],
+      timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
+      behavioralPaths: ["src/**"],
+      sourceGlob: "src/**",
+    });
+  }
+
+  for (const scope of scopes) {
+    notes.push(
+      `${scope.name}: failures from this scope classify under the ` +
+        `${detectRunner(scope.command).runner} runner profile (§2.6.1)`,
+    );
+  }
+  return { scopes, notes };
+}
+
+// One requiredScopes entry per detected scope, so no path is left with an empty
+// scope list by construction. With exactly one ecosystem the pattern is "**";
+// with several, each entry's pattern is that ecosystem's own source glob.
+function setupRequiredScopes(scopes: ProposedScope[]): Array<{ pattern: string; scopes: string[] }> {
+  if (scopes.length === 1) return [{ pattern: "**", scopes: [scopes[0].name] }];
+  return scopes.map((scope) => ({ pattern: scope.sourceGlob, scopes: [scope.name] }));
+}
+
+function setupMergedBehavioralPaths(scopes: ProposedScope[]): string[] {
+  const merged: string[] = [];
+  for (const scope of scopes) {
+    for (const glob of scope.behavioralPaths) {
+      if (!merged.includes(glob)) merged.push(glob);
+    }
+  }
+  return merged;
+}
+
+// Smoke-spawn every command the config would RECORD: each scope command, each
+// scope itemTest (substituted, so no §2.1 token reaches the probe), and every
+// format rule (setup proposes none, but a reconfigure inherits the ones already
+// in the file).
+function setupSmokeAll(
+  root: string,
+  scopes: ProposedScope[],
+  formatRules: Config["format"]["rules"],
+  smoked: SmokeProbe[],
+): string[] {
+  const failures: string[] = [];
+  for (const scope of scopes) {
+    const commandSource = `verify.scopes.${scope.name}.command`;
+    if (!setupSmokeProbe(root, commandSource, scope.command[0], smoked)) {
+      failures.push(setupUnspawnableFailure(scope.command[0], commandSource));
+    }
+    const itemTest = scope.itemTest;
+    if (itemTest !== undefined) {
+      const itemTestSource = `verify.scopes.${scope.name}.itemTest`;
+      const substituted = substituteItemTest(itemTest, SETUP_REPRESENTATIVE_TEST_FILES);
+      if (substituted.length > 0 && !setupSmokeProbe(root, itemTestSource, substituted[0], smoked)) {
+        failures.push(setupUnspawnableFailure(substituted[0], itemTestSource));
+      }
+    }
+  }
+  for (let i = 0; i < formatRules.length; i += 1) {
+    const rule = formatRules[i];
+    const source = `format.rules[${String(i)}].command`;
+    if (rule.command.length === 0) continue;
+    if (!setupSmokeProbe(root, source, rule.command[0], smoked)) {
+      failures.push(setupUnspawnableFailure(rule.command[0], source));
+    }
+  }
+  return failures;
+}
+
+interface SetupHttpResult {
+  status: number;
+  body: string;
+}
+
+// A single bounded, fail-soft JSON request. It NEVER rejects: a refused
+// connection, a socket error, or a hang past probeTimeoutMs all resolve null, so
+// the CALLER decides what a failed request means (a dead router is a failover; a
+// dead upstream is a failed proof). The router-client's httpGet is GET-only and
+// module-private, so this is the same discipline written for the POST the schema
+// probe needs — not a second policy.
+function setupHttpJson(
+  origin: string,
+  pathName: string,
+  method: "GET" | "POST",
+  payload: Record<string, unknown> | null,
+  timeoutMs: number,
+): Promise<SetupHttpResult | null> {
+  return new Promise<SetupHttpResult | null>((resolve) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const finish = (value: SetupHttpResult | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      resolve(value);
+    };
+
+    let url: URL;
+    try {
+      url = new URL(pathName, origin);
+    } catch {
+      finish(null);
+      return;
+    }
+    const body = payload === null ? null : JSON.stringify(payload);
+    const headers: Record<string, string> =
+      body === null
+        ? {}
+        : { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) };
+
+    const req = httpRequest(
+      { host: url.hostname, port: url.port, path: url.pathname + url.search, method, headers },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          finish({ status, body: Buffer.concat(chunks).toString("utf8") });
+        });
+        res.on("error", () => {
+          req.destroy();
+          finish(null);
+        });
+      },
+    );
+    req.on("error", () => {
+      finish(null);
+    });
+    timer = setTimeout(() => {
+      req.destroy();
+      finish(null);
+    }, timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+    if (body !== null) req.write(body);
+    req.end();
+  });
+}
+
+// One proof request against the §4.4 origin. A DOWN ROUTER IS NOT A SETUP
+// FAILURE (G5): the first failed request latches the session onto the upstream
+// through the committed noteRouterFailure and the request is re-made against the
+// origin resolveBaseUrl then yields. Only what the proofs themselves prove false
+// fails setup.
+//
+// The `failover` record is written HERE, with a literal component and event, and
+// noteRouterFailure is called without its optional sink: forwarding a sink that
+// passes the event name through as a variable would make this call site invisible
+// to the §7.4 source audit, which is the one guard that sees journal names no
+// test drives.
+async function setupProofRequest(
+  input: SetupInput,
+  pathName: string,
+  method: "GET" | "POST",
+  payload: Record<string, unknown> | null,
+): Promise<SetupHttpResult | null> {
+  const timeoutMs = input.router.probeTimeoutMs;
+  const first = resolveBaseUrl(input.router, input.upstream, input.failoverState);
+  const result = await setupHttpJson(first, pathName, method, payload, timeoutMs);
+  if (result !== null || input.failoverState.useUpstream) return result;
+
+  noteRouterFailure(input.failoverState);
+  input.journal.log(
+    "warn",
+    "router-client",
+    "failover",
+    {
+      failovers: input.failoverState.failovers,
+      probingDisabled: input.failoverState.probingDisabled,
+      origin: first,
+      path: pathName,
+    },
+    {},
+  );
+  const second = resolveBaseUrl(input.router, input.upstream, input.failoverState);
+  if (second === first) return null;
+  return await setupHttpJson(second, pathName, method, payload, timeoutMs);
+}
+
+function setupParseJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+// §2.1:629 — the served model list, or null when the origin could not answer.
+async function setupServedModels(input: SetupInput): Promise<string[] | null> {
+  const res = await setupProofRequest(input, "/v1/models", "GET", null);
+  if (res === null || res.status !== 200) return null;
+  const parsed = setupParseJson(res.body);
+  if (!setupIsRecord(parsed) || !Array.isArray(parsed.data)) return null;
+  const ids: string[] = [];
+  for (const entry of parsed.data) {
+    if (setupIsRecord(entry) && typeof entry.id === "string") ids.push(entry.id);
+  }
+  return ids;
+}
+
+// §2.1:630 — ONE tiny schema-constrained request, sent DIRECT (never through
+// opencode's prompt path, which adapter/wire-notes.md proved emits neither
+// `format` nor `response_format` at 1.18.15) and non-streaming. PASS is "the
+// reply validates against the probe's schema": a model that ignores the
+// constraint but answers correctly passes, and an EMPTY completion — measured on
+// this repo's weights, C-058 — does not.
+async function setupSchemaProbe(input: SetupInput, model: string): Promise<string | null> {
+  const res = await setupProofRequest(input, "/v1/chat/completions", "POST", {
+    model,
+    messages: [
+      {
+        role: "user",
+        content: 'Reply with exactly this JSON object and nothing else: {"ok": true}',
+      },
+    ],
+    stream: false,
+    max_tokens: 256,
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: SETUP_PROBE_SCHEMA_NAME, strict: true, schema: SETUP_PROBE_SCHEMA },
+    },
+  });
+  if (res === null) {
+    return (
+      "setup proof (§2.1:630): the schema-constrained probe request never completed — " +
+      "remedy: start the served model (or the router) and run conductor_setup again"
+    );
+  }
+  if (res.status !== 200) {
+    return (
+      `setup proof (§2.1:630): the schema-constrained probe returned HTTP ${String(res.status)} — ` +
+      "remedy: check the served origin's log; a server that refuses response_format cannot be " +
+      "trusted with the schema-shaped stages"
+    );
+  }
+  const parsed = setupParseJson(res.body);
+  let content: string | null = null;
+  if (setupIsRecord(parsed) && Array.isArray(parsed.choices) && parsed.choices.length > 0) {
+    const choice = parsed.choices[0];
+    if (setupIsRecord(choice) && setupIsRecord(choice.message) && typeof choice.message.content === "string") {
+      content = choice.message.content;
+    }
+  }
+  if (content === null || content.trim().length === 0) {
+    return (
+      "setup proof (§2.1:630): the schema-constrained probe came back EMPTY (a 200 with no " +
+      "content) — a model that spends its whole budget and returns nothing can never produce " +
+      "structured output; remedy: raise the served model's token budget, or serve a model that " +
+      "honours response_format"
+    );
+  }
+  const reply = setupParseJson(content);
+  if (reply === undefined) {
+    return (
+      "setup proof (§2.1:630): the schema-constrained probe came back unconstrained — the reply " +
+      `is not JSON at all (${content.slice(0, 120)}); remedy: serve a model that honours ` +
+      "response_format json_schema"
+    );
+  }
+  const verdict = validate(SETUP_PROBE_SCHEMA_NAME, reply);
+  if (!verdict.ok) {
+    return (
+      "setup proof (§2.1:630): the schema-constrained probe came back unconstrained — the reply " +
+      `does not validate against the probe schema (${verdict.errors.join("; ")}); remedy: serve a ` +
+      "model that honours response_format json_schema"
+    );
+  }
+  return null;
+}
+
+// §2.1:631 — the slot proof. llama-server publishes its own slot count at
+// GET /props (total_slots), which is the SERVER-side signal; a client cannot
+// observe server-side overlap, and wall-clock timing would measure the machine's
+// load rather than the server's capacity.
+async function setupSlotProof(input: SetupInput, maxReaders: number): Promise<string | null> {
+  const res = await setupProofRequest(input, "/props", "GET", null);
+  if (res === null || res.status !== 200) {
+    return (
+      "setup proof (§2.1:631): the served origin did not answer GET /props, so its slot count " +
+      "is unknown — remedy: serve the model through llama-server (which publishes total_slots) " +
+      `and start it with --parallel ${String(maxReaders)} plus a matching --ctx-size`
+    );
+  }
+  const parsed = setupParseJson(res.body);
+  const slots =
+    setupIsRecord(parsed) && typeof parsed.total_slots === "number" ? parsed.total_slots : null;
+  if (slots === null) {
+    return (
+      "setup proof (§2.1:631): the served origin's /props carries no total_slots, so the " +
+      `configured parallel.maxReaders ${String(maxReaders)} cannot be proven — remedy: start ` +
+      `llama-server with --parallel ${String(maxReaders)} and a matching --ctx-size`
+    );
+  }
+  if (slots < maxReaders) {
+    return (
+      `setup proof (§2.1:631): the served origin reports ${String(slots)} slots but ` +
+      `parallel.maxReaders is ${String(maxReaders)} — the fan-out would serialize against a ` +
+      "server that cannot hold its readers open. Remedy: restart llama-server with " +
+      `--parallel ${String(maxReaders)}, and raise --ctx-size with it: --ctx-size is the TOTAL ` +
+      "context divided among the slots, so adding slots alone shrinks every slot's window"
+    );
+  }
+  return null;
+}
+
+// Flatten a config to dotted key paths, arrays and scalars as leaves, so a diff
+// names the field a human would edit (`git.mode`) rather than the object holding it.
+function setupFlattenConfig(value: unknown, prefix: string, out: Map<string, unknown>): void {
+  if (setupIsRecord(value)) {
+    for (const [key, inner] of Object.entries(value)) {
+      setupFlattenConfig(inner, prefix.length === 0 ? key : `${prefix}.${key}`, out);
+    }
+    return;
+  }
+  out.set(prefix, value);
+}
+
+function setupConfigDiff(before: Config, after: Config): ConfigChange[] {
+  const from = new Map<string, unknown>();
+  const to = new Map<string, unknown>();
+  setupFlattenConfig(before, "", from);
+  setupFlattenConfig(after, "", to);
+  const keys = [...new Set([...from.keys(), ...to.keys()])].sort();
+  const changes: ConfigChange[] = [];
+  for (const key of keys) {
+    const oldValue = from.get(key);
+    const newValue = to.get(key);
+    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+      changes.push({ key, from: oldValue ?? null, to: newValue ?? null });
+    }
+  }
+  return changes;
+}
+
+// The §2.1 config in force, or null for all three of: absent, unparseable, and
+// failing validate("Config"). ONE derivation on top of task-let 5.4a's reader, so
+// the gate's `repoConfigured` and this handler can never disagree — a corrupt
+// config REOPENS setup rather than opening every gate on an unvalidated object.
+function setupCurrentConfig(root: string): Config | null {
+  try {
+    const loaded = loadConfig(root);
+    return loaded.repoConfigured ? loaded.config : null;
+  } catch {
+    return null;
+  }
+}
+
+// The reconfigure guard's "no live run" predicate, read off the persisted run
+// rather than through openWorkspace — opening a workspace would take the very
+// lock the guard is testing for.
+function setupLiveRunId(root: string): string | null {
+  const pointerPath = path.join(root, ".conductor", "state", "current-run.json");
+  if (!existsSync(pointerPath)) return null;
+  let pointer: unknown;
+  try {
+    pointer = readJsonFileSync(pointerPath);
+  } catch {
+    return null;
+  }
+  if (!setupIsRecord(pointer) || typeof pointer.runId !== "string") return null;
+  const runId = pointer.runId;
+  const runPath = path.join(root, ".conductor", "runs", runId, "run.json");
+  let run: unknown;
+  try {
+    run = readJsonFileSync(runPath);
+  } catch {
+    // A pointer naming a run that cannot be read is not evidence of NO run, and
+    // reconfiguring under a live run is what this guard exists to prevent.
+    throw new Error(
+      `conductor_setup: refusing to reconfigure — ${runPath} names the current run but could ` +
+        "not be read, so whether a run is live cannot be established",
+    );
+  }
+  return isTerminal(run as Run) ? null : runId;
+}
+
+export async function handleSetup(input: SetupInput): Promise<SetupResult> {
+  const root = input.root;
+  const now = input.now ?? Date.now;
+  const answers: SetupAnswers = input.answers ?? {};
+  const reconfigure = input.reconfigure === true;
+
+  // (1) legality (§3.2 / §3.4). Setup RUNS while the config is absent — that is
+  // the state in which core/gates-phase.ts legalizes only conductor_setup and
+  // conductor_status — and REFUSES on a configured repo without reconfigure:true.
+  const existing = setupCurrentConfig(root);
+  if (existing !== null && !reconfigure) {
+    throw new Error(
+      `conductor_setup: ${configPath(root)} already configures this repo — pass ` +
+        "reconfigure:true to re-run setup (§3.4); setup writes nothing otherwise",
+    );
+  }
+  if (reconfigure) {
+    const liveRunId = setupLiveRunId(root);
+    if (liveRunId !== null) {
+      throw new Error(
+        `conductor_setup: refusing to reconfigure while run ${liveRunId} is live (§3.4) — ` +
+          "finish or stop that run first; the config it started under stays byte-identical",
+      );
+    }
+  }
+
+  // (2) §3.9: a workspace that is not a repo gets ONE choice, and no git.mode
+  // question (no-git forces the mode). `initialize` runs git init from the
+  // HANDLER — never a model session — after which the SAME call continues down
+  // the ordinary git-repo path.
+  const asks: SetupAsk[] = [];
+  let repoNow = isRepo(root);
+  let noGit = false;
+  if (!repoNow) {
+    if (answers.initRepo === undefined) {
+      asks.push({
+        id: ASK_GIT_INIT,
+        question:
+          `${root} is not a git repository. Conductor can initialize one here, or run in ` +
+          "no-git mode (§3.9): no-git forces git.mode read-only and parallel writes off, and " +
+          "publish stays unavailable because there is nothing to commit to.",
+        options: ["initialize a repo here", "run in no-git mode"],
+        proposal: null,
+      });
+    } else if (answers.initRepo) {
+      initRepo(root);
+      repoNow = isRepo(root);
+    } else {
+      noGit = true;
+    }
+  }
+
+  // (3) detection + the smoke sweep. Both run on EVERY call, answered or not, so
+  // the human sees what setup found before being asked to confirm anything.
+  const smoked: SmokeProbe[] = [];
+  const detection = setupDetect(root, smoked);
+  const scopes = detection.scopes;
+  const proposedPaths = setupMergedBehavioralPaths(scopes);
+  const formatRules = existing === null ? [] : existing.format.rules;
+  const smokeFailures = setupSmokeAll(root, scopes, formatRules, smoked);
+  const proposals: SetupProposals = {
+    scopes,
+    behavioralPaths: proposedPaths,
+    requiredScopes: setupRequiredScopes(scopes),
+    notes: detection.notes,
+    smoked,
+  };
+
+  const unconfigured = (
+    partial: Partial<SetupResult> & { failures: string[] },
+  ): SetupResult => ({
+    ok: false,
+    written: false,
+    repoConfigured: existing !== null,
+    isRepo: repoNow,
+    asks,
+    proposals,
+    config: null,
+    diff: null,
+    ...partial,
+  });
+
+  if (asks.length > 0) return unconfigured({ failures: smokeFailures });
+
+  // (4) the two §2.1:622 questions that have NO default. Neither value is ever
+  // silently defaulted: a call short of either answer re-returns the missing ask
+  // and writes nothing.
+  if (!noGit && answers.gitMode === undefined) {
+    asks.push({
+      id: ASK_GIT_MODE,
+      question:
+        "Which git mode should conductor use in this repo? It has no default (§2.1:622): " +
+        "read-only never writes git state, commit commits each published item, and " +
+        "commit-and-push also pushes.",
+      options: setupGitModes(),
+      proposal: null,
+    });
+  }
+  if (answers.behavioralPaths === undefined) {
+    const goDetected = scopes.some((scope) => scope.ecosystem === "go");
+    const caveat = goDetected
+      ? " The go proposal is the positive glob **/*.go; §2.1 asks for **/*.go minus " +
+        "**/*_test.go, which a list of positive globs cannot express, so narrow it here if " +
+        "the *_test.go files should not owe a behavioral test."
+      : "";
+    asks.push({
+      id: ASK_BEHAVIORAL_PATHS,
+      question:
+        "Confirm the paths whose changes require a behavioral test (§2.1:622). It has no " +
+        `default: this proposal is what detection found, not a decision.${caveat}`,
+      options: ["confirm the proposal", "supply a corrected list"],
+      proposal: [...proposedPaths],
+    });
+  }
+  if (asks.length > 0) return unconfigured({ failures: smokeFailures });
+
+  if (smokeFailures.length > 0) return unconfigured({ failures: smokeFailures });
+
+  // (5) the candidate config, built from task-let 5.4a's single exported default
+  // rather than a second literal (two defaults that drift are invisible to both
+  // tasks' tests). Only what setup detected or the human answered is overwritten.
+  const candidate: Config = structuredClone(DEFAULT_CONFIG);
+  const scopeMap: Config["verify"]["scopes"] = {};
+  for (const scope of scopes) {
+    const entry: Config["verify"]["scopes"][string] = {
+      command: [...scope.command],
+      timeoutMs: scope.timeoutMs,
+    };
+    // No buildCommand, ever: §2.1 describes the field and adapter/evidence.ts
+    // implements it, but SCHEMAS.Config omits it under additionalProperties:false,
+    // so a config carrying one fails its own registered schema.
+    if (scope.itemTest !== undefined) entry.itemTest = [...scope.itemTest];
+    scopeMap[scope.name] = entry;
+  }
+  candidate.verify.scopes = scopeMap;
+  candidate.verify.requiredScopes = proposals.requiredScopes.map((entry) => ({
+    pattern: entry.pattern,
+    scopes: [...entry.scopes],
+  }));
+  candidate.verify.behavioralPaths = [...(answers.behavioralPaths ?? [])];
+  candidate.format.rules = formatRules.map((rule) => ({
+    pattern: rule.pattern,
+    mode: rule.mode,
+    command: [...rule.command],
+  }));
+  if (noGit) {
+    // §3.9 in CONFIG terms, and nothing more: Config has no noGit field, no
+    // publish switch and no worktree switch, and additionalProperties:false would
+    // reject an invented one. No-git stays a runtime gitio.isRepo derivation —
+    // the same one publish's refusal keys on — so it means one thing everywhere.
+    candidate.git.mode = "read-only";
+    candidate.parallel.writes = "off";
+  } else if (answers.gitMode !== undefined) {
+    candidate.git.mode = answers.gitMode;
+  }
+
+  // (6) the §2.1:628-632 proofs, against the candidate IN MEMORY. §2.1:634: a
+  // failed check is a setup failure with a named remedy, never a warning.
+  const failures: string[] = [];
+  const served = await setupServedModels(input);
+  if (served === null) {
+    failures.push(
+      "setup proof (§2.1:629): the served origin did not answer GET /v1/models — remedy: start " +
+        "the model server (or the router) and run conductor_setup again",
+    );
+  } else if (input.modelId !== undefined) {
+    if (!served.includes(input.modelId)) {
+      failures.push(
+        `setup proof (§2.1:629): models.default "${input.modelId}" is not served — the origin ` +
+          `lists ${served.join(", ")}; remedy: serve that model, or set models.default in ` +
+          ".conductor/config.json to one of the listed ids",
+      );
+    } else {
+      candidate.models.default = input.modelId;
+    }
+  } else if (served.length === 1) {
+    candidate.models.default = served[0];
+  } else {
+    failures.push(
+      `setup proof (§2.1:629): models.default cannot be derived — the origin serves ` +
+        `${served.length === 0 ? "no models at all" : served.join(", ")}; remedy: set ` +
+        "models.default in .conductor/config.json (setup never guesses among served weights)",
+    );
+  }
+
+  if (candidate.models.default.length > 0) {
+    const schemaFailure = await setupSchemaProbe(input, candidate.models.default);
+    if (schemaFailure !== null) failures.push(schemaFailure);
+  }
+
+  const slotFailure = await setupSlotProof(input, candidate.parallel.maxReaders);
+  if (slotFailure !== null) failures.push(slotFailure);
+
+  if (failures.length > 0) return unconfigured({ failures });
+
+  const validation = validate("Config", candidate);
+  if (!validation.ok) {
+    return unconfigured({
+      failures: [
+        "setup: the candidate config does not validate against the §2.1 schema: " +
+          validation.errors.join("; "),
+      ],
+    });
+  }
+
+  // (7) persist — atomically, and only now that every proof has passed.
+  const diff = existing === null ? null : setupConfigDiff(existing, candidate);
+  writeFileAtomicSync(configPath(root), JSON.stringify(candidate, null, 2));
+  // §1.2/§3.9: registerConductorExclude writes nothing when root is not a repo,
+  // so the no-git branch needs no separate skip.
+  registerConductorExclude(root);
+
+  // (8) journal. A reconfigure records its DIFF — the changed keys with their old
+  // and new values, and an empty change set when nothing changed, because "the
+  // config was rewritten and nothing moved" is itself a fact replay needs.
+  if (diff !== null) {
+    input.journal.log(
+      "info",
+      "state",
+      "config.updated",
+      { path: configPath(root), changes: diff, tsMs: now() },
+      {},
+    );
+  }
+
+  return {
+    ok: true,
+    written: true,
+    repoConfigured: true,
+    isRepo: repoNow,
+    asks,
+    proposals,
+    config: candidate,
+    failures: [],
+    diff,
   };
 }
