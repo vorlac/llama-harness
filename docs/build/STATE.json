@@ -1372,7 +1372,7 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "0978540",
       "commitMessage": "conductor: 10.1 continuation + ask gate",
       "planLines": [
         2731,
@@ -1435,10 +1435,11 @@
           "round": 3,
           "at": "2026-08-14T14:45:00-04:00",
           "finding": "Phase 10 gate stage 2, round 2 of 3: the two items round 1 left open, both in conductor/adapter/continuation.ts.",
-          "disposition": "BOTH CLOSED, each test-first. The reconciler's discriminator moved out of the filesystem into the item's own durable record (new optional Item.releasedQuestions, written by store.clearBlocked); the idle engine's accounting now follows the send, so a synchronously-thrown prompt charges nothing. 1242 -> 1244 rows. Six gatekeeper-run mutations, all caught, including restoring round 1's mtime discriminator verbatim (fails the new row only) — which is why both rows now live side by side. Cross-task edits to conductor/adapter/state.ts and conductor/core/types.ts approved on the record. See GATES.json phaseGates['10'].stage2FixRound2 and C-071.",
+          "disposition": "BOTH CLOSED, each test-first. The reconciler's discriminator moved out of the filesystem into the item's own durable record (new optional Item.releasedQuestions, written by store.clearBlocked); the idle engine's accounting now follows the send, so a synchronously-thrown prompt charges nothing. 1242 -> 1244 rows. Six gatekeeper-run mutations, all caught, including restoring round 1's mtime discriminator verbatim (fails the new row only) \u2014 which is why both rows now live side by side. Cross-task edits to conductor/adapter/state.ts and conductor/core/types.ts approved on the record. See GATES.json phaseGates['10'].stage2FixRound2 and C-071.",
           "commit": "conductor-build: phase 10 gate fix round 2"
         }
-      ]
+      ],
+      "phaseGate": "Phase 10 gate PASS after 2 fix rounds (stage 1 + stage 2 rounds 1-2 of 3). Full record at GATES.json phaseGates[\"10\"].finalVerdict."
     },
     "11.1": {
       "taskId": "11.1",

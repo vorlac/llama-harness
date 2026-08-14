@@ -1,6 +1,6 @@
 # HANDOFF — read this first on every start
 
-## Position — updated 2026-08-14, after Phase 10 stage 2 PASSED
+## Position — updated 2026-08-14, after the Phase 10 gate PASSED
 
 **48 of 55 ledger rows COMMITTED.** MAIN tree: **1244/1244 GATE PASS**, five legs green; C++ 92
 cases / 27,726 assertions; M5 clean. `STATE.json` is the machine truth (`status` + `commitSha`);
@@ -8,12 +8,14 @@ cases / 27,726 assertions; M5 clean. `STATE.json` is the machine truth (`status`
 no task is in flight; `NOW.md` is the human view. **Phase gates 0–11 all PASS.** Next work is the
 remaining-work table below, starting at 12.2.
 
-## Phase 10 gate — CLOSED, stage 2 PASS after fix round 2 of 3
+## Phase 10 gate — CLOSED, **PASS after 2 fix rounds** (`GATES.json … phaseGates["10"].finalVerdict`)
 
 Stage 1 PASS (C-069). Stage 2's reviewer confirmed **7 majors** in 10.1; round 1 closed six and
 left one closed only for its own fixture, plus a regression it introduced (C-070). Round 2 closed
 both (C-071), verified by six gatekeeper-run mutations — including restoring round 1's `statSync`
 compare verbatim, which fails the new row **only**, which is exactly why round 1 shipped green.
+The verdict re-measured the tree rather than trusting the rounds: 1244/1244 five legs, C++ 92/27,726,
+M5 115 files, M7 33/33 rows covered, and the three round-2 fixes read back out of source.
 
 Two things a future reader needs:
 
@@ -23,9 +25,6 @@ Two things a future reader needs:
   validates. Cross-task edit approved on the record (`GATES.json … stage2FixRound2.scopeException`).
 - Three residuals recorded rather than fixed, in `stage2FixRound2.residualsRecordedNotFixed`.
   None blocking; the first-block-wins one is intended behaviour, not a defect.
-
-Stage 2's **fresh-worktree leg was never re-run** after either round (no build input changed, but
-that is an argument, not a measurement). Fold it into the next fresh-checkout gate.
 
 ## Remaining work
 
@@ -38,7 +37,7 @@ that is an argument, not a measurement). Fold it into the next fresh-checkout ga
 | 14.2 POC run | NOT_STARTED | LIVE, 90 headless runs measured in HOURS. **Launch detached.** |
 | 15.1 ops docs | NOT_STARTED | HONEST-LIMITS.md verbatim from §9 plus the residuals below. |
 
-Then: phase gates 10, 12, 13, 14, 15; `scripts/verify-acceptance.sh` exiting 0 in a clean worktree of HEAD; `docs/build/COMPLETION-REPORT.md`.
+Then: phase gates 12, 13, 14, 15 (10 is CLOSED); `scripts/verify-acceptance.sh` exiting 0 in a clean worktree of HEAD; `docs/build/COMPLETION-REPORT.md`. **Owed:** stage 2's fresh-worktree leg was never re-run after either fix round — no build input changed, but that is an argument, not a measurement. Fold it into the next fresh-checkout gate.
 
 ## Deferred bindings — still live
 
