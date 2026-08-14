@@ -914,7 +914,7 @@
     },
     "11": {
       "at": "2026-08-14T10:40:00Z",
-      "status": "STAGE 1 PASS \u2014 stage 2 (lens fan-out) pending",
+      "status": "PASS after fix round 1 of 3",
       "note": "Branch B ran parallel to the spine and its phase boundary was never adjudicated when 11.8 landed. The gate is being run late, deliberately, rather than skipped.",
       "stage1": {
         "freshWorktree": "PASS. `git worktree add --detach $TMPDIR/verify-phase11 HEAD`, its OWN `npm install` in conductor/, then the complete gate from scratch: TAP tests=1158 pass=1158 fail=0 cancelled=0 skipped=0 todo=0, typecheck OK, bun leg OK (8 pass), schema export OK. GATE PASS. Orchestrator-observed; worktree removed. This is the check against work that only passes because of uncommitted files, a wrong-cwd glob, or files never git-added.",
@@ -922,7 +922,24 @@
         "cppTreeCompleteness": "PASS. Every source in the router-tests source list and every `#include \"router/*.hpp\"` it reaches is TRACKED, and `git status --short --untracked-files=all router/ tools/ CMakeLists.txt` is EMPTY \u2014 so no untracked file participates in the build and a fresh worktree has byte-identical C++ sources. This substitutes for a second cmake configure in the verification worktree, which would cost ~45 minutes of vcpkg work to prove a property git already proves.",
         "m5": "PASS after repair \u2014 and the repair is the gate's first credit at this boundary. M5 had been globbing the PRE-HOIST path src/router/**, so it scanned ZERO C++ files across all eight Phase 11 tasks while printing PASS. Fixed, floored so a moved path fails loudly, and self-tested both directions. See C-057."
       },
-      "rejected": "1 confirmed defect at stage 1: the M5 stub scan was inspecting none of the surface this phase produced (C-057)."
+      "rejected": "1 confirmed defect at stage 1: the M5 stub scan was inspecting none of the surface this phase produced (C-057).",
+      "stage2": {
+        "at": "2026-08-14T12:30:00Z",
+        "lenses": "4 blind lenses (correctness, protocol-conformance, concurrency, spec-conformance) over the committed router sources + doctest suites + plan lines 2750-2863 and 1846-1900. 19 agents total. Findings: 27 (7 major, 20 minor/nit). Full set committed at docs/build/artifacts/phase-11-lens-findings.md.",
+        "redTeamProbe": "PASS, mechanically, executed by the ORCHESTRATOR against the committed observe_request via a standalone harness: 20 hostile request shapes (not JSON, empty, bare array, truncated mid-key, duplicate keys, response_format null/array/string-schema, empty schema object, array model field, unknown and empty tag headers, grammar-only, deeply nested schema). NOTHING threw and NOTHING was rejected - every malformed body resolves to tagged/schemaMissing and is proxied, which is the 11.6 bullet verbatim. Artifact: docs/build/artifacts/phase-11-redteam-probe.md.",
+        "adjudication": [
+          "SIX of the seven majors are ONE defect, found independently by three lenses: a mid-body upstream failure relayed downstream as a SUCCESSFUL, silently truncated response. Orchestrator confirmed the core claim mechanically before dispatching any fix - `grep -n succeeded router/router.hpp` shows relay->succeeded written at :1089 and read NOWHERE, and relay->error consumed only inside the !haveResponse branch.",
+          "CONFIRMED untested: the only committed upstream-failure case, [11.3-upstream-down-502], is a CONNECT failure where no headers ever arrive.",
+          "FIXED test-first (C-066). The red was proven genuine by an independent probe (a plain httplib client must receive the partial bytes and THEN report Error::Read) rather than by construction. A THIRD half the lenses did not name was found by the fixer: the upstream's status and headers were applied before the outcome was known, so the new 502 would have carried the head of an answer that never arrived.",
+          "Orchestrator re-verified both halves independently by reverting each and rebuilding: buffered 502 reverted => the buffered case fails (4 assertions); streaming abort reverted => the streaming case fails (1 assertion). Restored byte-identical with cmp both times.",
+          "R11-02 (hard-coded 600s upstream read timeout) recorded as a LIMIT rather than fixed: unreachable at this machine's measured throughput (~67 tok/s against an 8192-token slot).",
+          "R11-004 and R11-06 recorded as OBLIGATIONS rather than notes. R11-004: metrics.hpp:137 pushes every request's queueWaitMs into the percentile sample including the zeros, so waitMsP50/P95 collapse to 0 - and the C++ dashboard already disagrees with the endpoint about this (15.2's SG-A counts only queueWaitMs>0). Deferred to the PHASE 14 GATE, whose lens is measurement-validity, because changing it changes 11.7's published contract. R11-06: the empty-model admission bucket is an independent counter, so concurrent model-less POSTs can put 2x maxInflightPerModel on the upstream.",
+          "18 remaining minors/nits recorded in the artifact, non-blocking per the plan's adjudication ladder step 4."
+        ],
+        "verdict": "PASS after fix round 1 of 3",
+        "rejected": "1 confirmed MAJOR fixed (found 6x by 3 independent lenses) + 1 stage-1 defect (C-057, M5 scanning zero C++ files). Two minors promoted to obligations. Gate credit: this boundary was skipped when Branch B ran parallel to the spine, and running it late still found a silent data-corruption bug that a 90-case green suite did not."
+      },
+      "ctestAfterFix": "92 cases / 27726 assertions, 0 failed, 0 skipped; ctest 1/1 (orchestrator-observed)"
     }
   },
   "rejections": [
