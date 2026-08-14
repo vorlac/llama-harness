@@ -1,0 +1,329 @@
+{
+  "version": 1,
+  "selectionCriteria": {
+    "languageMix": "ts, python and cpp each appear at least once, so the set covers the three languages this repository is written in.",
+    "difficultySpread": "five one-function tasks and five small multi-file tasks, so a process whose cost is fixed per run is measured against both the work it can help and the work it cannot.",
+    "nonBehavioral": "two tasks (api-docs-ts, docstrings-py) have no test that could be written first, so the non-behavioral trajectory is measured rather than assumed.",
+    "hiddenTests": "every task's measurement lives in gauge/, which is never seeded into the work tree and is materialized only after the model's process has exited.",
+    "seedIsGreen": "each seeded repository passes its own visible suite, so a run starts from a green tree and a red visible test is the arm's doing."
+  },
+  "defaults": {
+    "model": "llamacpp/qwen3.6-27b",
+    "runTimeoutSec": 1800
+  },
+  "tasks": [
+    {
+      "id": "slugify-ts",
+      "language": "ts",
+      "difficulty": "one-function",
+      "behavioral": true,
+      "rationale": "A single pure string function with a dense edge-case surface: the cheapest task in the set, and the control for whether an arm's overhead hurts on work that needs none of it.",
+      "prompt": "src/slugify.ts exports slugify(input). Make it turn an arbitrary title into a URL slug: lowercase the text, replace every run of characters that are not letters or digits with a single '-', and remove leading and trailing '-'. Keep the existing export name and signature. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/slugify.ts": "export function slugify(input: string): string {\n  return input.trim().toLowerCase();\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { slugify } from \"../src/slugify.ts\";\n\ntest(\"lowercases a plain word\", () => {\n  assert.equal(slugify(\"Hello\"), \"hello\");\n});\n",
+        "README.md": "# slugify\n\nA tiny URL-slug helper. Run the suite with `node --test tests/visible.test.ts`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { slugify } from \"../src/slugify.ts\";\n\ntest(\"spaces become single hyphens\", () => {\n  assert.equal(slugify(\"Hello There World\"), \"hello-there-world\");\n});\ntest(\"punctuation runs collapse\", () => {\n  assert.equal(slugify(\"Cats, Dogs & Mice!\"), \"cats-dogs-mice\");\n});\ntest(\"edges are trimmed\", () => {\n  assert.equal(slugify(\"  --Hello--  \"), \"hello\");\n});\ntest(\"digits survive\", () => {\n  assert.equal(slugify(\"Top 10 Reasons\"), \"top-10-reasons\");\n});\ntest(\"an empty result stays empty\", () => {\n  assert.equal(slugify(\"!!!\"), \"\");\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "retry-ts",
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two files that have to agree: a pure delay schedule and the caller that consumes it. The smallest task in the set where a plan can be wrong about the seam rather than about an expression.",
+      "prompt": "src/backoff.ts must export backoffDelays(attempts, baseMs) returning the delay before each retry as an array of length attempts - 1, doubling each time (base, base*2, base*4, ...). src/client.ts must export callWithRetry(fn, attempts, baseMs) which awaits fn(), returns its value on success, and on a thrown error retries using that schedule, re-throwing the last error when every attempt fails. Record each delay it waited in the exported array usedDelays so a caller can audit it. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/backoff.ts": "export function backoffDelays(attempts: number, baseMs: number): number[] {\n  return [];\n}\n",
+        "src/client.ts": "import { backoffDelays } from \"./backoff.ts\";\n\nexport const usedDelays: number[] = [];\n\nexport async function callWithRetry<T>(\n  fn: () => Promise<T>,\n  attempts: number,\n  baseMs: number,\n): Promise<T> {\n  void backoffDelays;\n  return await fn();\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { callWithRetry } from \"../src/client.ts\";\n\ntest(\"returns the value when the call succeeds\", async () => {\n  assert.equal(await callWithRetry(async () => 7, 3, 10), 7);\n});\n",
+        "README.md": "# retry\n\nA retry helper split across a delay schedule and a caller. Run the suite with `node --test tests/visible.test.ts`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { backoffDelays } from \"../src/backoff.ts\";\nimport { callWithRetry, usedDelays } from \"../src/client.ts\";\n\ntest(\"the schedule doubles\", () => {\n  assert.deepEqual(backoffDelays(4, 100), [100, 200, 400]);\n  assert.deepEqual(backoffDelays(1, 100), []);\n});\ntest(\"a transient failure is retried\", async () => {\n  usedDelays.length = 0;\n  let calls = 0;\n  const value = await callWithRetry(async () => {\n    calls += 1;\n    if (calls < 3) throw new Error(\"transient\");\n    return \"ok\";\n  }, 4, 1);\n  assert.equal(value, \"ok\");\n  assert.equal(calls, 3);\n  assert.deepEqual(usedDelays, [1, 2]);\n});\ntest(\"the last error survives\", async () => {\n  usedDelays.length = 0;\n  await assert.rejects(\n    callWithRetry(async () => { throw new Error(\"always\"); }, 3, 1),\n    /always/,\n  );\n  assert.equal(usedDelays.length, 2);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "duration-py",
+      "language": "python",
+      "difficulty": "one-function",
+      "behavioral": true,
+      "rationale": "One parser with a well-defined rejection contract, so the measurement covers error paths rather than only the happy path.",
+      "prompt": "src/duration.py exports parse_duration(text) returning whole seconds. Accept a sequence of one or more <integer><unit> parts with units w, d, h, m and s, in any order, for example '1h30m' or '2d4h'. Whitespace around the text is ignored. Raise ValueError for an empty string, for an unknown unit, for a bare number with no unit and for a repeated unit. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/duration.py": "UNITS = {\"s\": 1, \"m\": 60, \"h\": 3600, \"d\": 86400, \"w\": 604800}\n\n\ndef parse_duration(text):\n    body = text.strip()\n    if len(body) > 1 and body[-1] in UNITS and body[:-1].isdigit():\n        return int(body[:-1]) * UNITS[body[-1]]\n    raise ValueError(\"cannot parse duration %r\" % text)\n",
+        "src/__init__.py": "",
+        "tests/check_visible.py": "import unittest\n\nfrom src.duration import parse_duration\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_single_part(self):\n        self.assertEqual(parse_duration(\"90s\"), 90)\n        self.assertEqual(parse_duration(\"2h\"), 7200)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# duration\n\nA duration parser. Run the suite with `python3 tools/run_tests.py tests`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import unittest\n\nfrom src.duration import parse_duration\n\n\nclass SpecTests(unittest.TestCase):\n    def test_compound(self):\n        self.assertEqual(parse_duration(\"1h30m\"), 5400)\n        self.assertEqual(parse_duration(\"2d4h\"), 187200)\n        self.assertEqual(parse_duration(\"1w\"), 604800)\n\n    def test_order_is_free(self):\n        self.assertEqual(parse_duration(\"30m1h\"), 5400)\n\n    def test_surrounding_space(self):\n        self.assertEqual(parse_duration(\"  45s \"), 45)\n\n    def test_rejections(self):\n        for bad in (\"\", \"   \", \"10\", \"5x\", \"1h1h\", \"h\", \"1h2\"):\n            with self.assertRaises(ValueError, msg=bad):\n                parse_duration(bad)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ledger-py",
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "A merge and a summary that must stay consistent across two modules, with null handling as the trap: the shape of change where a decomposed plan can pay for itself.",
+      "prompt": "src/ledger.py exports merge_records(records) which collapses records sharing an id into one, later records overriding earlier fields but never replacing a present value with None, and returns them sorted by id. src/summary.py exports summarize(records) returning a dict with count, total_tokens (the sum of the tokens field, skipping None) and partial (True when any merged record's tokens field is None). summarize must consume merge_records rather than re-implement it. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/ledger.py": "def merge_records(records):\n    return sorted(records, key=lambda record: record[\"id\"])\n",
+        "src/summary.py": "from src.ledger import merge_records\n\n\ndef summarize(records):\n    merged = merge_records(records)\n    return {\"count\": len(merged), \"total_tokens\": 0, \"partial\": False}\n",
+        "src/__init__.py": "",
+        "tests/check_visible.py": "import unittest\n\nfrom src.summary import summarize\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_counts_records(self):\n        rows = [{\"id\": \"a\", \"tokens\": 1}, {\"id\": \"b\", \"tokens\": 2}]\n        self.assertEqual(summarize(rows)[\"count\"], 2)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# ledger\n\nRecord merging and summary. Run the suite with `python3 tools/run_tests.py tests`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import unittest\n\nfrom src.ledger import merge_records\nfrom src.summary import summarize\n\n\nclass SpecTests(unittest.TestCase):\n    def rows(self):\n        return [\n            {\"id\": \"b\", \"tokens\": 5, \"role\": \"plan\"},\n            {\"id\": \"a\", \"tokens\": 1},\n            {\"id\": \"b\", \"tokens\": None, \"role\": \"review\"},\n            {\"id\": \"c\", \"tokens\": None},\n        ]\n\n    def test_merge_keeps_present_values(self):\n        merged = merge_records(self.rows())\n        self.assertEqual([row[\"id\"] for row in merged], [\"a\", \"b\", \"c\"])\n        self.assertEqual(merged[1][\"tokens\"], 5)\n        self.assertEqual(merged[1][\"role\"], \"review\")\n\n    def test_summary_skips_nulls_and_flags_partial(self):\n        out = summarize(self.rows())\n        self.assertEqual(out[\"count\"], 3)\n        self.assertEqual(out[\"total_tokens\"], 6)\n        self.assertTrue(out[\"partial\"])\n\n    def test_complete_set_is_not_partial(self):\n        out = summarize([{\"id\": \"a\", \"tokens\": 2}, {\"id\": \"b\", \"tokens\": 3}])\n        self.assertEqual(out[\"total_tokens\"], 5)\n        self.assertFalse(out[\"partial\"])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "clamp-cpp",
+      "language": "cpp",
+      "difficulty": "one-function",
+      "behavioral": true,
+      "rationale": "A header-only template whose contract is easy to state and easy to get subtly wrong; C++ is in the set because the harness's own router is C++ and a benchmark that skipped it would not cover the repository.",
+      "prompt": "src/clamp.hpp declares clamp_to_range. Make it a constexpr function template over an arithmetic type that returns lo when value < lo, hi when value > hi and value otherwise, and that returns lo when the bounds are given in the wrong order (lo > hi). Keep it header-only and keep the existing name. tests/visible.cpp must keep passing.",
+      "seedFiles": {
+        "src/clamp.hpp": "#pragma once\n\ntemplate <typename T>\nconstexpr T clamp_to_range(T value, T lo, T hi) {\n    return value < lo ? lo : value;\n}\n",
+        "tests/visible.cpp": "#include \"clamp.hpp\"\n\n#include <cstdio>\n\nint main() {\n    if (clamp_to_range(5, 0, 10) != 5) { std::puts(\"inside failed\"); return 1; }\n    if (clamp_to_range(-3, 0, 10) != 0) { std::puts(\"below failed\"); return 1; }\n    return 0;\n}\n",
+        "tools/build_tests.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "README.md": "# clamp\n\nA header-only clamp. Run the suite with `python3 tools/build_tests.py tests/visible.cpp`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/build.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "gauge/spec.cpp": "#include \"clamp.hpp\"\n\n#include <cstdio>\n\nstatic int failures = 0;\n\nstatic void check(bool ok, const char* what) {\n    if (!ok) { std::printf(\"FAIL %s\\n\", what); ++failures; }\n}\n\nint main() {\n    check(clamp_to_range(5, 0, 10) == 5, \"inside\");\n    check(clamp_to_range(-3, 0, 10) == 0, \"below\");\n    check(clamp_to_range(42, 0, 10) == 10, \"above\");\n    check(clamp_to_range(7, 10, 0) == 10, \"inverted bounds\");\n    check(clamp_to_range(1.5, 0.0, 1.0) == 1.0, \"double above\");\n    static_assert(clamp_to_range(11, 0, 10) == 10, \"constexpr\");\n    return failures == 0 ? 0 : 1;\n}\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/build.py",
+        "gauge/spec.cpp"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/build_tests.py",
+        "tests/visible.cpp"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ring-cpp",
+      "language": "cpp",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two headers with a wrap-around invariant between them: the C++ task where an incorrect mental model of the data structure shows up in the statistics rather than at the call site.",
+      "prompt": "src/ring.hpp declares a fixed-capacity RingBuffer<T, N> that overwrites the oldest element once full. Give it push(value), size(), capacity(), and at(i) reading oldest-first from i = 0. src/ring_stats.hpp declares ring_mean, which must return the mean of the live elements as a double and 0.0 when the buffer is empty, reading through the ring's own accessors. tests/visible.cpp must keep passing.",
+      "seedFiles": {
+        "src/ring.hpp": "#pragma once\n\n#include <array>\n#include <cstddef>\n\ntemplate <typename T, std::size_t N>\nclass RingBuffer {\npublic:\n    void push(T value) { m_data[m_size++] = value; }\n    std::size_t size() const { return m_size; }\n    std::size_t capacity() const { return N; }\n    T at(std::size_t index) const { return m_data[index]; }\n\nprivate:\n    std::array<T, N> m_data{};\n    std::size_t m_size{0};\n};\n",
+        "src/ring_stats.hpp": "#pragma once\n\n#include \"ring.hpp\"\n\ntemplate <typename T, std::size_t N>\ndouble ring_mean(const RingBuffer<T, N>& ring) {\n    return 0.0;\n}\n",
+        "tests/visible.cpp": "#include \"ring.hpp\"\n\n#include <cstdio>\n\nint main() {\n    RingBuffer<int, 4> ring;\n    ring.push(1);\n    ring.push(2);\n    if (ring.size() != 2) { std::puts(\"size failed\"); return 1; }\n    if (ring.at(0) != 1) { std::puts(\"order failed\"); return 1; }\n    if (ring.capacity() != 4) { std::puts(\"capacity failed\"); return 1; }\n    return 0;\n}\n",
+        "tools/build_tests.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "README.md": "# ring\n\nA fixed-capacity ring buffer and its statistics. Run the suite with `python3 tools/build_tests.py tests/visible.cpp`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/build.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "gauge/spec.cpp": "#include \"ring.hpp\"\n#include \"ring_stats.hpp\"\n\n#include <cmath>\n#include <cstdio>\n\nstatic int failures = 0;\n\nstatic void check(bool ok, const char* what) {\n    if (!ok) { std::printf(\"FAIL %s\\n\", what); ++failures; }\n}\n\nint main() {\n    RingBuffer<int, 3> ring;\n    check(ring.size() == 0, \"empty size\");\n    check(ring_mean(ring) == 0.0, \"empty mean\");\n    ring.push(1);\n    ring.push(2);\n    ring.push(3);\n    check(ring.size() == 3, \"full size\");\n    check(std::fabs(ring_mean(ring) - 2.0) < 1e-9, \"full mean\");\n    ring.push(4);\n    check(ring.size() == 3, \"size after wrap\");\n    check(ring.at(0) == 2, \"oldest after wrap\");\n    check(ring.at(2) == 4, \"newest after wrap\");\n    check(std::fabs(ring_mean(ring) - 3.0) < 1e-9, \"mean after wrap\");\n    return failures == 0 ? 0 : 1;\n}\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/build.py",
+        "gauge/spec.cpp"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/build_tests.py",
+        "tests/visible.cpp"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "api-docs-ts",
+      "language": "ts",
+      "difficulty": "one-function",
+      "behavioral": false,
+      "rationale": "A documentation task, which is the non-behavioral trajectory: no test can be written first for it, so it measures what each arm does when its own TDD law does not apply.",
+      "prompt": "Write docs/api.md documenting the public surface of this package. For every exported function in src/, give a heading with the function name, a one-line summary, a Parameters list naming each parameter, and a Returns line. Do not change any file under src/.",
+      "seedFiles": {
+        "src/money.ts": "export function formatCents(cents: number, currency: string): string {\n  const sign = cents < 0 ? \"-\" : \"\";\n  const whole = Math.floor(Math.abs(cents) / 100);\n  const rest = String(Math.abs(cents) % 100).padStart(2, \"0\");\n  return `${sign}${currency}${whole}.${rest}`;\n}\n\nexport function parseCents(text: string): number {\n  const match = /^(-?)(\\d+)\\.(\\d{2})$/.exec(text.trim());\n  if (match === null) throw new Error(`not an amount: ${text}`);\n  const magnitude = Number(match[2]) * 100 + Number(match[3]);\n  return match[1] === \"-\" ? -magnitude : magnitude;\n}\n",
+        "src/rounding.ts": "export function roundToStep(value: number, step: number): number {\n  if (step <= 0) throw new Error(\"step must be positive\");\n  return Math.round(value / step) * step;\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { formatCents, parseCents } from \"../src/money.ts\";\nimport { roundToStep } from \"../src/rounding.ts\";\n\ntest(\"money round trips\", () => {\n  assert.equal(formatCents(1234, \"$\"), \"$12.34\");\n  assert.equal(parseCents(\"12.34\"), 1234);\n});\ntest(\"rounding snaps to the step\", () => {\n  assert.equal(roundToStep(7, 5), 5);\n});\n",
+        "README.md": "# money\n\nAmount formatting and rounding helpers. The reference documentation lives under docs/.\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { readFileSync } from \"node:fs\";\n\nconst doc = (() => {\n  try {\n    return readFileSync(\"docs/api.md\", \"utf8\");\n  } catch {\n    return \"\";\n  }\n})();\n\ntest(\"the document exists and is not a stub\", () => {\n  assert.ok(doc.length > 200, `docs/api.md is ${doc.length} bytes`);\n});\ntest(\"every exported function is documented\", () => {\n  for (const name of [\"formatCents\", \"parseCents\", \"roundToStep\"]) {\n    assert.match(doc, new RegExp(`^#+ .*${name}`, \"m\"), name);\n  }\n});\ntest(\"each entry names its parameters and its return\", () => {\n  for (const name of [\"cents\", \"currency\", \"text\", \"value\", \"step\"]) {\n    assert.ok(doc.includes(name), `parameter ${name} is undocumented`);\n  }\n  const returns = doc.match(/Returns/g) ?? [];\n  assert.ok(returns.length >= 3, `only ${returns.length} Returns lines`);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "docstrings-py",
+      "language": "python",
+      "difficulty": "one-function",
+      "behavioral": false,
+      "rationale": "The second non-behavioral task, and the one whose file scope touches src/ without changing behaviour: the case where an arm must decide that no test is owed and still not skip verification.",
+      "prompt": "Every module and every public function under src/ needs a docstring saying what it is for and, where it is not obvious, why it is written that way. Add them. Do not change any executable line: the behaviour of this package must be identical afterwards, and tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/window.py": "def rolling_max(values, width):\n    if width < 1:\n        raise ValueError(\"width must be positive\")\n    out = []\n    for index in range(len(values)):\n        start = max(0, index - width + 1)\n        out.append(max(values[start : index + 1]))\n    return out\n\n\ndef clamp_index(index, length):\n    if length == 0:\n        return 0\n    return min(max(index, 0), length - 1)\n",
+        "src/tally.py": "def tally(items):\n    counts = {}\n    for item in items:\n        counts[item] = counts.get(item, 0) + 1\n    return counts\n",
+        "tests/check_visible.py": "import unittest\n\nfrom src.tally import tally\nfrom src.window import rolling_max\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_behaviour_is_the_contract(self):\n        self.assertEqual(rolling_max([1, 3, 2], 2), [1, 3, 3])\n        self.assertEqual(tally(\"aab\"), {\"a\": 2, \"b\": 1})\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# window\n\nRolling-window helpers. Run the suite with `python3 tools/run_tests.py tests`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import unittest\n\nfrom src import tally as tally_module\nfrom src import window as window_module\n\n\nclass SpecTests(unittest.TestCase):\n    def test_modules_are_documented(self):\n        for module in (tally_module, window_module):\n            doc = (module.__doc__ or \"\").strip()\n            self.assertGreater(len(doc), 30, module.__name__)\n\n    def test_public_functions_are_documented(self):\n        pairs = [\n            (window_module.rolling_max, \"rolling_max\"),\n            (window_module.clamp_index, \"clamp_index\"),\n            (tally_module.tally, \"tally\"),\n        ]\n        for func, name in pairs:\n            doc = (func.__doc__ or \"\").strip()\n            self.assertGreater(len(doc), 20, name)\n\n    def test_behaviour_is_unchanged(self):\n        self.assertEqual(window_module.rolling_max([1, 3, 2], 2), [1, 3, 3])\n        self.assertEqual(window_module.clamp_index(9, 3), 2)\n        self.assertEqual(tally_module.tally(\"aab\"), {\"a\": 2, \"b\": 1})\n        with self.assertRaises(ValueError):\n            window_module.rolling_max([1], 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "paths-py",
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "A normalizer and the config loader that depends on it, with a security style rejection rule: the task most likely to be reported as done while one of its two rules is still missing.",
+      "prompt": "src/paths.py exports normalize(path) returning a repo-relative POSIX path with '.' segments removed, duplicate separators collapsed and a leading './' stripped, and raising ValueError for an absolute path or for one that escapes the root with '..'. src/config.py exports load_paths(document) which normalizes every entry of document['paths'], drops duplicates while keeping first-seen order, and raises ValueError naming the offending entry when one is rejected. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/paths.py": "def normalize(path):\n    return path\n",
+        "src/config.py": "from src.paths import normalize\n\n\ndef load_paths(document):\n    return [normalize(entry) for entry in document[\"paths\"]]\n",
+        "tests/check_visible.py": "import unittest\n\nfrom src.config import load_paths\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_plain_paths_survive(self):\n        self.assertEqual(\n            load_paths({\"paths\": [\"src/a.py\", \"src/b.py\"]}),\n            [\"src/a.py\", \"src/b.py\"],\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# paths\n\nPath normalization for the config loader. Run the suite with `python3 tools/run_tests.py tests`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import unittest\n\nfrom src.config import load_paths\nfrom src.paths import normalize\n\n\nclass SpecTests(unittest.TestCase):\n    def test_normalize_cleans(self):\n        self.assertEqual(normalize(\"./src/a.py\"), \"src/a.py\")\n        self.assertEqual(normalize(\"src//b.py\"), \"src/b.py\")\n        self.assertEqual(normalize(\"src/./c.py\"), \"src/c.py\")\n        self.assertEqual(normalize(\"src/sub/../d.py\"), \"src/d.py\")\n\n    def test_normalize_rejects(self):\n        for bad in (\"/etc/passwd\", \"../outside.py\", \"src/../../up.py\"):\n            with self.assertRaises(ValueError, msg=bad):\n                normalize(bad)\n\n    def test_loader_dedupes_in_order(self):\n        loaded = load_paths({\"paths\": [\"./src/a.py\", \"src/b.py\", \"src//a.py\"]})\n        self.assertEqual(loaded, [\"src/a.py\", \"src/b.py\"])\n\n    def test_loader_names_the_offender(self):\n        with self.assertRaises(ValueError) as ctx:\n            load_paths({\"paths\": [\"src/a.py\", \"../escape.py\"]})\n        self.assertIn(\"../escape.py\", str(ctx.exception))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "dedupe-ts",
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Last-writer-wins deduplication plus an order-preserving merge: two small functions whose combination has a stable-order requirement that is easy to satisfy by accident and easy to break by accident.",
+      "prompt": "src/dedupe.ts must export dedupeById(records) which keeps ONE record per id, taking the LAST occurrence's fields but the FIRST occurrence's position in the output. src/merge.ts must export mergeLists(left, right) which concatenates the two and returns dedupeById of the result, so a right-hand record wins on conflict while the left-hand ordering is preserved. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/dedupe.ts": "export interface Record {\n  id: string;\n  [key: string]: unknown;\n}\n\nexport function dedupeById(records: Record[]): Record[] {\n  return records.slice();\n}\n",
+        "src/merge.ts": "import { dedupeById, type Record } from \"./dedupe.ts\";\n\nexport function mergeLists(left: Record[], right: Record[]): Record[] {\n  void dedupeById;\n  return left.concat(right);\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { dedupeById } from \"../src/dedupe.ts\";\n\ntest(\"a list with no repeats is unchanged\", () => {\n  const rows = [{ id: \"a\" }, { id: \"b\" }];\n  assert.deepEqual(dedupeById(rows), rows);\n});\n",
+        "README.md": "# dedupe\n\nRecord deduplication and merging. Run the suite with `node --test tests/visible.test.ts`.\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { dedupeById } from \"../src/dedupe.ts\";\nimport { mergeLists } from \"../src/merge.ts\";\n\ntest(\"the last record wins in the first position\", () => {\n  const out = dedupeById([\n    { id: \"a\", v: 1 },\n    { id: \"b\", v: 2 },\n    { id: \"a\", v: 3 },\n  ]);\n  assert.deepEqual(out, [{ id: \"a\", v: 3 }, { id: \"b\", v: 2 }]);\n});\ntest(\"merge lets the right side win without reordering\", () => {\n  const out = mergeLists(\n    [{ id: \"a\", v: 1 }, { id: \"b\", v: 2 }],\n    [{ id: \"b\", v: 9 }, { id: \"c\", v: 4 }],\n  );\n  assert.deepEqual(out, [\n    { id: \"a\", v: 1 },\n    { id: \"b\", v: 9 },\n    { id: \"c\", v: 4 },\n  ]);\n});\ntest(\"empty inputs are handled\", () => {\n  assert.deepEqual(dedupeById([]), []);\n  assert.deepEqual(mergeLists([], [{ id: \"z\" }]), [{ id: \"z\" }]);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    }
+  ]
+}
