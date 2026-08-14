@@ -4,7 +4,7 @@ Updated: 2026-08-14 (boot reconciliation. Phases 0–9 and 11 COMPLETE; Phase 9 
 
 ## Position
 
-**45 of 54 ledger rows COMMITTED.** Suite **1158/1158 GATE PASS** (tsc + bun + schema-export
+**43 of 55 ledger rows COMMITTED.** Suite **1158/1158 GATE PASS** (tsc + bun + schema-export
 green, orchestrator-observed at this boot). C++ 73 cases / 26,392 assertions.
 
 `docs/build/STATE.json` is the machine truth (`status` + `commitSha`).

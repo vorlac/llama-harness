@@ -23,7 +23,7 @@ their failures cannot be mistaken for each other:
 Every one of those reds was observed by running the command myself. An agent reporting "it
 fails" is never accepted as evidence here.
 
-**Suite:** 1158/1158 at the last clean point. **Ledger:** 46 of 55 rows committed.
+**Suite:** 1158/1158 at the last clean point. **Ledger:** 43 of 55 rows committed (12 remaining; 15.0 is green but not yet committed).
 
 ---
 
