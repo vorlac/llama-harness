@@ -134,8 +134,10 @@
 //       orphan-question reconciliation — the row says "BEFORE any re-prompt or stop
 //       decision"; (d) halt ⇒ interrupt (halt outranks the debounce, the recommendation
 //       and the futility rule alike); (e) isTerminal ⇒ worktree cleanup + archive, never a
-//       prompt; (f) shouldTerminate; (g) the verdict; (h) debounce/in-flight; (i) counters
-//       + prompt.
+//       prompt; (f) the futility signature and the progress reset — a run that MOVED since
+//       the last re-prompt is not wedged, so the comparison must precede the verdict that
+//       would stop it; (g) shouldTerminate; (h) the verdict; (i) debounce/in-flight;
+//       (j) counters + prompt.
 //  (P3) THE ENGINE WRITES ONLY TWO STOP KINDS: `noop` (its own futility rule) and
 //       `interrupt` (halt). A shouldTerminate verdict of blocked / surfaced / env is NOT
 //       recorded here — §2.9:900-905 assigns blocked/surfaced/done to the report tool and
@@ -237,7 +239,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,10 +266,12 @@ import {
   gateBeforeToolCall,
   handleAnswer,
   handleDecide,
+  handleQueueAmend,
   handleSubmitTest,
   handleSurface,
   handleVetTest,
 } from "../adapter/tools.ts";
+import type { QueueAmendOp } from "../core/queue-amend.ts";
 import type { RegistryEntry } from "../adapter/tools.ts";
 import { ConductorPlugin } from "../plugin/index.ts";
 import { legalTools } from "../core/gates-phase.ts";
@@ -384,6 +388,10 @@ interface AnswerOutcome {
 interface PluginHooks {
   tool?: Record<string, unknown>;
   "tool.execute.before"?: (input: unknown, output: unknown) => Promise<void> | void;
+  "chat.message"?: (
+    input: { sessionID: string },
+    output: { parts: Array<{ type: string; text?: string }> },
+  ) => Promise<void> | void;
   event?: (input: { event: { type: string; properties?: Record<string, unknown> } }) => Promise<void> | void;
 }
 
@@ -2845,8 +2853,9 @@ test("[10.1-ask-claim-one-derivation-both-seams] the active-claim scope is ONE e
       fileScope: [],
       testScope: [],
       verifyInFlightTree: null,
-      // The SAME derivation the ask-gate reads. plugin/index.ts hardcodes null today,
-      // which is why the allow path would otherwise be dead code in production.
+      // The SAME derivation the ask-gate reads. This row drives it directly; the
+      // PRODUCTION wiring that has to make the same call is driven through the
+      // plugin's own hook by the row of the same name at the foot of this file.
       inlineClaimScope: activeInlineClaimScope(store, runId),
       journal: journal.sink,
       corr: { runId, sessionID: ORCH },
@@ -3725,5 +3734,606 @@ test("[10.1-binding-answer-reblocks-on-next-open-question] C-056's residual: rel
       assert.notEqual(q.answeredIso, null, `${q.id} is marked answered — re-blocking never undoes an answer`);
     }
   }
+  store.release();
+});
+
+// ===========================================================================
+// [10.1-ask-claim-one-derivation-both-seams] — the PRODUCTION wiring
+// ===========================================================================
+
+test("[10.1-ask-claim-one-derivation-both-seams] the production wiring, driven through plugin/index.ts's OWN tool.execute.before hook and its OWN registration path: with the claim active the plugin admits the orchestrator's edit, and with the claim gone the same hook denies — the scope and the session tree are both derived by the plugin, not handed to it by this test", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  seedExecuting(store, runId, {
+    items: [makeQueueItem("I1", { fileScope: ["src/**"], testScope: ["tests/**"] })],
+  });
+  const claimed = store.loadItem(runId, "I1");
+  claimed.inlineClaim = { reason: "inline is cheaper here", decisionId: "D-0001" };
+  store.saveItem(runId, claimed);
+  const itemPath = path.join(runDirOf(store, runId), "items", "I1.json");
+
+  // The plugin opens the workspace itself (P4) and must be the single writer (G6).
+  mkdirSync(path.join(root, ".conductor"), { recursive: true });
+  writeFileSync(path.join(root, ".conductor", "config.json"), JSON.stringify(config, null, 2));
+  store.release();
+
+  const wiring = makeWiring(makeRegistry());
+  const factory = ConductorPlugin as unknown as (input: unknown) => Promise<PluginHooks>;
+  const hooks = await factory({
+    client: wiring.client,
+    project: { id: "prj_test", worktree: root },
+    directory: root,
+    worktree: root,
+    experimental_workspace: { register: () => undefined },
+    serverUrl: new URL("http://127.0.0.1:4096"),
+    $: () => undefined,
+  });
+
+  // The ONLY registration production performs for an orchestrator session:
+  // adapter/chat-message.ts registers {role:"orchestrator"} with NO tree (SG-9), so
+  // whatever resolves that tree has to be the plugin's own gate body.
+  const chat = hooks["chat.message"];
+  assert.ok(chat !== undefined, "the plugin installs a chat.message hook");
+  await chat({ sessionID: ORCH }, { parts: [{ type: "text", text: "carry on" }] });
+
+  const before = hooks["tool.execute.before"];
+  assert.ok(before !== undefined, "and the tool.execute.before gate hook");
+  // §0.2's realpath rule: the plugin canonicalizes its root, so the ask must be the
+  // canonical path or the comparison would be about symlinks rather than claims.
+  const askedPath = path.join(realpathSync(root), "src", "parser.mjs");
+  const drive = async (): Promise<Error | null> => {
+    try {
+      await before({ sessionID: ORCH, tool: "edit" }, { args: { filePath: askedPath } });
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err : new Error(String(err));
+    }
+  };
+
+  assert.equal(
+    await drive(),
+    null,
+    "with the claim active, the plugin's OWN inline-claim derivation admits the orchestrator's edit",
+  );
+
+  // Drop the claim on disk — our lock is released, so the item file is written directly.
+  const unclaimed = JSON.parse(readFileSync(itemPath, "utf8")) as Item;
+  unclaimed.inlineClaim = null;
+  writeFileSync(itemPath, JSON.stringify(unclaimed, null, 2));
+
+  const denied = await drive();
+  assert.ok(denied instanceof Error, "with the claim gone, the SAME production hook denies by throwing");
+  assert.match(
+    denied.message,
+    /inline claim/i,
+    "and the reason is core gates-edit's G8 reason naming the inline claim",
+  );
+});
+
+// ===========================================================================
+// [10.1-ask-path-unextractable-reject] — the MIXED payload
+// ===========================================================================
+
+test("[10.1-ask-path-unextractable-reject] SG-10 fail-closed on a MIXED payload: an orchestrator edit ask whose `patterns` carry wildcards BESIDE a covered concrete path is rejected WHOLE — the wildcards are not filtered away and the ask adjudicated on what remains, and a metadata.filePath cannot rescue a payload that also asks for a wildcard", async () => {
+  const shapes = [
+    { name: "concrete path mixed with wildcard patterns", withMetadata: false },
+    { name: "metadata.filePath beside a wildcard pattern", withMetadata: true },
+  ];
+
+  for (const shape of shapes) {
+    const root = scratchRepo();
+    const config = makeConfig();
+    const journal = makeJournal();
+    const store = openStore(root, journal.sink, config);
+    const runId = createRunFor(store);
+    seedExecuting(store, runId, { items: [makeQueueItem("I1", { fileScope: ["**"], testScope: ["tests/**"] })] });
+    const item = store.loadItem(runId, "I1");
+    item.inlineClaim = { reason: "inline is cheaper here", decisionId: "D-0001" };
+    store.saveItem(runId, item);
+
+    const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+    const concrete = path.join(root, "src", "parser.mjs");
+
+    // PREMISE: the concrete path ALONE is granted, so the reject below can only be
+    // the wildcards' doing — this is what makes the row about mixing, not coverage.
+    const soloWiring = makeWiring(registry);
+    const solo: PermissionAskedResult = await handlePermissionAsked({
+      store,
+      state: createContinuationState(),
+      registry,
+      client: soloWiring.client,
+      event: { id: "per_mixed_solo", sessionID: ORCH, permission: "edit", patterns: [concrete] },
+      journal: journal.sink,
+      now: makeClock().now,
+    });
+    assert.equal(solo.replied, "once", `${shape.name}: premise — the concrete path on its own IS covered by the claim`);
+
+    const wiring = makeWiring(registry);
+    const res: PermissionAskedResult = await handlePermissionAsked({
+      store,
+      state: createContinuationState(),
+      registry,
+      client: wiring.client,
+      event: {
+        id: "per_mixed",
+        sessionID: ORCH,
+        permission: "edit",
+        patterns: shape.withMetadata ? [concrete, "**"] : [concrete, "**/*.ts", `${root}/**`],
+        metadata: shape.withMetadata ? { filePath: concrete } : {},
+      },
+      journal: journal.sink,
+      now: makeClock().now,
+    });
+
+    assert.equal(
+      res.replied,
+      "reject",
+      `${shape.name}: a reply grants the ASK, so a payload that also asks for a wildcard degrades to 'the claim does not work'`,
+    );
+    assert.equal(wiring.replies.length, 1, `${shape.name}: exactly one reply`);
+    assert.equal(wiring.replies[0].response, "reject", `${shape.name}: response 'reject'`);
+    store.release();
+  }
+});
+
+// ===========================================================================
+// [10.1-binding-orphan-question-reconcile] — the deliberate release
+// ===========================================================================
+
+test("[10.1-binding-orphan-question-reconcile] a DELIBERATE release is not a half-applied block: after conductor_queue_amend clears `blocked` under a still-OPEN implementer-blocked question (§2.5 names that tool a legal clearer), the next orchestrator idle leaves the item released and re-prompts — while an item untouched since its question was appended is still repaired in the same pass", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const queue: Queue = {
+    items: [
+      makeQueueItem("I1", { fileScope: ["src/parser.mjs"], testScope: ["tests/p.test.mjs"] }),
+      makeQueueItem("I2", { fileScope: ["src/other.mjs"], testScope: ["tests/o.test.mjs"] }),
+    ],
+  };
+  seedExecuting(store, runId, queue);
+  const runDir = runDirOf(store, runId);
+
+  const ask = (itemId: string): string =>
+    appendQuestion(
+      runDir,
+      {
+        runId,
+        question: `conductor_submit_test could not obtain a legal RED for item "${itemId}"`,
+        askedBy: { role: "testWriter", sessionID: SUB },
+        humanTerritory: false,
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      START_MS,
+    ).id;
+
+  // I1: the fully-applied pair the amendment then RELEASES.
+  const releasedQuestion = ask("I1");
+  store.setBlocked(runId, "I1", { reason: BLOCK_MARKER, stage: "PENDING", questionId: releasedQuestion });
+  assert.notEqual(store.loadItem(runId, "I1").blocked, null, "premise: I1's block was fully applied");
+
+  // I2: the C-032 E7 window — question appended, the item untouched since.
+  const orphanQuestion = ask("I2");
+  assert.equal(store.loadItem(runId, "I2").blocked, null, "premise: I2 is the half-applied orphan");
+
+  const ops: QueueAmendOp[] = [
+    {
+      op: "update",
+      item: makeQueueItem("I1", {
+        fileScope: ["src/parser.mjs"],
+        testScope: ["tests/p.test.mjs", "tests/p.signed.test.mjs"],
+      }),
+    },
+  ];
+  const amended = handleQueueAmend({
+    store,
+    runId,
+    config,
+    journal: journal.sink,
+    now: () => START_MS,
+    ops,
+    question: "should I1's test scope widen to cover the signed cases?",
+    options: [
+      {
+        name: "widen I1's test scope",
+        score: { capability: 4, testability: 5, movingParts: 4, validationEarliness: 5, singleSource: 4 },
+      },
+      {
+        name: "leave the scope and add a second item",
+        score: { capability: 3, testability: 3, movingParts: 2, validationEarliness: 3, singleSource: 2 },
+      },
+    ],
+    choice: "widen I1's test scope",
+    why: "the signed cases belong to the same behaviour, so one item still owns one change",
+    appliedWhere: "queue.json",
+  });
+  assert.deepEqual(amended.updated, ["I1"], "premise: the amendment updated I1");
+  assert.equal(store.loadItem(runId, "I1").blocked, null, "premise: §2.5's legal clearer released I1");
+  const stillOpen = readQuestions(runDir).find((q) => q.id === releasedQuestion);
+  assert.equal(stillOpen?.answeredIso, null, "premise: and left the blocking question OPEN — the ambiguous state");
+
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  const res: SessionIdleResult = await handleSessionIdle({
+    store,
+    state: createContinuationState(),
+    registry,
+    sessionID: ORCH,
+    client: wiring.client,
+    config,
+    journal: journal.sink,
+    stateHome: freshStateHome(),
+    workspaceKey: "wk",
+    now: makeClock().now,
+  });
+  await turns();
+
+  assert.equal(
+    store.loadItem(runId, "I1").blocked,
+    null,
+    "an item DELIBERATELY released by an amendment is not re-blocked at idle — the documented escape hatch survives",
+  );
+  assert.notEqual(
+    store.loadItem(runId, "I2").blocked,
+    null,
+    "while the untouched orphan is still repaired in the very same pass",
+  );
+  assert.equal(
+    store.loadItem(runId, "I2").blocked?.questionId,
+    orphanQuestion,
+    "and its block points at the open question that named it",
+  );
+  assert.equal(res.stop, null, "the pass records no stop");
+  assert.equal(readQuestions(runDir).length, 2, "and appends no question");
+  store.release();
+});
+
+// ===========================================================================
+// [10.1-signature-change-resets] — progress outranks the wedge stop
+// ===========================================================================
+
+test("[10.1-signature-change-resets] progress OUTRANKS the wedge stop: with counters.futileRePrompts persisted at 3 and a real state change since the third re-prompt, the fourth idle resets the counter and re-prompts instead of disengaging — while the identical fixture that did NOT move is still stopped `noop` on that same fourth pass", async () => {
+  const drive = async (moved: boolean): Promise<{
+    res: SessionIdleResult;
+    futile: number;
+    stopKind: string | null;
+    disengages: number;
+    prompts: number;
+  }> => {
+    const root = scratchRepo();
+    const config = makeConfig();
+    const journal = makeJournal();
+    const store = openStore(root, journal.sink, config);
+    const runId = createRunFor(store);
+    const queue = seedOneItemExecuting(store, runId);
+    const runDir = runDirOf(store, runId);
+
+    const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+    const wiring = makeWiring(registry);
+    const clock = makeClock();
+    const state = createContinuationState();
+    const stateHome = freshStateHome();
+
+    const idle = async (): Promise<SessionIdleResult> => {
+      const out: SessionIdleResult = await handleSessionIdle({
+        store,
+        state,
+        registry,
+        sessionID: ORCH,
+        client: wiring.client,
+        config,
+        journal: journal.sink,
+        stateHome,
+        workspaceKey: "wk",
+        now: clock.now,
+      });
+      await turns();
+      clock.advance(DEBOUNCE_MS * 2);
+      return out;
+    };
+
+    for (let pass = 0; pass < 3; pass += 1) await idle();
+    assert.equal(
+      readRunFile(store, runId).counters.futileRePrompts,
+      3,
+      "premise: three unchanged passes leave futileRePrompts at 3, one short of the stop",
+    );
+    assert.equal(wiring.sdk.prompts.length, 3, "premise: exactly three prompts so far");
+
+    if (moved) {
+      // The run finally did the work the third re-prompt asked for.
+      const item = store.loadItem(runId, "I1");
+      item.state = "RED";
+      store.saveItem(runId, item);
+      assert.notEqual(
+        verdictOf(store, runId, queue).recommended,
+        null,
+        "premise: the MOVED fixture still has a next action, so a re-prompt is possible",
+      );
+    }
+
+    const res = await idle();
+    const persisted = readRunFile(store, runId);
+    const out = {
+      res,
+      futile: persisted.counters.futileRePrompts,
+      stopKind: persisted.stop === null ? null : persisted.stop.kind,
+      disengages: readAnomalies(runDir).filter((a) => a.kind === "disengage").length,
+      prompts: wiring.sdk.prompts.length,
+    };
+    store.release();
+    return out;
+  };
+
+  const movedRun = await drive(true);
+  assert.equal(movedRun.res.stop, null, "the run MOVED before this pass, so the wedge detector must not fire");
+  assert.equal(movedRun.stopKind, null, "no stop is persisted on run.json");
+  assert.equal(movedRun.disengages, 0, "and no §2.8 disengage anomaly is appended");
+  assert.equal(movedRun.futile, 0, "the observed progress resets futileRePrompts to 0");
+  assert.equal(movedRun.res.prompted, true, "and the fourth pass re-prompts");
+  assert.equal(movedRun.prompts, 4, "exactly one more prompt");
+
+  const wedgedRun = await drive(false);
+  assert.equal(wedgedRun.res.stop?.kind, "noop", "the CONTROL fixture, which did not move, is still stopped noop");
+  assert.equal(wedgedRun.stopKind, "noop", "and the stop is persisted");
+  assert.equal(wedgedRun.disengages, 1, "with its disengage anomaly");
+  assert.equal(wedgedRun.prompts, 3, "and no fourth prompt");
+});
+
+// ===========================================================================
+// [10.1-one-reprompt-in-flight] — a SYNCHRONOUS transport throw
+// ===========================================================================
+
+test("[10.1-one-reprompt-in-flight] the one-in-flight latch is released when the prompt call throws SYNCHRONOUSLY: the pass reports no prompt, journals the failure once at error level under a §7.4 name, and the next idle re-prompts normally once the transport recovers — a transient fault cannot silence the idle engine for the life of the process", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  seedOneItemExecuting(store, runId);
+
+  const THROW_MARKER = "INJECTED synchronous transport failure 5518";
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  let throwing = true;
+  const client: ContinuationClient = {
+    session: {
+      create: (opts) => wiring.client.session.create(opts),
+      prompt: (opts) => {
+        if (throwing) throw new Error(THROW_MARKER);
+        return wiring.client.session.prompt(opts);
+      },
+      abort: (opts) => wiring.client.session.abort(opts),
+      messages: (opts) => wiring.client.session.messages(opts),
+    },
+    postSessionIdPermissionsPermissionId: (opts) => wiring.client.postSessionIdPermissionsPermissionId(opts),
+  };
+
+  const clock = makeClock();
+  const state = createContinuationState();
+  const stateHome = freshStateHome();
+  const idle = async (): Promise<SessionIdleResult> => {
+    const out: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client,
+      config,
+      journal: journal.sink,
+      stateHome,
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    return out;
+  };
+
+  const first = await idle();
+  assert.equal(first.prompted, false, "a send that threw is not reported as a prompt");
+  assert.equal(wiring.sdk.prompts.length, 0, "premise: the transport never received it");
+  const errors = journal.records.filter((r) => r.level === "error");
+  assert.equal(errors.length, 1, "the failure is journaled exactly once at error level");
+  assert.equal(
+    isKnownEvent(errors[0].component, errors[0].event),
+    true,
+    `"${errors[0].component}/${errors[0].event}" must be in the closed §7.4 vocabulary`,
+  );
+  assert.ok(
+    JSON.stringify(errors[0].data).includes(THROW_MARKER),
+    "and carries the underlying failure, so the fault is diagnosable",
+  );
+
+  throwing = false;
+  clock.advance(DEBOUNCE_MS * 10);
+  const second = await idle();
+  assert.equal(second.prompted, true, "with the latch released and the transport recovered, the next idle re-prompts");
+  assert.equal(wiring.sdk.prompts.length, 1, "and the prompt reaches the transport");
+  store.release();
+});
+
+// ===========================================================================
+// [10.1-ask-needs-context-conversion] — a FAILED delivery, and the run scope
+// ===========================================================================
+
+test("[10.1-ask-needs-context-conversion] a conversion whose delivery FAILS is not destroyed: when the re-prompt carrying it rejects, the failure is journaled at error level and the conversion goes back on the queue, so the next successful re-prompt carries it — 'surfaced exactly once' may never become 'surfaced zero times'", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  seedOneItemExecuting(store, runId);
+
+  const REJECT_MARKER = "INJECTED prompt transport failure 6614";
+  const DENIED_PATH = `${root}/src/forbidden-6614.ts`;
+  const registry = makeRegistry([
+    [ORCH, { role: "orchestrator" }],
+    [SUB, { role: "implementer", itemId: "I1", tree: root }],
+  ]);
+  const wiring = makeWiring(registry);
+  let rejecting = true;
+  const client: ContinuationClient = {
+    session: {
+      create: (opts) => wiring.client.session.create(opts),
+      prompt: (opts) =>
+        rejecting ? Promise.reject(new Error(REJECT_MARKER)) : wiring.client.session.prompt(opts),
+      abort: (opts) => wiring.client.session.abort(opts),
+      messages: (opts) => wiring.client.session.messages(opts),
+    },
+    postSessionIdPermissionsPermissionId: (opts) => wiring.client.postSessionIdPermissionsPermissionId(opts),
+  };
+
+  const state = createContinuationState();
+  const clock = makeClock();
+  const asked: PermissionAskedResult = await handlePermissionAsked({
+    store,
+    state,
+    registry,
+    client,
+    event: { id: "per_lost_conversion", sessionID: SUB, permission: "edit", patterns: [DENIED_PATH] },
+    journal: journal.sink,
+    now: clock.now,
+  });
+  assert.equal(asked.replied, "reject", "premise: the sub-session ask is refused (§3.5(b))");
+  const conversion = asked.conversion;
+  assert.ok(conversion !== null, "premise: and converts to a NEEDS_CONTEXT disposition to surface");
+
+  const idle = async (): Promise<SessionIdleResult> => {
+    const out: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client,
+      config,
+      journal: journal.sink,
+      stateHome: freshStateHome(),
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 5);
+    return out;
+  };
+
+  await idle();
+  const errors = journal.records.filter((r) => r.level === "error");
+  assert.equal(errors.length, 1, "the failed delivery is journaled once at error level");
+  assert.equal(
+    isKnownEvent(errors[0].component, errors[0].event),
+    true,
+    `"${errors[0].component}/${errors[0].event}" must be in the closed §7.4 vocabulary`,
+  );
+  assert.ok(
+    JSON.stringify(errors[0].data).includes(REJECT_MARKER),
+    "and names the transport failure that swallowed the surface",
+  );
+
+  rejecting = false;
+  const second = await idle();
+  assert.equal(second.prompted, true, "premise: the recovered transport takes the next re-prompt");
+  assert.equal(wiring.sdk.prompts.length, 1, "premise: exactly one prompt actually reached the transport");
+  assert.ok(
+    wiring.sdk.prompts[0].text.includes(conversion.neededContext),
+    "the conversion whose delivery failed rides the NEXT successful re-prompt rather than being destroyed",
+  );
+
+  const third = await idle();
+  assert.equal(third.prompted, true, "premise: a third pass re-prompts too");
+  assert.equal(
+    wiring.sdk.prompts[1].text.includes(conversion.neededContext),
+    false,
+    "and having been delivered once, it is not repeated",
+  );
+  store.release();
+});
+
+test("[10.1-ask-needs-context-conversion] the surface queue is RUN-SCOPED: a conversion raised under a run that then ENDS is reported as lost exactly once and is never delivered into a LATER run's re-prompt, which could only name an item that run does not contain", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const firstRunId = createRunFor(store);
+  seedOneItemExecuting(store, firstRunId);
+
+  const DENIED_PATH = `${root}/src/forbidden-4712.ts`;
+  const registry = makeRegistry([
+    [ORCH, { role: "orchestrator" }],
+    [SUB, { role: "implementer", itemId: "I1", tree: root }],
+  ]);
+  const wiring = makeWiring(registry);
+  const state = createContinuationState();
+  const clock = makeClock();
+
+  const asked: PermissionAskedResult = await handlePermissionAsked({
+    store,
+    state,
+    registry,
+    client: wiring.client,
+    event: { id: "per_run_scoped", sessionID: SUB, permission: "edit", patterns: [DENIED_PATH] },
+    journal: journal.sink,
+    now: clock.now,
+  });
+  const conversion = asked.conversion;
+  assert.ok(conversion !== null, "premise: the refusal queued a conversion under the FIRST run");
+
+  const idle = async (): Promise<SessionIdleResult> => {
+    const out: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client: wiring.client,
+      config,
+      journal: journal.sink,
+      stateHome: freshStateHome(),
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 5);
+    return out;
+  };
+
+  // End the first run before any re-prompt could carry the conversion: §2.3 terminality
+  // is a persisted stop, and the idle engine archives such a run on sight.
+  const ending = store.loadRun(firstRunId);
+  ending.stop = { kind: "done", reasonDisplay: "the run finished before the surface could be delivered", tsMs: START_MS };
+  store.saveRun(ending);
+
+  const archived = await idle();
+  assert.equal(archived.prompted, false, "premise: a terminal run is archived, never re-prompted");
+  assert.equal(store.currentRun(), null, "premise: the first run is gone");
+  const lost = journal.records.filter(
+    (r) => r.level === "error" && String((r.data as { hook?: unknown }).hook ?? "").includes("surface-conversion"),
+  );
+  assert.equal(lost.length, 1, "the undelivered conversion is reported lost exactly once — never silently dropped");
+  assert.ok(
+    String((lost[0].data as { error?: unknown }).error ?? "").includes(conversion.neededContext),
+    "and the record says what the orchestrator never heard",
+  );
+
+  // A LATER run, with a queue that does not contain I1 at all.
+  const secondRunId = createRunFor(store);
+  seedExecuting(store, secondRunId, {
+    items: [makeQueueItem("I9", { fileScope: ["src/parser.mjs"], testScope: ["tests/p.test.mjs"] })],
+  });
+  const second = await idle();
+  assert.equal(second.runId, secondRunId, "premise: the engine is now working the SECOND run");
+  assert.equal(second.prompted, true, "premise: which does get its own re-prompt");
+  assert.equal(wiring.sdk.prompts.length, 1, "premise: exactly one prompt was sent, and it belongs to the second run");
+  const text = wiring.sdk.prompts[0].text;
+  assert.ok(text.includes("I9"), "premise: it names the second run's own item");
+  assert.equal(
+    text.includes(conversion.neededContext),
+    false,
+    "a conversion raised under an archived run is never delivered into a later run's re-prompt",
+  );
+  assert.equal(text.includes("I1"), false, "and the later run is never told about an item it does not contain");
   store.release();
 });

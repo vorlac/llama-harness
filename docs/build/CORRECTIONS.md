@@ -2970,3 +2970,98 @@ meant to inspect the *artifact*. Any assertion whose expected value is computed 
 `cwd`, `REPO_ROOT`, `$HOME`, or a hostname is testing the machine, not the code. Grep for that
 shape before trusting a suite as a portability claim — and note that the only leg of the build
 that could ever have caught it is the one that runs somewhere else.
+
+---
+
+## C-070 — a fix round that closed seven seams and left the eighth closed only for the fixture
+
+The Phase 10 stage-2 reviewer confirmed seven majors in Task 10.1. The fix round returned all
+seven GREEN (main tree 1242/1242, five legs), and the implementer disclosed a mutation table of
+nine entries. I re-ran every one of the nine in the main tree against a `cp` snapshot: **all nine
+are caught, each by exactly one row.** Eight of the nine name a real production seam. The
+verdict is still FAIL, on the ninth.
+
+### What the mutation table could not tell me
+
+`reconcileOrphanQuestions` had to separate a half-applied `blockAndAsk` from a §2.5-legal
+`conductor_queue_amend` release. The two are byte-identical in durable content, and the fix
+reaches outside the content for a discriminator:
+
+```ts
+const questionsNs = lastWriteNs(path.join(runDir, "questions.jsonl"));
+...
+const itemNs = lastWriteNs(path.join(runDir, "items", itemId + ".json"));
+if (questionsNs !== null && itemNs !== null && itemNs > questionsNs) continue;
+```
+
+`questionsNs` is the mtime of the **whole file**, not of the question being reconciled. One
+further append to `questions.jsonl` — from any origin, for any other item — moves that mtime past
+the released item's, and the release is forgotten. The committed row passes because its fixture
+appends its second question *before* the amend and never appends another.
+
+**PROBE-G1, run not reasoned.** The committed row, with one line changed: the run carries on and
+a later item I3 blocks, so its question is appended after the amend. VERBATIM:
+
+```
+PROBE-G1 I1.blocked after a later question append: {"reason":"completing a half-applied block: open question Q-0001 names this item but the item carried no disposition (§2.11, C-032 E7)",...,"questionId":"Q-0001"}
+PROBE-G1 I3.blocked (the genuine orphan): {...,"questionId":"Q-0002"}
+not ok 42 - PROBE-G1: a released item survives a LATER question append
+```
+
+The amended item is re-blocked on the question the amend released it from, and will be re-blocked
+again after every subsequent amend. That is the original finding, verbatim, one ordinary event
+later. The escape hatch is not restored; it is restored until the next question.
+
+The write-order idea is not wrong — the release *does* write the item last. What is wrong is the
+granularity: the comparison must be against the moment **that question** was appended, and
+`questions.jsonl` does not carry it into the filesystem. The durable record does have the fact
+the guard needs (`Question.askedIso`, and the item's own `blocked`/disposition history); a
+content-level discriminator is available and a filesystem-level one is not.
+
+### And a regression the round introduced
+
+Releasing the one-in-flight latch on a synchronous throw is right. But the pass that threw still
+increments `idleRePrompts` **and** `futileRePrompts`, still stamps `lastRePromptMs`, and still
+writes the `info continuation/reprompt` record — a send that never reached the transport is
+accounted for exactly like one that did.
+
+**PROBE-G2.** A permanently failing transport, four idles:
+
+```
+PROBE-G2 prompts that reached the transport: 0
+PROBE-G2 fourth idle stop: {"kind":"noop","reasonDisplay":"the run made no observable progress across 3 consecutive re-prompts (§3.7 futile re-prompt limit reached): disengaging rather than burning tokens",...}
+PROBE-G2 disengage anomalies: 1
+```
+
+The run is killed, and the durable reason says the orchestrator was re-prompted three times and
+did nothing. It was never asked once. The pre-fix behaviour was a silent wedge; this is a false
+accusation written to `run.json` and to the anomaly log. It is the better failure of the two and
+it is still a defect: a failed send is not a futile re-prompt.
+
+### What the round did close, verified
+
+| seam | mutation | caught by |
+|---|---|---|
+| plugin's own claim derivation | `inlineClaimScope: null` | the new production-wiring row |
+| plugin's own tree resolution | delete `resolveSessionTree(...)` | the same row |
+| SG-10 fail-closed on mixed payloads | restore the wildcard-filtering form | ask-path-unextractable-reject |
+| progress outranks the wedge stop | delete the reset before `shouldTerminate` | signature-change-resets |
+| latch release on a sync throw | delete the try/catch | one-reprompt-in-flight |
+| conversions survive a failed send | `.then(settle, settle)` | needs-context (delivery) |
+| conversions are run-scoped | drain with `splice` | needs-context (run scope) |
+| an ended run reports what it lost | delete the archive-time record | needs-context (run scope) |
+
+The implementer's correction to the reviewer also holds and is worth keeping: the claim that
+`resolveSessionTree` at `plugin/index.ts:556` is "provably inert because gateBeforeToolCall
+re-derives the tree" is **wrong** — `tools.ts:340` reads `entry?.tree ?? ""`. Deleting that line
+now fails a test. A reviewer's "provably inert" was reasoning where a mutation was available.
+
+### The lesson
+
+An implementer who discloses a mutation table and flags his own least conventional change is
+doing the job — this one wrote "worth a reviewer's eye" over exactly the change that failed. The
+gate's own job is the step past the table: for each mutation, ask what the *fixture* supplies
+that production does not. Here the fixture supplied a `questions.jsonl` that never grew again.
+**A discriminator drawn from outside the durable record is a discriminator the record cannot
+defend.** When a fix has to reach for the filesystem to tell two states apart, the real finding
+is usually that the state machine is not writing down something it knows.

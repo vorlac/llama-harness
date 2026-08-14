@@ -1380,13 +1380,13 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 1235,
-        "pass": 1235,
+        "tests": 1242,
+        "pass": 1242,
         "fail": 0,
         "skipped": 0,
         "todo": 0,
-        "file": "34/34",
-        "suite": "tests=1235 pass=1235 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed). 1235 is post-fix-round: the Phase 10 review's MAJOR (10.1-signature-change-resets, restart case) added one test. Committed at 1234."
+        "file": "41/41",
+        "suite": "tests=1242 pass=1242 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed). 1242 is post-stage-2-fix-round-1, which added 7 rows for the reviewer's 7 confirmed majors (1235 -> 1242). Committed at 1234; stage 1's own fix round took it to 1235. The row's implementation is NOT finished: GATES.json phaseGates[\"10\"].stage2FixRound1.open names 1 major still open and 1 regression the round introduced, both in conductor/adapter/continuation.ts."
       },
       "redEvidence": {
         "cmd": "bash scripts/test-conductor.sh",

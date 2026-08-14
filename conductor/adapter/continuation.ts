@@ -45,7 +45,7 @@
 // it may never cost a live run, because §3.7's wedge detector must fire only on a
 // run that is not moving.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import { readQuestions } from "./questions.ts";
@@ -108,8 +108,18 @@ export interface ContinuationClient {
 
 export type PermissionResponse = "once" | "always" | "reject";
 
-/** The §2.10 conversion a denied sub-session ask produces (no new status). */
+/**
+ * The §2.10 conversion a denied sub-session ask produces (no new status).
+ *
+ * `runId` is the run the ask was raised UNDER, and it is what makes the queue
+ * below run-scoped: the queue itself is process-scoped (SG-3), it outlives the
+ * run that filled it, and `itemId` only means anything inside its own run. A
+ * conversion delivered into a LATER run would name an item that run does not
+ * contain — state the orchestrator could act on only by inventing it. Null when
+ * no run was current at the moment of the ask.
+ */
 export interface NeedsContextConversion {
+  runId: string | null;
   sessionID: string;
   itemId: string | null;
   status: string;
@@ -348,6 +358,19 @@ function signatureOf(store: StateStore, run: Run, runDir: string, queue: Queue |
 // ---------------------------------------------------------------------------
 
 /**
+ * The last write to `file`, as the filesystem recorded it, or null when the file
+ * is absent or unreadable. Nanosecond resolution, because the two writes this
+ * engine has to order are microseconds apart.
+ */
+function lastWriteNs(file: string): bigint | null {
+  try {
+    return statSync(file, { bigint: true }).mtimeNs;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * blockAndAsk (tools.ts) and blockVetAndAsk append their §2.11 question FIRST and
  * call store.setBlocked SECOND. A crash between those two writes — or two
  * in-flight calls — leaves an OPEN question that no item references, and the
@@ -358,6 +381,20 @@ function signatureOf(store: StateStore, run: Run, runDir: string, queue: Queue |
  * whose `blocked` is null, set the block at that question. A fully-applied pair is
  * left untouched (the item already carries a disposition) and an ANSWERED question
  * never re-blocks anything. No question is ever appended here.
+ *
+ * THE RELEASE TEST. "Open question, unblocked item" is ALSO what a legal release
+ * looks like: §2.5 names conductor_queue_amend a legal clearer of `blocked`, and
+ * tools.ts clears it while leaving the question open. The two situations are
+ * byte-identical in durable CONTENT, so repairing on content alone re-blocks every
+ * amended item on the very next idle — permanently, and again after every later
+ * amend, which kills the documented escape hatch. The one fact that still
+ * separates them is the ORDER of two real file writes: the crash leaves an item
+ * last written BEFORE the question was appended (blockAndAsk saves the item's
+ * attempts, appends the question, then dies), while every release writes the item
+ * AFTER it. That order is a filesystem fact, so it survives an injected clock, and
+ * an item touched since the question is left alone — the conservative direction,
+ * since the only cost is a repair not made while the cost of the other direction
+ * is a run no amendment can free.
  */
 function reconcileOrphanQuestions(
   store: StateStore,
@@ -371,6 +408,7 @@ function reconcileOrphanQuestions(
   } catch {
     return;
   }
+  const questionsNs = lastWriteNs(path.join(runDir, "questions.jsonl"));
   for (const question of questions) {
     if (question.answeredIso !== null) continue;
     if (question.origin !== "implementer-blocked") continue;
@@ -382,6 +420,8 @@ function reconcileOrphanQuestions(
         continue;
       }
       if (item.blocked !== null) continue;
+      const itemNs = lastWriteNs(path.join(runDir, "items", itemId + ".json"));
+      if (questionsNs !== null && itemNs !== null && itemNs > questionsNs) continue;
       store.setBlocked(runId, itemId, {
         reason:
           "completing a half-applied block: open question " +
@@ -407,6 +447,28 @@ function reconcileOrphanQuestions(
 
 function cleanupAndArchive(input: SessionIdleInput, run: Run, runDir: string): void {
   const { store, journal } = input;
+  // SG-5's channel closes with the run: a conversion raised under it can never be
+  // surfaced now, and it must not be carried into a later run (the drain below is
+  // run-scoped for exactly that). Silent loss is the one thing that is not
+  // allowed, so each undelivered conversion leaves a record naming what the
+  // orchestrator never heard.
+  for (const conversion of input.state.pendingConversions) {
+    if (conversion.runId !== run.runId) continue;
+    journal.log(
+      "error",
+      "state",
+      "hook.failed",
+      {
+        hook: "continuation.surface-conversion",
+        itemId: conversion.itemId,
+        sessionID: conversion.sessionID,
+        error:
+          "the run ended before this NEEDS_CONTEXT conversion could be surfaced to the orchestrator, so it is lost: " +
+          conversion.neededContext,
+      },
+      { runId: run.runId, ...(conversion.itemId === null ? {} : { itemId: conversion.itemId }) },
+    );
+  }
   const remove = input.deps?.removeWorktree ?? removeWorktreeImpl;
   const queue = readQueue(runDir);
   for (const entry of queue === null ? [] : queue.items) {
@@ -538,6 +600,45 @@ function composeRePrompt(
   return lines.join("\n");
 }
 
+/**
+ * Takes the conversions belonging to `runId` off the process-scoped queue, and
+ * DISCARDS the rest with a record. A conversion names an item by id, and an id
+ * only means anything inside the run it was raised under; delivering a foreign
+ * one would hand the orchestrator an item its run does not contain.
+ */
+function takeConversionsFor(
+  state: ContinuationState,
+  runId: string,
+  journal: ContinuationJournal,
+  sessionID: string,
+): NeedsContextConversion[] {
+  const mine: NeedsContextConversion[] = [];
+  const foreign: NeedsContextConversion[] = [];
+  for (const conversion of state.pendingConversions) {
+    (conversion.runId === runId ? mine : foreign).push(conversion);
+  }
+  state.pendingConversions.length = 0;
+  for (const conversion of foreign) {
+    journal.log(
+      "error",
+      "state",
+      "hook.failed",
+      {
+        hook: "continuation.surface-conversion",
+        itemId: conversion.itemId,
+        sessionID: conversion.sessionID,
+        error:
+          "this NEEDS_CONTEXT conversion was raised under run " +
+          (conversion.runId ?? "(no run)") +
+          ", which is no longer the live run, so it is discarded rather than surfaced under another run's items: " +
+          conversion.neededContext,
+      },
+      { runId, sessionID },
+    );
+  }
+  return mine;
+}
+
 // ---------------------------------------------------------------------------
 // handleSessionIdle — the §3.7 idle engine
 // ---------------------------------------------------------------------------
@@ -598,7 +699,24 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     return { runId, prompted: false, stop: null };
   }
 
-  // (f) The wedge rule (Task 1.3), consulted with the PERSISTED counters BEFORE
+  // (f) PROGRESS BEFORE THE VERDICT. The futility signature is computed here,
+  //     ahead of the wedge rule, because a run that MOVED since the last
+  //     re-prompt is not wedged and must not be stopped on a counter that
+  //     describes the state it has already left. Deciding first and comparing
+  //     afterwards killed exactly the run that finally did the work in response
+  //     to the third re-prompt: the observation was in hand and simply never
+  //     consulted. The reset is skipped when this process has no prior
+  //     observation (SG-3's restart case) — there is nothing to compare against,
+  //     and inventing progress would be as wrong as inventing futility.
+  const queue = readQueue(runDir);
+  const signature = signatureOf(store, run, runDir, queue);
+  const movedSinceLastRePrompt = state.lastSignature !== null && state.lastSignature !== signature;
+  if (movedSinceLastRePrompt && run.counters.futileRePrompts > 0) {
+    run.counters.futileRePrompts = 0;
+    store.saveRun(run);
+  }
+
+  // (g) The wedge rule (Task 1.3), consulted with the PERSISTED counters BEFORE
   //     this pass touches them — the only order in which "exactly three prompts,
   //     the fourth stops" and "futileRePrompts reads 1,2,3" are both true. The
   //     threshold lives in core/stops.ts and is never restated here.
@@ -633,8 +751,7 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   // blocked/surfaced/done to conductor_report, env to the override hatch
   // (§2.9:900-905). This engine writes nothing for them and carries on.
 
-  // (g) The gate's own verdict. No second next-step derivation exists.
-  const queue = readQueue(runDir);
+  // (h) The gate's own verdict. No second next-step derivation exists.
   const gate = waveVerdict(store, runId, runDir, queue ?? { items: [] });
   const recommended = gate.recommended;
   if (recommended === null) {
@@ -645,15 +762,16 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     return { runId, prompted: false, stop: null };
   }
 
-  // (h) §3.7.4 debounce and the one-in-flight latch — INDEPENDENT guards.
+  // (i) §3.7.4 debounce and the one-in-flight latch — INDEPENDENT guards.
   if (state.rePromptInFlight) return { runId, prompted: false, stop: null };
   if (state.lastRePromptMs !== null && now() - state.lastRePromptMs < DEBOUNCE_MS) {
     return { runId, prompted: false, stop: null };
   }
 
-  // (i) Counters, then the message. A signature that DIFFERS from the last one
+  // (j) Counters, then the message. A signature that DIFFERS from the last one
   //     this engine observed is progress and resets the futile counter; an equal
-  //     one increments it.
+  //     one increments it. The comparison is the same one (f) already made, and
+  //     it is made against the same observation, so the two can never disagree.
   //
   //     The third case is a pass with NO prior observation. SG-3 keeps the last
   //     signature in memory while the counters are persisted, so a process
@@ -667,33 +785,62 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   //     never cost a live run). A run that has never been re-prompted at all
   //     (idleRePrompts 0) has no lost observation, so its first re-prompt counts
   //     normally, which is what keeps 1,2,3 true for a fresh wedge.
-  const signature = signatureOf(store, run, runDir, queue);
   const resumedMidCount = state.lastSignature === null && run.counters.idleRePrompts > 0;
   run.counters.idleRePrompts += 1;
   if (!resumedMidCount) {
-    run.counters.futileRePrompts =
-      state.lastSignature !== null && state.lastSignature !== signature
-        ? 0
-        : run.counters.futileRePrompts + 1;
+    run.counters.futileRePrompts = movedSinceLastRePrompt ? 0 : run.counters.futileRePrompts + 1;
   }
   store.saveRun(run);
   state.lastSignature = signature;
   state.lastRePromptMs = now();
 
-  const conversions = state.pendingConversions.splice(0, state.pendingConversions.length);
+  // Only THIS run's conversions ride along; anything raised under an earlier run
+  // is discarded here rather than delivered, and either way the queue is left
+  // holding nothing that has already been accounted for.
+  const conversions = takeConversionsFor(state, runId, journal, sessionID);
   const text = composeRePrompt(run, recommended, conversions);
 
   // The prompt is FIRED, not awaited: the latch is what bounds concurrency, and
   // awaiting the orchestrator's reply here would hold the hook open for the whole
-  // turn. It clears when the prompt settles, either way.
+  // turn. It clears when the prompt settles, either way — and a SYNCHRONOUS throw
+  // out of the SDK call settles it too. A latch left raised by a transient
+  // transport fault silences the idle engine for the life of the process, which
+  // freezes the counters, which means the wedge detector can never fire: the
+  // fault would create the very wedge this engine exists to end.
+  //
+  // The conversions were drained BEFORE the send, so a failed send would destroy
+  // the only channel a refused sub-session has to the orchestrator (SG-5). They
+  // go back on the queue instead, ahead of anything raised since, and the failure
+  // is journaled like every other G5 fail-soft path in this file.
   state.rePromptInFlight = true;
   const settle = (): void => {
     state.rePromptInFlight = false;
   };
-  input.client.session.prompt({ path: { id: sessionID }, body: { parts: [{ type: "text", text }] } }).then(
-    settle,
-    settle,
-  );
+  const failed = (err: unknown): void => {
+    settle();
+    state.pendingConversions.unshift(...conversions);
+    journal.log(
+      "error",
+      "state",
+      "hook.failed",
+      {
+        hook: "continuation.reprompt",
+        surfaced: conversions.length,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      { runId, sessionID },
+    );
+  };
+  let sent = true;
+  try {
+    input.client.session.prompt({ path: { id: sessionID }, body: { parts: [{ type: "text", text }] } }).then(
+      settle,
+      failed,
+    );
+  } catch (err) {
+    sent = false;
+    failed(err);
+  }
 
   journal.log(
     "info",
@@ -709,7 +856,7 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     { runId, sessionID },
   );
 
-  return { runId, prompted: true, stop: null };
+  return { runId, prompted: sent, stop: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -720,6 +867,13 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
 // which field carries the edit's path is unverified. Extraction order is
 // metadata.filePath, then metadata.path, then a single CONCRETE (wildcard-free)
 // entry of `patterns`. Anything else yields null and the ask FAILS CLOSED.
+//
+// A WILDCARD anywhere in `patterns` makes the whole payload unadjudicable, and
+// that is checked FIRST — before the metadata fields and before the single-entry
+// rule. The reply grants the ASK, not the path the gate happened to check, so
+// filtering the wildcards out and adjudicating on whatever concrete entry remains
+// would grant `**` on the strength of one covered file. SG-10's degradation is
+// "the claim does not work", never "the orchestrator may edit anything".
 function stringField(metadata: Record<string, unknown> | undefined, key: string): string | null {
   if (metadata === undefined) return null;
   const value = metadata[key];
@@ -731,10 +885,11 @@ function hasWildcard(pattern: string): boolean {
 }
 
 function extractAskPath(event: PermissionAskedEvent): string | null {
+  const patterns = event.patterns ?? [];
+  if (patterns.some((pattern) => hasWildcard(pattern))) return null;
   const direct = stringField(event.metadata, "filePath") ?? stringField(event.metadata, "path");
   if (direct !== null) return direct;
-  const patterns = event.patterns ?? [];
-  const concrete = patterns.filter((pattern) => pattern.length > 0 && !hasWildcard(pattern));
+  const concrete = patterns.filter((pattern) => pattern.length > 0);
   return concrete.length === 1 ? concrete[0] : null;
 }
 
@@ -844,6 +999,7 @@ export async function handlePermissionAsked(input: PermissionAskedInput): Promis
     );
     await sendReply(input, "reject", corr);
     const conversion: NeedsContextConversion = {
+      runId: runId ?? null,
       sessionID: event.sessionID,
       itemId: entry.itemId ?? null,
       status: "NEEDS_CONTEXT",

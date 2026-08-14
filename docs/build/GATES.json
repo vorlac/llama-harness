@@ -938,8 +938,8 @@
       "rejected": "11 confirmed majors incl. 1 security bypass and 1 documented-into-existence guard (gate credit: the milestone gate found defects a 1129-row green suite did not)"
     },
     "10": {
-      "at": "2026-08-14T11:40:00Z",
-      "status": "stage 1 PASS on re-run, after 1 fix round \u2014 reviewer NOT yet dispatched",
+      "at": "2026-08-14T13:10:00Z",
+      "status": "stage 2 FAIL after fix round 1 of 3 on the reviewer's seven majors. Six are closed with discriminating assertions; the seventh (10.1-binding-orphan-question-reconcile) is closed only for its own fixture, and the round introduced one regression. The tree is committed because eight of the nine disclosed mutations name real production seams and the suite is green; round 2 is scoped to the two items in `open` below.",
       "priorVerdict": "FAIL at stage 1 (recorded 2026-08-14T09:30:00Z, commit e71054f): main tree green, fresh worktree of HEAD 5786a27 red on the python leg. That record is superseded by this one; the defect it named is fixed and the fix is verified below.",
       "scope": "Phase 10 is the single task 10.1 (STATE.json status COMMITTED). Cumulative source diff d984342..5786a27 = 4 source files: conductor/adapter/continuation.ts (new), conductor/adapter/tools.ts, conductor/plugin/index.ts, conductor/tests/continuation.test.ts (new). The fix round adds a 5th changed file, scripts/test_conductor_wiring.py, which is a 12.1 deliverable and not part of the Phase 10 diff.",
       "fixRound": {
@@ -958,7 +958,40 @@
       },
       "phase11GateNote": "Carried forward unchanged from the FAIL record, because it is still true and still unaddressed: phaseGates['11'].stage1.freshWorktree claims GATE PASS at d984342 but enumerates only four legs (TAP, typecheck, bun, schema export) and never names the python leg. The python leg was unconditional in scripts/test-conductor.sh at d984342 (verified by `git show d984342:scripts/test-conductor.sh`) and the failing assertion was already present at that commit, so that run either did not execute the whole script or was recorded from a partial reading. It should not be relied on as evidence of a clean fresh checkout. It would now pass, but for a reason it did not know about.",
       "verdict": "STAGE 1 PASS",
-      "nextStage": "NOT RUN. Stage 1 is the prelude only. No reviewer lens has been dispatched for Phase 10 and no adjudication of the phase's substance exists. The next gatekeeper invocation runs stage 2 against the same scope."
+      "nextStage": "NOT RUN. Stage 1 is the prelude only. No reviewer lens has been dispatched for Phase 10 and no adjudication of the phase's substance exists. The next gatekeeper invocation runs stage 2 against the same scope.",
+      "stage2FixRound1": {
+        "of": "1 of 3 (stage 2's own count; stage 1 used its own round budget)",
+        "verdict": "FAIL",
+        "filesTouched": [
+          "conductor/adapter/continuation.ts",
+          "conductor/tests/continuation.test.ts"
+        ],
+        "mainTree": "PASS. `bash scripts/test-conductor.sh`: TAP tests=1242 pass=1242 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0 (node exit=0), typecheck OK, bun leg OK (8 pass), schema export OK, python leg OK (Ran 29 tests), GATE PASS exit 0. Gatekeeper-observed.",
+        "cppLeg": "PASS (no C++ change). `cmake --build .out/build/clang-relwdebinfo --target router-tests` exit 0 (ninja: no work to do), then ./.out/build/clang-relwdebinfo/router-tests: doctest 92 cases / 27726 assertions, 0 failed, 0 skipped.",
+        "m5": "PASS. 3 scoped files (continuation.ts, continuation.test.ts, plugin/index.ts), then 115 repo-wide; 6 line exemptions all live.",
+        "m2": "PASS. 1235 -> 1242 passes, strictly greater; 7 new rows, one per confirmed major.",
+        "mutationsReRun": "All NINE disclosed mutations re-applied by the gatekeeper in the main tree against a cp snapshot, each run through `bash scripts/test-conductor.sh conductor/tests/continuation.test.ts`. All nine caught, 40/41 each, one row apiece: (a) plugin `inlineClaimScope: null` and (b) deleting plugin `resolveSessionTree(...)` both fail the new production-wiring row at continuation.test.ts:3796; (c) restoring extractAskPath's wildcard-filtering form fails ask-path-unextractable-reject; (d) removing the write-order guard fails the release row; (e) removing the progress reset fails signature-change-resets; (f) removing the try/catch fails one-reprompt-in-flight; (g) `.then(settle, settle)` fails the failed-delivery row; (h) draining with splice and (i) deleting the archive-time loss record both fail the run-scoped row. Tree restored from snapshot after every run; `git diff --stat` unchanged.",
+        "reviewerCorrectionUpheld": "The implementer's rebuttal is correct and the reviewer's claim was wrong: `resolveSessionTree` at plugin/index.ts:556 is NOT inert. gateBeforeToolCall does not re-derive the tree; tools.ts:340 reads `entry?.tree ?? \"\"`. Mutation (b) proves it.",
+        "open": [
+          {
+            "row": "10.1-binding-orphan-question-reconcile",
+            "severity": "MAJOR \u2014 the confirmed finding is not closed",
+            "file": "conductor/adapter/continuation.ts",
+            "defect": "The release test compares the item's mtime against the mtime of the WHOLE questions.jsonl, not against the moment the question in hand was appended. Any later append \u2014 any origin, any item \u2014 moves questions.jsonl past the released item, and the amended item is re-blocked on the question the amend released it from. The committed row passes only because its fixture appends its second question BEFORE the amend and never appends another.",
+            "proof": "PROBE-G1 (gatekeeper, scratch copy of the suite, run not reasoned): the committed row with one change \u2014 the run carries on and a later item I3 blocks, so its question is appended AFTER the amend. VERBATIM: `PROBE-G1 I1.blocked after a later question append: {\"reason\":\"completing a half-applied block: open question Q-0001 names this item but the item carried no disposition (\\u00a72.11, C-032 E7)\",...,\"questionId\":\"Q-0001\"}` with I3 correctly repaired on Q-0002, and `not ok 42 - PROBE-G1: a released item survives a LATER question append`. Probe file deleted; tree clean.",
+            "directionForRound2": "Drop the filesystem discriminator. The durable record already carries what the guard needs \u2014 Question.askedIso for the moment of the append, and the item's own block/disposition history for whether a release happened since. A content-level discriminator is defensible against replay, backup, copy and a coarse-mtime filesystem; a stat() is defensible against none of them. Whatever replaces it must carry BOTH the committed row and a row in which a further question is appended after the amend."
+          },
+          {
+            "row": "10.1-one-reprompt-in-flight (regression introduced by this round)",
+            "severity": "MAJOR-adjacent \u2014 new durable falsehood, not present before the round",
+            "file": "conductor/adapter/continuation.ts",
+            "defect": "A send that throws now releases the latch (correct) but the pass still increments idleRePrompts AND futileRePrompts, still stamps lastRePromptMs, and still writes the `info continuation/reprompt` record. Three transport faults therefore reach the futility threshold and the fourth idle stops the run `noop`.",
+            "proof": "PROBE-G2 (gatekeeper): permanently failing transport, four idles. VERBATIM: `PROBE-G2 prompts that reached the transport: 0` / `PROBE-G2 fourth idle stop: {\"kind\":\"noop\",\"reasonDisplay\":\"the run made no observable progress across 3 consecutive re-prompts (\\u00a73.7 futile re-prompt limit reached): disengaging rather than burning tokens\",...}` / `PROBE-G2 disengage anomalies: 1`. The orchestrator was never asked once.",
+            "directionForRound2": "A failed send is not a re-prompt. On the failure path, roll the counters and lastRePromptMs back (or charge them only from the success path, as the conversions already are), and do not write the info reprompt record. The error record already written is the correct and sufficient trace."
+          }
+        ],
+        "correction": "C-070"
+      }
     },
     "11": {
       "at": "2026-08-14T10:40:00Z",
