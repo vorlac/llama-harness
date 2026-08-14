@@ -3065,3 +3065,93 @@ that production does not. Here the fixture supplied a `questions.jsonl` that nev
 **A discriminator drawn from outside the durable record is a discriminator the record cannot
 defend.** When a fix has to reach for the filesystem to tell two states apart, the real finding
 is usually that the state machine is not writing down something it knows.
+
+---
+
+## C-071 — the state machine writes down what it knows, and a failed send stops accusing anyone
+
+Round 2 of the Phase 10 stage-2 gate was scoped to exactly two things: the major C-070 found
+still open, and the regression C-070 found introduced. Both came back closed, and this time the
+mutation that mattered was one the gatekeeper wrote rather than one the implementer disclosed.
+
+### The discriminator moved into the record
+
+C-070's finding was that `reconcileOrphanQuestions` told a half-applied `blockAndAsk` from a
+§2.5-legal `conductor_queue_amend` release by comparing two file mtimes — and that
+`questions.jsonl` carries ONE mtime for every question in the run, so a later append for any
+other item moved it past the released item and the release was forgotten.
+
+The fix stops asking the filesystem. `store.clearBlocked` writes the released question's id into
+the item's own record:
+
+```ts
+const questionId = item.blocked?.questionId;
+if (questionId !== undefined) {
+  const released = item.releasedQuestions ?? [];
+  if (!released.includes(questionId)) item.releasedQuestions = [...released, questionId];
+}
+item.blocked = null;
+```
+
+and the reconciler reads it: `if ((item.releasedQuestions ?? []).includes(question.id)) continue;`.
+`lastWriteNs` and the `statSync` import are gone. The immunity is per QUESTION, not per item, so
+a *new* question's half-applied window on a previously-released item is still repaired — and that
+second half is asserted in the same row, because the obvious over-fix ("this item was released
+once, leave it alone forever") would have passed a row that only checked the first half.
+
+**The mutation that decides it.** Restoring round 1's mtime discriminator verbatim takes the suite
+to 1243/1244 with **only the new row** failing — the round-1 row still passes underneath it. That
+is the whole of why round 1 shipped green, reproduced on demand, and it is the reason both rows
+now have to live side by side rather than one replacing the other.
+
+Six mutations were run, each through the full gate and then again scoped to name the row:
+
+| mutation | result |
+|---|---|
+| delete the `releasedQuestions` guard | 1242/1244, new row fails |
+| restore round 1's `statSync` compare (the PROBE-G1 defect) | 1243/1244, **only** the new row fails |
+| `clearBlocked` stops recording the release | 1242/1244, new row fails |
+| widen the guard to `releasedQuestions.length > 0` | 1243/1244, new row's second half fails |
+| delete `if (!sent) return {...}` (the PROBE-G2 defect) | 1243/1244, the in-flight row fails |
+| delete the try/catch around `session.prompt` | 1242/1244, the in-flight row fails |
+
+### A send that never left is not a re-prompt
+
+The regression: a prompt call that threw on the way out still incremented `idleRePrompts` and
+`futileRePrompts`, so three transport faults reached the §3.7 futility threshold and the fourth
+idle killed the run with a durable "no observable progress across 3 consecutive re-prompts". The
+orchestrator was never asked once.
+
+The accounting now follows the send — `if (!sent) return { runId, prompted: false, stop: null };`
+sits ahead of the counter block — so a thrown call charges nothing, stamps no debounce clock,
+records no signature and writes no `info continuation/reprompt`. The `error` record the fail-soft
+path already writes is the whole trace. A call that RETURNED and rejects later still counts: it
+left the process, and its conversions go back on the queue as before.
+
+### The cross-task edit, approved on the record
+
+`conductor/core/types.ts` and `conductor/adapter/state.ts` were first added by earlier tasks. The
+round added one optional `Item` property and five lines inside `clearBlocked`. Approved, because
+round 1's own recorded direction was to draw the discriminator from "the item's own block history"
+and **that history did not exist**: `blocked` holds one disposition and forgets the questionId
+when it goes null, the amend's decision record does not name the item, and `journal.jsonl` rotates
+and is level-filtered so it is not a system of record. Creating the fact necessarily touches the
+type that declares it and the writer that knows it; the only alternative was keeping the `stat()`.
+`releasedQuestions` is in the schema's `properties` and absent from `required`, so every §2.5 item
+ever written still validates — and adding it to `properties` was mandatory, not optional, because
+the item schema is `additionalProperties: false`.
+
+Three residuals were recorded rather than fixed (GATES.json `stage2FixRound2.residualsRecordedNotFixed`):
+the guard depends on an optional `blocked.questionId` that every production setter happens to
+supply; under first-block-wins an amend still does not free an item a *second* open question
+names, which matches C-056's hand-off doctrine; and a thrown send is now retried on every idle
+rather than paced by the debounce.
+
+### The lesson
+
+C-070 said a discriminator drawn from outside the durable record is one the record cannot defend.
+The repair is the general form of that: **when a guard has to reach outside the state for a fact,
+the finding is that the state machine is not writing down something it already knew.** The moment
+`clearBlocked` runs is the last moment the item knows which question released it. Writing it there
+costs one optional field and removes an entire class of failure — replay, backup restore, file
+copy, coarse-mtime volume — that no test in this suite would ever have run.

@@ -938,8 +938,8 @@
       "rejected": "11 confirmed majors incl. 1 security bypass and 1 documented-into-existence guard (gate credit: the milestone gate found defects a 1129-row green suite did not)"
     },
     "10": {
-      "at": "2026-08-14T13:10:00Z",
-      "status": "stage 2 FAIL after fix round 1 of 3 on the reviewer's seven majors. Six are closed with discriminating assertions; the seventh (10.1-binding-orphan-question-reconcile) is closed only for its own fixture, and the round introduced one regression. The tree is committed because eight of the nine disclosed mutations name real production seams and the suite is green; round 2 is scoped to the two items in `open` below.",
+      "at": "2026-08-14T14:45:00Z",
+      "status": "stage 2 PASS after fix round 2 of 3. All seven of the reviewer's confirmed majors are now closed with discriminating assertions, and the regression round 1 introduced is closed too. Round 2's own record is stage2FixRound2 below; stage2FixRound1's `open` list is retained verbatim as the history of what round 2 had to fix, and every item in it is now closed.",
       "priorVerdict": "FAIL at stage 1 (recorded 2026-08-14T09:30:00Z, commit e71054f): main tree green, fresh worktree of HEAD 5786a27 red on the python leg. That record is superseded by this one; the defect it named is fixed and the fix is verified below.",
       "scope": "Phase 10 is the single task 10.1 (STATE.json status COMMITTED). Cumulative source diff d984342..5786a27 = 4 source files: conductor/adapter/continuation.ts (new), conductor/adapter/tools.ts, conductor/plugin/index.ts, conductor/tests/continuation.test.ts (new). The fix round adds a 5th changed file, scripts/test_conductor_wiring.py, which is a 12.1 deliverable and not part of the Phase 10 diff.",
       "fixRound": {
@@ -990,8 +990,44 @@
             "directionForRound2": "A failed send is not a re-prompt. On the failure path, roll the counters and lastRePromptMs back (or charge them only from the success path, as the conversions already are), and do not write the info reprompt record. The error record already written is the correct and sufficient trace."
           }
         ],
-        "correction": "C-070"
-      }
+        "correction": "C-070",
+        "closedBy": "stage2FixRound2 — both entries in `open` above are closed and each is now pinned by a mutation the gatekeeper ran."
+      },
+      "stage2FixRound2": {
+        "of": "2 of 3",
+        "verdict": "PASS",
+        "at": "2026-08-14T14:45:00Z",
+        "filesTouched": [
+          "conductor/adapter/continuation.ts",
+          "conductor/adapter/state.ts",
+          "conductor/core/types.ts",
+          "conductor/tests/continuation.test.ts"
+        ],
+        "mainTree": "PASS. `bash scripts/test-conductor.sh`: TAP tests=1244 pass=1244 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0 (node exit=0), typecheck OK, bun leg OK (8 pass), schema export OK (router/tests/schemas/), python leg OK (Ran 29 tests), GATE PASS exit 0. Gatekeeper-observed as the BASELINE leg of the mutation sweep, so the green and the six reds come from one uninterrupted script over one snapshot.",
+        "cppLeg": "PASS (no C++ change). `cmake --build .out/build/clang-relwdebinfo --target router-tests` (ninja: no work to do), then ./.out/build/clang-relwdebinfo/router-tests: doctest 92 cases / 27726 assertions, 0 failed, 0 skipped.",
+        "m5": "PASS. Scoped to the round's 4 files: M5 PASS (4 file(s) scanned, 6 line exemption(s) all live). Repo-wide floor: M5 PASS (115 file(s) scanned, 6 line exemption(s) all live).",
+        "m2": "PASS. 1242 -> 1244 passes, strictly greater; 2 new rows, one per open item.",
+        "howItWasFixed": {
+          "10.1-binding-orphan-question-reconcile": "The discriminator moved OUT of the filesystem, which is the direction round 1's record gave. `lastWriteNs` and the `statSync` import are deleted. `store.clearBlocked` (adapter/state.ts) now appends the released question's id to the item's own record — `Item.releasedQuestions` — at the one moment the item still knows it, and `reconcileOrphanQuestions` skips a question the item names as released. The immunity is per QUESTION, not per item, so a NEW question's half-applied window on a previously-released item is still repaired.",
+          "10.1-one-reprompt-in-flight (regression)": "The accounting now FOLLOWS the send. `let sent = true` is cleared in the catch, and `if (!sent) return {...}` precedes the counter block, so a call that throws on the way out charges no idleRePrompts, no futileRePrompts, no lastRePromptMs stamp, no lastSignature and no info continuation/reprompt record. The error record `failed` already writes is the whole trace. A call that RETURNED and rejects later is still counted (it left the process) and stays fail-soft."
+        },
+        "mutations": "SIX mutations, applied by the GATEKEEPER (not taken from the implementer's table on trust) by one script over a cp snapshot: baseline first, then each mutation through the FULL `bash scripts/test-conductor.sh`, then the same six again scoped to continuation.test.ts to name the failing row. All six caught; the tree was restored between every run and shasum-verified byte-identical afterwards. (A1) delete the `releasedQuestions` guard from the reconciler => 1242/1244, row 42 (the new durable-record row) fails. (A2) restore round 1's filesystem discriminator verbatim — statSync mtimeNs of questions.jsonl vs items/<id>.json, the exact PROBE-G1 defect => 1243/1244, ONLY row 42 fails, which is precisely why round 1 shipped green and why both rows now have to live side by side. (A3) state.ts clearBlocked stops recording the release, keeps `blocked = null` => 1242/1244, row 42 fails. (A4) widen the guard to `(item.releasedQuestions ?? []).length > 0`, so an item released once becomes permanently unrepairable => 1243/1244, row 42 fails on its second half. (B1) delete `if (!sent) return {...}`, i.e. charge a thrown send again — PROBE-G2's defect => 1243/1244, row 43 fails. (B2) delete the try/catch around client.session.prompt, re-verified after the restructure moved that block => 1242/1244, row 43 fails.",
+        "scopeException": {
+          "ruling": "APPROVED, and the approval is on the record rather than implied by the commit.",
+          "what": "conductor/core/types.ts and conductor/adapter/state.ts were first added by earlier tasks and were edited in a Phase 10 fix round. types.ts gains ONE optional Item property (`releasedQuestions?: string[]`, added to the schema's `properties` and NOT to `required`); state.ts writes it in `clearBlocked` (5 lines, confined to that function).",
+          "why": "Round 1's recorded direction was to draw the discriminator from 'the item's own block/disposition history'. That history did not exist: `blocked` holds one disposition and forgets the questionId when it goes null, the amend's decision record does not name the item, and journal.jsonl rotates and is level-filtered so it is not a system of record. Creating the fact necessarily touches the type that declares it and the writer that knows it. The only alternative on the table was keeping the stat(), which is the thing round 2 was convened to remove.",
+          "blastRadiusVerified": "`releasedQuestions` is in `properties` and absent from `required`, so every §2.5 item ever written still validates against the schema — and adding it to `properties` was mandatory, not optional, because the item schema is `additionalProperties: false`. Full gate green including the schema-export leg; the exported Item.schema.json is gitignored and regenerates clean; the C++ leg is untouched; M5 clean over both files."
+        },
+        "residualsRecordedNotFixed": [
+          "The release is recorded only when `blocked.questionId` is defined (it is optional on the §2.5 disposition). Every production setter of a block behind an `implementer-blocked` question passes it — continuation.ts:412 and the blockAndAsk family in tools.ts — so this is unreachable today, but it is a coupling between an optional field and a guard that now depends on it.",
+          "FIRST-BLOCK-WINS interaction: an item named by TWO open implementer-blocked questions and released by an amend records only the question it was blocked ON, so the reconciler re-blocks it on the second. That matches the hand-off doctrine C-056 established (answerQuestion re-blocks on the oldest remaining open question), so it is the intended behaviour and not a defect — but it does mean an amend does not free an item a second open question still gates.",
+          "On a synchronously-thrown send the debounce clock is deliberately not stamped, so a permanently unreachable transport is retried on every idle event rather than paced. Fail-soft (one error record per attempt) and bounded by the idle event rate; recorded because it is a behaviour change round 2 introduced on purpose."
+        ],
+        "notReRun": "Stage 2's fresh-worktree leg has still not been re-run since round 1. The round changed no build input (four TypeScript files, all tracked, all modified rather than added), and `git status --porcelain` shows no untracked file participating in the gate — but that is an argument, not the measurement, and it is recorded as such.",
+        "correction": "C-071"
+      },
+      "stage2Verdict": "PASS after fix round 2 of 3",
+      "rejected": "7 confirmed majors across two rounds, plus 1 regression a fix round introduced and 1 fix that was closed only for its own fixture. Gate credit: rounds 1 and 2 both shipped a GREEN suite with a real defect inside it, and both times the defect was found by asking what the fixture supplied that production does not."
     },
     "11": {
       "at": "2026-08-14T10:40:00Z",

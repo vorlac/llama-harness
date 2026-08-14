@@ -1,34 +1,31 @@
 # HANDOFF — read this first on every start
 
-## Position — updated 2026-08-14, after Phase 10 stage 2's first fix round
+## Position — updated 2026-08-14, after Phase 10 stage 2 PASSED
 
-**48 of 55 ledger rows COMMITTED.** MAIN tree: **1242/1242 GATE PASS**, five legs green; C++ 92
+**48 of 55 ledger rows COMMITTED.** MAIN tree: **1244/1244 GATE PASS**, five legs green; C++ 92
 cases / 27,726 assertions; M5 clean. `STATE.json` is the machine truth (`status` + `commitSha`);
 `git log --grep='^conductor: '` is authoritative for "committed"; `IN_PROGRESS.json` absent means
-no task is in flight; `NOW.md` is the human view. Phase gates 0–9 and 11 PASS. **Phase 10 is
-stage 2 FAIL** — read the next section before touching 10.1.
+no task is in flight; `NOW.md` is the human view. **Phase gates 0–11 all PASS.** Next work is the
+remaining-work table below, starting at 12.2.
 
-## Phase 10 gate — stage 2 FAIL, round 2 is the next work
+## Phase 10 gate — CLOSED, stage 2 PASS after fix round 2 of 3
 
-Stage 1 PASS (C-069); stage 2's reviewer then confirmed **7 majors** in 10.1. Fix round 1 came
-back green with 7 new rows and a 9-mutation table, and all nine are genuinely caught — but **two
-things stay open** (`GATES.json.phaseGates["10"].stage2FixRound1.open`, C-070), both in
-`conductor/adapter/continuation.ts`, both proven by running the consequence:
+Stage 1 PASS (C-069). Stage 2's reviewer confirmed **7 majors** in 10.1; round 1 closed six and
+left one closed only for its own fixture, plus a regression it introduced (C-070). Round 2 closed
+both (C-071), verified by six gatekeeper-run mutations — including restoring round 1's `statSync`
+compare verbatim, which fails the new row **only**, which is exactly why round 1 shipped green.
 
-1. **`10.1-binding-orphan-question-reconcile` is closed only for its fixture.** The release test
-   compares the item's mtime against the mtime of the *whole* `questions.jsonl`, so **one later
-   question append of any origin** re-blocks the amended item on the question the amend released
-   it from. Use a content-level discriminator (`Question.askedIso` + the item's block history);
-   the replacement must carry the committed row **and** a row where a further question lands
-   after the amend.
-2. **A regression the round introduced.** A send that throws releases the latch (right) but still
-   charges `idleRePrompts`/`futileRePrompts` and still writes the info `reprompt` record, so a
-   permanently failing transport stops the run `noop` with **0 prompts delivered**, blaming the
-   orchestrator. Charge the counters from the success path only.
+Two things a future reader needs:
 
-Upheld against the reviewer: `resolveSessionTree` at `plugin/index.ts:556` is **not** inert —
-`tools.ts:340` reads `entry?.tree ?? ""`. Stage 2's fresh-worktree leg is **not re-run** since
-the round; do that after round 2.
+- `Item.releasedQuestions?: string[]` is new (`core/types.ts`, written by `state.ts` `clearBlocked`).
+  It is how `reconcileOrphanQuestions` tells a §2.5-legal amend release from a half-applied
+  `blockAndAsk`. Optional, absent from schema `required`, so every item ever written still
+  validates. Cross-task edit approved on the record (`GATES.json … stage2FixRound2.scopeException`).
+- Three residuals recorded rather than fixed, in `stage2FixRound2.residualsRecordedNotFixed`.
+  None blocking; the first-block-wins one is intended behaviour, not a defect.
+
+Stage 2's **fresh-worktree leg was never re-run** after either round (no build input changed, but
+that is an argument, not a measurement). Fold it into the next fresh-checkout gate.
 
 ## Remaining work
 
@@ -45,7 +42,7 @@ Then: phase gates 10, 12, 13, 14, 15; `scripts/verify-acceptance.sh` exiting 0 i
 
 ## Deferred bindings — still live
 
-Sources: `docs/build/specs/*.json` `phaseGateNBindings` + the corrections named. All four 10.1 bindings (C-029 a/b, C-032 E7, C-037 ruling 6) and the C-056 residual are CLOSED (C-067) — but see the Phase 10 section: C-032 E7's repair half is not yet correct.
+Sources: `docs/build/specs/*.json` `phaseGateNBindings` + the corrections named. All four 10.1 bindings (C-029 a/b, C-032 E7, C-037 ruling 6) and the C-056 residual are CLOSED — C-032 E7's repair half included, now that its discriminator lives in the durable record (C-071).
 
 - **9.1** — enforce derived-decision scored options (`decide.requireTwoOptions`); `ClassificationCheck.correctedKind == null` iff agreed.
 - **receive-review.md delivery (C-028)** — fix-round routing must thread a `receiving-review` signal to `buildSystemAppend`, parallel to the wired debug.md path. Pack loaded; signal missing.
@@ -83,7 +80,8 @@ Sources: `docs/build/specs/*.json` `phaseGateNBindings` + the corrections named.
 - **A green suite that mutation-tests clean can still hide a MAJOR** (C-033, C-067(b), C-070).
   Read the prose too, then **RUN the consequence, don't reason it** (C-068).
 - **A caught mutation is not a closed defect** (C-070): ask what the FIXTURE supplies that
-  production does not, and distrust discriminators drawn from outside the durable record (mtime, cwd, hostname — C-069 is the same shape).
+  production does not, and distrust discriminators drawn from outside the durable record (mtime, cwd, hostname — C-069 is the same shape). The repair is usually to **write the fact down** (C-071):
+  a guard reaching outside the state means the state machine forgot something it knew.
 - **The recurring defect class** (C-044…C-047, C-063): a check that PASSES while inspecting less
   than it appears to. Make every scanner report how much it inspected.
 - **Piped exit codes lie** — a pipeline's status is the LAST command's; **measure the right

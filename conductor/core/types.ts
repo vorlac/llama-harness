@@ -242,6 +242,16 @@ export interface Item {
     overridesUsed: number;
   };
   blocked: { reason: string; sinceMs: number; questionId?: string; stage: string } | null;
+  // The ids of the §2.11 questions this item's `blocked` annotation has been cleared
+  // FROM. `blocked` holds one disposition and forgets it on release, so "open
+  // question, unblocked item" reads identically whether the block was deliberately
+  // cleared (§2.5 names conductor_queue_amend a legal clearer) or never finished
+  // being applied. C-032 E7's reconciler has to tell those apart, and the only
+  // discriminator it can trust is one the record itself carries: a filesystem
+  // timestamp is defeated by replay, backup, copy and a coarse-mtime volume alike.
+  // Absent on items that have never been released, so every §2.5 item ever written
+  // stays valid.
+  releasedQuestions?: string[];
   deferred: { reason: string; decisionId: string } | null;
   debugging: { sinceMs: number; hypothesis: string } | null;
   evidence: { red?: EvidenceRef; green?: EvidenceRef; validated?: EvidenceRef };
@@ -868,6 +878,7 @@ const itemSchema = {
       required: ["reason", "sinceMs", "stage"],
       additionalProperties: false,
     },
+    releasedQuestions: stringArraySchema,
     deferred: reasonDecisionOrNullSchema,
     debugging: {
       type: ["object", "null"],

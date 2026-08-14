@@ -1380,13 +1380,13 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 1242,
-        "pass": 1242,
+        "tests": 1244,
+        "pass": 1244,
         "fail": 0,
         "skipped": 0,
         "todo": 0,
-        "file": "41/41",
-        "suite": "tests=1242 pass=1242 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed). 1242 is post-stage-2-fix-round-1, which added 7 rows for the reviewer's 7 confirmed majors (1235 -> 1242). Committed at 1234; stage 1's own fix round took it to 1235. The row's implementation is NOT finished: GATES.json phaseGates[\"10\"].stage2FixRound1.open names 1 major still open and 1 regression the round introduced, both in conductor/adapter/continuation.ts."
+        "file": "43/43",
+        "suite": "tests=1244 pass=1244 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed). Committed at 1234; stage 1's own fix round took it to 1235; stage 2 fix round 1 added 7 rows for the reviewer's 7 confirmed majors (1235 -> 1242); stage 2 fix round 2 added 2 more (1242 -> 1244) for the one major that round 1 closed only for its fixture and the one regression round 1 introduced. The Phase 10 gate is now stage 2 PASS."
       },
       "redEvidence": {
         "cmd": "bash scripts/test-conductor.sh",
@@ -1400,7 +1400,9 @@
         "conductor/adapter/continuation.ts (new)",
         "conductor/adapter/tools.ts",
         "conductor/plugin/index.ts",
-        "conductor/tests/continuation.test.ts (new)"
+        "conductor/tests/continuation.test.ts (new)",
+        "conductor/adapter/state.ts (stage 2 fix round 2 only; earlier-task file, exception approved in GATES.json phaseGates[\"10\"].stage2FixRound2.scopeException)",
+        "conductor/core/types.ts (stage 2 fix round 2 only; same approved exception)"
       ],
       "revertAssertion": "[10.1-halt-interrupt] \u2014 RUN, not reasoned (M4 R1 above): with the full implementation present in a detached worktree, changing continuation.ts's halt branch to `if (false && store.isHalted() && !isTerminal(run))` takes the file from 33/33 to 32/33 with exactly that row failing. R2 and R3 pin the futility engine and the two tools.ts bindings the same way.",
       "attempts": 1,
@@ -1421,6 +1423,20 @@
           "finding": "10.1-signature-change-resets (MAJOR, Phase 10 review): the futility signature's comparison baseline is in-memory while counters.futileRePrompts is persisted, so the first idle after a plugin restart incremented on no evidence and the next idle stopped a MOVING run noop.",
           "disposition": "CONFIRMED REAL and fixed test-first in continuation.ts:671. One new test under the same row id; reverting the fix alone leaves 33/34 with only that test failing. Closes the C-067(b) binding. See C-068 and GATES.json taskGates['10.1'].fixRound1.",
           "commit": "conductor-build: 10.1 close review findings"
+        },
+        {
+          "round": 2,
+          "at": "2026-08-14T14:00:00-04:00",
+          "finding": "Phase 10 gate stage 2, round 1 of 3: the reviewer's SEVEN confirmed majors, fixed in one round (1235 -> 1242 rows).",
+          "disposition": "Six closed with discriminating assertions; all nine disclosed mutations re-run by the gatekeeper and all nine caught. FAIL on the seventh (10.1-binding-orphan-question-reconcile, closed only for its own fixture) plus one regression the round introduced (a thrown send still charged the futility counters). See GATES.json phaseGates['10'].stage2FixRound1 and C-070.",
+          "commit": "conductor-build: phase 10 gate fix round 1"
+        },
+        {
+          "round": 3,
+          "at": "2026-08-14T14:45:00-04:00",
+          "finding": "Phase 10 gate stage 2, round 2 of 3: the two items round 1 left open, both in conductor/adapter/continuation.ts.",
+          "disposition": "BOTH CLOSED, each test-first. The reconciler's discriminator moved out of the filesystem into the item's own durable record (new optional Item.releasedQuestions, written by store.clearBlocked); the idle engine's accounting now follows the send, so a synchronously-thrown prompt charges nothing. 1242 -> 1244 rows. Six gatekeeper-run mutations, all caught, including restoring round 1's mtime discriminator verbatim (fails the new row only) — which is why both rows now live side by side. Cross-task edits to conductor/adapter/state.ts and conductor/core/types.ts approved on the record. See GATES.json phaseGates['10'].stage2FixRound2 and C-071.",
+          "commit": "conductor-build: phase 10 gate fix round 2"
         }
       ]
     },

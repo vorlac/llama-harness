@@ -610,8 +610,20 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     return item;
   }
 
+  // Clearing the §2.5 `blocked` annotation is the ONE moment at which the item knows
+  // which question it was released from — the next reader sees only `blocked: null`,
+  // which is also what a half-applied blockAndAsk leaves behind (C-032 E7). So the
+  // release is written down here, in the item's own durable record, rather than left
+  // to be inferred later from file timestamps that a replay, a backup restore or a
+  // copy would destroy. Recorded once per question: a second release under the same
+  // reused question adds nothing new to the history.
   function clearBlocked(runId: string, itemId: string): Item {
     const item = loadItem(runId, itemId);
+    const questionId = item.blocked?.questionId;
+    if (questionId !== undefined) {
+      const released = item.releasedQuestions ?? [];
+      if (!released.includes(questionId)) item.releasedQuestions = [...released, questionId];
+    }
     item.blocked = null;
     saveItem(runId, item);
     return item;

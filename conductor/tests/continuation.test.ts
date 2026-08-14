@@ -4337,3 +4337,209 @@ test("[10.1-ask-needs-context-conversion] the surface queue is RUN-SCOPED: a con
   assert.equal(text.includes("I1"), false, "and the later run is never told about an item it does not contain");
   store.release();
 });
+
+// ===========================================================================
+// [10.1-binding-orphan-question-reconcile] — the release outlives LATER questions
+// ===========================================================================
+
+test("[10.1-binding-orphan-question-reconcile] a deliberate release is remembered in the DURABLE record, not inferred from the filesystem: after conductor_queue_amend releases an item under a still-OPEN question, a LATER question appended for a different item — an ordinary event on any run that carries on — does not resurrect the released block, while that later question's own half-applied window is repaired in the same pass", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const queue: Queue = {
+    items: [
+      makeQueueItem("I1", { fileScope: ["src/parser.mjs"], testScope: ["tests/p.test.mjs"] }),
+      makeQueueItem("I3", { fileScope: ["src/other.mjs"], testScope: ["tests/o.test.mjs"] }),
+    ],
+  };
+  seedExecuting(store, runId, queue);
+  const runDir = runDirOf(store, runId);
+
+  const ask = (itemId: string): string =>
+    appendQuestion(
+      runDir,
+      {
+        runId,
+        question: `conductor_submit_test could not obtain a legal RED for item "${itemId}"`,
+        askedBy: { role: "testWriter", sessionID: SUB },
+        humanTerritory: false,
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      START_MS,
+    ).id;
+
+  const releasedQuestion = ask("I1");
+  store.setBlocked(runId, "I1", { reason: BLOCK_MARKER, stage: "PENDING", questionId: releasedQuestion });
+  assert.notEqual(store.loadItem(runId, "I1").blocked, null, "premise: I1's block was fully applied");
+
+  const amended = handleQueueAmend({
+    store,
+    runId,
+    config,
+    journal: journal.sink,
+    now: () => START_MS,
+    ops: [
+      {
+        op: "update",
+        item: makeQueueItem("I1", {
+          fileScope: ["src/parser.mjs"],
+          testScope: ["tests/p.test.mjs", "tests/p.signed.test.mjs"],
+        }),
+      },
+    ],
+    question: "should I1's test scope widen to cover the signed cases?",
+    options: [
+      {
+        name: "widen I1's test scope",
+        score: { capability: 4, testability: 5, movingParts: 4, validationEarliness: 5, singleSource: 4 },
+      },
+      {
+        name: "leave the scope and add a second item",
+        score: { capability: 3, testability: 3, movingParts: 2, validationEarliness: 3, singleSource: 2 },
+      },
+    ],
+    choice: "widen I1's test scope",
+    why: "the signed cases belong to the same behaviour, so one item still owns one change",
+    appliedWhere: "queue.json",
+  });
+  assert.deepEqual(amended.updated, ["I1"], "premise: the amendment updated I1");
+  assert.equal(store.loadItem(runId, "I1").blocked, null, "premise: §2.5's legal clearer released I1");
+
+  // The run CARRIES ON: a later item hits its own §2.11 window, so questions.jsonl
+  // grows AFTER the release was written. Nothing about I1 changed.
+  const laterQuestion = ask("I3");
+  assert.equal(store.loadItem(runId, "I3").blocked, null, "premise: I3 is the genuine half-applied orphan");
+  assert.notEqual(laterQuestion, releasedQuestion, "premise: and it is a question of its own");
+
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  const state = createContinuationState();
+  const clock = makeClock();
+  const idle = async (): Promise<SessionIdleResult> => {
+    const out: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client: wiring.client,
+      config,
+      journal: journal.sink,
+      stateHome: freshStateHome(),
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 5);
+    return out;
+  };
+  const res = await idle();
+
+  assert.equal(
+    store.loadItem(runId, "I1").blocked,
+    null,
+    "the released item stays released after a later question is appended — the escape hatch is not restored only until the next question",
+  );
+  assert.equal(
+    store.loadItem(runId, "I3").blocked?.questionId,
+    laterQuestion,
+    "while the later question's own orphan is completed on that same pass",
+  );
+  assert.equal(res.stop, null, "the pass records no stop");
+  assert.equal(readQuestions(runDir).length, 2, "and appends no question");
+
+  // The release excuses THAT question, not the item: I1 later hits a §2.11 window of
+  // its own, and the half-applied block behind that NEW question is a genuine orphan.
+  // An item that has ever been released must not become permanently unrepairable.
+  const secondQuestion = ask("I1");
+  await idle();
+  assert.equal(
+    store.loadItem(runId, "I1").blocked?.questionId,
+    secondQuestion,
+    "a NEW question's half-applied window on the same item is still completed — the record excuses one question, not the item forever",
+  );
+  store.release();
+});
+
+// ===========================================================================
+// [10.1-one-reprompt-in-flight] — a send that never left the process
+// ===========================================================================
+
+test("[10.1-one-reprompt-in-flight] a send that THREW is not accounted for as a re-prompt: with a permanently throwing transport, four idles outside the debounce window leave idleRePrompts and futileRePrompts at zero, write no continuation/reprompt record and no §2.8 disengage anomaly, and never stop the run `noop` — the wedge rule may only accuse an orchestrator that was actually asked", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  seedOneItemExecuting(store, runId);
+  const runDir = runDirOf(store, runId);
+
+  const THROW_MARKER = "INJECTED unreachable transport 7731";
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  const client: ContinuationClient = {
+    session: {
+      create: (opts) => wiring.client.session.create(opts),
+      prompt: () => {
+        throw new Error(THROW_MARKER);
+      },
+      abort: (opts) => wiring.client.session.abort(opts),
+      messages: (opts) => wiring.client.session.messages(opts),
+    },
+    postSessionIdPermissionsPermissionId: (opts) => wiring.client.postSessionIdPermissionsPermissionId(opts),
+  };
+
+  const clock = makeClock();
+  const state = createContinuationState();
+  const stateHome = freshStateHome();
+  const idle = async (): Promise<SessionIdleResult> => {
+    const out: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client,
+      config,
+      journal: journal.sink,
+      stateHome,
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 5);
+    return out;
+  };
+
+  const passes: SessionIdleResult[] = [];
+  for (let n = 0; n < 4; n += 1) passes.push(await idle());
+
+  assert.equal(wiring.sdk.prompts.length, 0, "premise: not one prompt ever reached the transport");
+  assert.deepEqual(
+    passes.map((p) => p.prompted),
+    [false, false, false, false],
+    "premise: and no pass claims to have prompted",
+  );
+  const counters = readRunFile(store, runId).counters;
+  assert.equal(counters.idleRePrompts, 0, "a send that never left this process is not counted as a re-prompt");
+  assert.equal(counters.futileRePrompts, 0, "nor charged to the futility rule, which describes the ORCHESTRATOR's silence");
+  assert.equal(
+    journal.records.filter((r) => r.component === "continuation" && r.event === "reprompt").length,
+    0,
+    "and no continuation/reprompt record claims a message was sent",
+  );
+  assert.equal(
+    journal.records.filter((r) => r.level === "error").length,
+    4,
+    "the four failures are journaled at error level — the correct and sufficient trace",
+  );
+  assert.equal(passes[3].stop, null, "the fourth pass does not disengage on prompts the orchestrator never received");
+  assert.equal(readRunFile(store, runId).stop, null, "and run.json carries no false wedge verdict");
+  assert.equal(
+    readAnomalies(runDir).filter((a) => a.kind === "disengage").length,
+    0,
+    "and no §2.8 disengage anomaly accuses a run that was never asked",
+  );
+  store.release();
+});

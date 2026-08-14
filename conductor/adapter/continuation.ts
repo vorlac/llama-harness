@@ -45,7 +45,7 @@
 // it may never cost a live run, because §3.7's wedge detector must fire only on a
 // run that is not moving.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { readQuestions } from "./questions.ts";
@@ -358,19 +358,6 @@ function signatureOf(store: StateStore, run: Run, runDir: string, queue: Queue |
 // ---------------------------------------------------------------------------
 
 /**
- * The last write to `file`, as the filesystem recorded it, or null when the file
- * is absent or unreadable. Nanosecond resolution, because the two writes this
- * engine has to order are microseconds apart.
- */
-function lastWriteNs(file: string): bigint | null {
-  try {
-    return statSync(file, { bigint: true }).mtimeNs;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * blockAndAsk (tools.ts) and blockVetAndAsk append their §2.11 question FIRST and
  * call store.setBlocked SECOND. A crash between those two writes — or two
  * in-flight calls — leaves an OPEN question that no item references, and the
@@ -384,17 +371,19 @@ function lastWriteNs(file: string): bigint | null {
  *
  * THE RELEASE TEST. "Open question, unblocked item" is ALSO what a legal release
  * looks like: §2.5 names conductor_queue_amend a legal clearer of `blocked`, and
- * tools.ts clears it while leaving the question open. The two situations are
- * byte-identical in durable CONTENT, so repairing on content alone re-blocks every
- * amended item on the very next idle — permanently, and again after every later
- * amend, which kills the documented escape hatch. The one fact that still
- * separates them is the ORDER of two real file writes: the crash leaves an item
- * last written BEFORE the question was appended (blockAndAsk saves the item's
- * attempts, appends the question, then dies), while every release writes the item
- * AFTER it. That order is a filesystem fact, so it survives an injected clock, and
- * an item touched since the question is left alone — the conservative direction,
- * since the only cost is a repair not made while the cost of the other direction
- * is a run no amendment can free.
+ * tools.ts clears it while leaving the question open. Repairing without separating
+ * the two re-blocks every amended item on the very next idle — permanently, and
+ * again after every later amend, which kills the documented escape hatch.
+ *
+ * The separator is the item's own `releasedQuestions` history: store.clearBlocked
+ * writes the question id down at the one moment the item still knows it, so a
+ * released item names the question it was released from and a half-applied one
+ * names nothing. Nothing outside the durable record is consulted. The file
+ * timestamps this guard used to compare could not do the job at any granularity —
+ * questions.jsonl carries ONE mtime for every question in the run, so a later
+ * append for any other item moved it past the released item and the release was
+ * forgotten — and a discriminator drawn from the filesystem is undone by replay, a
+ * backup restore, a copy, or a volume with coarse timestamps besides.
  */
 function reconcileOrphanQuestions(
   store: StateStore,
@@ -408,7 +397,6 @@ function reconcileOrphanQuestions(
   } catch {
     return;
   }
-  const questionsNs = lastWriteNs(path.join(runDir, "questions.jsonl"));
   for (const question of questions) {
     if (question.answeredIso !== null) continue;
     if (question.origin !== "implementer-blocked") continue;
@@ -420,8 +408,7 @@ function reconcileOrphanQuestions(
         continue;
       }
       if (item.blocked !== null) continue;
-      const itemNs = lastWriteNs(path.join(runDir, "items", itemId + ".json"));
-      if (questionsNs !== null && itemNs !== null && itemNs > questionsNs) continue;
+      if ((item.releasedQuestions ?? []).includes(question.id)) continue;
       store.setBlocked(runId, itemId, {
         reason:
           "completing a half-applied block: open question " +
@@ -768,10 +755,11 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     return { runId, prompted: false, stop: null };
   }
 
-  // (j) Counters, then the message. A signature that DIFFERS from the last one
-  //     this engine observed is progress and resets the futile counter; an equal
-  //     one increments it. The comparison is the same one (f) already made, and
-  //     it is made against the same observation, so the two can never disagree.
+  // (j) The message, the send, and — only if the send actually left this process —
+  //     the accounting. A signature that DIFFERS from the last one this engine
+  //     observed is progress and resets the futile counter; an equal one increments
+  //     it. The comparison is the same one (f) already made, and it is made against
+  //     the same observation, so the two can never disagree.
   //
   //     The third case is a pass with NO prior observation. SG-3 keeps the last
   //     signature in memory while the counters are persisted, so a process
@@ -786,13 +774,6 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   //     (idleRePrompts 0) has no lost observation, so its first re-prompt counts
   //     normally, which is what keeps 1,2,3 true for a fresh wedge.
   const resumedMidCount = state.lastSignature === null && run.counters.idleRePrompts > 0;
-  run.counters.idleRePrompts += 1;
-  if (!resumedMidCount) {
-    run.counters.futileRePrompts = movedSinceLastRePrompt ? 0 : run.counters.futileRePrompts + 1;
-  }
-  store.saveRun(run);
-  state.lastSignature = signature;
-  state.lastRePromptMs = now();
 
   // Only THIS run's conversions ride along; anything raised under an earlier run
   // is discarded here rather than delivered, and either way the queue is left
@@ -841,6 +822,28 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     sent = false;
     failed(err);
   }
+
+  // THE ACCOUNTING FOLLOWS THE SEND, and a send that threw on the way out never
+  // happened: nothing left this process, so nothing about it may be charged to the
+  // ORCHESTRATOR. Charging it anyway walked a merely unreachable transport to the
+  // §3.7 futility threshold in three passes and killed the run with a durable
+  // "no observable progress across 3 consecutive re-prompts" — an accusation
+  // against a session that was never asked once. The error record `failed` already
+  // wrote is the whole and correct trace of such a pass. The debounce clock is
+  // left alone for the same reason: it paces re-prompts the orchestrator receives.
+  //
+  // A call that RETURNED, and rejects later, did leave: it is counted here, and its
+  // rejection is fail-soft in `failed`, which puts the conversions back so nothing
+  // the sub-sessions raised is lost with it.
+  if (!sent) return { runId, prompted: false, stop: null };
+
+  run.counters.idleRePrompts += 1;
+  if (!resumedMidCount) {
+    run.counters.futileRePrompts = movedSinceLastRePrompt ? 0 : run.counters.futileRePrompts + 1;
+  }
+  store.saveRun(run);
+  state.lastSignature = signature;
+  state.lastRePromptMs = now();
 
   journal.log(
     "info",
