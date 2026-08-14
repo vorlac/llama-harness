@@ -114,15 +114,23 @@ function stripTrailingSlashes(s: string): string {
 // item scopes (which are tree-relative) and the `.conductor/**` deny both match
 // the NORMALIZED path, never the worktree-root prefix. A worktree file at
 // <tree>/src/a.ts normalizes to src/a.ts even when <tree> itself lives under a
-// `.conductor` state home — the prefix must not false-deny (§3.5:1409-1413). A
-// path that is not under the tree is left as-is: it matches no tree-relative
-// scope and is denied by the role check below.
-function normalizeUnderTree(absPath: string, tree: string): string {
+// `.conductor` state home — the prefix must not false-deny (§3.5:1409-1413).
+//
+// A path that is NOT under the tree returns null, and the caller denies outright.
+// It used to be returned unchanged, on the reasoning that an absolute path
+// "matches no tree-relative scope". That reasoning was wrong for any
+// WILDCARD-HEADED scope: globMatch("**", "/etc/passwd") is true, because `**`
+// spans separators including the leading one. So an item whose fileScope is `**`
+// — which verifyScopePathsOf produces for an item that declares no paths — or
+// `**/*.ts` granted edit permission to any absolute path on the machine. The `..`
+// guard does not help, because no traversal is needed when the path is already
+// absolute (C-055, found by the Phase 9 milestone gate).
+function normalizeUnderTree(absPath: string, tree: string): string | null {
   const t = stripTrailingSlashes(tree);
   if (absPath === t) return "";
   const prefix = t + "/";
   if (absPath.startsWith(prefix)) return absPath.slice(prefix.length);
-  return absPath;
+  return null;
 }
 
 // True when a (normalized) path carries a `..` path segment. normalizeUnderTree
@@ -158,7 +166,15 @@ export function decideEdit(input: EditInput): Decision {
   } = input;
 
   // 1. Tree-relative normalization FIRST — every later check reads the result.
+  //    A path outside the tree is denied HERE rather than left for a scope match
+  //    to reject, because a wildcard-headed scope would have accepted it.
   const normalized = normalizeUnderTree(path, sessionTree);
+  if (normalized === null) {
+    return deny(
+      "the path is outside this session's tree; an edit is confined to the tree the session was " +
+        "dispatched into (§3.5), and no item scope can widen that",
+    );
+  }
 
   // 1b. Path traversal — deny any `..` segment BEFORE scope matching. `..` lets
   //     an in-scope glob reach the .conductor state area, a sibling item, or out

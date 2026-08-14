@@ -2003,3 +2003,44 @@ STANDING RULE: when a correction record claims a construction prevents a recurre
 that records it MUST contain the construction. If the guard is deferred, the record says DEFERRED
 and names the task that will build it. "Is removed by" is a claim about the present tense and must
 be true when written.
+
+## C-055 — a wildcard fileScope granted edit permission to the whole filesystem (MAJOR, security)
+
+**The finding**, from the Phase 9 milestone gate's isolation lens, demonstrated and then confirmed
+by two skeptics. `core/gates-edit.ts normalizeUnderTree` strips the session tree's prefix so
+tree-relative item scopes match, and returned a path NOT under the tree UNCHANGED. Its comment
+justified that: such a path "matches no tree-relative scope and is denied by the role check below".
+
+That is false for any WILDCARD-HEADED scope. Verified directly:
+
+    globMatch("**",      "/etc/passwd")            -> true
+    globMatch("**",      "/Users/sal/.ssh/id_rsa") -> true
+    globMatch("**/*.ts", "/tmp/evil.ts")           -> true
+    globMatch("src/**",  "/etc/passwd")            -> false
+
+`**` spans separators INCLUDING the leading one. So an absolute path outside the tree, left
+unchanged by normalization, was matched by the item's own fileScope and ALLOWED.
+
+**Not an exotic scope.** `verifyScopePathsOf` returns exactly `["**"]` for an item that declares no
+paths, and a model-driven decomposition is free to emit `**/*.ts`. The `..` traversal guard does
+not help — no traversal is needed when the path is already absolute. Neither does the freeze check
+(keyed on tree equality) nor the `.conductor/**` deny (matched against the same unchanged absolute
+path, which it does not match).
+
+**The fix.** `normalizeUnderTree` returns null for a path outside the tree, and `decideEdit` denies
+outright at step 1 — BEFORE any scope matching, because scope matching is precisely what could not
+be trusted to reject it. VERIFIED to discriminate: restoring the old "return it unchanged" line
+reds `[5.2-out-of-tree-escape]` and only that row.
+
+**Why the existing security suite missed it.** Phase 5 hardened this gate hard — eight bypasses were
+found and fixed there (C-022, C-023) — and it has a dedicated path-traversal row. But every scope in
+those fixtures is `src/**`-shaped, i.e. rooted at a literal segment, and a rooted glob genuinely
+does fail to match an absolute path. The suite tested the guard against the scopes it expected,
+never against the one the product itself generates for a scope-less item. The new row asserts its
+own PREMISE (`globMatch("**", "/etc/passwd") === true`) so it cannot later pass because the matcher
+changed underneath it.
+
+**The pattern, again.** A comment stated an invariant; the invariant held for the inputs anyone had
+tried; the code was trusted because the comment was confident. That is C-054's lesson wearing
+different clothes — and the two were found by the same gate, hours apart, in code written months
+apart. The gate earned its cost on these two alone.

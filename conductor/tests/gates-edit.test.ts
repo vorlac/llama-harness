@@ -62,6 +62,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { decideEdit, writeShapedPaths, decideSession } from "../core/gates-edit.ts";
+// The matcher the gate itself uses — imported so [5.2-out-of-tree-escape] can assert
+// its PREMISE rather than assume it.
+import { globMatch } from "../core/shell-parse.ts";
 
 // ---------------------------------------------------------------------------
 // Local structural mirrors of the subject's param + return shapes. Kept local
@@ -564,4 +567,58 @@ test("[5.2-path-traversal] a normal in-scope path without '..' is unchanged (all
     }),
   );
   assertAllow(d, "normal in-scope path, no traversal");
+});
+
+// ===========================================================================
+// [5.2-out-of-tree-escape] — Phase 9 MILESTONE GATE finding (C-055).
+//
+// normalizeUnderTree strips the session tree's prefix so item scopes, which are
+// TREE-RELATIVE, match. Its comment then claims that a path NOT under the tree
+// "is left as-is: it matches no tree-relative scope and is denied by the role
+// check below."
+//
+// That claim is false for any WILDCARD-HEADED scope. globMatch("**", "/etc/passwd")
+// is true — `**` spans separators, including the leading one — so an absolute
+// path outside the tree, left unchanged by normalization, is matched by the
+// item's own fileScope and ALLOWED.
+//
+// This is not an exotic scope. `verifyScopePathsOf` returns exactly ["**"] for an
+// item that declares no paths, and a decomposition is free to produce `**/*.ts`
+// or `src/**` — the first two of which match absolute paths anywhere on the
+// filesystem. The `..` guard does not help: no traversal is needed when the path
+// is already absolute.
+//
+// The freeze and `.conductor/**` checks do not save it either: freeze is keyed on
+// tree equality, and `.conductor/**` is matched against the same unchanged
+// absolute path, so an out-of-tree state file matches neither.
+// ===========================================================================
+
+test("[5.2-out-of-tree-escape] an ABSOLUTE path outside the session tree is denied even when the item's own fileScope is wildcard-headed — normalization leaving it unchanged must not hand it to a `**` that spans separators", () => {
+  // The premise, stated so this test cannot pass because the matcher changed:
+  // `**` really does match an absolute path.
+  assert.equal(globMatch("**", "/etc/passwd"), true, "premise: `**` spans the leading separator");
+
+  for (const scope of [["**"], ["**/*.ts"], ["src/**", "**"]]) {
+    for (const outside of ["/etc/passwd", "/Users/someone/.ssh/id_rsa", "/tmp/evil.ts"]) {
+      const verdict = decideEdit(editInput({ fileScope: scope, path: outside }));
+      assert.equal(
+        verdict.action,
+        "deny",
+        `scope ${JSON.stringify(scope)} must NOT grant an edit to ${outside} — it is outside the session tree`,
+      );
+      assert.match(
+        verdict.reason ?? "",
+        /outside|tree/i,
+        "the denial says the path is outside the session tree, not something incidental",
+      );
+    }
+  }
+
+  // And the ordinary in-tree case still works, so the fix is a deny of the
+  // out-of-tree case rather than a blanket deny of wildcard scopes.
+  assert.equal(
+    decideEdit(editInput({ fileScope: ["**"], path: p("src/a.ts") })).action,
+    "allow",
+    "an in-tree path under a wildcard scope is still allowed",
+  );
 });
