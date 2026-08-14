@@ -3155,3 +3155,77 @@ the finding is that the state machine is not writing down something it already k
 `clearBlocked` runs is the last moment the item knows which question released it. Writing it there
 costs one optional field and removes an entire class of failure — replay, backup restore, file
 copy, coarse-mtime volume — that no test in this suite would ever have run.
+
+---
+
+## C-072 — the Phase 12 gate, stopped at stage 1: the phase was not finished
+
+Stage 1 exists so no reviewer is convened over a tree that cannot support one. It stopped here,
+and the reason is not subtle: **task 12.2 is still in flight.** `STATE.json` has it `NOT_STARTED`,
+`IN_PROGRESS.json` has it at `red-observation`, and the working tree holds all of it uncommitted —
+1068 changed lines across five `conductor/` modules and an untracked 2240-line
+`conductor/tests/setup.test.ts`. The main-tree gate is red: `tests=1272 pass=1271 fail=1`, run
+twice, identically. The single red is in `setup.test.ts` (28 tests against the spec's 28 rows,
+1:1). So 27 of 28 rows are green — `red-observation` is a stale label on a nearly finished task,
+not an accurate one.
+
+### The fresh worktree said the quiet part
+
+`git worktree add $TMPDIR/verify-p12 HEAD`, its own `npm install`, then the complete gate: **1244
+pass, 0 fail, five legs, GATE PASS.** HEAD is *greener than the working tree*, and that is the
+finding, not a comfort. 1272 − 1244 = 28: exactly task 12.2, absent from the repository. The
+lesson C-069 wrote down — a green main tree proves nothing about a fresh checkout — has a mirror
+image that had not been written down: **a green fresh checkout proves nothing about the phase**,
+because work that was never committed cannot fail there.
+
+One good thing fell out of it. `HANDOFF.md` carried an owed item: phase 10's stage-2
+fresh-worktree leg was never re-run after either fix round, and the argument for skipping it was
+that no build input changed — "an argument, not a measurement", in its own words. This worktree
+was cut from `203016d`, the phase-10-PASS commit. It is now a measurement.
+
+### The 12.1 supervisor obligation, adjudicated: CONFIRMED MAJOR
+
+C-062 deferred five disclosed survivors to this gate. The serious one is unchanged in the tree.
+`scripts/test_conductor_wiring.py:868-874` does this:
+
+    source = cw.ROUTER_SUPERVISOR_SOURCE
+    self.assertIn("os.kill(shell_pid, 0)", source)
+    self.assertIn("SIGTERM", source)
+    self.assertIn("SIGKILL", source)
+    self.assertLess(source.index("SIGTERM"), source.index("SIGKILL"), ...)
+
+Four assertions about a **string**. The supervisor is never executed by any test in the suite. A
+supervisor that carries every one of those tokens in a comment and signals nothing passes all
+four. C-062 stated the consequence exactly: *"a router that outlives every session would not fail
+this suite."* The out-of-band transcript that shows the real behaviour is correct does not change
+what the suite enforces. Recorded as a confirmed major and promoted to a fix-round obligation: it
+needs an executed test — spawn the real supervisor source against a fake router binary and a fake
+shell pid, and assert the signals observed and the reap. The gatekeeper does not write tests, so
+this closes as an obligation, not a fix. It is the C-044/C-047/C-063 class again, and this is the
+third gate in a row to find it.
+
+### M5 has been reporting a number that does not cover the phase
+
+`scripts/conductor-gate.sh` reported `M5 PASS (115 file(s) scanned)`. Its default file set is
+`git ls-files` over `conductor/**/*.ts`, `router/**`, `tools/**`. **`scripts/` is not in that
+list**, so `scripts/conductor_wiring.py` and `scripts/test_conductor_wiring.py` — the entirety of
+task 12.1's product — have never been scanned by M5. `git ls-files` also excludes untracked
+files, so 12.2's 2240-line test file was invisible too. Re-run in explicit-file mode over the
+phase-12 set it reports `M5 PASS (12 file(s) scanned)` and is clean, so nothing is wrong with the
+code; what is wrong is that the number 115 was being read as coverage.
+
+C-057 added the floors after the C++ half went unscanned for two commits when `src/router` became
+`router`. The floors catch a glob that has **moved**. They cannot catch a glob that never
+**reached** — and `scripts/` was never reached. "Make every scanner report how much it inspected"
+is only half the rule; the other half is checking the number against what you meant to inspect.
+
+### An obligation kept in a one-slot file is an obligation you are going to lose
+
+This gate's brief cites `IN_PROGRESS.json` `processNotes.greppingSourceIsNotTesting` as where the
+12.1 obligation lived. That field is gone: `IN_PROGRESS.json` is a single slot, rewritten when
+12.2 started, and it now holds only `taskId`, `step`, `intendedFiles`, `startedAt`. The obligation
+survived only because C-062 also wrote it into this file. Durable obligations belong in
+`CORRECTIONS.md` or `GATES.json`; `IN_PROGRESS.json` is a liveness marker, not a ledger.
+
+Also backfilled here: `STATE.json` had task 12.1 `COMMITTED` with `commitSha: null`. The commit is
+`589d22e`. A status without a sha is a claim without a receipt.

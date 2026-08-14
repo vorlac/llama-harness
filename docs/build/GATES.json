@@ -1112,6 +1112,86 @@
         "rejected": "1 confirmed MAJOR fixed (found 6x by 3 independent lenses) + 1 stage-1 defect (C-057, M5 scanning zero C++ files). Two minors promoted to obligations. Gate credit: this boundary was skipped when Branch B ran parallel to the spine, and running it late still found a silent data-corruption bug that a 90-case green suite did not."
       },
       "ctestAfterFix": "92 cases / 27726 assertions, 0 failed, 0 skipped; ctest 1/1 (orchestrator-observed)"
+    },
+    "12": {
+      "at": "2026-08-14T12:10:00Z",
+      "stage": "1 (mechanical prelude)",
+      "verdict": "FAIL",
+      "priorVerdict": "none \u2014 phase 12 had no entry in phaseGates before this run; phases 0-11 all PASS",
+      "headAtGate": "203016d",
+      "blocking": [
+        "PHASE INCOMPLETE \u2014 the gate was dispatched over unfinished work. STATE.json has 12.2 status NOT_STARTED and 12.1-G5 NOT_STARTED (G5 is deferred by design until after 13.1). IN_PROGRESS.json holds taskId 12.2 at step red-observation. Task 12.2's entire product is UNCOMMITTED: 1068 changed lines across conductor/adapter/gitio.ts, conductor/adapter/tools.ts, conductor/core/journal-events.ts, conductor/core/tool-bindings.ts, conductor/plugin/index.ts, plus an untracked 2240-line conductor/tests/setup.test.ts. No 12.2 commit exists.",
+        "MAIN-TREE GATE RED \u2014 bash scripts/test-conductor.sh exits 1: TAP tests=1272 pass=1271 fail=1. The node leg fails first, so the tsc, bun, schema-export and python legs are never reached in the main tree.",
+        "CONFIRMED MAJOR (the 12.1 obligation, carried from C-062 and now adjudicated) \u2014 scripts/test_conductor_wiring.py:868-874 still asserts against ROUTER_SUPERVISOR_SOURCE as TEXT (assertIn 'os.kill(shell_pid, 0)', assertIn 'SIGTERM', assertIn 'SIGKILL', index ordering). Nothing executes the supervisor. A supervisor that keeps every one of those tokens and never signals passes the suite; in the implementer's own words, 'a router that outlives every session would not fail this suite'. The gatekeeper does not write tests, so this is recorded as a confirmed major and is now a fix-round obligation, not a deferral."
+      ],
+      "legs": {
+        "mainTreeGate": "FAIL \u2014 exit 1. TAP tests=1272 pass=1271 fail=1 cancelled=0 skipped=0 todo=0 skipdirectives=0. Run twice, identical both times.",
+        "failLocation": "The single red is in conductor/tests/setup.test.ts (task 12.2). Run alone through the same wrapper: tests=28 pass=27 fail=1. The file carries exactly 28 top-level tests against the 28 rows of docs/build/specs/task-12.2.assertions.json, one per row. The wrapper's excerpt window (grep -v '^ok ' | tail -60) covers rows 19-28 and shows all ten green, so the red is one of rows 1-18.",
+        "cppLeg": "PASS \u2014 cmake --build .out/build/clang-relwdebinfo --target router-tests ('ninja: no work to do'), then ./.out/build/clang-relwdebinfo/router-tests: doctest 92/92 cases, 27726/27726 assertions, exit 0.",
+        "freshWorktree": "PASS in itself, and it is the finding. git worktree add $TMPDIR/verify-p12 HEAD; npm install in conductor/ (exit 0); bash scripts/test-conductor.sh from that tree: TAP tests=1244 pass=1244 fail=0, typecheck OK, bun leg OK (8 pass), python leg OK (Ran 29 tests), GATE PASS, exit 0. 1244 vs the main tree's 1272 is the whole of task 12.2 (28 tests) missing from HEAD. HEAD is green because the phase's second half is not in it. Worktree removed after the run.",
+        "m5Default": "PASS \u2014 bash scripts/conductor-gate.sh: 'M5 PASS (115 file(s) scanned, 6 line exemption(s) all live)'.",
+        "m5PhaseSet": "PASS \u2014 explicit-file mode over the phase-12 cumulative set: scripts/conductor_wiring.py, scripts/test_conductor_wiring.py, scripts/serve.py, scripts/fetch_models.py, conductor/adapter/{gitio,tools,state,config-io}.ts, conductor/core/{journal-events,tool-bindings}.ts, conductor/plugin/index.ts, conductor/tests/setup.test.ts. 'M5 PASS (12 file(s) scanned, 6 line exemption(s) all live)'."
+      },
+      "checks": [
+        {
+          "id": "M1",
+          "result": "FAIL",
+          "detail": "main tree exit 1, 1/1272 red; fresh worktree at HEAD PASS 1244/1244 five legs; C++ 92 cases / 27726 assertions PASS"
+        },
+        {
+          "id": "M2",
+          "result": "FAIL",
+          "detail": "1244 (HEAD) -> 1272 (working tree), +28 for 12.2 \u2014 but every one of those 28 is uncommitted, so the rise does not exist in the repository"
+        },
+        {
+          "id": "M3",
+          "result": "NA",
+          "detail": "not reached in the main tree (the node leg fails first and the wrapper exits); PASS in the fresh worktree at HEAD ('typecheck: OK')"
+        },
+        {
+          "id": "M4",
+          "result": "NA",
+          "detail": "phase-level revert assertion not attempted \u2014 12.2 has no commit to revert against"
+        },
+        {
+          "id": "M5",
+          "result": "PASS",
+          "detail": "115 files in default mode; 12 files over the phase-12 explicit set; 6 exemptions all live"
+        },
+        {
+          "id": "M6",
+          "result": "NA",
+          "detail": "reachability is a task-gate check; not run at phase level over an incomplete phase"
+        },
+        {
+          "id": "M7",
+          "result": "FAIL",
+          "detail": "12.2's spec has 28 assertion rows and setup.test.ts has 28 name-prefixed tests (1:1 mapping is right), but one row is red, so coverage is not demonstrated"
+        },
+        {
+          "id": "M8",
+          "result": "NA",
+          "detail": "no live leg in this stage; 12.1's live rows were covered at its task gate"
+        },
+        {
+          "id": "M9",
+          "result": "NA",
+          "detail": "bun leg not reached in the main tree; PASS in the fresh worktree ('bun leg: OK (8 pass)')"
+        }
+      ],
+      "secondaryFindings": [
+        "M5's default glob cannot see the whole of task 12.1. scripts/conductor-gate.sh globs conductor/**/*.ts, router/** and tools/** via git ls-files \u2014 scripts/ is not in the list, so scripts/conductor_wiring.py and scripts/test_conductor_wiring.py (12.1's entire product) have never been in the 115. git ls-files also excludes untracked files, so the 2240-line setup.test.ts was invisible too. Both were covered here only because this gate passed them explicitly. Same class as C-057, which added the floors after the C++ half went unscanned for two commits. The floors do not help: they check the globs still match, not that the globs cover the tree.",
+        "IN_PROGRESS.json's processNotes were lost. The brief for this gate cites processNotes.greppingSourceIsNotTesting as recorded there; the file now holds only 12.2's taskId/step/intendedFiles/startedAt. The obligation survived because C-062 wrote it into CORRECTIONS.md:2503-2522 as well. A single-slot IN_PROGRESS.json that gets overwritten at each task start cannot carry an obligation across tasks \u2014 CORRECTIONS.md and this file are the durable places.",
+        "IN_PROGRESS.json's step is stale: it says red-observation, but 27 of 28 rows are green, so implementation is nearly complete.",
+        "STATE.json had 12.1 status COMMITTED with commitSha null; the commit is 589d22e ('conductor: 12.1 serve wiring'). Backfilled in this commit.",
+        "Closes an item HANDOFF.md listed as owed: 'stage 2's fresh-worktree leg was never re-run after either fix round'. This gate's fresh worktree was cut from 203016d, the phase-10-gate-PASS commit, npm-installed from scratch and run complete: 1244/1244, all five legs, GATE PASS. Phase 10's fresh-checkout claim is now measured rather than argued."
+      ],
+      "whatMustHappenNext": [
+        "1. Finish task 12.2: make the one red row green, then take it through its task gate and commit it. The phase gate cannot be re-run before that.",
+        "2. Close the supervisor major with an EXECUTED test of the real supervisor source (spawn it against a fake router binary and a fake shell pid, and assert the observed signals and reap), not a text search. C-062 already recorded the out-of-band transcript that shows the behaviour is correct; the missing thing is a test.",
+        "3. Widen scripts/conductor-gate.sh's default file set to include scripts/*.py (orchestrator-owned file \u2014 orchestrator edit).",
+        "4. Then re-run phase 12 stage 1 from a clean tree. 12.1-G5 stays deferred to after 13.1 by design and does not block this gate."
+      ]
     }
   },
   "rejections": [
