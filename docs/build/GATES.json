@@ -1302,7 +1302,7 @@
       "stage": "1 (mechanical prelude)",
       "verdict": "FAIL",
       "priorVerdict": "none - phase 14 had no entry in phaseGates before this run. Phases 0-11 PASS; phase 12 is stage 1 PASS with stage 2 NOT RUN; phase 13 has no entry and no work.",
-      "headAtGate": "eb39500",
+      "headAtGate": "09c8c57",
       "blocking": [
         "PHASE 14 DOES NOT EXIST. Both of its ledger rows are NOT_STARTED in STATE.json (14.1 bench driver, 14.2 POC run) and neither has a commitSha. `git log --grep='^conductor: 14\\.'` returns nothing. `git grep -l -E '14\\.[12]-' -- conductor scripts router tools` returns nothing: not one of the 51 assertion ids in docs/build/specs/task-14.1.assertions.json (33 rows) and task-14.2.assertions.json (18 rows) is named by any tracked source file. The gate was dispatched over a phase with zero committed work and zero work in flight (IN_PROGRESS.json is absent). There is nothing here for a reviewer to review, and no set of green legs can change that - the legs below are all green precisely because they measure a repository in which phase 14 has not begun.",
         "PHASE 13 IS ALSO ENTIRELY UNBUILT, and 14.2 depends on it. 13.1 (e2e scripted) and 13.2 (live smoke) are both NOT_STARTED. HANDOFF.md line 33 calls 13.1 the largest task in the plan. Phase gates are ordered; 13 must be built and gated before 14 is dispatched.",

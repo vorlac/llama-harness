@@ -3435,3 +3435,49 @@ at all. 2. Reconcile the peers' in-flight edits, then commit 14.1 under its own 
 unachievable for it. 3. Revise 14.2's spec per Finding 1. 4. Run 13.2 (live, → `conductor/SMOKE.md`).
 5. Launch 14.2 **detached** (→ both report paths). Rows 6, 8, 12 and detector E clear together, and
 only when those three tasks are genuinely built and genuinely measured.
+
+## C-076 — 12.2's commit renamed instead of its claim: the scar from C-073, closed
+
+C-073 recorded that 12.2's product landed under `conductor-build: phase 12 gate stage 1 repair`
+(`eb39500`) rather than under its own manifest message, and drew the consequence plainly:
+`git log --grep='^conductor: 12.2'` found nothing, so acceptance row 12 counted 12.2 as a missing
+manifest commit. C-075's repair round then made row 12 pass **by editing STATE.json's
+`commitMessage` for 12.2 to the phase-gate message that had actually landed** — which is the wrong
+direction. Row 12 exists to check that each manifest row's deliverable landed under that row's own
+message; rewriting the expected string to whatever happened to be in the log turns the meter into a
+tautology. It inspected a string that existed instead of the claim that did not.
+
+**What was done instead.** The repo owner chose to rewrite the commit rather than the claim.
+`git filter-branch --msg-filter` over `eb39500~1..HEAD` replaced that one commit's subject with the
+verbatim manifest message `conductor: 12.2 first-run setup` and left every tree byte-identical
+(HEAD's tree hash is `e01ec00` before and after). Seven commits were rewritten and force-pushed to
+`origin/main`; the working tree's five modified files were stashed by explicit path across the
+rewrite and restored unchanged (669 insertions, cmp-clean).
+
+**Old → new sha map.** Any short sha quoted in an earlier correction, in `JOURNAL.jsonl`, or in
+`COMPLETION-REPORT.md` resolves through this table. Those historical texts are deliberately NOT
+rewritten — they record what ran at the time — but `STATE.json`'s four in-range `commitSha` receipts
+and `GATES.json`'s `phaseGates['14'].headAtGate` are updated, because those are machine truth.
+
+| old | new | subject |
+|-----|-----|---------|
+| `eb39500` | `09c8c57` | `conductor: 12.2 first-run setup` (was `conductor-build: phase 12 gate stage 1 repair`) |
+| `da31871` | `cddd9b9` | `conductor-build: phase 14 gate stage 1` |
+| `71c45a9` | `c4fa9f7` | `conductor: 13.1 e2e scripted` |
+| `c64c805` | `4afdf2b` | `conductor: 15.1 ops docs` |
+| `3506dda` | `588a046` | `conductor-build: close acceptance rows round 1` |
+| `dc42d88` | `cf50357` | `conductor-build: close acceptance rows round 2` |
+| `6097918` | `3784d10` | `conductor-build: completion report` |
+
+The pre-rewrite tip is kept as the tag `prerewrite-backup-20260814` (`6097918`), local only.
+
+**The rule this leaves behind.** A failing acceptance row is not an invitation to edit what the row
+expects, any more than it is an invitation to author the artifact it wants (C-075). Both moves flip
+the meter and leave the truth where it was. If a row's deliverable landed under the wrong message,
+the message is what is wrong — fix the message.
+
+**And the defect that caused it, which is still unfixed at the source.** 12.2 was left uncommitted
+because its staged test contradicted itself; the implementer correctly returned STUCK and refused to
+edit the test. The orchestration then parked the task **with its partial work still in the tree**, so
+the phase gate was dispatched over unfinished work and every later task's clean-tree precondition
+blocked on it. Parking a task must also park its files.

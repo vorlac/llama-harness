@@ -1816,8 +1816,8 @@
       "manifest": true,
       "tier": "B",
       "status": "COMMITTED",
-      "commitSha": "eb39500",
-      "commitMessage": "conductor-build: phase 12 gate stage 1 repair",
+      "commitSha": "09c8c57",
+      "commitMessage": "conductor: 12.2 first-run setup",
       "planLines": [
         2890,
         2913
@@ -1844,9 +1844,9 @@
       "revertAssertion": "RUN by the gatekeeper itself, in a disposable worktree so the main tree was never mutated, and cmp-verified clean afterwards. TARGETED: dropping the `base.startsWith(\"python\") && rest.includes(\"pytest\")` arm from detectRunner in conductor/adapter/evidence.ts - so `python3 -m pytest` falls through to the node profile - takes setup.test.ts from 28/28 to tests=28 pass=26 fail=2, failing [12.2-detect-itemtest-templates] and [12.2-c003-pytest-measured]. The suite therefore binds the python leg to a real committed runner profile rather than to whatever detectRunner returns.",
       "attempts": 1,
       "deviations": [
-        "C-073: 12.2's product is committed under the phase-gate message `conductor-build: phase 12 gate stage 1 repair`, NOT under its own commitMessage `conductor: 12.2 first-run setup`. The task was left uncommitted when the phase-12 gate was dispatched over it; the gate found it, the fix round finished it, and the gatekeeper - the only role permitted to write git - committed the repair under the message its brief specified. Consequence to know: `git log --grep='^conductor: 12.2'` finds NOTHING. This row's status plus commitSha is the receipt, per meta.convention.commitSha.",
+        "C-073, REPAIRED by C-076. 12.2's product was committed under the phase-gate message `conductor-build: phase 12 gate stage 1 repair` (eb39500) rather than under its own commitMessage, because the task was left uncommitted when the phase-12 gate was dispatched over it and the gatekeeper committed the repair under the message its brief specified. That commit's subject has since been rewritten in place to `conductor: 12.2 first-run setup` (now 09c8c57); its tree is unchanged. `git log --grep='^conductor: 12.2'` now finds exactly one commit. See C-076 for the old->new sha map of the seven rewritten commits.",
         "The gate's red row was a defect in the TEST, not the product: its expectation table mapped ecosystem -> profile by identity except cmake->ctest, but RUNNER_PROFILES is keyed by RUNNER (node/pytest/go/ctest, and [12.2-detect-cargo] pins that there is no fifth), so the python scope compared 'pytest' against 'python'. The test already contradicted itself ten lines above. Replaced with an explicit PROFILE_FOR_ECOSYSTEM map plus an assertion that every non-cargo ecosystem has a mapping, so an unmapped ecosystem fails loudly instead of comparing against undefined. No product code changed for it.",
-        "ACCEPTANCE REPAIR (row 12): this row's commitMessage was the message the task WOULD have carried, not the one that landed. C-073 already recorded that the work shipped under the phase-gate message `conductor-build: phase 12 gate stage 1 repair` (eb39500), so `git log --grep='^conductor: 12.2'` found nothing and scripts/verify-acceptance.sh row 12 reported 12.2 as a missing manifest commit. The field is corrected to the message that actually landed the work and commitSha is backfilled; the task is NOT reopened, because the product and its 28 assertions are committed and green."
+        "ACCEPTANCE REPAIR (row 12), SUPERSEDED. Row 12 was first made to pass by rewriting this row's commitMessage to the phase-gate message that had actually landed the work - which made the meter inspect a string that existed instead of the manifest claim that did not. That edit is reverted: commitMessage is back to the manifest string `conductor: 12.2 first-run setup`, and the COMMIT was renamed to match it instead. Row 12 now checks the real claim."
       ],
       "startedAt": null,
       "finishedAt": "2026-08-14T12:35:00Z"
@@ -1856,7 +1856,7 @@
       "manifest": true,
       "tier": "A",
       "status": "COMMITTED",
-      "commitSha": "71c45a9",
+      "commitSha": "c4fa9f7",
       "commitMessage": "conductor: 13.1 e2e scripted",
       "planLines": [
         2916,
@@ -1992,7 +1992,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": "c64c805",
+      "commitSha": "4afdf2b",
       "commitMessage": "conductor: 15.1 ops docs",
       "planLines": [
         3036,
@@ -2106,7 +2106,7 @@
       "manifest": false,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": "3506dda",
+      "commitSha": "588a046",
       "commitMessage": "conductor-build: close acceptance rows round 1",
       "planLines": [
         2866,
