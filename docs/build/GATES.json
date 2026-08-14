@@ -911,6 +911,18 @@
       ],
       "verdict": "PASS after fix round 1 of 3",
       "rejected": "11 confirmed majors incl. 1 security bypass and 1 documented-into-existence guard (gate credit: the milestone gate found defects a 1129-row green suite did not)"
+    },
+    "11": {
+      "at": "2026-08-14T10:40:00Z",
+      "status": "STAGE 1 PASS \u2014 stage 2 (lens fan-out) pending",
+      "note": "Branch B ran parallel to the spine and its phase boundary was never adjudicated when 11.8 landed. The gate is being run late, deliberately, rather than skipped.",
+      "stage1": {
+        "freshWorktree": "PASS. `git worktree add --detach $TMPDIR/verify-phase11 HEAD`, its OWN `npm install` in conductor/, then the complete gate from scratch: TAP tests=1158 pass=1158 fail=0 cancelled=0 skipped=0 todo=0, typecheck OK, bun leg OK (8 pass), schema export OK. GATE PASS. Orchestrator-observed; worktree removed. This is the check against work that only passes because of uncommitted files, a wrong-cwd glob, or files never git-added.",
+        "ctest": "PASS. cmake --build .out/build/clang-relwdebinfo --target router-tests, then ctest: 1/1 passed. Direct run: doctest 73 cases / 26392 assertions, 0 failed, 0 skipped.",
+        "cppTreeCompleteness": "PASS. Every source in the router-tests source list and every `#include \"router/*.hpp\"` it reaches is TRACKED, and `git status --short --untracked-files=all router/ tools/ CMakeLists.txt` is EMPTY \u2014 so no untracked file participates in the build and a fresh worktree has byte-identical C++ sources. This substitutes for a second cmake configure in the verification worktree, which would cost ~45 minutes of vcpkg work to prove a property git already proves.",
+        "m5": "PASS after repair \u2014 and the repair is the gate's first credit at this boundary. M5 had been globbing the PRE-HOIST path src/router/**, so it scanned ZERO C++ files across all eight Phase 11 tasks while printing PASS. Fixed, floored so a moved path fails loudly, and self-tested both directions. See C-057."
+      },
+      "rejected": "1 confirmed defect at stage 1: the M5 stub scan was inspecting none of the surface this phase produced (C-057)."
     }
   },
   "rejections": [
