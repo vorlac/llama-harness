@@ -1127,7 +1127,23 @@ class GateAndLiveRecord(WiringTestCase):
         # M8 discipline: verbatim commands, raw blocks, an observed cwd.
         self.assertGreaterEqual(section.count("```"), 6, "raw output must be fenced, not narrated")
         self.assertGreaterEqual(len(re.findall(r"^\$ ", section, re.M)), 3)
-        self.assertIn(str(REPO_ROOT), section, "every command records the cwd it ran from")
+
+        # The cwd is part of the record, so the section must name the absolute
+        # directory the commands were observed from. It is the historical cwd of
+        # the measurement, not the cwd of whatever checkout is running this test:
+        # asserting str(REPO_ROOT) here would pass only in the clone the artifact
+        # happened to be written in and fail in any fresh worktree.
+        observed_cwd = re.search(r"run from[ \t]+`([^`\n]+)`", section, re.I)
+        self.assertIsNotNone(
+            observed_cwd,
+            "every command records the cwd it ran from: the section must say "
+            "'run from `<absolute path>`'",
+        )
+        recorded = observed_cwd.group(1) if observed_cwd else ""
+        self.assertTrue(
+            Path(recorded).is_absolute(),
+            "the recorded cwd must be an absolute path, not %r" % recorded,
+        )
 
     def test_12_1_g5_equivalence(self) -> None:
         """[12.1-g5-equivalence] the two arms differ only where §4.4 permits."""

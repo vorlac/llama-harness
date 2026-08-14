@@ -2924,3 +2924,49 @@ about the consequence instead of running it**, and got the consequence wrong in 
 direction. A residual filed as "documentation defect first, behavioural a distant second" is a
 residual nobody schedules. Durability boundaries are not reviewable by reading: pair the durable
 field with the volatile one and ask what the first pass after a restart does with both.
+
+---
+
+## C-069 — a test asserted its own checkout's path, and only a fresh worktree could see it
+
+`scripts/test_conductor_wiring.py:1130` read:
+
+```python
+self.assertIn(str(REPO_ROOT), section, "every command records the cwd it ran from")
+```
+
+`REPO_ROOT` is `SCRIPTS_DIR.parent` — the path of **whatever checkout is running the test**.
+`section` is the Task 12.1 Step 2 block of `router/UPSTREAM_CONTRACT.md`, whose line 14 records
+the cwd the live measurement was **historically** observed from, as the literal string
+`/Users/sal/development/vorlac/llama-harness`. So the assertion compared a frozen historical
+path against a live runtime path. It can only pass in the one clone the artifact was written in.
+
+- **The intent was right.** M8 discipline says a live measurement must record the cwd it ran
+  from, and the artifact does record it. The *mechanism* was wrong: it read the record by
+  matching it against the environment instead of checking the record's own shape.
+- **The fix** requires the section to contain ``run from `<path>` `` and requires that captured
+  path to be absolute. `router/UPSTREAM_CONTRACT.md` was **not** edited — the record was already
+  correct.
+- **Provenance:** `git log -S 'every command records the cwd it ran from' -- scripts/test_conductor_wiring.py`
+  returns exactly one commit, 589d22e (12.1). Latent since 12.1 landed; the Phase 10 phase gate's
+  fresh-worktree leg was the first run in this build to exercise it.
+
+**The mutations, run in the fresh worktree rather than reasoned about:** restoring the pre-fix
+assertion reproduces the gate failure verbatim in that tree; deleting the recorded-cwd line
+fails; rewriting the cwd as the relative `../llama-harness` fails. Both directions, so the new
+assertion is not merely the old one weakened until it passed.
+
+**Why this is worth a numbered correction and not a footnote.** Every quality signal this build
+trusts was green on it. The suite was 1235/1235. M4 passed. Two phase gates passed. The per-task
+review of 12.1 passed. A defect that makes the repository un-buildable by anyone else survived
+all of them, because all of them ran in the same directory. `phaseGates["11"]` even claims a
+fresh-worktree PASS at a commit where this was already failing — it enumerates four legs and
+never names the python one, which is what a partial reading looks like when it is written down
+as a pass.
+
+**The generalisation, and it is a sharper version of C-044…C-047:** those were checks that
+inspected less than they appeared to. This is a check that inspected the *environment* when it
+meant to inspect the *artifact*. Any assertion whose expected value is computed from `__file__`,
+`cwd`, `REPO_ROOT`, `$HOME`, or a hostname is testing the machine, not the code. Grep for that
+shape before trusting a suite as a portability claim — and note that the only leg of the build
+that could ever have caught it is the one that runs somewhere else.

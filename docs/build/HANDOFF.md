@@ -1,24 +1,23 @@
 # HANDOFF — read this first on every start
 
-## Position — updated 2026-08-14, after the Phase 10 gate's stage 1
+## Position — updated 2026-08-14, after the Phase 10 gate's stage 1 re-run
 
-**48 of 55 ledger rows COMMITTED.** MAIN tree: **1235/1235 GATE PASS**, all five legs green (node,
-tsc, bun, schema-export, python); C++ 92 cases / 27,726 assertions. **A fresh checkout is RED.**
-`STATE.json` is the machine truth (`status` + `commitSha`); `git log --grep='^conductor: '` is
-authoritative for "committed"; `IN_PROGRESS.json` absent means no task is in flight; `NOW.md` is
-the human view. Phase gates 0–9 and 11 PASS; Phase 10's per-task review ran and its MAJOR is fixed
-(C-068), but the **Phase 10 phase gate is FAIL** at stage 1.
+**48 of 55 ledger rows COMMITTED.** MAIN tree and a **fresh detached worktree** both:
+**1235/1235 GATE PASS**, all five legs green (node, tsc, bun, schema-export, python); C++ 92 cases
+/ 27,726 assertions. `STATE.json` is the machine truth (`status` + `commitSha`);
+`git log --grep='^conductor: '` is authoritative for "committed"; `IN_PROGRESS.json` absent means
+no task is in flight; `NOW.md` is the human view. Phase gates 0–9 and 11 PASS; Phase 10's per-task
+review ran and its MAJOR is fixed (C-068).
 
-## Open gate failure — fix this before any new task
+## Phase 10 gate — stage 1 PASS, stage 2 NOT RUN
 
-`GATES.json.phaseGates["10"]` is **FAIL**. Main tree green, fresh worktree of HEAD **red**:
-`scripts/test_conductor_wiring.py:1130` asserts `str(REPO_ROOT)` — the *running checkout's* path —
-appears in the 12.1 Step 2 section, which records the historical cwd
-`/Users/sal/development/vorlac/llama-harness` as a literal, so it passes only in the original
-clone. From 589d22e (12.1); the Phase 10 diff never touches `scripts/`. Fix: assert some absolute
-cwd, not `REPO_ROOT`, then re-run stage 1 whole — no reviewer lens has run for Phase 10 yet. Also:
-`phaseGates["11"]`'s fresh-worktree record names four legs, never the python leg (already failing
-then) — not evidence of a clean checkout.
+`GATES.json.phaseGates["10"]` is **stage 1 PASS after 1 fix round of 3**. The fresh-worktree FAIL
+is closed: `scripts/test_conductor_wiring.py:1130` pinned the recorded cwd to the *running*
+checkout's path (latent from 589d22e/12.1, not Phase 10); it now requires the section to record
+some **absolute** cwd. Three mutations in the worktree all caught (C-069). **No reviewer lens has
+been dispatched for Phase 10** — the next gatekeeper runs stage 2 over the same scope. Also still
+true: `phaseGates["11"]`'s fresh-worktree record names four legs, never the python leg (already
+failing then) — not evidence of a clean checkout.
 
 ## Remaining work
 
@@ -76,8 +75,9 @@ Sources: `docs/build/specs/*.json` `phaseGateNBindings` + the corrections named.
 
 ## Lessons that keep paying
 
-- **A green main tree proves nothing about a fresh checkout** — the Phase 10 gate is FAIL on
-  exactly that. Gate in a detached worktree, and read EVERY leg of the output.
+- **A green main tree proves nothing about a fresh checkout** — the Phase 10 gate caught exactly
+  that, an absolute path baked into an assertion (C-069). Gate in a detached worktree with its own
+  `npm install`, and read EVERY leg of the output.
 - **A green suite that mutation-tests clean can still hide a MAJOR** (C-033, C-067(b)): both were
   found by reading a comment that claimed what the code below it did not do. Read the prose too.
   Then **RUN the consequence, don't reason it** — C-067(b) talked itself down to "documentation
