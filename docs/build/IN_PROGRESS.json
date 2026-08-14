@@ -1,35 +1,34 @@
 {
-  "asOf": "2026-08-13, after the C++ layout reorg. 43 of 54 manifest tasks COMMITTED. Conductor suite 1126/1126 GATE PASS; C++ 73 cases / 26392 assertions. Phase 9 IMPLEMENTATION IS COMPLETE (9.1-9.6 all committed + M4); its MILESTONE GATE is next.",
+  "asOf": "2026-08-14 boot reconciliation. 45 of 54 ledger rows COMMITTED. Suite 1158/1158 GATE PASS, orchestrator-observed from a clean tree. Phases 0-9 and 11 are implementation-complete; phase gates 0-9 PASS; PHASE 11'S GATE IS OWED.",
   "spineTask": {
-    "taskId": "Phase 9 MILESTONE gate",
-    "step": "9.1-9.6 are all committed with M4 PASS. The gate runs over the phase's whole surface. Carry these in as INPUTS rather than rediscovering them: (1) the no-git display residual (inject.ts and the two gate-hook call sites still use the 4-arg legalTools, so the injected state block can name conductor_publish as legal in a run the handler would refuse - C-048); (2) the reviewer/skeptic ROLE COLLISION (conductor_vet_test critics and conductor_item_review lens reviewers both dispatch under role 'reviewer', told apart only by a LENSES: line in the prompt - it has already cost one test, see C-050); (3) the one-rule-in-two-places theme, which has now drifted six times.",
+    "taskId": "10.1",
+    "step": "Not yet started. 32 assertion rows are promoted at docs/build/specs/task-10.1.assertions.json. NEW conductor/adapter/continuation.ts plus ask-gate wiring in adapter/tools.ts. Carry the four deferred 10.1 bindings in as INPUTS rather than rediscovering them: classify's un-archived ANSWERED run (C-029a), decide's blindness to isHumanTerritory (C-029b), the stranded-question write ordering (C-032 E7), and first-block-wins releasing an item a second open question still names (C-056).",
     "intendedFiles": [
+      "conductor/adapter/continuation.ts",
       "conductor/adapter/tools.ts",
-      "conductor/core/gates-phase.ts",
-      "docs/build/GATES.json"
+      "conductor/tests/continuation.test.ts"
     ]
   },
   "branchB": {
-    "taskId": "11.7",
-    "step": "metrics ledger, 16 rows. The red IS IN THE TREE at router/tests/metrics_test.cpp, wired into CMakeLists, and OBSERVED: one fatal error, 'router/metrics.hpp' file not found. An implementer is running. 11.6 committed at f142745 with M4 PASS.",
-    "timingFactEstablishedByRunning": "The ledger append fires at response completion (content-provider destruction), which trails the client's last byte by a scheduling instant EVEN ON THE BUFFERED PATH. The fixtures poll via awaitLedgerLines(). Do not 'fix' a test by trying to make the append synchronous with the last byte."
+    "taskId": "none",
+    "step": "Branch B is COMPLETE through 11.8. The CLI runs and the live smoke artifact is committed and was re-verified at this boot (identical listening line, byte-identical /conductor/health, SIGTERM exit 0). What remains for Phase 11 is its PHASE GATE, which never ran."
   },
   "openDecisions": {},
   "readyToStart": {
-    "11.8-live": "The CLI half is COMMITTED and the binary RUNS (verified live: listens on 8088, /conductor/health -> {\"status\":\"ok\",\"version\":\"0.0.1\"}, /conductor/metrics -> aggregate JSON, SIGTERM -> exit 0). What remains is the M8 LIVE SMOKE artifact against a real llama-server with a model: verbatim command lines, cwd, raw output, exit codes. A recorded BLOCKED is an acceptable outcome; an invented transcript is not.",
-    "10.1": "32 rows promoted. NEW conductor/adapter/continuation.ts + ask-gate wiring.",
-    "12.x/13.x/14.x/15.x": "all specs promoted; nothing is blocked on planning."
+    "15.0": "Replay tool. Needs only 2.1, touches NEW conductor/tools/replay.ts + its test, and collides with nothing. The cheapest parallel work available.",
+    "12.1/12.2": "A named safe pair (12.1-core is python under scripts/, 12.2 is TS under conductor/). Both specs promoted.",
+    "13.1": "Everything it depends on is committed. Five scenarios; all five names must appear in the TAP output or acceptance fails."
   },
   "processNotes": {
-    "theRecurringDEFECTCLASS": "C-044, C-045, C-046 and C-047 were ALL the same shape: a check that PASSED while inspecting less than it appeared to. A name-level equation blind to types; a grep blind to a binary file; an assertion satisfiable by two independent mechanisms so it pinned neither; a green suite over a product whose tools all throw. LESSON, now standing: a construction that enforces an invariant must ALSO assert that it actually ran \u2014 a floor on how much it inspected, an explicit allowlist instead of a silent skip, a premise that fails when the fixture becomes unverifiable.",
-    "mutationRevertTrap": "A mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. It threw away half of C-035 mid-round. Snapshot with `cp` before the first mutation; restore from the snapshot; verify with `cmp`.",
-    "agentStrayFileTrap": "Test-writers told to typecheck by copying into conductor/tests/ and deleting have twice left or removed files at a path the orchestrator was also using. A CHANGED TEST COUNT (994 -> 995) is the tell that something arrived or vanished. After ANY agent returns, run git status before trusting a gate result.",
-    "autoformatIsNotAnAgentEdit": "AUTOFORMAT_SRC_ON_CONFIGURE runs clang-format at cmake CONFIGURE time over router/ and tools/. A delivered C++ file will DIFFER from its parked copy on formatting alone - compare whitespace-normalized before suspecting an agent edited a test. Also: an incremental ninja build does NOT reconfigure, so a file can be committed format-dirty and only get rewritten later (metrics.hpp did). Run clang-format --dry-run --Werror on anything new under router/ or tools/.",
-    "disclosedSurvivorsArePayingOff": "Three consecutive implementers disclosed a surviving mutation rather than hiding it, and every disclosure became a real fix (C-042, C-046, C-047). Keep asking for the mutation table and keep treating a survivor as information rather than a failure.",
-    "readTheInterface": "Read the exported SIGNATURE, never infer it from one call site. That mistake cost one correction round already.",
-    "reviewResultTrap": "A review workflow returning an EMPTY finding set can mean the LENSES CRASHED, not that the diff is clean. Check the run's failures + journal.jsonl before treating empty as a pass.",
+    "phase11GateIsOwed": "Branch B ran parallel to the spine and its phase boundary was never adjudicated. Lenses per plan 7.2: correctness, protocol-conformance, concurrency, plus standing spec-conformance and the >=10-malformed-request red-team-by-data probe (the orchestrator executes the candidates against the exported pure functions and compares verdicts; an admitted input is a mechanically confirmed finding needing no skeptic round).",
+    "sameFileAgentsRunSequentially": "C-056: three fixes to adapter/tools.ts were dispatched in parallel. A clobbered fix does not fail the gate - it is simply absent, and the test that would have caught it is clobbered with it. Sequencing comes from the file touched, not from how small the change looks.",
+    "theRecurringDEFECTCLASS": "C-044 through C-047 were one shape: a check that PASSED while inspecting less than it appeared to. A name-level equation blind to types; a grep blind to a binary file; an assertion satisfiable by two mechanisms so it pinned neither; a green suite over a product whose tools all throw. A construction that enforces an invariant must ALSO assert that it ran.",
+    "mutationRevertTrap": "A mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. Snapshot with cp, restore from the snapshot, verify with cmp.",
+    "agentStrayFileTrap": "Test-writers told to typecheck by copying into conductor/tests/ and deleting have twice left or removed files at a path the orchestrator was also using. A CHANGED TEST COUNT is the tell. Run git status after ANY agent returns.",
+    "readTheInterface": "Read the exported SIGNATURE, never infer it from one call site.",
+    "reviewResultTrap": "An EMPTY finding set can mean the LENSES CRASHED. Check the run's failures and journal.jsonl before treating empty as a pass.",
     "userParallelWork": "The user commits their own work on main concurrently. ALWAYS git add explicit paths, never -A, and never revert their files.",
-    "cppLayout": "C++ LAYOUT (user-directed, 2026-08-13): src/ -> router/, src/tests/ -> router/tests/, src/tools/ -> tools/. The include ROOT is now the repo root, so every header is still spelled #include \"router/<name>.hpp\" exactly as before \u2014 the rule did not change, only where the root sits. CMake target names are unchanged (llama-router, router-tests, membench). clang-format's configure-time scope follows router/ and tools/.",
-    "wireContractFlake": "conductor/tests/wire-contract.test.ts spawns a real `opencode serve`. Under heavy concurrent load its readiness probe times out and all 15 subtests are CANCELLED, failing the gate. opencode 1.18.15 logs 'server listening' ~7.7s BEFORE it answers /config. Re-run on a quiet machine before treating a cancellation as a regression."
+    "wireContractFlake": "conductor/tests/wire-contract.test.ts spawns a real `opencode serve`. Under heavy concurrent load its readiness probe times out and all 15 subtests CANCEL, failing the gate. Re-run on a quiet machine before treating a cancellation as a regression.",
+    "reasoningModelEmptyContent": "From the 11.8 live artifact: a reasoning model under a tight max_tokens spends the whole budget in reasoning_content and returns EMPTY content with status 200. This bites 12.1's per-role token budgets and any structured-output retry loop, which will spend the same budget the same way."
   }
 }

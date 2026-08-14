@@ -3,26 +3,22 @@
 Keep this file open. It is rewritten whenever the work changes, so it is never a summary
 written after the fact.
 
-**Last written:** 2026-08-13, immediately after the Phase 9 milestone gate's fix round was
-dispatched.
+**Last written:** 2026-08-14, at the boot that picked the build back up.
 
 ---
 
 ## Right now
 
-**Running:** a fix workflow for the Phase 9 milestone gate's confirmed defects.
-Three fixes in files nothing else touches went in parallel; everything after them edits
-`conductor/adapter/tools.ts`, so those run strictly one at a time.
+**Running:** Task 10.1 (the continuation engine and the ask gate) and Task 15.0 (the replay
+tool) in parallel. They touch no file in common, so they are genuinely independent — 15.0 is
+a new file nothing else imports yet.
 
-| Stage | What it fixes | State |
-|---|---|---|
-| Independent | journal vocabulary breaches; worktree recreation after a crash; queue-amend keeping stale evidence | landing now |
-| PublishOrder | `handlePublish` commits before checking it was allowed to | queued |
-| PublishStaging | pathspec-less commit sweeps the whole index; empty pathspec diffs the whole tree; deletions never staged | queued |
-| WorktreeTrees | stage handlers test the MAIN tree while sub-sessions edit the worktree | queued |
-| Remainder | vacuous closing verify; driver abandons a live stage; surface overwrites an existing block | queued |
+The session before this one finished the Phase 9 milestone gate's fix round. This one started
+by checking that claim rather than believing it: full suite from a clean tree, and the Task
+11.8 live artifact re-verified by re-running its router leg and comparing the output byte for
+byte. Both held.
 
-**Suite:** 1135/1135 GATE PASS. **Tasks:** 43 of 54 committed.
+**Suite:** 1158/1158 GATE PASS. **Ledger:** 45 of 54 rows committed.
 
 ---
 
@@ -48,27 +44,28 @@ Two files carry the reasoning rather than the result:
 
 ---
 
-## What just happened (the last hour)
+## What just happened
 
-The Phase 9 milestone gate ran: six blind review lenses over ~9,500 lines, then two
-refute-biased skeptics per finding. It returned 46 findings, 29 major, ~20 distinct after
-deduplication. Two are fixed and committed:
+Boot reconciliation. Three things were out of step with reality and are now fixed:
 
-- **C-054** — `legalTools`' `publishEnabled` flag was passed by NO production call site, and
-  the guard test I had claimed prevented exactly that did not exist. I had written that claim
-  in a correction record and a code comment, in the past tense, without building it. Under
-  no-git the gate therefore recommended a tool the handler always refuses. Guard built, all
-  three call sites wired.
-- **C-055 (security)** — a wildcard `fileScope` granted edit permission to any absolute path
-  on the machine. `globMatch("**", "/etc/passwd")` is true, and an out-of-tree path was being
-  left unchanged for scope matching to reject. Now denied at normalization, before any scope
-  match.
+- **Task 11.8 was committed but its ledger row still said NOT_STARTED.** Git is authoritative
+  for "committed", so the row was corrected, not the history. Before accepting it, its live
+  artifact was tested the way §7.1 M8 demands: the router was started again from the same
+  config, `/conductor/health` returned the same bytes the artifact records, and SIGTERM still
+  exited 0.
+- **The Phase 9 gate had no recorded verdict**, though its fix round had landed. Recorded now
+  as PASS after one fix round, with the eleven confirmed majors it rejected listed — including
+  the security bypass (C-055) and the guard that had been documented into existence but never
+  built (C-054).
+- **Phase 11 never had a phase gate at all.** Branch B ran parallel to the spine and its
+  boundary was never adjudicated. That is now written down as owed work rather than quietly
+  skipped.
 
 ---
 
-## What is left after this round
+## What is left
 
-11 manifest tasks: the 11.8 live smoke, Phase 10 (continuation + ask-gate), Phase 12
-(serve.py wiring), Phase 13 (end-to-end + the composition root), Phase 14 (benchmark) and
-Phase 15 (acceptance + completion report). Then the final adversarial review of the whole
-repo.
+Nine manifest tasks: 10.1, 12.1, 12.2, 13.1, 13.2, 14.1, 14.2, 15.0, 15.1, 15.2 — plus the
+G5 equivalence run that splits off 12.1. Then the phase gates for 10 through 15, the owed
+Phase 11 gate, an acceptance script that has to exit 0 in a clean checkout, and the
+completion report.

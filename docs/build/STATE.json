@@ -1483,7 +1483,7 @@
       "manifest": true,
       "tier": "C",
       "status": "COMMITTED",
-      "commitSha": null,
+      "commitSha": "a3bf1e7",
       "commitMessage": "conductor: 11.3 router proxy",
       "planLines": [
         2790,
@@ -1678,24 +1678,39 @@
       "taskId": "11.8",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
-      "commitSha": null,
+      "status": "COMMITTED",
+      "commitSha": "2e3dd96",
       "commitMessage": "conductor: 11.8 router live smoke",
       "planLines": [
         2855,
         2863
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
+      "tap": {
+        "ctest": "router-tests 73 cases / 26392 assertions (CLI half, 6b732a3)",
+        "suite": "tests=1158 pass=1158 (orchestrator-observed 2026-08-14)"
+      },
+      "redEvidence": {
+        "cmd": "M8 live task: no red step (plan \u00a77.1 M8 governs)",
+        "exitCode": null,
+        "class": "live-artifact",
+        "excerpt": "CLI half (6b732a3) carried its own red: cli_test.cpp fatal error 'router/cli.hpp' file not found."
+      },
+      "filesTouched": [
+        "docs/build/artifacts/11.8-live-smoke.md",
+        "router/cli.hpp",
+        "router/main.cpp",
+        "router/tests/cli_test.cpp",
+        "CMakeLists.txt"
+      ],
+      "revertAssertion": "M8, not M4. Orchestrator re-ran the artifact's router leg on 2026-08-14: llama-router --config .data/configs/conductor-router.json --schema router/tests/schemas/RouterConfig.schema.json emitted the identical listening line, /conductor/health returned {\"status\":\"ok\",\"version\":\"0.0.1\"} http=200 byte-identical to the artifact, SIGTERM exit 0.",
+      "attempts": 1,
       "deviations": [
-        "C-041: tier C -> B. The plan assigns no task the llama-router CLI (src/main.cpp is still the 11.1 scaffold and 11.2-11.7 are all header-only library tasks), yet 11.8 Step 1 runs the binary. 11.8 therefore lands a minimum CLI test-first: NEW src/router/cli.hpp (pure parseCli) + NEW src/tests/cli_test.cpp + src/main.cpp as a thin adapter. --schema is a required flag with no search path; exit codes 0/2/3/4 pinned for 12.1's supervisor."
+        "C-041: tier C -> B. The plan assigns no task the llama-router CLI (src/main.cpp is still the 11.1 scaffold and 11.2-11.7 are all header-only library tasks), yet 11.8 Step 1 runs the binary. 11.8 therefore lands a minimum CLI test-first: NEW src/router/cli.hpp (pure parseCli) + NEW src/tests/cli_test.cpp + src/main.cpp as a thin adapter. --schema is a required flag with no search path; exit codes 0/2/3/4 pinned for 12.1's supervisor.",
+        "Committed across TWO commits: 6b732a3 (CLI, C-041) and 2e3dd96 (the M8 live artifact). The manifest string \"conductor: 11.8 router live smoke\" appears exactly once."
       ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T09:14:25Z"
     },
     "12.1": {
       "taskId": "12.1",
