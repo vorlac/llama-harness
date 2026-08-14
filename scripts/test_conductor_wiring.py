@@ -404,11 +404,13 @@ class ParallelDerivation(WiringTestCase):
             self.assertEqual(config["admission"]["maxInflightPerModel"], slots)
             self.assertLessEqual(config["admission"]["maxInflightPerModel"], slots)
 
-            head = head_server_command(self.configs, UPSTREAM_HOST, UPSTREAM_PORT, 4096)
+            # HEAD emitted `--ctx-size <ctx>` of its own; 12.1 folds that value INTO the
+            # derivation (one flag, per-slot semantics) rather than appending beside it.
+            head = head_server_command(self.configs, UPSTREAM_HOST, UPSTREAM_PORT, None)
             self.assertNotIn(
                 "--parallel", head, "HEAD's serve.py emitted no --parallel; 12.1 adds it"
             )
-            self.assertEqual(cmd, head + cw.parallel_server_args(slots))
+            self.assertEqual(cmd, head + cw.parallel_server_args(slots, 4096))
 
             seen.append((slots, cmd[cmd.index("--parallel") + 1], config["admission"]["maxInflightPerModel"]))
 
@@ -456,7 +458,64 @@ class ParallelDerivation(WiringTestCase):
         self.assertEqual(cw.parallel_server_args(1), ["--parallel", "1"])
         cmd = serve.build_server_command(MODEL_ID, UPSTREAM_HOST, UPSTREAM_PORT, 1, 4096, 1)
         self.assertEqual(
-            cmd, head_server_command(self.configs, UPSTREAM_HOST, UPSTREAM_PORT, 4096) + ["--parallel", "1"]
+            cmd,
+            head_server_command(self.configs, UPSTREAM_HOST, UPSTREAM_PORT, None)
+            + ["--parallel", "1", "--ctx-size", "4096"],
+        )
+
+    def test_12_1_ctx_configured_reaches_the_derivation(self) -> None:
+        """[12.1-ctx-per-slot-preserved] --ctx is the per-slot window, and it is emitted ONCE.
+
+        llama-server takes the LAST --ctx-size it is handed, so an argv carrying both the
+        user's value and the derived one silently discards one of the two intents - and the
+        derived one, being a constant times the slot count, makes `--ctx 4096` and
+        `--ctx 131072` produce byte-identical argv.
+        """
+        slots = cw.DEFAULT_MAX_READERS
+        self.assertGreater(slots, 1, "the duplicate only appears on the multi-slot path")
+
+        small = serve.build_server_command(MODEL_ID, UPSTREAM_HOST, UPSTREAM_PORT, 1, 4096, slots)
+        large = serve.build_server_command(MODEL_ID, UPSTREAM_HOST, UPSTREAM_PORT, 1, 131072, slots)
+
+        for cmd in (small, large):
+            self.assertEqual(cmd.count("--ctx-size"), 1, cmd)
+        self.assertNotEqual(small, large, "the configured context must reach the argv")
+
+        # --ctx-size is the TOTAL context divided among the slots (C-058 F3), so the
+        # configured value is the per-slot window and the emitted total is its multiple.
+        self.assertEqual(small[small.index("--ctx-size") + 1], str(4096 * slots))
+        self.assertEqual(large[large.index("--ctx-size") + 1], str(131072 * slots))
+
+        # No --ctx at all keeps the recorded per-slot default.
+        default = serve.build_server_command(MODEL_ID, UPSTREAM_HOST, UPSTREAM_PORT, 1, None, slots)
+        self.assertEqual(default.count("--ctx-size"), 1, default)
+        self.assertEqual(
+            default[default.index("--ctx-size") + 1],
+            str(cw.PER_SLOT_CONTEXT_TOKENS * slots),
+        )
+
+    def test_12_1_router_port_never_equals_server_port(self) -> None:
+        """[12.1-router-config-shape] a router is never configured to proxy to itself.
+
+        resolve_port only asks whether a port can be bound RIGHT NOW, and llama-server has
+        not been started when the router's port is chosen, so `--port 8088` hands the same
+        free port out twice unless the already-claimed one is excluded.
+        """
+        host = UPSTREAM_HOST
+        server_port = serve.resolve_port(host, 8080, False)
+        router_port = serve.resolve_router_port(host, server_port, server_port)
+        self.assertNotEqual(
+            router_port, server_port, "the router's listen port collided with llama-server's"
+        )
+        # ...and it is the seam serve.py actually uses for the router's port.
+        source = (SCRIPTS_DIR / "serve.py").read_text()
+        self.assertIn("router_port = resolve_router_port(host, router_port, port)", source)
+
+        config = cw.generate_router_config(host, router_port, host, server_port, 6, root=self.tmp)
+        self.assertNotEqual(
+            (config["listen"]["host"], config["listen"]["port"]),
+            (config["upstream"]["host"], config["upstream"]["port"]),
+            "a router told to proxy to its own listen address: %r" % (config,),
         )
 
 
@@ -990,6 +1049,69 @@ class RouterLaunchDecision(WiringTestCase):
                 self.assertIn("export %s=" % name, block)
                 self.assertIn("%s=%s" % (name, value), lines)
 
+    def test_12_1_print_env_reports_the_live_session(self) -> None:
+        """[12.1-session-env-router] --print-env REPORTS; it starts nothing and writes nothing.
+
+        Two things this pins. (1) stdout is NAME=value and nothing else - `--print-env` is
+        documented "for scripting", and a prose notice on stdout ends up inside the caller's
+        `eval`. (2) a session running through a live router reports LLAMA_HARNESS_ROUTER=1;
+        forcing the direct answer would make the router half of this row unreachable through
+        the very flag that is meant to surface it.
+        """
+        config_path = self.configs / "opencode.session.json"
+        router_config = self.tmp / cw.ROUTER_CONFIG_RELPATH
+        decision = cw.Preflight("launch", True, notice="a notice that must not reach stdout")
+
+        out, err = cw.print_env_report(
+            MODEL_ID,
+            config_path,
+            UPSTREAM_HOST,
+            UPSTREAM_PORT,
+            LISTEN_HOST,
+            LISTEN_PORT,
+            router_config,
+            decision,
+            probe=lambda host, port: True,
+        )
+        for line in out:
+            self.assertRegex(line, r"^[A-Z][A-Z0-9_]*=", "stdout carried prose: %r" % line)
+            self.assertNotIn("\x1b", line, "stdout carried an ANSI escape: %r" % line)
+        env = dict(line.split("=", 1) for line in out)
+        self.assertEqual(env["LLAMA_HARNESS_ROUTER"], "1")
+        self.assertEqual(
+            env["LLAMA_HARNESS_ROUTER_URL"], "http://%s:%d" % (LISTEN_HOST, LISTEN_PORT)
+        )
+        self.assertEqual(env["LLAMA_HARNESS_ROUTER_CONFIG"], str(router_config))
+        self.assertEqual(env["LLAMA_HARNESS_URL"], "http://%s:%d" % (UPSTREAM_HOST, UPSTREAM_PORT))
+        self.assertNotIn("LLAMA_HARNESS_SERVER_PID", env, "--print-env started no server")
+        self.assertIn(decision.notice, "\n".join(err), "the notice belongs on stderr")
+
+        # No router answering: the direct answer, still only NAME=value on stdout.
+        down_out, _down_err = cw.print_env_report(
+            MODEL_ID,
+            config_path,
+            UPSTREAM_HOST,
+            UPSTREAM_PORT,
+            LISTEN_HOST,
+            LISTEN_PORT,
+            router_config,
+            decision,
+            probe=lambda host, port: False,
+        )
+        down = dict(line.split("=", 1) for line in down_out)
+        self.assertEqual(down["LLAMA_HARNESS_ROUTER"], "0")
+        self.assertNotIn("LLAMA_HARNESS_ROUTER_URL", down)
+
+        # A --no-shell preflight is a DECISION about a session serve.py is about to start.
+        # --print-env starts none, so it must not manufacture that decision (and its notice,
+        # "--no-shell leaves no session shell to supervise a router", would be a lie).
+        source = (SCRIPTS_DIR / "serve.py").read_text()
+        self.assertNotIn(
+            "no_shell=args.no_shell or args.print_env",
+            source,
+            "--print-env must not fake a --no-shell preflight",
+        )
+
 
 _FAKE_ROUTER = '''#!%(python)s
 import os
@@ -1149,6 +1271,45 @@ class RouterSupervisorExecution(WiringTestCase):
             _wait_until(lambda: not _pid_alive(router_pid), 15.0),
             "the router outlived the session shell",
         )
+
+    def test_12_1_readiness_fallback_stops_the_supervisor(self) -> None:
+        """[12.1-readiness-fallback-direct] no supervisor is left chasing a router nobody uses.
+
+        The supervisor is started BEFORE readiness is known (it is what brings the router
+        up), so the fallback leg has to be able to take it back down. Its session shell is
+        still alive here - that is the whole point of the fallback - so nothing else will.
+        """
+        root, shell, supervisor, events, router_pid = self.start_supervisor(stubborn=False)
+        self.assertTrue(_pid_alive(shell.pid), "the session shell survives the fallback")
+
+        fallback = cw.finalize_routing(
+            cw.Preflight("launch", True),
+            LISTEN_HOST,
+            LISTEN_PORT,
+            UPSTREAM_HOST,
+            UPSTREAM_PORT,
+            probe=lambda host, port: False,
+        )
+        self.assertFalse(fallback.router_enabled)
+
+        cw.stop_router_supervisor(supervisor)
+
+        self.assertTrue(
+            _wait_until(lambda: supervisor.poll() is not None, 20.0),
+            "the supervisor outlived the session's decision not to use the router",
+        )
+        self.assertTrue(
+            _wait_until(lambda: not _pid_alive(router_pid), 20.0),
+            "the router the supervisor started outlived it",
+        )
+
+        # And it stays down: nothing respawns behind the session's back.
+        spawns = _read(events).count("started ")
+        time.sleep(3.0)
+        self.assertEqual(
+            _read(events).count("started "), spawns, "the supervisor respawned after being stopped"
+        )
+        self.assertTrue(_pid_alive(shell.pid), "stopping the supervisor must not touch the shell")
 
     def test_12_1_supervisor_escalates_to_sigkill(self) -> None:
         """[12.1-supervisor-sigkill-executed] a router that ignores SIGTERM is killed after the grace."""

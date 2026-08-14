@@ -80,11 +80,15 @@
 //       alternative — the committed handleX convention. A failed setup CHECK returns
 //       {ok:false, written:false, failures:[…]} so every named remedy is narrated at once;
 //       §2.1:634 makes it a failure either way, and it is not an illegal call.
-//  (P3) THE SLOT PROOF READS GET {origin}/props -> total_slots (M1). The spec row describes
-//       "N concurrent trivial completions, measure whether they overlap", but a CLIENT cannot
-//       observe SERVER-side overlap without a server-side signal, and the signal C-058
-//       actually measured the 4-vs-6 fact with is total_slots. Wall-clock overlap would be
-//       exactly the timing measurement the row forbids. Recorded as a deliberate deviation.
+//  (P3) THE SLOT PROOF HAS TWO LEGS, neither of them a stopwatch. Leg 1 is the spec row's own
+//       mechanism: parallel.maxReaders concurrent trivial completions on /v1/chat/completions —
+//       the ONE path a router proxies (router.hpp:104-108) — every one of which must come back
+//       served. Leg 2 is the capacity number, GET {origin}/props -> total_slots (M1). Leg 1
+//       alone cannot see a server that ACCEPTS every reader and then queues them (llama-server
+//       does exactly that at --parallel 1); leg 2 alone never issues the fan-out the row
+//       specifies, and /props is not under /v1, so a healthy router 404s it — which is why leg 2
+//       retries the UPSTREAM origin directly rather than treating a routing fact as a proof
+//       failure. Wall-clock overlap is what the row forbids and is measured nowhere.
 //  (P4) THE SCHEMA PROBE registers its own tiny schema into the (deliberately mutable, see
 //       core/types.ts:1238-1242) SCHEMAS record under SETUP_PROBE_SCHEMA_NAME, sends it as the
 //       request's response_format.json_schema.schema, and validates the reply through core
@@ -115,8 +119,9 @@
 //       multi-ecosystem repo cannot silently overwrite one scope with another, and each
 //       proposal carries `ecosystem` and `sourceGlob` alongside the §2.1 scope fields.
 //       requiredScopes is one entry per scope: pattern "**" when exactly one ecosystem was
-//       detected, otherwise that ecosystem's sourceGlob (its behavioralPaths proposal's first
-//       entry).
+//       detected, otherwise that ecosystem's sourceGlob — an EXTENSION glob (**/*.{js,ts,...}),
+//       not a directory glob, so two ecosystems in one repo cover the repo's sources between
+//       them instead of both claiming src/** and leaving lib/, include/ and test/ to nobody.
 //  (P9) THE DIFF JOURNAL EVENT is `state` / `config.updated`, added to core/journal-events.ts
 //       EVENTS.state under that file's own sanctioned-widening rule (the `decision.recorded`
 //       precedent, C-029 F7). data.changes is [{key, from, to}] over dotted key paths, ONLY
@@ -203,7 +208,7 @@ import { isKnownEvent } from "../core/journal-events.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateRun } from "../core/gates-phase.ts";
 import { isTerminal } from "../core/stops.ts";
-import { shellTokens } from "../core/shell-parse.ts";
+import { globMatch, shellTokens } from "../core/shell-parse.ts";
 import { SCHEMAS, validate } from "../core/types.ts";
 import type { Config, GitMode, LogLevel } from "../core/types.ts";
 
@@ -445,6 +450,18 @@ interface StubOptions {
   totalSlots?: number;
   chatContent?: string;
   chatStatus?: number;
+  // The ROUTER's shape: router.hpp:104-108 pins kProxyPathPattern "/v1/.*" and every other
+  // path falls through to httplib's own 404. A stub standing in for the router must 404 the
+  // origin-root endpoints, or a test cannot see what a real router does to them.
+  proxyOnlyV1?: boolean;
+  // Hold each slot-probe completion (a chat request carrying NO response_format) open until
+  // this many are open AT ONCE, then release the batch. peakConcurrentSlotProbes() is what
+  // the SERVER saw, so a test can measure overlap without a stopwatch. Default 1: release
+  // immediately, which is the behaviour every other test in this file expects.
+  slotBarrier?: number;
+  // Serve at most this many slot probes; every reader past it comes back 503, the way a
+  // server with fewer readers than the fan-out refuses the overflow instead of holding it.
+  serveAtMostSlotProbes?: number;
 }
 
 interface StubRequest {
@@ -457,6 +474,8 @@ interface StubHandle {
   host: string;
   port: number;
   requests: StubRequest[];
+  /** The greatest number of slot-probe completions this server held open simultaneously. */
+  peakConcurrentSlotProbes: () => number;
   close: () => Promise<void>;
 }
 
@@ -469,7 +488,21 @@ function startStub(options: StubOptions = {}): Promise<StubHandle> {
   const totalSlots = options.totalSlots ?? 6;
   const chatContent = options.chatContent ?? PROBE_CONFORMING;
   const chatStatus = options.chatStatus ?? 200;
+  const proxyOnlyV1 = options.proxyOnlyV1 ?? false;
+  const slotBarrier = options.slotBarrier ?? 1;
+  const serveAtMostSlotProbes = options.serveAtMostSlotProbes ?? Number.MAX_SAFE_INTEGER;
   const requests: StubRequest[] = [];
+  let acceptedSlotProbes = 0;
+  let openSlotProbes = 0;
+  let peakSlotProbes = 0;
+  let held: Array<() => void> = [];
+  let barrierTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const releaseHeld = (): void => {
+    const batch = held;
+    held = [];
+    for (const release of batch) release();
+  };
 
   const server = createServer((req, res) => {
     let raw = "";
@@ -493,6 +526,11 @@ function startStub(options: StubOptions = {}): Promise<StubHandle> {
         res.end(JSON.stringify(payload));
       };
 
+      if (proxyOnlyV1 && !url.startsWith("/v1/")) {
+        json(404, { error: "this origin proxies only /v1/* (router.hpp:104-108): " + url });
+        return;
+      }
+
       if (url.startsWith("/v1/models")) {
         json(200, { object: "list", data: models.map((id) => ({ id, object: "model" })) });
         return;
@@ -503,13 +541,43 @@ function startStub(options: StubOptions = {}): Promise<StubHandle> {
         return;
       }
       if (url.includes("chat/completions")) {
-        json(chatStatus, {
+        const chatBody = {
           id: "chatcmpl-stub-12-2",
           object: "chat.completion",
           choices: [
             { index: 0, message: { role: "assistant", content: chatContent }, finish_reason: "stop" },
           ],
+        };
+        // The schema probe carries response_format; the slot probes do not.
+        if ("response_format" in body) {
+          json(chatStatus, chatBody);
+          return;
+        }
+        acceptedSlotProbes += 1;
+        if (acceptedSlotProbes > serveAtMostSlotProbes) {
+          json(503, { error: "no free slot for this reader" });
+          return;
+        }
+        openSlotProbes += 1;
+        if (openSlotProbes > peakSlotProbes) peakSlotProbes = openSlotProbes;
+        held.push(() => {
+          openSlotProbes -= 1;
+          json(chatStatus, chatBody);
         });
+        if (held.length >= slotBarrier) {
+          if (barrierTimer !== null) {
+            clearTimeout(barrierTimer);
+            barrierTimer = null;
+          }
+          releaseHeld();
+        } else if (barrierTimer === null) {
+          // A barrier that is never reached must still answer, or the probe would fail on a
+          // timeout rather than on the count the test is about.
+          barrierTimer = setTimeout(() => {
+            barrierTimer = null;
+            releaseHeld();
+          }, 400);
+        }
         return;
       }
       json(404, { error: "no stub route for " + url });
@@ -524,8 +592,14 @@ function startStub(options: StubOptions = {}): Promise<StubHandle> {
         host: "127.0.0.1",
         port,
         requests,
+        peakConcurrentSlotProbes: () => peakSlotProbes,
         close: () =>
           new Promise<void>((done) => {
+            if (barrierTimer !== null) {
+              clearTimeout(barrierTimer);
+              barrierTimer = null;
+            }
+            releaseHeld();
             server.close(() => done());
           }),
       });
@@ -879,7 +953,28 @@ test("[12.2-detect-multi-ecosystem] a two-ecosystem repo yields two distinctly-n
         scope.sourceGlob,
         `a multi-ecosystem requiredScopes pattern is that ecosystem's source glob`,
       );
-      assert.equal(scope.sourceGlob, scope.behavioralPaths[0], "sourceGlob is the first behavioralPaths proposal");
+    }
+
+    // Each ecosystem's source glob names ITS OWN sources, so the entries do not collide and
+    // no ordinary source path falls outside every one of them. An item that no requiredScopes
+    // entry covers has no constructible test command at all — adapter/tools.ts itemVerifyScope
+    // raises a named legality failure for it — so an uncovered path is a repo setup wrote a
+    // config for and then made unverifiable.
+    const patterns = required.map((row) => row.pattern);
+    assert.equal(new Set(patterns).size, patterns.length, `requiredScopes patterns collide: ${patterns.join(", ")}`);
+    const coverage: Record<string, string[]> = {
+      "src/a.js": ["node"],
+      "lib/util.js": ["node"],
+      "test/util.test.js": ["node"],
+      "src/main.cpp": ["cmake"],
+      "include/x.hpp": ["cmake"],
+    };
+    for (const [filePath, expected] of Object.entries(coverage)) {
+      const covering = required
+        .filter((row) => globMatch(row.pattern, filePath))
+        .flatMap((row) => row.scopes)
+        .sort();
+      assert.deepEqual(covering, expected, `requiredScopes coverage for ${filePath}`);
     }
 
     const singleResult = await setup(harness(single, stub).input);
@@ -1351,7 +1446,11 @@ test("[12.2-proof-schema-probe] §2.1:630 — ONE direct schema-constrained POST
     });
     assert.equal(result.ok, true, failureText(result));
 
-    const posts = stub.requests.filter((request) => request.url.includes("chat/completions"));
+    // The SCHEMA probe is the one carrying response_format; §2.1:631's slot readers are the
+    // other completions on this path and are counted by their own row.
+    const posts = stub.requests.filter(
+      (request) => request.url.includes("chat/completions") && "response_format" in request.body,
+    );
     assert.equal(posts.length, 1, "§2.1:630 is ONE tiny request, not a batch");
     assert.equal(posts[0].method, "POST");
     assert.equal(
@@ -1442,6 +1541,91 @@ test("[12.2-proof-slot-count] §2.1:631 — an observed slot count below paralle
   });
 });
 
+test("[12.2-proof-slot-count] §2.1:631 — the slot proof ISSUES parallel.maxReaders concurrent completions on /v1/chat/completions, and the server sees them all open at once", async () => {
+  const root = nodeFixture("slots-concurrent", PKG_NODE_TEST);
+  const readers = DEFAULT_CONFIG.parallel.maxReaders;
+
+  // The barrier releases only once `readers` slot probes are open SIMULTANEOUSLY, so the peak
+  // below is measured by the server, never by a clock on the client. A setup that sends one
+  // completion (the schema probe) and reads a slot count out of GET /props never reaches it.
+  await withStub({ totalSlots: readers, slotBarrier: readers }, async (stub) => {
+    const result = await setup({
+      ...harness(root, stub).input,
+      answers: answers(),
+    });
+    assert.equal(result.ok, true, failureText(result));
+
+    const slotProbes = stub.requests.filter(
+      (request) =>
+        request.method === "POST" &&
+        request.url.includes("chat/completions") &&
+        !("response_format" in request.body),
+    );
+    assert.equal(
+      slotProbes.length,
+      readers,
+      `the slot proof issues parallel.maxReaders trivial completions, got ${String(slotProbes.length)}`,
+    );
+    assert.equal(
+      stub.peakConcurrentSlotProbes(),
+      readers,
+      "all of them are open on the server AT ONCE — the overlap is the proof",
+    );
+    // Every slot probe travels the ONE path a router proxies (router.hpp:104-108).
+    for (const probe of slotProbes) {
+      assert.ok(probe.url.startsWith("/v1/"), `a slot probe must be proxyable: ${probe.url}`);
+    }
+  });
+});
+
+test("[12.2-proof-slot-count] §2.1:631 — an origin that cannot hold parallel.maxReaders readers open fails setup naming the observed count and the --parallel remedy", async () => {
+  const root = nodeFixture("slots-serializing", PKG_NODE_TEST);
+  const readers = DEFAULT_CONFIG.parallel.maxReaders;
+
+  // A server that refuses the overflow readers rather than holding them: only `readers - 2`
+  // completions are ever served, the rest come back 503. Nothing here is timed.
+  await withStub({ totalSlots: readers, serveAtMostSlotProbes: readers - 2 }, async (stub) => {
+    const result = await setup({
+      ...harness(root, stub).input,
+      answers: answers(),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.written, false);
+    const text = failureText(result);
+    assert.ok(text.includes(String(readers - 2)), `the observed count must be named: ${text}`);
+    assert.ok(text.includes(String(readers)), `the configured maxReaders must be named: ${text}`);
+    assert.ok(text.includes("--parallel"), `the remedy must name --parallel: ${text}`);
+    assert.ok(text.includes("--ctx-size"), `the remedy must name --ctx-size too (C-058 F3): ${text}`);
+    assert.equal(existsSync(configPathOf(root)), false);
+  });
+});
+
+test("[12.2-proofs-origin-fail-soft] a HEALTHY router that proxies only /v1/* is not a setup failure: the slot count is read from the upstream directly", async () => {
+  const root = nodeFixture("props-not-proxied", PKG_NODE_TEST);
+
+  // router.hpp:104-108 proxies /v1/.* and 404s everything else, so GET /props at the router
+  // origin is a routing fact about the proxy — never a fact about the served model.
+  await withStub({ totalSlots: 6 }, async (upstream) => {
+    await withStub({ proxyOnlyV1: true, totalSlots: 6 }, async (router) => {
+      const bench = harness(root, upstream, { routerPort: router.port });
+      const result = await setup({ ...bench.input, answers: answers() });
+
+      assert.equal(result.ok, true, `a healthy router must not fail setup: ${failureText(result)}`);
+      assert.equal(result.written, true);
+
+      // The proofs ran through the ROUTER, so the failover never latched.
+      assert.equal(bench.failover.useUpstream, false, "a healthy router is never failed over");
+      const routerProbes = router.requests.filter((request) => request.url.startsWith("/v1/"));
+      assert.ok(routerProbes.length >= 2, "the /v1 proofs travel through the router");
+
+      // ...and the slot count came from the upstream, which is the process that publishes it.
+      const upstreamProps = upstream.requests.filter((request) => request.url.startsWith("/props"));
+      assert.ok(upstreamProps.length >= 1, "the slot count is read from llama-server directly");
+      assert.equal(upstreamProps[0].method, "GET");
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // (14) [12.2-zero-model-dispatch]
 // ---------------------------------------------------------------------------
@@ -1462,7 +1646,9 @@ test("[12.2-zero-model-dispatch] a full successful setup makes exactly the three
     });
     assert.equal(result.ok, true, failureText(result));
 
-    const shape = stub.requests.map((request) => `${request.method} ${request.url.split("?")[0]}`).sort();
+    const shape = [
+      ...new Set(stub.requests.map((request) => `${request.method} ${request.url.split("?")[0]}`)),
+    ].sort();
     assert.deepEqual(shape, ["GET /props", "GET /v1/models", "POST /v1/chat/completions"]);
     assert.equal(sdk.calls.length, 0, "setup creates no session and prompts no model");
   });
@@ -1494,7 +1680,9 @@ test("[12.2-proofs-origin-fail-soft] G5 — a router that refuses connections la
     assert.equal(failoverRecords[0].level, "warn");
 
     // Every proof still ran, against the UPSTREAM stub.
-    const shape = stub.requests.map((request) => `${request.method} ${request.url.split("?")[0]}`).sort();
+    const shape = [
+      ...new Set(stub.requests.map((request) => `${request.method} ${request.url.split("?")[0]}`)),
+    ].sort();
     assert.deepEqual(shape, ["GET /props", "GET /v1/models", "POST /v1/chat/completions"]);
   });
 });

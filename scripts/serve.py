@@ -38,7 +38,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import conductor_wiring as cw  # noqa: E402
@@ -179,18 +179,37 @@ def port_is_free(host: str, port: int) -> bool:
             return False
 
 
-def resolve_port(host: str, wanted: int, interactive: bool) -> int:
-    if port_is_free(host, wanted):
+def resolve_port(host: str, wanted: int, interactive: bool, avoid: Sequence[int] = ()) -> int:
+    """A free port, never one this run has already handed to another process.
+
+    port_is_free only asks whether a port can be bound at this instant, and the router's
+    port is chosen before llama-server has been started, so without ``avoid`` the
+    same free port is handed out twice and the generated router config proxies to
+    its own listen address.
+    """
+    taken = {int(port) for port in avoid}
+    if wanted not in taken and port_is_free(host, wanted):
         return wanted
     info(yellow("port %d is already in use" % wanted))
     for candidate in range(wanted + 1, wanted + 40):
-        if port_is_free(host, candidate):
+        if candidate not in taken and port_is_free(host, candidate):
             if not interactive:
                 info("  using %d instead" % candidate)
                 return candidate
             raw = prompt("Port to use instead", str(candidate))
             return int(raw) if raw.isdigit() else candidate
     raise SystemExit(fm.red("error: ") + "no free port near %d" % wanted)
+
+
+def resolve_router_port(host: str, wanted: int, server_port: int) -> int:
+    """The router's listen port, which can never be llama-server's own.
+
+    llama-server has not been started at the point this runs, so its port is still free
+    and a stateless resolve_port hands the same number out twice - producing a
+    router configured to proxy to its own listen address, after which one of the
+    two processes dies on a bind failure that names nothing about the real cause.
+    """
+    return resolve_port(host, wanted, False, avoid=(server_port,))
 
 
 def write_session_opencode_config(model_id: str, base_url: str) -> Path:
@@ -247,11 +266,11 @@ def build_server_command(
         str(port),
         "--jinja",
     ]
-    if ctx:
-        cmd += ["--ctx-size", str(ctx)]
     # --ctx-size is llama-server's TOTAL context, divided among slots, so the
-    # slot count carries its own context term (router/UPSTREAM_CONTRACT.md F3).
-    cmd += cw.parallel_server_args(slots)
+    # configured per-slot window and the slot count are ONE derivation
+    # (router/UPSTREAM_CONTRACT.md F3). Emitted here and nowhere else: llama-server
+    # honours the last --ctx-size it is handed, so a second one discards an intent.
+    cmd += cw.parallel_server_args(slots, ctx)
     return cmd
 
 
@@ -516,18 +535,47 @@ def main(argv: Optional[List[str]] = None) -> int:
         cw.find_router_binary(REPO_ROOT, environ),
         REPO_ROOT / cw.ROUTER_SCHEMA_RELPATH,
         searched=cw.router_search_paths(REPO_ROOT, environ),
-        # --no-shell execs into llama-server and --print-env returns before
-        # anything starts, so neither leaves a process able to supervise a router.
-        no_shell=args.no_shell or args.print_env,
+        # --no-shell execs into llama-server, so it leaves no process able to
+        # supervise a router. --print-env starts nothing at all and therefore makes
+        # no such decision: claiming one here would print a notice about a flag the
+        # user never passed and force LLAMA_HARNESS_ROUTER=0 onto a live router session.
+        no_shell=args.no_shell,
     )
     if decision.action == "refuse":
         raise SystemExit(fm.red("error: ") + decision.error)
-    if decision.notice:
+    if decision.notice and not args.print_env:
         info(yellow("notice: ") + decision.notice)
 
     router_port = int(args.router_port or saved.get("router_port") or cw.DEFAULT_LISTEN_PORT)
     if decision.action == "launch":
-        router_port = resolve_port(host, router_port, False)
+        router_port = resolve_router_port(host, router_port, port)
+
+    if args.print_env:
+        # --print-env REPORTS the session (its own help: "for scripting"). It starts
+        # nothing and writes nothing - not the session opencode config a live session
+        # is reading, not the saved settings - and every diagnostic goes to stderr so
+        # stdout stays NAME=value for the caller's eval.
+        out, notices = cw.print_env_report(
+            model.id,
+            SESSION_OPENCODE,
+            host,
+            port,
+            host,
+            router_port,
+            fm.CONFIGS_DIR / "conductor-router.json",
+            decision,
+        )
+        if not SESSION_OPENCODE.is_file():
+            notices.append(
+                "no session opencode config at %s yet; OPENCODE_CONFIG names where a "
+                "serve.py run will write one. --print-env writes nothing itself, so it "
+                "cannot overwrite the config a running session is reading." % SESSION_OPENCODE
+            )
+        for notice in notices:
+            print(yellow("notice: ") + notice, file=sys.stderr, flush=True)
+        for line in out:
+            print(line)
+        return 0
 
     save_session(
         {
@@ -540,15 +588,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             "router_port": router_port,
         }
     )
-
-    if args.print_env:
-        routing = cw.finalize_routing(decision, host, router_port, host, port)
-        config_path = write_session_opencode_config(model.id, routing.base_url)
-        for line in cw.print_env_lines(
-            cw.session_env(model.id, config_path, host, port, None, routing)
-        ):
-            print(line)
-        return 0
 
     cmd = build_server_command(model.id, host, port, models_max, ctx, slots)
 
@@ -588,7 +627,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         # exec keeps this pid, so the shell we are about to become is the pid
         # the supervisor polls - the same trick start_watchdog uses.
-        cw.start_router_supervisor(
+        supervisor = cw.start_router_supervisor(
             cw.find_router_binary(REPO_ROOT, environ),
             router_config_path,
             Path(decision.schema),
@@ -598,8 +637,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         routing = cw.finalize_routing(decision, host, router_port, host, port)
         if routing.router_enabled:
             info("    %s router on http://%s:%d" % (green("ok"), host, router_port))
-        elif routing.notice:
-            info(yellow("notice: ") + routing.notice)
+        else:
+            # The supervisor only exits with the session shell, and on this leg that
+            # shell is exactly what carries on running - so nothing but this call can
+            # stop it restarting a router the session has stopped pointing at.
+            cw.stop_router_supervisor(supervisor)
+            if routing.notice:
+                info(yellow("notice: ") + routing.notice)
 
     # Written only once the routing decision is final: a session config aimed
     # at a router that never came up 502s from its first prompt.

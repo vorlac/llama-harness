@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -170,7 +171,7 @@ def derive_slots(max_readers: Any) -> int:
     return max_readers if max_readers > 1 else 1
 
 
-def parallel_server_args(slots: Any) -> List[str]:
+def parallel_server_args(slots: Any, ctx: Optional[int] = None) -> List[str]:
     """The llama-server arguments the derived slot count adds.
 
     Two-valued because --ctx-size is the TOTAL context llama-server divides
@@ -178,12 +179,24 @@ def parallel_server_args(slots: Any) -> List[str]:
     finding F3). Appending a bare `--parallel N` to the existing command cuts
     every sub-session's window by a factor of N, and llama-server reports it as
     a rounding notice rather than a warning. At one slot there is nothing to
-    divide, so the argv is the identity case: `--parallel 1` and nothing else.
+    divide, so with no configured context the argv is the identity case:
+    `--parallel 1` and nothing else.
+
+    ``ctx`` is the operator's `--ctx`, and it is the PER-SLOT window, matching
+    the flag's own help ("override served context size") - a session asking for
+    a 131072-token window wants that per sub-session, not that total split six
+    ways. It is folded in here rather than emitted beside this argv: llama-server
+    honours the LAST --ctx-size it is handed, so two of them silently discard one
+    of the two intents, and the derived one - a constant times the slot count -
+    would make every value of --ctx produce identical argv.
     """
     count = derive_slots(slots)
+    per_slot = PER_SLOT_CONTEXT_TOKENS if ctx is None else int(ctx)
     args = ["--parallel", str(count)]
     if count > 1:
-        args += ["--ctx-size", str(PER_SLOT_CONTEXT_TOKENS * count)]
+        args += ["--ctx-size", str(per_slot * count)]
+    elif ctx is not None:
+        args += ["--ctx-size", str(per_slot)]
     return args
 
 
@@ -763,6 +776,118 @@ def start_router_supervisor(
         start_new_session=True,
         cwd=str(root),
     )
+
+
+def stop_router_supervisor(
+    handle: Any, grace_s: float = ROUTER_TERM_GRACE_S, kill_group: Optional[Callable[[int, int], None]] = None
+) -> None:
+    """Take a supervisor back down when the session decides not to use its router.
+
+    The supervisor is started BEFORE readiness is known - it is what brings the
+    router up - so the readiness fallback is the one caller that has to be able
+    to undo it. Nothing else can: the supervisor only exits when the SESSION
+    SHELL dies, and on the fallback leg that shell is exactly what carries on
+    running. Left alone it restarts the router forever under capped-exponential
+    backoff, against a port the session has stopped pointing at.
+
+    Signals the whole process GROUP: start_router_supervisor uses
+    start_new_session, so the supervisor leads its own group and the
+    llama-router it spawned is in it. Signalling the supervisor pid alone would
+    orphan a running router with nothing left owning it.
+    """
+    if handle is None:
+        return
+    pid = getattr(handle, "pid", None)
+    if pid is None or handle.poll() is not None:
+        return
+    signaller = os.killpg if kill_group is None else kill_group
+    try:
+        group = os.getpgid(int(pid))
+    except OSError:
+        group = int(pid)
+    try:
+        signaller(group, signal.SIGTERM)
+    except OSError:
+        return
+    deadline = time.time() + float(grace_s)
+    while time.time() < deadline:
+        if handle.poll() is not None:
+            return
+        time.sleep(0.1)
+    try:
+        signaller(group, signal.SIGKILL)
+    except OSError:
+        return
+    try:
+        handle.wait(timeout=grace_s)
+    except Exception as exc:  # a supervisor already reaped elsewhere is the wanted outcome
+        del exc
+
+
+def report_routing(
+    decision: Preflight,
+    listen_host: str,
+    listen_port: int,
+    upstream_host: str,
+    upstream_port: int,
+    probe: Optional[Callable[[str, int], bool]] = None,
+) -> Routing:
+    """Where an ALREADY-RUNNING session's traffic goes. Starts nothing, waits for nothing.
+
+    finalize_routing decides, on a router serve.py has just launched, and spends
+    the whole readiness budget waiting for it. This one only asks whether a
+    router answers on the first try, which is the question --print-env has.
+    """
+    direct = openai_base_url(upstream_host, upstream_port)
+    if decision.action == "direct" and not decision.router_enabled:
+        return Routing(False, direct, decision.notice or None)
+    check = (lambda host, port: wait_for_router_health(host, port, timeout=0.0)) if probe is None else probe
+    try:
+        healthy = bool(check(listen_host, int(listen_port)))
+    except OSError:
+        healthy = False
+    if healthy:
+        return Routing(True, openai_base_url(listen_host, listen_port), None)
+    return Routing(False, direct, decision.notice or None)
+
+
+def print_env_report(
+    model_id: str,
+    config_path: Path,
+    upstream_host: str,
+    upstream_port: int,
+    listen_host: str,
+    listen_port: int,
+    router_config_path: Optional[Path],
+    decision: Preflight,
+    probe: Optional[Callable[[str, int], bool]] = None,
+) -> Tuple[List[str], List[str]]:
+    """--print-env's two streams: (stdout lines, stderr lines).
+
+    --print-env is documented "for scripting", so stdout is NAME=value and
+    nothing else - a prose notice printed there lands inside the caller's `eval`.
+    Every diagnostic goes to the second list, which serve.py writes to stderr.
+
+    It reports rather than decides: no server is started, so no server pid is
+    reported, and the routing is whatever a live router answers - forcing the direct answer would make LLAMA_HARNESS_ROUTER=1 unreachable
+    through the one flag meant to surface it.
+    """
+    routing = report_routing(decision, listen_host, listen_port, upstream_host, upstream_port, probe)
+    env = session_env(
+        model_id,
+        config_path,
+        upstream_host,
+        upstream_port,
+        None,
+        routing,
+        router_config_path=router_config_path if routing.router_enabled else None,
+    )
+    notices = [text for text in (decision.notice, routing.notice) if text]
+    seen: List[str] = []
+    for text in notices:
+        if text not in seen:
+            seen.append(text)
+    return print_env_lines(env), seen
 
 
 def _is_executable_file(candidate: Path) -> bool:

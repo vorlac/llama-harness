@@ -8049,6 +8049,14 @@ SCHEMAS[SETUP_PROBE_SCHEMA_NAME] = SETUP_PROBE_SCHEMA;
 
 // §2.1:483's example scope timeout, applied to every proposed scope.
 const SETUP_SCOPE_TIMEOUT_MS = 600000;
+// A scope's sourceGlob is what setupRequiredScopes turns into that scope's
+// requiredScopes pattern in a MULTI-ecosystem repo, so it has to name the files
+// the ecosystem actually owns rather than the directory its sources usually sit
+// in. Two ecosystems both claiming "src/**" leave lib/, include/ and test/
+// covered by nothing, and an item no requiredScopes entry covers has no
+// constructible test command at all (itemVerifyScope raises on it).
+const NODE_SOURCE_GLOB = "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}";
+const CMAKE_SOURCE_GLOB = "**/*.{c,cc,cpp,cxx,h,hh,hpp,hxx,cmake}";
 // The smoke probe's own kill timeout. A probe exists to answer "can this be
 // spawned at all"; one that hangs has answered nothing and must never wedge setup.
 const SETUP_SMOKE_TIMEOUT_MS = 10000;
@@ -8278,7 +8286,7 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
       command,
       timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
       behavioralPaths: ["src/**", "lib/**"],
-      sourceGlob: "src/**",
+      sourceGlob: NODE_SOURCE_GLOB,
     };
     if (setupIsNodeCommand(command)) {
       scope.itemTest = ["node", "--test", "{files}"];
@@ -8300,7 +8308,7 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
       timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
       itemTest: ["ctest", "-R", "{name}"],
       behavioralPaths: ["src/**", "include/**"],
-      sourceGlob: "src/**",
+      sourceGlob: CMAKE_SOURCE_GLOB,
     });
     notes.push(
       "cmake: `ctest` is proposed unqualified — most CMake projects run it from a build " +
@@ -8354,15 +8362,16 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
       }
     }
     const pkgDir = setupPyprojectPackage(pyproject);
-    const sourceGlob = pkgDir === null ? "**/*.py" : `${pkgDir}/**`;
     scopes.push({
       name: "python",
       ecosystem: "python",
       command,
       timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
       itemTest,
-      behavioralPaths: [sourceGlob],
-      sourceGlob,
+      behavioralPaths: [pkgDir === null ? "**/*.py" : `${pkgDir}/**`],
+      // The scope's coverage is every .py file, not just the declared package
+      // directory: a test module beside it is still python's to verify.
+      sourceGlob: "**/*.py",
     });
   }
 
@@ -8392,7 +8401,7 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
       command: ["cargo", "test"],
       timeoutMs: SETUP_SCOPE_TIMEOUT_MS,
       behavioralPaths: ["src/**"],
-      sourceGlob: "src/**",
+      sourceGlob: "**/*.rs",
     });
   }
 
@@ -8405,9 +8414,11 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
   return { scopes, notes };
 }
 
-// One requiredScopes entry per detected scope, so no path is left with an empty
-// scope list by construction. With exactly one ecosystem the pattern is "**";
-// with several, each entry's pattern is that ecosystem's own source glob.
+// One requiredScopes entry per detected scope. With exactly one ecosystem the
+// pattern is "**", which leaves no path uncovered by construction; with several,
+// each entry's pattern is that ecosystem's own source glob, and the globs are
+// keyed on the ecosystem's file extensions precisely so that between them they
+// still cover the repo's sources instead of one directory each.
 function setupRequiredScopes(scopes: ProposedScope[]): Array<{ pattern: string; scopes: string[] }> {
   if (scopes.length === 1) return [{ pattern: "**", scopes: [scopes[0].name] }];
   return scopes.map((scope) => ({ pattern: scope.sourceGlob, scopes: [scope.name] }));
@@ -8661,36 +8672,98 @@ async function setupSchemaProbe(input: SetupInput, model: string): Promise<strin
   return null;
 }
 
-// §2.1:631 — the slot proof. llama-server publishes its own slot count at
-// GET /props (total_slots), which is the SERVER-side signal; a client cannot
-// observe server-side overlap, and wall-clock timing would measure the machine's
-// load rather than the server's capacity.
-async function setupSlotProof(input: SetupInput, maxReaders: number): Promise<string | null> {
-  const res = await setupProofRequest(input, "/props", "GET", null);
-  if (res === null || res.status !== 200) {
-    return (
-      "setup proof (§2.1:631): the served origin did not answer GET /props, so its slot count " +
-      "is unknown — remedy: serve the model through llama-server (which publishes total_slots) " +
-      `and start it with --parallel ${String(maxReaders)} plus a matching --ctx-size`
-    );
+// The remedy every §2.1:631 failure ends with. --parallel alone divides the
+// existing total context by the new slot count (C-058 F3), so the two flags are
+// always named together.
+function setupSlotRemedy(maxReaders: number): string {
+  return (
+    `Remedy: restart llama-server with --parallel ${String(maxReaders)}, and raise --ctx-size ` +
+    "with it: --ctx-size is the TOTAL context divided among the slots, so adding slots alone " +
+    "shrinks every slot's window"
+  );
+}
+
+// llama-server publishes its own slot count at GET /props (total_slots): the
+// SERVER's report of its capacity rather than an inference from a stopwatch.
+//
+// /props is NOT under /v1, and the router proxies ONLY /v1/.*
+// (router/router.hpp:104-108) — every other path falls through to httplib's own
+// 404. A router that answers the /v1 proofs and 404s /props is HEALTHY, so this
+// read retries the upstream origin directly instead of failing setup, and it does
+// NOT call noteRouterFailure: latching the session onto the upstream over a
+// routing fact would take the router out of the loop for the rest of the run.
+async function setupServedSlotCount(input: SetupInput): Promise<number | null> {
+  const timeoutMs = input.router.probeTimeoutMs;
+  const proofOrigin = resolveBaseUrl(input.router, input.upstream, input.failoverState);
+  const upstreamOrigin = `http://${input.upstream.host}:${String(input.upstream.port)}`;
+  const origins =
+    proofOrigin === upstreamOrigin ? [proofOrigin] : [proofOrigin, upstreamOrigin];
+  for (const origin of origins) {
+    const res = await setupHttpJson(origin, "/props", "GET", null, timeoutMs);
+    if (res === null || res.status !== 200) continue;
+    const parsed = setupParseJson(res.body);
+    if (setupIsRecord(parsed) && typeof parsed.total_slots === "number") return parsed.total_slots;
   }
-  const parsed = setupParseJson(res.body);
-  const slots =
-    setupIsRecord(parsed) && typeof parsed.total_slots === "number" ? parsed.total_slots : null;
+  return null;
+}
+
+// §2.1:631 — the slot proof, in two legs, neither of them a stopwatch.
+//
+// LEG 1 is the plan's own mechanism: parallel.maxReaders concurrent trivial
+// completions, issued together against /v1/chat/completions — the one path a
+// router proxies, so the proof reaches the server through the same origin the run
+// will use. Every reader must come back served; an origin that refuses, drops or
+// errors one under a maxReaders-wide fan-out cannot hold the run's readers open,
+// and the failure names how many it did serve.
+//
+// LEG 2 is the capacity number itself, read from the server (setupServedSlotCount
+// above). Leg 1 alone cannot see a server that ACCEPTS every reader and then
+// queues them internally — llama-server does exactly that at --parallel 1 — so the
+// count llama-server publishes is what turns "all six were accepted" into "all six
+// can actually run".
+async function setupSlotProof(
+  input: SetupInput,
+  maxReaders: number,
+  model: string,
+): Promise<string | null> {
+  const readers = maxReaders > 1 ? maxReaders : 1;
+  if (model.length > 0) {
+    const results = await Promise.all(
+      Array.from({ length: readers }, (_unused, index) =>
+        setupProofRequest(input, "/v1/chat/completions", "POST", {
+          model,
+          messages: [{ role: "user", content: `Reply with the digit ${String(index + 1)}.` }],
+          stream: false,
+          max_tokens: 1,
+        }),
+      ),
+    );
+    const served = results.filter((res) => res !== null && res.status === 200).length;
+    if (served < readers) {
+      return (
+        `setup proof (§2.1:631): of ${String(readers)} concurrent readers the served origin ` +
+        `held only ${String(served)} open, and parallel.maxReaders is ${String(maxReaders)} — ` +
+        "the fan-out would serialize against a server that cannot hold its readers open. " +
+        setupSlotRemedy(maxReaders)
+      );
+    }
+  }
+
+  const slots = await setupServedSlotCount(input);
   if (slots === null) {
     return (
-      "setup proof (§2.1:631): the served origin's /props carries no total_slots, so the " +
-      `configured parallel.maxReaders ${String(maxReaders)} cannot be proven — remedy: start ` +
-      `llama-server with --parallel ${String(maxReaders)} and a matching --ctx-size`
+      "setup proof (§2.1:631): neither the served origin nor the upstream answered GET /props " +
+      "with a total_slots, so the slot count is unknown — remedy: serve the model through " +
+      `llama-server (which publishes total_slots) and start it with --parallel ${String(maxReaders)} ` +
+      "plus a matching --ctx-size"
     );
   }
   if (slots < maxReaders) {
     return (
       `setup proof (§2.1:631): the served origin reports ${String(slots)} slots but ` +
       `parallel.maxReaders is ${String(maxReaders)} — the fan-out would serialize against a ` +
-      "server that cannot hold its readers open. Remedy: restart llama-server with " +
-      `--parallel ${String(maxReaders)}, and raise --ctx-size with it: --ctx-size is the TOTAL ` +
-      "context divided among the slots, so adding slots alone shrinks every slot's window"
+      "server that cannot hold its readers open. " +
+      setupSlotRemedy(maxReaders)
     );
   }
   return null;
@@ -8957,7 +9030,11 @@ export async function handleSetup(input: SetupInput): Promise<SetupResult> {
     if (schemaFailure !== null) failures.push(schemaFailure);
   }
 
-  const slotFailure = await setupSlotProof(input, candidate.parallel.maxReaders);
+  const slotFailure = await setupSlotProof(
+    input,
+    candidate.parallel.maxReaders,
+    candidate.models.default,
+  );
   if (slotFailure !== null) failures.push(slotFailure);
 
   if (failures.length > 0) return unconfigured({ failures });
