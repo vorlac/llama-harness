@@ -27,8 +27,18 @@
 //     re-serialization would not round-trip are all logged and ignored, never
 //     rejected;
 //   * the upstream status crosses back untouched, non-2xx included; the router
-//     mints a status of its own in exactly one situation, an upstream it could
-//     not reach at all, and that is a per-request 502 envelope, never latched.
+//     mints a status of its own in exactly two situations, both the same
+//     per-request 502 envelope and neither latched — an upstream it could not
+//     reach at all, and an upstream that answered and then failed MID-BODY
+//     while the response was still buffered, so nothing had been written
+//     downstream yet. The second is not a G5 exception: relaying the partial
+//     bytes under the upstream's own 200 would hand the caller a SHORT answer
+//     carrying a Content-Length that matches the truncation, which no client
+//     can tell from a complete one — a silent corruption, not a served
+//     request. Once bytes ARE downstream that choice is gone, so a STREAMED
+//     relay whose upstream failed mid-body aborts the connection instead,
+//     leaving the chunked response without its terminating chunk: a detectable
+//     error at the client rather than a clean end over an aborted generation.
 //
 // Header-only, matching Task 11.2's config.hpp, so both llama-router and
 // router-tests get it without a translation unit of their own.
@@ -913,14 +923,22 @@ namespace conductor::router {
                 return;
             }
 
-            response.status = status;
-            // The status column records what the CLIENT gets: the upstream's
-            // own answer, non-2xx included, crossing back untouched.
-            ledgerGuard->record.status = status;
-            for (const auto& [name, value] : responseHeaders) {
-                if (!detail::isResponseHeaderDropped(name))
-                    response.set_header(name, value);
-            }
+            // The upstream's response head, relayed downstream verbatim. Held
+            // back rather than applied here because the buffered path below
+            // learns the upstream's REAL verdict only after this point, while
+            // nothing has yet been written downstream: a 502 the router mints
+            // there must carry its own head, not the head of an answer the
+            // upstream never finished.
+            const auto relayResponseHead = [&] {
+                response.status = status;
+                // The status column records what the CLIENT gets: the upstream's
+                // own answer, non-2xx included, crossing back untouched.
+                ledgerGuard->record.status = status;
+                for (const auto& [name, value] : responseHeaders) {
+                    if (!detail::isResponseHeaderDropped(name))
+                        response.set_header(name, value);
+                }
+            };
 
             const std::string contentType = detail::headerValue(responseHeaders, "Content-Type");
             // A declared length means the whole body is bounded and known, so relay
@@ -932,6 +950,7 @@ namespace conductor::router {
 
             if (!incremental) {
                 std::string body;
+                bool truncated = false;
 
                 {
                     std::unique_lock<std::mutex> lock(relay->mutex);
@@ -941,7 +960,27 @@ namespace conductor::router {
                         });
 
                     body.swap(relay->pending);
+                    // The upstream's OWN verdict, which exists only once the
+                    // call has returned. `headersReady` says an answer STARTED;
+                    // nothing before this point can say whether it finished.
+                    truncated = !relay->succeeded;
+                    error = relay->error;
                 }
+
+                if (truncated) {
+                    // Not a byte has gone downstream yet, so the choice is still
+                    // open — and `body` is not an answer: httplib delivers what
+                    // it read before the failure, so relaying it would attach a
+                    // Content-Length matching the TRUNCATION under the
+                    // upstream's own status. The client could not tell that
+                    // from a complete response, and the router would have
+                    // corrupted a request rather than served it.
+                    sendRouterError(response, truncatedMessage(error, body.size()));
+                    ledgerGuard->record.status = 502;
+                    return;
+                }
+
+                relayResponseHead();
 
                 // Task 11.6's response half runs on the buffered path only —
                 // the verdict is recorded off these exact bytes BEFORE they are
@@ -956,6 +995,8 @@ namespace conductor::router {
                 sendBuffered(response, contentType, std::move(body));
                 return;
             }
+
+            relayResponseHead();
 
             {
                 const std::lock_guard<std::mutex> lock(relay->mutex);
@@ -977,9 +1018,12 @@ namespace conductor::router {
             // written when the provider is destroyed, exactly once, AFTER any
             // usage chunk has crossed — never at handler return (C-033).
             response.set_chunked_content_provider(
-                contentType, [relay, call, slot = std::move(slot), ledgerGuard](std::size_t /*offset*/, httplib::DataSink& sink) {
+                contentType, [relay, call, slot = std::move(slot), ledgerGuard,
+                              endpoint = upstreamEndpoint()](std::size_t /*offset*/, httplib::DataSink& sink) {
                     std::string chunk;
                     bool complete = false;
+                    bool upstreamFailed = false;
+                    httplib::Error cause = httplib::Error::Success;
 
                     {
                         std::unique_lock<std::mutex> lock(relay->mutex);
@@ -991,6 +1035,14 @@ namespace conductor::router {
 
                         chunk.swap(relay->pending);
                         complete = relay->finished || relay->cancelled;
+                        // The upstream's OWN verdict, read HERE because this is
+                        // the only place it is reachable: `finished` says the
+                        // call returned, never that it succeeded. Meaningful
+                        // only under `complete`, which is the only thing that
+                        // consults it.
+                        upstreamFailed = (relay->finished && !relay->succeeded) ||
+                                         relay->cancelled;
+                        cause = relay->error;
                     }
 
                     relay->cv.notify_all();
@@ -1014,8 +1066,27 @@ namespace conductor::router {
                         return false;
                     }
 
-                    if (complete)
+                    if (complete) {
+                        if (upstreamFailed) {
+                            // Bytes are already downstream and cannot be
+                            // recalled, so no status is left to mint: the only
+                            // honest ending is no ending. Returning false makes
+                            // httplib abort the connection WITHOUT the
+                            // terminating chunk, which the client detects as
+                            // the truncation it is — sink.done() would frame an
+                            // aborted generation as a normal end, the one
+                            // outcome a streamed relay must never produce.
+                            spdlog::warn(
+                                "router: the upstream at {} failed mid-stream ({}) — the "
+                                "downstream stream is aborted without its terminating "
+                                "chunk rather than ended cleanly",
+                                endpoint, httplib::to_string(cause));
+
+                            return false;
+                        }
+
                         sink.done();
+                    }
 
                     return true;
                 });
@@ -1121,9 +1192,26 @@ namespace conductor::router {
                 });
         }
 
+        [[nodiscard]] std::string upstreamEndpoint() const {
+            return config_.upstream.host + ":" + std::to_string(config_.upstream.port);
+        }
+
         [[nodiscard]] std::string upstreamMessage(const std::string& cause) const {
-            return "llama-router could not reach the upstream at " + config_.upstream.host + ":" +
-                   std::to_string(config_.upstream.port) + ": " + cause;
+            return "llama-router could not reach the upstream at " + upstreamEndpoint() + ": " +
+                   cause;
+        }
+
+        // The mid-body failure's message. Deliberately NOT upstreamMessage's
+        // "could not reach": the router did reach this upstream and it did
+        // answer — it stopped partway — and an operator needs those apart. The
+        // envelope AROUND it is identical, so the fan-out side still parses one
+        // router-origin error shape.
+        [[nodiscard]] std::string truncatedMessage(httplib::Error cause,
+                                                   std::size_t received) const {
+            return "llama-router could not complete the response from the upstream at " +
+                   upstreamEndpoint() + ": " + httplib::to_string(cause) + " after " +
+                   std::to_string(received) +
+                   " byte(s) of body; the truncated body was not relayed";
         }
 
         // The one router-origin error shape, shared so the TS fan-out side

@@ -2727,3 +2727,90 @@ before writing.**
   rule" became "four" — which is one line beyond my "change nothing else in that file". It flagged
   this rather than hiding it, and it was right to: leaving a comment asserting something the code
   below no longer does is the C-033 shape this build keeps punishing.
+
+---
+
+## C-066 — the Phase 11 major, fixed test-first, and a THIRD half the lenses did not find
+
+The defect of C-063 is closed. `router-tests` 90 → **92 cases, 27726 assertions, 0 failed**.
+
+### The red was genuine, and the agent proved it was genuine
+
+The hard part of this test is not the router — it is producing a REAL short read. `httplib::Server`
+cannot emit an unfinished message, so the stub is a raw POSIX socket. And both cases open with an
+independent probe, `requireGenuineShortRead(...)`: a plain httplib client, no router in the
+picture, which must receive exactly the partial bytes through its content receiver and *then*
+report `Error::Read`. If the stub were fake the cases would abort at that probe instead of
+reaching the real assertions.
+
+Verbatim red against unmodified `router.hpp`:
+
+```
+[11.3-upstream-truncated-buffered]
+  CHECK( result->status == 502 )                          values: CHECK( 200 == 502 )
+  CHECK_FALSE( mentions(result->body, kTruncationMarker) ) values: CHECK_FALSE( true )
+  REQUIRE_FALSE( envelope.is_discarded() )                 values: REQUIRE_FALSE( true )
+
+[11.3-upstream-truncated-stream]
+  REQUIRE_FALSE( static_cast<bool>(result) )               values: REQUIRE_FALSE( true )
+```
+
+Note the third line: the buffered body was **not valid JSON** — cut mid-string — and that is what a
+client would have been handed as a complete answer.
+
+### A trap worth carrying forward
+
+`close()` on a socket with unread request bytes still buffered makes the kernel send **RST**, and
+an RST lets the peer discard payload it has already received but not yet handed up. That would
+have destroyed the exact partial delivery the test depends on, and the case would have degenerated
+into a connection-reset test that "passed" for the wrong reason. The stub therefore drains the
+whole request, then `shutdown(SHUT_WR)`, then waits for the peer's FIN before closing.
+
+### The third half, which no lens named
+
+`router.hpp:916-923` applied the upstream's status **and its end-to-end headers** to `response`
+before the buffered path knew the outcome. Left alone, the new 502 would have gone out wearing the
+head of an answer that never arrived — the router's own error dressed in the upstream's clothes.
+The whole head is now deferred behind a `relayResponseHead()` lambda invoked only once the verdict
+is known.
+
+The agent's own test did not catch this at first. It said so, strengthened the test (an
+`X-Upstream-Marker` on the stub's head) rather than shipping an untested line, and mutation 3
+proves it load-bearing.
+
+### And a bug in the original read timing
+
+`relay->error` was snapshotted at `:903` under the FIRST wait (headers-ready), where in a
+truncation it is still `Error::Success` — the real error only lands when the call returns. Re-read
+inside the buffered completion wait, so the envelope names the actual cause. The `!haveResponse`
+path's read was always correct because that wait exits on `finished`.
+
+### Verified by the orchestrator, not accepted on report
+
+Each half reverted independently (`if (X)` → `if (false && X)`), rebuilt, run:
+
+| revert | truncated-buffered | truncated-stream |
+|---|---|---|
+| buffered 502 | **FAILS** (4 assertions) | passes |
+| streaming abort | passes | **FAILS** (1 assertion) |
+
+Each half is under test, and each half only. Restored byte-identical with `cmp` both times.
+
+### Two things left deliberately unchanged, and why
+
+- **The error `type` string stays `router_upstream_unreachable`.** It is now a mild misnomer for
+  the mid-body case — the router *did* reach this upstream. But that string is what
+  `conductor/adapter/router-client.ts` parses, and changing a committed wire contract to improve a
+  word is not a change to make unilaterally inside a fix round. The MESSAGE distinguishes them:
+  `truncatedMessage()` says "could not complete the response from", names the httplib error and
+  the byte count received, and deliberately does not say "could not reach".
+- **The streaming ledger status stays the upstream's 200.** 200 *is* the status line the client
+  received, and the ledger records what the client got; the truncation is carried by the missing
+  terminating chunk. The only alternative that avoids a schema change would be rewriting that
+  status to 502, which would make the ledger disagree with the wire. Recorded as a limit.
+
+### The law in the header comment was updated, because it changed
+
+`router.hpp:27-31` said the router mints a status of its own "in exactly one situation". It is now
+two, and the comment says two and says why. A comment still claiming "exactly one" after a second
+was added is precisely the C-033 shape, and M5 does not catch prose.

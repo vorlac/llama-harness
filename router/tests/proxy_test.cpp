@@ -109,14 +109,24 @@
 // translation unit must not define it again.
 // =============================================================================
 
+#include <arpa/inet.h>
 #include <doctest/doctest.h>
 #include <httplib.h>
+#include <netinet/in.h>
 #include <nlohmann/json.hpp>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include <atomic>
+#include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -124,6 +134,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "router/config.hpp"
@@ -227,6 +238,195 @@ namespace {
         std::vector<CapturedRequest> requests_;
     };
 
+    // An upstream that ANSWERS and then dies mid-body. httplib::Server cannot
+    // express this — it always frames a complete response — so this stub speaks
+    // the wire itself: it writes a response head promising more payload than it
+    // will ever send (a Content-Length larger than the body, or a chunked
+    // framing with no terminating chunk), writes the short payload, and
+    // half-closes. httplib's client delivers those partial bytes to the content
+    // receiver and only THEN reports the read failure, which is exactly the
+    // upstream shape the router has to survive: response headers already in
+    // hand, the body cut off underneath them.
+    class TruncatingUpstream {
+    public:
+        // `head` is the literal response head, blank line included; `payload` is
+        // every byte of body the upstream will ever write.
+        TruncatingUpstream(std::string head, std::string payload)
+            : head_(std::move(head))
+            , payload_(std::move(payload)) {
+        }
+
+        ~TruncatingUpstream() {
+            stop();
+        }
+
+        TruncatingUpstream(const TruncatingUpstream&) = delete;
+        TruncatingUpstream& operator=(const TruncatingUpstream&) = delete;
+
+        void start() {
+            listenFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+            REQUIRE(listenFd_ >= 0);
+
+            const int reuse = 1;
+            ::setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+            sockaddr_in address{};
+            address.sin_family = AF_INET;
+            address.sin_addr.s_addr = ::inet_addr(kHost);
+            address.sin_port = 0;
+            REQUIRE(::bind(listenFd_, reinterpret_cast<const sockaddr*>(&address),
+                           sizeof(address)) == 0);
+            REQUIRE(::listen(listenFd_, 4) == 0);
+
+            socklen_t length = sizeof(address);
+            REQUIRE(::getsockname(listenFd_, reinterpret_cast<sockaddr*>(&address), &length) == 0);
+            port_ = static_cast<int>(ntohs(address.sin_port));
+            REQUIRE(port_ > 0);
+
+            serving_ = std::thread([this] {
+                serve();
+            });
+        }
+
+        void stop() {
+            stopping_ = true;
+            if (serving_.joinable())
+                serving_.join();
+
+            if (listenFd_ >= 0) {
+                ::close(listenFd_);
+                listenFd_ = -1;
+            }
+        }
+
+        [[nodiscard]] int port() const {
+            return port_;
+        }
+
+        // The request bytes the stub received, so a test can prove the proxied
+        // request really arrived rather than inferring it from the answer.
+        [[nodiscard]] std::string observedRequest() const {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            return observed_;
+        }
+
+        [[nodiscard]] bool served() const {
+            const std::lock_guard<std::mutex> lock(mutex_);
+            return served_;
+        }
+
+    private:
+        void serve() {
+            int fd = -1;
+            while (!stopping_.load()) {
+                pollfd waiting{ listenFd_, POLLIN, 0 };
+                const int ready = ::poll(&waiting, 1, 25);
+                if (ready > 0) {
+                    fd = ::accept(listenFd_, nullptr, nullptr);
+                    break;
+                }
+
+                if (ready < 0 && errno != EINTR)
+                    return;
+            }
+
+            if (fd < 0)
+                return;
+
+            // Bounds every read below, so a peer that never closes cannot wedge
+            // this thread and with it the test binary.
+            timeval timeout{};
+            timeout.tv_sec = 10;
+            ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+            const std::string request = readRequest(fd);
+
+            {
+                const std::lock_guard<std::mutex> lock(mutex_);
+                observed_ = request;
+                served_ = true;
+            }
+
+            writeAll(fd, head_);
+            writeAll(fd, payload_);
+
+            // FIN, not RST. A close(2) with bytes still unread in the receive
+            // buffer sends an RST, and an RST lets the peer's kernel discard
+            // payload it has already received but not yet handed up — which
+            // would destroy the very partial delivery this stub exists to
+            // produce. Hence the full request drain above, the half-close here,
+            // and the wait for the peer's own FIN before closing.
+            ::shutdown(fd, SHUT_WR);
+
+            char drain[512];
+            while (::read(fd, drain, sizeof(drain)) > 0) {
+            }
+
+            ::close(fd);
+        }
+
+        static void writeAll(int fd, const std::string& bytes) {
+            std::size_t written = 0;
+            while (written < bytes.size()) {
+                const auto sent = ::send(fd, bytes.data() + written, bytes.size() - written, 0);
+                if (sent <= 0)
+                    return;
+
+                written += static_cast<std::size_t>(sent);
+            }
+        }
+
+        // Reads the request head and then exactly its declared Content-Length of
+        // body, so nothing is left unread when the socket half-closes.
+        static std::string readRequest(int fd) {
+            std::string buffer;
+            char chunk[1024];
+            std::size_t headEnd = std::string::npos;
+
+            while (headEnd == std::string::npos) {
+                const auto received = ::recv(fd, chunk, sizeof(chunk), 0);
+                if (received <= 0)
+                    return buffer;
+
+                buffer.append(chunk, static_cast<std::size_t>(received));
+                headEnd = buffer.find("\r\n\r\n");
+            }
+
+            const std::size_t bodyStart = headEnd + 4;
+            const std::size_t declared = declaredContentLength(buffer.substr(0, headEnd));
+            while (buffer.size() - bodyStart < declared) {
+                const auto received = ::recv(fd, chunk, sizeof(chunk), 0);
+                if (received <= 0)
+                    break;
+
+                buffer.append(chunk, static_cast<std::size_t>(received));
+            }
+
+            return buffer;
+        }
+
+        static std::size_t declaredContentLength(std::string head) {
+            for (char& character : head)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+            const std::size_t at = head.find("content-length:");
+            if (at == std::string::npos)
+                return 0;
+
+            return static_cast<std::size_t>(std::strtoul(head.c_str() + at + 15, nullptr, 10));
+        }
+
+        std::string head_;
+        std::string payload_;
+        int listenFd_{ -1 };
+        int port_{ 0 };
+        std::thread serving_;
+        std::atomic<bool> stopping_{ false };
+        mutable std::mutex mutex_;
+        std::string observed_;
+        bool served_{ false };
+    };
+
     // The Router consumes Task 11.2's PARSED RouterConfig — 11.3 never re-parses
     // config JSON, so the doctest builds the struct directly. listen.port 0 is the
     // pinned test-only "bind an ephemeral port" construction (parseRouterConfig's
@@ -272,6 +472,80 @@ namespace {
         }
 
         return ready();
+    }
+
+    // The two truncated-upstream wire shapes, shared by the direct probe that
+    // proves each is a real short read and by the router cases that consume it.
+    //
+    // Buffered: a Content-Length promising far more than the payload that
+    // follows, and a payload cut off mid-JSON-string so it cannot be mistaken
+    // for a complete answer by anything that parses it.
+    // X-Upstream-Marker is an ordinary end-to-end header, so it would be
+    // relayed on any response the router actually forwards — which makes its
+    // ABSENCE the proof that the 502 below is the router's own answer and not
+    // the upstream's half-finished one wearing a new status.
+    constexpr const char* kTruncatedBufferedHead =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "X-Upstream-Marker: partial-answer\r\n"
+        "Content-Length: 4096\r\n"
+        "\r\n";
+
+    constexpr const char* kTruncationMarker = "TRUNCATION-MARKER";
+
+    constexpr const char* kTruncatedBufferedPayload =
+        R"({"id":"chatcmpl-cut","object":"chat.completion","choices":[{"index":0,)"
+        R"("message":{"role":"assistant","content":"TRUNCATION-MARKER the rest of th)";
+
+    // Streaming: chunked framing whose terminating "0\r\n\r\n" never arrives,
+    // and an SSE body with no `data: [DONE]` — the stream is cut mid-generation.
+    constexpr const char* kTruncatedSseHead =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/event-stream\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n";
+
+    constexpr const char* kTruncatedSseFirst =
+        "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"partial-\"}}]}\n\n";
+    constexpr const char* kTruncatedSseSecond =
+        "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"stream\"}}]}\n\n";
+
+    // One well-formed HTTP/1.1 chunk. The stub writes two and then stops, so
+    // what is cut is the framing itself, not just the SSE grammar.
+    std::string chunkOf(std::string_view payload) {
+        char header[32];
+        std::snprintf(header, sizeof(header), "%zx\r\n", payload.size());
+        return std::string(header) + std::string(payload) + "\r\n";
+    }
+
+    std::string truncatedSsePayload() {
+        return chunkOf(kTruncatedSseFirst) + chunkOf(kTruncatedSseSecond);
+    }
+
+    // Proves a wire shape is a GENUINE short read rather than a stub that merely
+    // looks truncated: a plain httplib client with no router anywhere receives
+    // `expected` through its content receiver and THEN reports Error::Read.
+    // Without this the truncation cases below could pass by construction, which
+    // would make them worse than no test at all.
+    void requireGenuineShortRead(const std::string& head, const std::string& payload,
+                                 const std::string& expected) {
+        TruncatingUpstream probe(head, payload);
+        probe.start();
+
+        httplib::Client client(kHost, probe.port());
+        configureClient(client);
+
+        std::string delivered;
+        const auto probed = client.Get(
+            "/v1/probe", httplib::Headers{},
+            [&](const char* data, std::size_t length) {
+                delivered.append(data, length);
+                return true;
+            });
+
+        REQUIRE_FALSE(static_cast<bool>(probed));
+        CHECK(probed.error() == httplib::Error::Read);
+        CHECK(delivered == expected);
     }
 
     // The four §4.4 tag values used consistently across the header path and the
@@ -898,4 +1172,136 @@ TEST_CASE(
     const auto tags = router.last_request_tags();
     REQUIRE(tags.has_value());
     CHECK(*tags == emptyTags);
+}
+
+TEST_CASE(
+    "[11.3-upstream-truncated-buffered] a buffered upstream that dies mid-body is the "
+    "router's own 502, never the upstream's 200 over a silently short body") {
+    // The wire shape with no router anywhere first: a real short read, not a
+    // stub that only looks truncated.
+    requireGenuineShortRead(kTruncatedBufferedHead, kTruncatedBufferedPayload,
+                            kTruncatedBufferedPayload);
+
+    TruncatingUpstream upstream(kTruncatedBufferedHead, kTruncatedBufferedPayload);
+    upstream.start();
+
+    conductor::router::Router router(makeConfig(upstream.port()));
+    router.start();
+
+    httplib::Client client(kHost, router.listen_port());
+    configureClient(client);
+
+    const auto result = client.Post("/v1/chat/completions", kSimpleBody, "application/json");
+    REQUIRE(result);
+
+    // The request really did reach the upstream and the upstream really did
+    // answer: what follows is a MID-BODY failure, not the connect failure
+    // 11.3-upstream-down-502 already covers.
+    CHECK(upstream.served());
+    CHECK(mentions(upstream.observedRequest(), "POST /v1/chat/completions"));
+
+    // The upstream's 200 describes an answer it never finished, so it is not
+    // the router's to relay: the partial bytes would arrive under a
+    // Content-Length matching the TRUNCATION, indistinguishable at the client
+    // from a complete response. This is the second — and only other —
+    // situation in which the router mints a status of its own.
+    CHECK(result->status == 502);
+    CHECK(result->get_header_value("Content-Type") == "application/json");
+    CHECK_FALSE(mentions(result->body, kTruncationMarker));
+    // The envelope is the router's OWN response, head included: the upstream's
+    // end-to-end headers describe an answer that was never delivered, so none
+    // of them ride along on a status the upstream never sent.
+    CHECK(result->get_header_value("X-Upstream-Marker").empty());
+
+    const json envelope = json::parse(result->body, nullptr, /*allow_exceptions=*/false);
+    REQUIRE_FALSE(envelope.is_discarded());
+    REQUIRE(envelope.contains("error"));
+    REQUIRE(envelope["error"].is_object());
+    // The COMMITTED envelope shape, unchanged: one type string and one code
+    // for every router-origin 502, which is what the fan-out side parses.
+    CHECK(envelope["error"]["type"] == "router_upstream_unreachable");
+    CHECK(envelope["error"]["code"] == 502);
+
+    const std::string message = envelope["error"].value("message", std::string());
+    INFO("truncated-upstream envelope message: '", message, "'");
+    CHECK(mentions(message, kHost));
+    CHECK(mentions(message, std::to_string(upstream.port())));
+    // Naming the upstream's own error is what lets an operator tell a
+    // mid-body death apart from an upstream that was never reachable.
+    CHECK(mentions(message, httplib::to_string(httplib::Error::Read)));
+
+    // The ledger records what the CLIENT got. summary() is in-memory and
+    // per-Router, so it covers this one request and nothing else; serving
+    // /conductor/metrics is itself never counted.
+    const auto metrics = client.Get("/conductor/metrics");
+    REQUIRE(metrics);
+    const json summary = json::parse(metrics->body, nullptr, /*allow_exceptions=*/false);
+    REQUIRE_FALSE(summary.is_discarded());
+    CHECK(summary["totalRequests"] == 1);
+    CHECK(summary["statusCounts"].value("502", 0) == 1);
+    CHECK_FALSE(summary["statusCounts"].contains("200"));
+}
+
+TEST_CASE(
+    "[11.3-upstream-truncated-stream] a streamed upstream that dies mid-body ends the "
+    "downstream stream unterminated, never as a clean completion") {
+    constexpr const char* kStreamRequestBody =
+        R"({"model":"qwen3.6-27b","messages":[{"role":"user","content":"cut me off"}],"stream":true})";
+
+    const std::string wirePayload = truncatedSsePayload();
+    const std::string sseBytes = std::string(kTruncatedSseFirst) + kTruncatedSseSecond;
+
+    requireGenuineShortRead(kTruncatedSseHead, wirePayload, sseBytes);
+
+    TruncatingUpstream upstream(kTruncatedSseHead, wirePayload);
+    upstream.start();
+
+    conductor::router::Router router(makeConfig(upstream.port()));
+    router.start();
+
+    httplib::Client client(kHost, router.listen_port());
+    configureClient(client);
+
+    std::string delivered;
+    const auto result = client.Post(
+        "/v1/chat/completions", httplib::Headers{}, kStreamRequestBody, "application/json",
+        [&](const char* data, std::size_t length) {
+            delivered.append(data, length);
+            return true;
+        });
+
+    CHECK(upstream.served());
+
+    // Bytes already downstream cannot be recalled, so they stay exactly the
+    // upstream's own — the relay never invents or drops a byte.
+    CHECK(delivered == sseBytes);
+    // ...but the stream must NOT be framed as a normal end. A chunked
+    // response missing its terminating chunk is a DETECTABLE error at the
+    // client; a clean termination over an aborted generation is a lie, and
+    // there is no `data: [DONE]` in what arrived to contradict it.
+    CHECK_FALSE(mentions(delivered, "[DONE]"));
+    REQUIRE_FALSE(static_cast<bool>(result));
+    CHECK(result.error() == httplib::Error::Read);
+
+    // The ledger keeps the upstream's 200: that IS the status line the client
+    // received, and the ledger's job is to record what the client got. The
+    // stream's truncation is carried by the missing terminating chunk, not by
+    // a rewritten column. The poll is on observable state — the streamed line
+    // is written when httplib destroys the content provider, which happens
+    // after the client's call returns.
+    httplib::Client metricsClient(kHost, router.listen_port());
+    configureClient(metricsClient);
+
+    json summary;
+    const bool ledgered = waitUntil([&] {
+        const auto metrics = metricsClient.Get("/conductor/metrics");
+        if (!metrics)
+            return false;
+
+        summary = json::parse(metrics->body, nullptr, /*allow_exceptions=*/false);
+        return !summary.is_discarded() && summary["totalRequests"] == 1;
+    });
+
+    REQUIRE(ledgered);
+    CHECK(summary["statusCounts"].value("200", 0) == 1);
 }
