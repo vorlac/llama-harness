@@ -3368,3 +3368,70 @@ reaches `scripts/`, so task 12.1's entire product sits outside the "116 files sc
 gate phase 13 (13.1, then 12.1-G5, then 13.2). 4. Then start 14.1 — move
 `scratchpad/staging/task-14.1/test_conductor_bench.py` into `scripts/`, observe its red, implement,
 task-gate it. 5. Re-run phase 14 stage 1, naming this verdict as its prior.
+
+## C-075 — acceptance repair round 2: nothing was repairable, and the meter says so twice
+
+**Verdict: no rows closed. `bash scripts/verify-acceptance.sh` → 17 PASS / 4 FAIL at `3506dda`,
+byte-for-byte the same four failures round 1 left behind.** The repair sub-agent returned STUCK with
+an empty `filesTouched`, and the gatekeeper re-derived every claim rather than take it: main-tree
+gate **1280/1280, five legs, GATE PASS**; C++ `router-tests` **92 cases / 27,726 assertions,
+SUCCESS**; M5 **PASS (117 files, 6 live exemptions)**. All green — and green proves nothing here,
+because the four failures are not defects in shipped code. They are three tasks that do not exist.
+
+**Why a repair round could not have worked.** The failing set is `row 6` (wants `conductor/SMOKE.md`,
+task 13.2), `row 8` (wants `docs/build/artifacts/conductor-report.md`, task 14.2), `row 12`
+(manifest commit messages missing `13.2,14.1,14.2`) and `detector E` (the union of rows 6 and 8).
+Every one of them is a **live-measurement** row. 13.2 is an opencode session driven against
+qwen3.6-27b with verbatim transcripts; 14.2 is ninety detached headless runs on a local 27B, budgeted
+in hours, gated behind its own GO/NO-GO that greps `git log` for 14.1's commit. Neither artifact can
+be written from a text editor. `verify-acceptance.sh:143-147` names authoring them anyway as the
+single worst outcome available to this build, and it is right: a fabricated `SMOKE.md` turns a
+failing meter into a passing meter and a true statement about the system into a false one. **The
+correct output of this round was zero code changes, and that is what it produced.**
+
+**Finding 1, major, and the reason this round was worth its cost — the 14.2 report has two
+different mandatory paths, and they disagree.** `docs/build/specs/task-14.2.assertions.json` row
+`14.2-committed-copy` (spec line 118, reasoned at length in SG-A, spec line 33) fixes the committed
+report at **`bench/conductor-report.md`**, choosing `bench/` over `docs/build/` deliberately, because
+the report is only interpretable beside the manifest that defines the ten tasks it scores.
+`scripts/verify-acceptance.sh:163` hard-codes **`POC=docs/build/artifacts/conductor-report.md`** and
+fails row 8 plus detector E when that exact path is absent. **A flawless 14.2 campaign, executed
+exactly as its own spec instructs, lands the artifact where the meter does not look and leaves
+acceptance at 17/4.** The meter is the authority and is not editable by any build role, so the
+resolution is **additive, not a move**: 14.2 must land the report at BOTH paths, byte-identical to
+each other. This costs nothing — row `14.2-no-tuning` already permits `docs/build/*` in that commit's
+changed-file set, so the second copy is in-bounds as written. Whoever writes 14.2's spec revision
+makes this change **before** the campaign launches; discovering it after ninety runs means either a
+re-run or an artifact shuffled across paths after the fact, which is exactly the "measurement tuned
+while it is being taken" shape row `14.2-no-tuning` exists to forbid. **The gatekeeper did not edit
+the spec.** Amending an assertions row changes what a future task must prove, which is test-writing,
+and the gatekeeper writes neither tests nor implementation. It is recorded here for the orchestrator.
+
+**Finding 2, major, unchanged from round 1 and now blocking two rows.** Task **14.1 is code-complete
+on disk and uncommitted**: `scripts/conductor_bench.py` (1,847 lines), `scripts/test_conductor_bench.py`
+(1,947), `bench/conductor-tasks.json` (10 tasks). The python leg discovers and passes them — `Ran 68
+tests, OK`, no skips — which is precisely why the gate above reads green while the ledger reads
+NOT_STARTED. **Nothing in that paragraph is committed, so none of it counts.** Worse, it is invisible
+to M5: the scanner's default set is `git ls-files`, so 3,794 untracked lines sat outside the "117
+files scanned" that this very round reported as clean. That is the C-044…C-047/C-063/C-072 defect
+class again, on its seventh appearance — **a scanner that passes while inspecting less than it
+appears to.** When 14.1 is committed, pass its three files to `conductor-gate.sh` EXPLICITLY.
+
+**Finding 3, minor, and the reason nothing was touched.** The worktree is not clean and two peer
+sessions are live (`llama-harness-09`, `llama-harness-9e`). `git status` shows modified
+`conductor/adapter/tools.ts`, `conductor/tests/setup.test.ts`,
+`scripts/{conductor_wiring,test_conductor_wiring,serve}.py` plus untracked `bench/`,
+`scripts/conductor_bench.py`, `scripts/test_conductor_bench.py` and two `docs/` files the repo owner
+owns. **The gate numbers above therefore describe the dirty tree, not `3506dda`.** They are still
+load-bearing in the safe direction — a green dirty tree containing HEAD's content plus additions does
+not prove HEAD green, but this round committed no code, so HEAD's own greenness is unchanged from
+round 1, where it was proven in a detached worktree. Record it plainly rather than let a later
+reader mistake 1280/1280 for a measurement of the commit.
+
+**Order of work — unchanged, and strictly ordered.** 1. Bind the 22 conductor tools in
+`conductor/plugin/index.ts`; until then a live session cannot advance one stage and 13.2 cannot run
+at all. 2. Reconcile the peers' in-flight edits, then commit 14.1 under its own message,
+`conductor: 14.1 bench driver` — landing it under any other message makes row 12 permanently
+unachievable for it. 3. Revise 14.2's spec per Finding 1. 4. Run 13.2 (live, → `conductor/SMOKE.md`).
+5. Launch 14.2 **detached** (→ both report paths). Rows 6, 8, 12 and detector E clear together, and
+only when those three tasks are genuinely built and genuinely measured.
