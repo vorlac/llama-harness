@@ -3310,3 +3310,61 @@ by no test, `ROUTER_TERM_GRACE_S` has no upper bound, and `derive_slots`' bool g
 Only the serious one closed.
 
 Stage 1 passing is permission to convene a reviewer, not a phase verdict. Stage 2 has not run.
+
+## C-074 — the Phase 14 gate, stopped before it started: the phase does not exist
+
+**What happened.** A phase-14 stage-1 gate was dispatched. Phase 14 has no work in it. STATE.json
+carries 14.1 (bench driver) and 14.2 (POC run) as NOT_STARTED with no commitSha, `git log
+--grep='^conductor: 14\.'` returns nothing, and `git grep -l -E '14\.[12]-' -- conductor scripts
+router tools` returns nothing — not one of the 51 assertion ids already written into
+`docs/build/specs/task-14.1.assertions.json` (33 rows) and `task-14.2.assertions.json` (18 rows) is
+named by any tracked file. Phase 13 is unbuilt too, and 14.2 depends on it. Phase 12's stage-2
+reviewer has still never been convened. This is the same class as C-072 — a gate dispatched over
+unfinished work — one phase further along and one degree worse: C-072's phase was half-done and
+uncommitted, this one is not started at all.
+
+**Why it matters, given every leg was green.** The gate ran the full battery anyway. Main tree
+1275/1275 five legs exit 0. Fresh detached worktree of HEAD `eb39500`, its own `npm install`, complete
+gate from scratch: 1272/1272 five legs GATE PASS. C++ 92 cases / 27,726 assertions. M5 116 files, 6
+exemptions all live. **All green, and none of it is evidence about phase 14.** The legs are green
+*because* phase 14 has not begun. A gatekeeper that reports its legs and stops has produced exactly
+the artifact C-044…C-047, C-063 and C-072 keep naming: a check that passes while inspecting less than
+it appears to. So M1, M2 and M7 are recorded FAIL against green output, and the M5 phase-set scan is
+recorded **NA over an empty subject** rather than PASS over zero files. The rule this hardens: **a
+phase gate's first act is reading STATE.json for its own rows' status — before any command is run.**
+
+**Finding 1, carried forward as an obligation: 669 unowned lines.** `git diff --shortstat` at gate
+time showed 5 files, +669/−74 across `conductor/adapter/tools.ts`, `conductor/tests/setup.test.ts`,
+`scripts/conductor_wiring.py`, `scripts/serve.py` and `scripts/test_conductor_wiring.py`, carrying at
+least nine new **phase-12** assertion ids (`[12.2-proof-slot-count]`, `[12.2-proofs-origin-fail-soft]`,
+`[12.2-zero-model-dispatch]`, `[12.2-proof-schema-probe]`, `[12.2-detect-multi-ecosystem]`,
+`[12.1-session-env-router]`, `[12.1-router-config-shape]`, `[12.1-readiness-fallback-direct]`,
+`[12.1-ctx-per-slot-preserved]`) and lifting the working tree to 1275 node / 35 python against HEAD's
+1272 / 31. `IN_PROGRESS.json` is absent and no STATE.json row claims any of it. The work is green; the
+**attribution** is missing. HANDOFF.md's "the working tree matches it" was false and is corrected.
+Either take this through a task gate under a STATE row or revert it — an unowned green diff is exactly
+how a phase gets declared done over work nobody gated.
+
+**Finding 2, and it faked a red inside this very gate: a fixed /tmp path in the gate wrapper.**
+`scripts/test-conductor.sh` writes the python leg to the hard-coded `/tmp/python-leg.out` (line 103)
+and then greps the count out of it (line 111) and the G4 skip trailer out of it (line 119). Two gate
+runs on one machine share that file. This gate first ran the main tree and the verification worktree
+**concurrently**; the worktree's run truncated the file mid-grep and the main tree printed
+`GATE FAIL: python leg discovered ZERO tests (scripts/test_*.py moved or renamed?)` immediately above
+its own `Ran 35 tests … OK`. Serialized and re-run, exit 0. The failure direction here is safe — a
+false red — but the same corruption feeds the skip check, which can then read another run's trailer.
+`test-conductor.sh` is orchestrator-owned: the fix is a per-run `mktemp` path. Until then the
+operational rule is **gate runs are serial; never two trees at once.** Note the shape of it — the
+guard that exists specifically to catch a vacuous green (C-015's "unittest discover exits 0 on Ran 0
+tests") is itself the thing that misfired, because it reads a file it does not own.
+
+**Finding 3, minor.** `git worktree list` still shows a stale `scratchpad/wt12` at `eb39500`, left
+from the phase-12 gate, whose record asserts "worktree removed afterwards; `git worktree list` shows
+only the main tree". That claim is falsified. Left in place here in case a concurrent session holds
+it. Also still open, fourth gate running to say it: `scripts/conductor-gate.sh`'s default set never
+reaches `scripts/`, so task 12.1's entire product sits outside the "116 files scanned".
+
+**Order of work.** 1. Attribute or revert the 669 lines. 2. Dispatch phase 12 stage 2. 3. Build and
+gate phase 13 (13.1, then 12.1-G5, then 13.2). 4. Then start 14.1 — move
+`scratchpad/staging/task-14.1/test_conductor_bench.py` into `scripts/`, observe its red, implement,
+task-gate it. 5. Re-run phase 14 stage 1, naming this verdict as its prior.

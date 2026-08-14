@@ -1283,6 +1283,86 @@
         ]
       },
       "verdictHistory": "stage 1 FAIL at 2026-08-14T12:10:00Z (this record's top-level `verdict`), then one fix round, then stage 1 PASS at 2026-08-14T12:40:00Z (`stage1Rerun.verdict`). The phase gate as a whole is NOT yet PASS \u2014 stage 2 has not run."
+    },
+    "14": {
+      "at": "2026-08-14T15:20:00Z",
+      "stage": "1 (mechanical prelude)",
+      "verdict": "FAIL",
+      "priorVerdict": "none - phase 14 had no entry in phaseGates before this run. Phases 0-11 PASS; phase 12 is stage 1 PASS with stage 2 NOT RUN; phase 13 has no entry and no work.",
+      "headAtGate": "eb39500",
+      "blocking": [
+        "PHASE 14 DOES NOT EXIST. Both of its ledger rows are NOT_STARTED in STATE.json (14.1 bench driver, 14.2 POC run) and neither has a commitSha. `git log --grep='^conductor: 14\\.'` returns nothing. `git grep -l -E '14\\.[12]-' -- conductor scripts router tools` returns nothing: not one of the 51 assertion ids in docs/build/specs/task-14.1.assertions.json (33 rows) and task-14.2.assertions.json (18 rows) is named by any tracked source file. The gate was dispatched over a phase with zero committed work and zero work in flight (IN_PROGRESS.json is absent). There is nothing here for a reviewer to review, and no set of green legs can change that - the legs below are all green precisely because they measure a repository in which phase 14 has not begun.",
+        "PHASE 13 IS ALSO ENTIRELY UNBUILT, and 14.2 depends on it. 13.1 (e2e scripted) and 13.2 (live smoke) are both NOT_STARTED. HANDOFF.md line 33 calls 13.1 the largest task in the plan. Phase gates are ordered; 13 must be built and gated before 14 is dispatched.",
+        "PHASE 12's GATE IS NOT FINISHED. phaseGates['12'].verdictHistory says it plainly: stage 1 PASS at 12:40Z, stage 2 NOT RUN. Dispatching phase 14's gate while phase 12's reviewer has never been convened leaves two phases un-adjudicated behind this one.",
+        "UNATTRIBUTED UNCOMMITTED WORK IN THE MAIN TREE. `git diff --shortstat` at gate time: 5 files changed, 669 insertions(+), 74 deletions(-) across conductor/adapter/tools.ts, conductor/tests/setup.test.ts, scripts/conductor_wiring.py, scripts/serve.py, scripts/test_conductor_wiring.py. It carries at least nine new phase-12 assertion ids ([12.2-proof-slot-count], [12.2-proofs-origin-fail-soft], [12.2-zero-model-dispatch], [12.2-proof-schema-probe], [12.2-detect-multi-ecosystem], [12.1-session-env-router], [12.1-router-config-shape], [12.1-readiness-fallback-direct], [12.1-ctx-per-slot-preserved]) and raises the node leg from HEAD's 1272 to 1275 and the python leg from 31 to 35. No IN_PROGRESS.json marks it, no STATE.json row claims it, and no task gate has seen it. HANDOFF.md line 5 ('HEAD is green and the working tree matches it') is now false. This work is real and green - it is the ATTRIBUTION that is missing, and an unowned diff is how a phase gets declared done over work nobody gated."
+      ],
+      "legs": {
+        "mainTreeGate": "PASS - `bash scripts/test-conductor.sh` exit 0. TAP tests=1275 pass=1275 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; typecheck OK; bun leg OK (8 pass); schema export OK; python leg OK (Ran 35 tests); GATE PASS. NOTE: this measures the working tree INCLUDING the 669 unattributed lines above, which is where the extra 3 node tests and 4 python tests come from.",
+        "freshWorktree": "PASS - `git worktree add --detach $TMPDIR/verify-p14 HEAD` (eb39500), its OWN `npm install` in conductor/ (exit 0), then the complete gate from scratch in that tree: TAP tests=1272 pass=1272 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; typecheck OK; bun leg OK (8 pass); schema export OK; python leg OK (Ran 31 tests); GATE PASS, exit 0. HEAD is alive and self-sufficient. 1272/31 in the worktree vs 1275/35 in the main tree is exactly the unattributed diff. Worktree removed afterwards.",
+        "cppLeg": "PASS - `cmake --build .out/build/clang-relwdebinfo --target router-tests` ('ninja: no work to do'), then ./.out/build/clang-relwdebinfo/router-tests: doctest 92/92 cases, 27726/27726 assertions, Status SUCCESS, exit 0.",
+        "m5Default": "PASS - `bash scripts/conductor-gate.sh`: 'M5 PASS (116 file(s) scanned, 6 line exemption(s) all live)'. 116 vs the phase-12 gate's 115 is conductor/tests/setup.test.ts, which became tracked in eb39500 and so entered the git ls-files glob - the self-healing half of that gate's finding, confirmed.",
+        "m5PhaseSet": "NA - a phase-14 cumulative diff does not exist, so the explicit-file scan has an EMPTY subject. Scanning zero files and reporting PASS would be exactly the defect class C-044..C-047/C-063/C-072 keeps naming: a check that passes while inspecting less than it appears to. Recorded as NA, not PASS."
+      },
+      "checks": [
+        {
+          "id": "M1",
+          "result": "FAIL",
+          "detail": "The legs are green in both trees (main 1275/1275 five legs exit 0; fresh worktree of HEAD 1272/1272 five legs exit 0 with its own npm install; C++ 92 cases / 27726 assertions exit 0). M1 is nonetheless FAIL because green legs over a phase that contains no work are not evidence about that phase."
+        },
+        {
+          "id": "M2",
+          "result": "FAIL",
+          "detail": "Test-count rise attributable to phase 14: ZERO. 1272 at HEAD is the phase-12 number unchanged. The main tree's +3 node / +4 python belong to uncommitted phase-12 ids, not to 14.1 or 14.2."
+        },
+        {
+          "id": "M3",
+          "result": "PASS",
+          "detail": "typecheck: OK in the main tree and in the fresh worktree. Reported for completeness; it says nothing about phase 14."
+        },
+        {
+          "id": "M4",
+          "result": "NA",
+          "detail": "No mutation was run. There is no phase-14 product to mutate and no phase-14 test to observe going red. Running a mutation against phase-12 code under a phase-14 gate would be theatre."
+        },
+        {
+          "id": "M5",
+          "result": "PASS",
+          "detail": "116 files in default mode, 6 line exemptions all live. The phase-set scan is NA (empty subject) - see legs.m5PhaseSet."
+        },
+        {
+          "id": "M6",
+          "result": "NA",
+          "detail": "Reachability is a task-gate check and there are no phase-14 tasks to run it over."
+        },
+        {
+          "id": "M7",
+          "result": "FAIL",
+          "detail": "Spec-to-test mapping for phase 14: 51 assertion rows exist (task-14.1 33 rows, task-14.2 18 rows) and ZERO of them are named by any tracked test. 51 uncovered rows. The staged file HANDOFF.md line 35 describes (scratchpad/staging/task-14.1/test_conductor_bench.py, held out of scripts/ deliberately) is not in the repository and was not counted."
+        },
+        {
+          "id": "M8",
+          "result": "NA",
+          "detail": "No live leg in this stage. 14.2 is itself the live task (90 headless runs measured in hours) and has not been started."
+        },
+        {
+          "id": "M9",
+          "result": "PASS",
+          "detail": "bun leg: OK (8 pass) in the main tree and in the fresh worktree."
+        }
+      ],
+      "secondaryFindings": [
+        "NEW, and it produced a false red inside this very gate: scripts/test-conductor.sh writes the python leg to the FIXED path /tmp/python-leg.out (line 103) and then parses the count out of it (line 111). Two gate runs on one machine share that file. This gate first ran the main tree and the fresh worktree concurrently; the worktree's run truncated /tmp/python-leg.out while the main tree's grep was reading it, and the main tree reported 'GATE FAIL: python leg discovered ZERO tests (scripts/test_*.py moved or renamed?)' immediately above its own 'Ran 35 tests ... OK'. Re-run serially it is exit 0. The failure direction here is safe (a false RED), but the corrupted file also feeds the G4 skip check on line 119, which can then read another run's trailer. Orchestrator-owned file: the fix is a per-run mktemp path, and the operational rule until then is that gate runs must be SERIALIZED, never parallelized across worktrees.",
+        "A stale worktree from the phase-12 gate is still registered: `git worktree list` shows scratchpad/wt12 at eb39500 (detached) alongside the main tree. phaseGates['12'].stage1Rerun.legs.freshWorktree asserts 'Worktree removed afterwards; git worktree list shows only the main tree' - that claim is falsified. Left in place rather than removed, because a concurrent session may hold it; whoever owns it should remove it.",
+        "STILL OPEN, fourth gate running to say it: scripts/conductor-gate.sh's default set globs conductor/**/*.ts, router/** and tools/** via git ls-files, so scripts/*.py is never reached and task 12.1's entire product stays outside the '116 files scanned'. Orchestrator edit, still owed."
+      ],
+      "whatMustHappenNext": [
+        "1. Do not dispatch the phase-14 reviewer. Stage 1 failed; there is nothing to review.",
+        "2. Attribute or discard the 669 uncommitted lines. If they are a phase-12 fix round, take them through their task gate and commit them under a STATE.json row; if they are exploratory, revert them. Until then HANDOFF.md's 'the working tree matches HEAD' must be corrected, and no phase gate downstream can distinguish gated work from unowned work.",
+        "3. Finish phase 12: dispatch its stage-2 reviewer, which stage 1 explicitly authorized at 12:40Z and which has still never run.",
+        "4. Build phase 13 (13.1 e2e scripted, then 12.1-G5, then 13.2 live smoke) and gate it.",
+        "5. Only then start 14.1 - move scratchpad/staging/task-14.1/test_conductor_bench.py into scripts/, observe its red yourself, implement, and take it through its task gate. Re-run this phase-14 stage-1 gate afterwards; this record is the prior verdict it must name.",
+        "6. Serialize gate runs until /tmp/python-leg.out is made per-run."
+      ]
     }
   },
   "rejections": [
