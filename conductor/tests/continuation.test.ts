@@ -1550,6 +1550,76 @@ test("[10.1-signature-change-resets] ANY state change resets counters.futileRePr
   }
 });
 
+test("[10.1-signature-change-resets] the RESTART case: with counters.futileRePrompts persisted at 2 and a FRESH ContinuationState (lastSignature null), the first idle carries the persisted counter forward untouched, and after a real state change the next idle writes 0, still re-prompts and records no stop — a moving run is never wedged by a process restart", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const queue = seedOneItemExecuting(store, runId);
+
+  // Exactly what a killed process leaves behind: the counters are persisted
+  // mid-count (§2.3 run.json) while the in-memory signature is gone.
+  const seeded = store.loadRun(runId);
+  seeded.counters.idleRePrompts = 2;
+  seeded.counters.futileRePrompts = 2;
+  store.saveRun(seeded);
+
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  const clock = makeClock();
+  const state = createContinuationState();
+  assert.equal(state.lastSignature, null, "premise: the restarted process holds no observed signature");
+  const stateHome = freshStateHome();
+
+  const idle = async (): Promise<SessionIdleResult> => {
+    const res: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client: wiring.client,
+      config,
+      journal: journal.sink,
+      stateHome,
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 2);
+    return res;
+  };
+
+  const first = await idle();
+  assert.equal(first.prompted, true, "the first post-restart idle still re-prompts");
+  const afterFirst = readRunFile(store, runId);
+  assert.equal(
+    afterFirst.counters.futileRePrompts,
+    2,
+    "a pass with NO prior observation cannot claim the run failed to move: the persisted futile counter is carried forward untouched, never incremented on hearsay",
+  );
+  assert.equal(afterFirst.counters.idleRePrompts, 3, "premise: a prompt WAS sent, so the idle counter still advances");
+
+  const moved = store.loadItem(runId, "I1");
+  moved.state = "RED";
+  store.saveItem(runId, moved);
+  assert.notEqual(verdictOf(store, runId, queue).recommended, null, "premise: the moved fixture still recommends a tool");
+
+  const second = await idle();
+  assert.equal(second.stop, null, "the run MOVED, so the §3.7 wedge detector must not fire");
+  assert.equal(second.prompted, true, "and the moving run is re-prompted again");
+  const afterSecond = readRunFile(store, runId);
+  assert.equal(
+    afterSecond.counters.futileRePrompts,
+    0,
+    "the state change resets the persisted futile counter to 0, read back from run.json",
+  );
+  assert.equal(afterSecond.stop, null, "run.json carries no stop");
+  assert.equal(store.currentRun()?.runId, runId, "the run is still live — a false wedge would have archived it");
+  assert.equal(wiring.sdk.prompts.length, 2, "exactly two prompts across the two passes");
+  store.release();
+});
+
 // ===========================================================================
 // [10.1-noop-after-three-futile]
 // ===========================================================================

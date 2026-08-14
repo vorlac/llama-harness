@@ -696,7 +696,19 @@
       "M7": "PASS. All 33 rows in docs/build/specs/task-10.1.assertions.json now carry coveredByTest, mapped 1:1 to the 33 named tests in conductor/tests/continuation.test.ts by their `[10.1-...]` prefix. Zero unmapped rows.",
       "M8": "n/a for this task (no live model leg). The fake SDK is the driver; the worktree-cleanup row uses REAL git worktrees in its fixture.",
       "M9": "PASS for the three in-script legs, which each printed OK in this run: `bun leg: OK (8 pass)`, `schema export: OK (router/tests/schemas/)`, `python leg: OK (Ran 29 tests)`. C++ leg: NA \u2014 this task touched no file under router/ and no schema; the schema-export leg confirmed router/tests/schemas/ is unchanged.",
-      "note": "Diff read in full by the gatekeeper, not summarised. Two residuals found that way and recorded as C-067 rather than fixed inside the gate: the C-032 E7 prevention half covers two of the four `implementer-blocked` question sites (the two the binding names; the repair half covers all four), and continuation.ts's header claims the futility signature's baseline survives a restart when it is in-memory only. No implementer mutationTable was filed as an artifact for this task; the gatekeeper's three reverts stand in for it."
+      "note": "Diff read in full by the gatekeeper, not summarised. Two residuals found that way and recorded as C-067 rather than fixed inside the gate: the C-032 E7 prevention half covers two of the four `implementer-blocked` question sites (the two the binding names; the repair half covers all four), and continuation.ts's header claims the futility signature's baseline survives a restart when it is in-memory only. No implementer mutationTable was filed as an artifact for this task; the gatekeeper's three reverts stand in for it.",
+      "fixRound1": {
+        "at": "2026-08-14T18:20:00-04:00",
+        "trigger": "Phase 10 review, finding 10.1-signature-change-resets (MAJOR). Closes the C-067(b) binding; see C-068.",
+        "M1": "PASS. `bash scripts/test-conductor.sh` => TAP: tests=1235 pass=1235 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0 (node exit=0). GATE PASS, gatekeeper-observed.",
+        "M2": "PASS. 1235 >= 1234, the count this task committed, and strictly greater: +1, exactly the one new test. No row lost.",
+        "M3": "PASS. `typecheck: OK` in the same run (npx tsc -p conductor/tsconfig.json --noEmit).",
+        "M5": "PASS. `bash scripts/conductor-gate.sh` reported its SCANNED count: `M5 PASS (115 file(s) scanned, 6 line exemption(s) all live)`.",
+        "M6": "PASS. `git status --porcelain` named exactly conductor/adapter/continuation.ts and conductor/tests/continuation.test.ts, both first added by THIS task, plus docs/build/*. Nothing of the repository owner's staged; `git diff --submodule=short -- extern/` empty.",
+        "M9": "PASS for the three in-script legs: `bun leg: OK (8 pass)`, `schema export: OK (router/tests/schemas/)`, `python leg: OK (Ran 29 tests)`. C++ leg NA - nothing under router/ touched, and the schema-export leg confirms router/tests/schemas/ unchanged.",
+        "discriminatingAssertion": "RUN, not reasoned. Detached worktree at HEAD 0978540 with both working-tree files copied in: 34/34 baseline. Reverting the fix ALONE to the committed ternary => 33/34, and `not ok 10` is the new RESTART test and nothing else. Two further mutations (drop `state.lastSignature !== null &&`; over-broaden the guard to `run.counters.idleRePrompts > 0`) each => 28/34. Worktree removed.",
+        "note": "Diff read in full by the gatekeeper. The fix is 5 lines of code and ~20 of prose; the prose was checked against the code rather than skimmed, since C-067(b) was itself a false comment. One residual left OPEN and recorded in C-068: SG-3's durable-baseline claim is unachievable without a \u00a72.3 run.json field, so the header now states what the code guarantees instead. The finding's harm - a moving run archived after one restart - is closed."
+      }
     }
   },
   "phaseGates": {

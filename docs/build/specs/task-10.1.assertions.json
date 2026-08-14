@@ -144,7 +144,7 @@
     {
       "id": "10.1-signature-change-resets",
       "text": "ANY state change resets counters.futileRePrompts to 0, asserted independently for three change classes, each starting from a persisted futileRePrompts of 2: (a) an item advances (PENDING -> RED); (b) a disposition appears (an item gains blocked, or an open question becomes answered); (c) the run state advances (PLANNED -> PLAN_REVIEWED). In all three the next idle writes futileRePrompts 0 and still re-prompts; the reset is read back from run.json, not from an in-memory field",
-      "coveredByTest": "[10.1-signature-change-resets] ANY state change resets counters.futileRePrompts to 0, asserted independently for three change classes \u2014 an item advancing, a disposition appearing, and the run state advancing \u2014 each from a persisted futileRePrompts of 2, and each still re-prompting"
+      "coveredByTest": "[10.1-signature-change-resets] ANY state change resets counters.futileRePrompts to 0, asserted independently for three change classes \u2014 an item advancing, a disposition appearing, and the run state advancing \u2014 each from a persisted futileRePrompts of 2, and each still re-prompting  PLUS, from the Phase 10 fix round (C-068): [10.1-signature-change-resets] the RESTART case: with counters.futileRePrompts persisted at 2 and a FRESH ContinuationState (lastSignature null), the first idle carries the persisted counter forward untouched, and after a real state change the next idle writes 0, still re-prompts and records no stop. Two tests carry this row id; both are required."
     },
     {
       "id": "10.1-noop-after-three-futile",

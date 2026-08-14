@@ -1380,13 +1380,13 @@
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
       "tap": {
-        "tests": 1234,
-        "pass": 1234,
+        "tests": 1235,
+        "pass": 1235,
         "fail": 0,
         "skipped": 0,
         "todo": 0,
-        "file": "33/33",
-        "suite": "tests=1234 pass=1234 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed)"
+        "file": "34/34",
+        "suite": "tests=1235 pass=1235 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed). 1235 is post-fix-round: the Phase 10 review's MAJOR (10.1-signature-change-resets, restart case) added one test. Committed at 1234."
       },
       "redEvidence": {
         "cmd": "bash scripts/test-conductor.sh",
@@ -1413,7 +1413,16 @@
         "Two residuals the gatekeeper found by reading the diff, recorded as C-067 rather than fixed inside a gate: (a) the C-032 E7 PREVENTION half is wired at two of the four appendQuestion sites carrying origin 'implementer-blocked' \u2014 the two the binding names \u2014 while the REPAIR half covers all four; (b) continuation.ts's header claims the projected signature 'survives a restart', but the comparison baseline lives in ContinuationState and does not."
       ],
       "startedAt": "2026-08-14T08:16:30-04:00",
-      "finishedAt": "2026-08-14T12:55:00-04:00"
+      "finishedAt": "2026-08-14T12:55:00-04:00",
+      "fixRounds": [
+        {
+          "round": 1,
+          "at": "2026-08-14T18:20:00-04:00",
+          "finding": "10.1-signature-change-resets (MAJOR, Phase 10 review): the futility signature's comparison baseline is in-memory while counters.futileRePrompts is persisted, so the first idle after a plugin restart incremented on no evidence and the next idle stopped a MOVING run noop.",
+          "disposition": "CONFIRMED REAL and fixed test-first in continuation.ts:671. One new test under the same row id; reverting the fix alone leaves 33/34 with only that test failing. Closes the C-067(b) binding. See C-068 and GATES.json taskGates['10.1'].fixRound1.",
+          "commit": "conductor-build: 10.1 close review findings"
+        }
+      ]
     },
     "11.1": {
       "taskId": "11.1",

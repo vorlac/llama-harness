@@ -2858,3 +2858,69 @@ is the C-033 shape all the same: a comment asserting something the code below it
 which M5 cannot see and a green suite does not care about. Left as-is for Phase 10's review to
 rule on: either persist the baseline (a §2.3 schema change, so STOP-AND-PARK) or correct the
 sentence.
+
+---
+
+## C-068 — C-067(b) was not a documentation defect, and the fix round proves it
+
+The Phase 10 review took C-067(b) at its word and then checked it. C-067(b) reasoned that the
+in-memory comparison baseline "can only shorten a run" and that reaching the limit "takes three
+consecutive restart-then-idle sequences with no ordinary idle in between". Both halves of that
+reasoning are wrong for the same reason: **the counter is persisted while the baseline is not.**
+A process that dies with `counters.futileRePrompts` at 2 comes back with the counter still at 2
+and `state.lastSignature` at `null`. One idle takes the increment branch on no evidence and
+writes 3; the next idle's `shouldTerminate` returns `noop`. That is ONE restart, not three, and
+the run it kills is a run that moved.
+
+Severity as filed: MAJOR, and the file was right. §3.7's wedge detector exists to stop a run that
+is NOT moving. Here it fired on one that was — stop `{kind:'noop'}`, a stop-report written,
+worktrees removed, the run archived.
+
+### The red, run before the fix
+
+A new test tagged `[10.1-signature-change-resets]` — a non-terminal EXECUTING run with
+`idleRePrompts 2 / futileRePrompts 2` persisted, a FRESH `createContinuationState()`, one idle,
+a real state change (I1 PENDING → RED), a second idle. Against committed code it failed at
+`3 !== 2`: pass one incremented on hearsay. The gatekeeper re-ran it as a revert rather than
+taking the implementer's word — detached worktree at HEAD `0978540` with both working-tree files
+copied in, the fix alone reverted to the committed ternary: **34 → 33/34, and the only failing
+test is the new one.**
+
+### The fix, and the trade it takes
+
+`continuation.ts:671` — a pass with NO prior in-memory observation on a run that has ALREADY been
+re-prompted (`state.lastSignature === null && run.counters.idleRePrompts > 0`) carries
+`counters.futileRePrompts` forward untouched instead of incrementing it. A run that has never
+been re-prompted (`idleRePrompts 0`) still counts its first re-prompt, which is what keeps the
+committed 1,2,3 row true for a fresh wedge. A genuinely wedged run still stops; a restart costs
+it one extra prompt. That is the same trade SG-3 already takes on the debounce clock, and it is
+the right direction: a restart may cost a prompt, it may never cost a live run.
+
+### What was NOT done, and why it is a residual and not a park
+
+SG-3's literal claim that the baseline "is derived from persisted state and so survives a
+restart" is not achievable as written. The signature **as of the previous re-prompt** is not a
+function of the current persisted state — a restarted process can compute today's signature but
+has nothing to compare it against. Making it durable needs a new field in `run.json`, i.e. a §2.3
+schema change. The sentence was corrected to state what the code actually guarantees. The
+durable-baseline option remains available to anyone who opens §2.3 for other reasons; it buys
+back one prompt per restart and nothing else.
+
+### Three mutations, RUN not reasoned
+
+| mutation | result |
+|---|---|
+| revert the guard entirely (committed code) | 33/34 — only the new RESTART test fails |
+| drop `state.lastSignature !== null &&` from the reset ternary (C-067's stated tell) | 28/34 — 6 rows fail |
+| over-broaden the guard to `run.counters.idleRePrompts > 0` (wedge detector never fires) | 28/34 — 6 rows fail, the RESTART test among them |
+
+C-067's tell was mis-stated — dropping that clause is caught by the committed 1,2,3 row too — but
+the defect it pointed at was real, which is the part that mattered.
+
+### The lesson, and it is C-033's again with a twist
+
+C-067 found this by reading a comment that claimed more than the code did, and then **reasoned
+about the consequence instead of running it**, and got the consequence wrong in the safe
+direction. A residual filed as "documentation defect first, behavioural a distant second" is a
+residual nobody schedules. Durability boundaries are not reviewable by reading: pair the durable
+field with the volatile one and ask what the first pass after a restart does with both.

@@ -33,11 +33,17 @@
 // and nothing else: every extra field is another way for a wedged run to look like
 // it moved.
 //
-// THE DEBOUNCE AND THE ONE-IN-FLIGHT LATCH ARE IN-MEMORY (SG-3), held in a
-// caller-owned ContinuationState — the same shape the §3.5 registry and the §3.6
-// override-grant map already use. §2.3's schema has no field for either and adding
-// one would be a schema change. The durable half (counters + the projected
-// signature) is derived from persisted state and survives a restart.
+// THE DEBOUNCE, THE ONE-IN-FLIGHT LATCH AND THE LAST OBSERVED SIGNATURE ARE
+// IN-MEMORY (SG-3), held in a caller-owned ContinuationState — the same shape the
+// §3.5 registry and the §3.6 override-grant map already use. §2.3's schema has no
+// field for any of them and adding one would be a schema change. Only the counters
+// are durable, and the signature as of the PREVIOUS re-prompt is not recoverable
+// from them: a restarted process can compute today's signature but has nothing to
+// compare it against. So a pass with no prior observation on a run that has already
+// been re-prompted leaves counters.futileRePrompts exactly as it found it. A
+// restart may therefore cost one extra prompt (as it may on the debounce clock);
+// it may never cost a live run, because §3.7's wedge detector must fire only on a
+// run that is not moving.
 
 import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -646,14 +652,30 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   }
 
   // (i) Counters, then the message. A signature that DIFFERS from the last one
-  //     this engine observed is progress and resets the futile counter; equal (or
-  //     no observation yet) increments it.
+  //     this engine observed is progress and resets the futile counter; an equal
+  //     one increments it.
+  //
+  //     The third case is a pass with NO prior observation. SG-3 keeps the last
+  //     signature in memory while the counters are persisted, so a process
+  //     restart lands here with counters mid-count and nothing to compare them
+  //     against. The information is genuinely gone: the signature of the state
+  //     as of the previous re-prompt is not recoverable from run.json. Since
+  //     §3.7's wedge detector may only fire on a run that is NOT moving, such a
+  //     pass carries the persisted futile counter forward UNTOUCHED rather than
+  //     counting a re-prompt it never observed — the same trade SG-3 already
+  //     takes on the debounce clock (a restart may cost one extra prompt; it may
+  //     never cost a live run). A run that has never been re-prompted at all
+  //     (idleRePrompts 0) has no lost observation, so its first re-prompt counts
+  //     normally, which is what keeps 1,2,3 true for a fresh wedge.
   const signature = signatureOf(store, run, runDir, queue);
+  const resumedMidCount = state.lastSignature === null && run.counters.idleRePrompts > 0;
   run.counters.idleRePrompts += 1;
-  run.counters.futileRePrompts =
-    state.lastSignature !== null && state.lastSignature !== signature
-      ? 0
-      : run.counters.futileRePrompts + 1;
+  if (!resumedMidCount) {
+    run.counters.futileRePrompts =
+      state.lastSignature !== null && state.lastSignature !== signature
+        ? 0
+        : run.counters.futileRePrompts + 1;
+  }
   store.saveRun(run);
   state.lastSignature = signature;
   state.lastRePromptMs = now();
