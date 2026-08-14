@@ -187,22 +187,49 @@ elif /usr/bin/python3 - <<'PY' 2>/dev/null
 import sys, os
 sys.path.insert(0, os.path.join(os.getcwd(), "scripts"))
 import conductor_wiring as w
-# The derivation must be a single source: the router config's maxInflightPerModel and
-# the llama-server --parallel value must come from the same number, for several values.
+
+# Three properties, all of which must hold, checked over several reader counts.
+#   (a) SINGLE SOURCE: the router config's admission.maxInflightPerModel and the
+#       llama-server --parallel argument are the SAME number. The plan's whole point
+#       is that they cannot drift.
+#   (b) PER-SLOT CONTEXT SURVIVES: --ctx-size is llama-server's TOTAL context divided
+#       among slots (measured, C-058), so the emitted --ctx-size must be a per-slot
+#       value MULTIPLIED by the slot count. Appending a bare --parallel N — the plan's
+#       literal wording — silently cuts every sub-session's window by a factor of N.
+#   (c) The default reader count is not above what the machine was measured to serve.
 ok = True
 for readers in (1, 4, 6, 9):
     slots = w.derive_slots(readers)
-    cfg = w.build_router_config(host="127.0.0.1", port=8088,
-                                upstream_host="127.0.0.1", upstream_port=8080,
-                                max_readers=readers)
+    cfg = w.generate_router_config(listen_host="127.0.0.1", listen_port=8088,
+                                   upstream_host="127.0.0.1", upstream_port=8080,
+                                   slots=slots)
     if cfg["admission"]["maxInflightPerModel"] != slots:
+        print("row10: maxInflightPerModel %r != slots %r at readers=%d"
+              % (cfg["admission"]["maxInflightPerModel"], slots, readers), file=sys.stderr)
         ok = False
+
+    argv = w.parallel_server_args(slots)
+    if slots > 1:
+        if "--parallel" not in argv or argv[argv.index("--parallel") + 1] != str(slots):
+            print("row10: argv does not carry --parallel %d: %r" % (slots, argv), file=sys.stderr)
+            ok = False
+        if "--ctx-size" in argv:
+            total = int(argv[argv.index("--ctx-size") + 1])
+            if total % slots != 0 or total // slots < 4096:
+                print("row10: --ctx-size %d over %d slots leaves %d per slot"
+                      % (total, slots, total // slots), file=sys.stderr)
+                ok = False
+        else:
+            print("row10: argv sets --parallel without --ctx-size; per-slot context "
+                  "is silently divided (C-058 F3): %r" % (argv,), file=sys.stderr)
+            ok = False
 sys.exit(0 if ok else 1)
 PY
 then
-  pass "row 10: --parallel and maxInflightPerModel derive from one number"
+  pass "row 10: --parallel, maxInflightPerModel and per-slot context all derive from one number"
 else
-  fail "row 10: the --parallel / maxInflightPerModel single-source derivation does not hold"
+  fail "row 10: the --parallel / maxInflightPerModel / --ctx-size derivation does not hold" \
+       "re-run without 2>/dev/null to see which property failed"
 fi
 
 # ---------------------------------------------------------------- §11 row 11
