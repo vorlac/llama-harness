@@ -2529,3 +2529,120 @@ overrides the user's `--ctx`** whenever `slots > 1`. So `serve.py --ctx 4096 --m
 serves 8192 per slot, not 4096. That is F3-correct and forced by the assertion's shape, but a user
 passing `--ctx` and getting a different per-slot window may reasonably be surprised. At
 `slots == 1` the user's `--ctx` is left alone.
+
+---
+
+## C-063 — the Phase 11 gate, run late and worth the wait: one real MAJOR, found six times
+
+Branch B ran parallel to the spine and its phase boundary was never adjudicated when 11.8 landed.
+The gate was run now rather than skipped. 19 agents: four blind lenses (correctness,
+protocol-conformance, concurrency, spec-conformance), a red-team-by-data candidate generator, and
+two refute-biased skeptics per major. **27 findings: 7 major, 20 minor/nit.** Skeptics refuted 10
+of 14 verdicts.
+
+### Six of the seven majors are ONE defect
+
+PC-1, PC-2, R11-C1, R11-C2, R11-001 and R11-01 all describe the same thing, found independently by
+three different lenses. Reading them as six problems would badly misstate what Phase 11 got wrong;
+reading them as one, found six times, is the honest summary and is strong evidence.
+
+**A mid-body upstream failure is relayed downstream as a SUCCESSFUL, silently truncated response.**
+
+Verified by the orchestrator before any fix was dispatched, mechanically rather than by argument:
+
+```
+$ grep -n "succeeded" router/router.hpp
+238:            bool succeeded{ false };      <- the relay field
+1077:            const bool succeeded = ...   <- a LOCAL of the same name
+1083:                if (succeeded && ...)    <- reads the LOCAL
+1089:                relay->succeeded = succeeded;   <- written, and read NOWHERE
+```
+
+`router.hpp:893-904` waits on `headersReady || finished` and decides success purely from the
+header flag; `relay->error` is read at :903 but consumed only inside the `if (!haveResponse)`
+branch. **Once headers have arrived, the upstream's real verdict is unreachable.**
+
+- **Buffered**: the router ships the partial bytes, and `sendBuffered` sizes the content provider
+  at `payload->size()`, so httplib emits a `Content-Length` matching the TRUNCATION — while the
+  upstream's own Content-Length was already dropped. The client cannot distinguish it from a
+  complete response and the ledger records the upstream's 200.
+- **Streaming**: `complete = relay->finished || relay->cancelled` is true even when the call
+  FAILED, so `sink.done()` writes a clean terminating chunk and an aborted SSE stream is framed as
+  a normal end.
+
+The panel verified reachability against the vendored cpp-httplib 0.52.0:
+`read_content_with_length` delivers partial bytes to the content receiver and only THEN returns an
+error. The orchestrator separately confirmed **no committed test covers it** — the only
+upstream-failure case, `[11.3-upstream-down-502]`, is a CONNECT failure where no headers ever
+arrive.
+
+This is the defect class this build keeps meeting: a value written for a purpose and never read,
+under a green suite. It is the mirror of C-054 (a guard documented into existence but never built).
+
+### Rulings issued with the fix, so the fix could not drift
+
+- **Buffered → 502.** Nothing has been written downstream at that point, so the choice is still
+  open. This extends `router.hpp:29-31`'s stated law — the router mints a status of its own "in
+  exactly one situation, an upstream it could not reach at all" — to a SECOND situation, and the
+  comment must be updated to say so. A comment still claiming "exactly one situation" after a
+  second is added is precisely C-033's shape, and M5 would not catch it.
+- **Streaming → abort, never `done()`.** The bytes are already gone; a chunked stream missing its
+  terminal chunk is a DETECTABLE error at the client, and that is the honest outcome.
+- **No new ledger column.** That would change Task 11.7's committed contract and both of its
+  readers (the C++ dashboard's `parseLedgerLine` and the TypeScript router-client).
+
+### The seventh major, and the minors that deserve to outlive this file
+
+R11-02 — a hard-coded 600 s upstream read timeout can 502 a completion llama-server would have
+finished. Unreachable at this machine's measured throughput (~67 tok/s against a 8192-token slot
+is well under two minutes), so it is recorded as a LIMIT rather than fixed.
+
+Two minors are stronger than their label and are recorded as obligations rather than notes:
+
+- **R11-004** — `metrics.hpp:137` pushes EVERY request's `queueWaitMs` into the percentile sample,
+  including the zeros from requests admitted immediately, so `waitMsP50`/`waitMsP95` collapse to 0
+  under any load where most requests do not queue. **The C++ dashboard already disagrees with the
+  endpoint about this**: 15.2's SG-A resolution counts only `queueWaitMs > 0` as "actually
+  waited". One rule, two places, two answers — the theme that has now drifted seven times. It
+  matters because Phase 14's benchmark reads these numbers and §7.2's Phase 14 lens is
+  measurement-validity. Deferred to the Phase 14 gate rather than changed here, because changing
+  it changes 11.7's published contract.
+- **R11-06** — the empty-model admission bucket is an independent in-flight counter, so concurrent
+  model-less POSTs can put 2× `maxInflightPerModel` requests on the upstream.
+
+The full finding set, with per-finding evidence and reproductions, is committed at
+`docs/build/artifacts/phase-11-lens-findings.md`. The red-team probe is separate:
+`docs/build/artifacts/phase-11-redteam-probe.md`, executed by the orchestrator against the
+committed `observe_request` — 20 hostile shapes, nothing threw, nothing was rejected, PASS.
+
+## C-064 — two test-writers named the same function differently, caught before either committed
+
+5.4a's writer specified `loadConfig(root)`; 12.2's writer specified `readWorkspaceConfig(root)`,
+for the same §2.1 config reader that the 5.4a/12.2 collision amendment had already assigned to a
+single owner. The amendment settled WHO builds it and never settled WHAT IT IS CALLED, so two
+agents working from the same amendment produced two names.
+
+Caught because 12.2's writer read 5.4a's assertions file and reported the disagreement rather than
+assuming its own spelling was canonical. Had it not, 12.2's red would have been a *second*
+missing-subject error indistinguishable from the first, and the defect would have surfaced only
+when 12.2's implementer built a second reader to satisfy it — which is exactly the duplicate the
+amendment existed to prevent.
+
+**Ruling: `loadConfig` wins** — 5.4a owns the reader, its test is in the tree with its red
+observed, and its implementer is building against that name. Exporting both is not available:
+`.claude/rules/patterns-and-conventions.md` forbids compatibility aliases outright.
+
+**LESSON: an ownership amendment must pin the SIGNATURE, not just the owner.** Naming the owning
+task stops the duplicate implementation; it does not stop two callers from importing two different
+names. The 12.1/12.2 `DEFAULT_MAX_READERS` obligation got this right by naming the literal; the
+5.4a/12.2 one named only the file.
+
+### The disposition half, resolved without changing either test
+
+5.4a demands `loadConfig` THROW on a malformed config and never silently fall back. 12.2's writer
+argued a throw at plugin construction is dangerous and recommended a loud return instead. Both are
+right about their own concern, and the designs already reconcile: 5.4a's plugin opens the
+workspace **lazily**, and its `5.4a-construction-failure-denies-loudly` row requires the failure to
+be loud on the stderr sink AND the gate to still DENY. A throw is therefore caught at the lazy
+open, is loud, and fails closed. The throw stands; 12.2's leg was written tolerant of either and
+passes unchanged.
