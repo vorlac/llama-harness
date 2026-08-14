@@ -46,7 +46,9 @@
 // the sanctioned runtime use of the package; the `Plugin`/`PluginInput` names are
 // type-only (erased).
 
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 
 import { tool } from "@opencode-ai/plugin";
@@ -54,6 +56,13 @@ import type { Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
 
 import { handleChatMessage } from "../adapter/chat-message.ts";
 import type { SessionRegistry } from "../adapter/chat-message.ts";
+import {
+  activeInlineClaimScope,
+  createContinuationState,
+  handlePluginEvent,
+  resolveSessionTree,
+} from "../adapter/continuation.ts";
+import type { ContinuationClient } from "../adapter/continuation.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../adapter/config-io.ts";
 import { createJournal } from "../adapter/journal.ts";
 import type { Journal } from "../adapter/journal.ts";
@@ -168,8 +177,15 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   // writes, which is the safe default.
   const registry = new Map<string, RegistryEntry>();
   const registryView: SessionRegistry = {
+    // A COPY, never the caller's object. adapter/chat-message.ts registers one
+    // module-level `{role:"orchestrator"}` constant for every session it ever
+    // sees, so storing it directly would alias every session's entry to one
+    // object — and the moment anything records a PER-SESSION fact on an entry
+    // (the resolved tree, an item assignment) that fact would leak to every
+    // other session in the process. Copying at the boundary makes each entry
+    // this map's own, which is what lets resolveSessionTree record onto it.
     register: (sessionID, entry) => {
-      registry.set(sessionID, entry);
+      registry.set(sessionID, { ...entry });
     },
     get: (sessionID) => registry.get(sessionID),
   };
@@ -269,6 +285,40 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       );
       return null;
     }
+  }
+
+  // §3.7/§3.5's in-memory half, minted ONCE per plugin process: the debounce
+  // clock, the one-in-flight latch, the last futility signature, the adjudicated
+  // permission ids and the NEEDS_CONTEXT surface queue. It is the sibling of the
+  // session registry above and lives exactly as long.
+  const continuation = createContinuationState();
+
+  // The out-of-repo §4.2/§2.6 state coordinates. XDG first, then the home volume;
+  // the workspace key is a stable digest of the resolved root, so two checkouts of
+  // the same project never share a worktree or a quarantine directory (and the
+  // digest is a conservative slug, which state.ts assertSafeId requires).
+  function stateCoordinates(root: string): { stateHome: string; workspaceKey: string } {
+    const xdg = process.env.XDG_STATE_HOME;
+    const stateHome = xdg !== undefined && xdg.length > 0 ? xdg : path.join(homedir(), ".local", "state");
+    return { stateHome, workspaceKey: createHash("sha256").update(root).digest("hex").slice(0, 16) };
+  }
+
+  // §3.5: reconstruct the orchestrator's registry entry from PERSISTED state
+  // rather than inventing one. adapter/chat-message.ts writes this entry when a
+  // prompt arrives; a plugin instance that inherited a live run (a restart, an
+  // event before the first prompt) has no entry yet, and the run itself records
+  // whose session it belongs to. The tree is resolved through the ONE derivation
+  // both gate seams read (SG-9).
+  function seedOrchestratorEntry(ws: Workspace): void {
+    let run: Awaited<ReturnType<StateStore["currentRun"]>> = null;
+    try {
+      run = ws.store.currentRun();
+    } catch {
+      return;
+    }
+    if (run === null) return;
+    if (!registry.has(run.sessionID)) registry.set(run.sessionID, { role: "orchestrator" });
+    resolveSessionTree(ws.store, registry.get(run.sessionID));
   }
 
   const specs: Record<string, ToolSpec> = {
@@ -495,6 +545,23 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       const ws = ensureWorkspace(hook.sessionID, "tool.execute.before");
       const config = ws?.config ?? DEFAULT_CONFIG;
 
+      // §3.6: the SAME claim derivation the ask-gate reads. Hardcoding null here
+      // denied a claimed orchestrator edit at this seam BEFORE the permission ask
+      // was ever raised, which made the ask-gate's allow path dead code and
+      // conductor_inline_claim inoperative end to end. The tree is resolved
+      // through the same one helper, so neither seam can judge a path against a
+      // different tree than the other.
+      let inlineClaimScope: string[] | null = null;
+      if (ws !== null) {
+        resolveSessionTree(ws.store, registry.get(hook.sessionID));
+        try {
+          const run = ws.store.currentRun();
+          if (run !== null) inlineClaimScope = activeInlineClaimScope(ws.store, run.runId);
+        } catch {
+          inlineClaimScope = null; // fail closed: no claim derived, no edit allowed
+        }
+      }
+
       const corr: Corr = { runId: liveRunId ?? input.project.id, sessionID: hook.sessionID };
       gateBeforeToolCall({
         sessionID: hook.sessionID,
@@ -511,9 +578,39 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         fileScope: [],
         testScope: [],
         verifyInFlightTree: null,
-        inlineClaimScope: null,
+        inlineClaimScope,
         journal,
         corr,
+      });
+    },
+
+    // Thin bus hook: the §3.7 idle engine and the §3.5(b)/§3.6 ask-gate both hang
+    // off the `permission.asked` / `session.idle` BUS events (adapter/wire-notes.md:32
+    // — the typed `permission.ask` PLUGIN hook is never dispatched at 1.18.15), so
+    // this body parses nothing and decides nothing: it hands the whole event to the
+    // ONE adapter router, exactly as tool.execute.before delegates to
+    // gateBeforeToolCall. The router never throws (G5).
+    event: async (hook) => {
+      const properties =
+        hook.event !== null && typeof hook.event === "object" && "properties" in hook.event
+          ? ((hook.event as { properties?: unknown }).properties as Record<string, unknown> | undefined)
+          : undefined;
+      const sessionID = typeof properties?.sessionID === "string" ? properties.sessionID : "";
+      const ws = ensureWorkspace(sessionID, "event");
+      if (ws === null) return; // the open failure was already reported, loudly
+      seedOrchestratorEntry(ws);
+      const coords = stateCoordinates(ws.root);
+      await handlePluginEvent({
+        event: { type: hook.event.type, properties },
+        store: ws.store,
+        state: continuation,
+        registry,
+        client: input.client as unknown as ContinuationClient,
+        config: ws.config,
+        journal,
+        stateHome: coords.stateHome,
+        workspaceKey: coords.workspaceKey,
+        now: Date.now,
       });
     },
   };

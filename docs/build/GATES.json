@@ -684,6 +684,19 @@
       "M8": "PASS \u2014 artifact docs/build/artifacts/11.8-live-smoke.md carries verbatim command lines, raw output and exit codes; the orchestrator RE-RAN the router leg on 2026-08-14 and diffed: identical listening line, byte-identical /conductor/health body, SIGTERM exit 0.",
       "M9": "PASS (ctest)",
       "note": "Backfilled 2026-08-14 at boot reconciliation, after the M8 re-run."
+    },
+    "10.1": {
+      "at": "2026-08-14T12:55:00-04:00",
+      "M1": "PASS. `bash scripts/test-conductor.sh` => TAP: tests=1234 pass=1234 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0 (node exit=0). GATE PASS.",
+      "M2": "PASS. 1234 >= 1201, the last recorded count (5.4a), and strictly greater: +33, exactly the 33 assertion rows. No decrease anywhere to explain.",
+      "M3": "PASS. The gate script's typecheck leg printed `typecheck: OK` in this run (npx tsc -p conductor/tsconfig.json --noEmit).",
+      "M4": "PASS, both halves. Detached worktree at HEAD d984342. (i) test file alone => exit!=0, ERR_MODULE_NOT_FOUND naming conductor/adapter/continuation.ts: missing-subject, path inside this task's scope, never `error`. (ii) The strong half \u2014 with the four working-tree files copied in, the file is 33/33, and three targeted reverts each bite distinct named rows: R1 halt branch disabled => 32/33, only [10.1-halt-interrupt]; R2 signature = JSON.stringify(run) (the literal \u00a73.7.2 wording) => 28/33 across the five futility/noop rows; R3 C-029(b) guard + C-056 successor neutralised in tools.ts => 31/33 on the two binding rows. Worktree removed.",
+      "M5": "PASS. `bash scripts/conductor-gate.sh` reported the SCANNED count, not merely a verdict: `M5 PASS (113 file(s) scanned, 6 line exemption(s) all live)`.",
+      "M6": "PASS. `git status --porcelain` named exactly conductor/adapter/tools.ts, conductor/plugin/index.ts, conductor/adapter/continuation.ts, conductor/tests/continuation.test.ts plus docs/build/*. tools.ts and plugin/index.ts were first added by earlier tasks but are this task's DECLARED files (the assertions spec's `kind` and `bindings` both name them). Nothing of the repository owner's is staged; extern/ submodule pointers untouched.",
+      "M7": "PASS. All 33 rows in docs/build/specs/task-10.1.assertions.json now carry coveredByTest, mapped 1:1 to the 33 named tests in conductor/tests/continuation.test.ts by their `[10.1-...]` prefix. Zero unmapped rows.",
+      "M8": "n/a for this task (no live model leg). The fake SDK is the driver; the worktree-cleanup row uses REAL git worktrees in its fixture.",
+      "M9": "PASS for the three in-script legs, which each printed OK in this run: `bun leg: OK (8 pass)`, `schema export: OK (router/tests/schemas/)`, `python leg: OK (Ran 29 tests)`. C++ leg: NA \u2014 this task touched no file under router/ and no schema; the schema-export leg confirmed router/tests/schemas/ is unchanged.",
+      "note": "Diff read in full by the gatekeeper, not summarised. Two residuals found that way and recorded as C-067 rather than fixed inside the gate: the C-032 E7 prevention half covers two of the four `implementer-blocked` question sites (the two the binding names; the repair half covers all four), and continuation.ts's header claims the futility signature's baseline survives a restart when it is in-memory only. No implementer mutationTable was filed as an artifact for this task; the gatekeeper's three reverts stand in for it."
     }
   },
   "phaseGates": {

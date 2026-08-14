@@ -2814,3 +2814,47 @@ Each half is under test, and each half only. Restored byte-identical with `cmp` 
 `router.hpp:27-31` said the router mints a status of its own "in exactly one situation". It is now
 two, and the comment says two and says why. A comment still claiming "exactly one" after a second
 was added is precisely the C-033 shape, and M5 does not catch prose.
+
+---
+
+## C-067 — two residuals in Task 10.1, found by reading the diff, recorded rather than fixed
+
+Both were found at the 10.1 task gate by reading the whole diff, not by any check. Neither
+fails a row: the 33 promoted assertions all pass and all bite (three reverts prove it). Both
+are recorded here because the alternative is that they are silently absent.
+
+### (a) The C-032 E7 *prevention* half covers two of four blocking sites
+
+`reuseOrAppendBlockingQuestion` was wired into `handleSubmitTest` and `handleVetTest` —
+the two call sites the binding names (the old `blockAndAsk` / `blockVetAndAsk`). But
+`adapter/tools.ts` has **four** `appendQuestion` calls carrying `origin:"implementer-blocked"`,
+and the other two (the GREEN-stage implementer exit and the review fix-round exit) have the
+identical question-first / `setBlocked`-second ordering. They can still mint a second open
+question for an item that already has one.
+
+Why this is not a gate failure, and what limits the damage:
+
+- The **repair** half — `continuation.ts reconcileOrphanQuestions` — filters on `origin` alone,
+  so it completes half-applied blocks from all four sites, not two.
+- The C-056 fix landing in the same commit (`handleAnswer` re-blocks a released item on the
+  *oldest* still-open question naming it) means a duplicate question degrades to "answer both"
+  rather than "the item is released while still blocked".
+
+So the residual is duplicate *asks*, not a stranded item. Wiring the remaining two sites is a
+two-line change and belongs to whoever next opens `tools.ts` for the Phase 10 review.
+
+### (b) A header comment claims more durability than the code has
+
+`conductor/adapter/continuation.ts`'s module header says the futility signature's durable half
+"survives a restart". The signature is *computed* from persisted state on every pass, so that
+half is true — but the **comparison baseline** (`ContinuationState.lastSignature`) is in-memory
+and is `null` again after a plugin restart. The first idle after a restart therefore increments
+`futileRePrompts` even if the run genuinely progressed.
+
+The error is one-sided and conservative (it can only shorten a run, never extend one), and it
+takes three consecutive restart-then-idle sequences with no ordinary idle in between to reach
+the limit — so this is a documentation defect first and a behavioural one a distant second. It
+is the C-033 shape all the same: a comment asserting something the code below it does not do,
+which M5 cannot see and a green suite does not care about. Left as-is for Phase 10's review to
+rule on: either persist the baseline (a §2.3 schema change, so STOP-AND-PARK) or correct the
+sentence.

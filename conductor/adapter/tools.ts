@@ -61,6 +61,7 @@ import type {
   PlanDecision,
   Queue,
   QueueItem,
+  QuestionRecord,
   Run,
   RunState,
   TestVet,
@@ -70,6 +71,7 @@ import type {
 import { readJsonFileSync, writeFileAtomicSync } from "./state.ts";
 import type { StateStore } from "./state.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
+import type { NewQuestion } from "./questions.ts";
 import { headSha, indexMtimeMs, isRepo, worktreeMtimes } from "./gitio.ts";
 import { createWorktree, mergeBack } from "./worktrees.ts";
 import { verifyFreshFor } from "../core/freshness.ts";
@@ -449,7 +451,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
 type HandlerJournal = GateJournal;
 
 // Every handler derives its run dir the same way: <root>/.conductor/runs/<runId>/.
-function handlerRunDir(store: StateStore, runId: string): string {
+export function handlerRunDir(store: StateStore, runId: string): string {
   return path.join(store.root, ".conductor", "runs", runId);
 }
 
@@ -549,6 +551,40 @@ function assertDecisionValid(record: DecisionRecord): void {
   if (!result.ok) {
     throw new Error("tools: refusing to write an invalid DecisionRecord: " + result.errors.join("; "));
   }
+}
+
+/**
+ * C-032 E7, prevention half. blockAndAsk and blockVetAndAsk append their §2.11
+ * question FIRST and call store.setBlocked SECOND, so a crash between the two —
+ * or a second call after the item was cleared while the question stayed open —
+ * used to mint a DUPLICATE question for the same item. There can only ever be one
+ * useful ask per stuck item: §2.5 gives the item one `blocked` disposition, so a
+ * second question would be unanswerable-by-construction (answering it clears
+ * nothing) while the first still gates the item.
+ *
+ * So before appending, look for an already-OPEN question of the same origin whose
+ * blocksItems names this item, and re-point the item's block at THAT record. A
+ * different item is unaffected and still mints its own.
+ */
+function reuseOrAppendBlockingQuestion(
+  runDir: string,
+  input: NewQuestion,
+  nowMs: number,
+  itemId: string,
+): QuestionRecord {
+  let existing: QuestionRecord[] = [];
+  try {
+    existing = readQuestions(runDir);
+  } catch {
+    existing = [];
+  }
+  for (const candidate of existing) {
+    if (candidate.answeredIso !== null) continue;
+    if (candidate.origin !== input.origin) continue;
+    if (!candidate.blocksItems.includes(itemId)) continue;
+    return candidate;
+  }
+  return appendQuestion(runDir, input, nowMs);
 }
 
 // Validate (schema-subset, §2.7) then append one JSON line to decisions.jsonl.
@@ -807,6 +843,8 @@ export function handleStatus(input: StatusInput): StatusResult {
 // conductor_decide (§2.7)
 // ---------------------------------------------------------------------------
 
+const DECIDE_TOOL = "conductor_decide";
+
 export interface DecideInput {
   store: StateStore;
   runId: string;
@@ -850,6 +888,42 @@ export function handleDecide(input: DecideInput): DecideResult {
   const gate = requireTwoOptions(record);
   if (!gate.ok) {
     throw new Error(gate.why);
+  }
+
+  // (1b) C-029(b): the SECOND legality check, beside the first and before the same
+  //      persist. A kind:"derived" decision claims the answer was derivable, and
+  //      §6.2 says a human-territory question is not: deriving one settles, on the
+  //      model's own authority, a matter the human owns. So it is refused and the
+  //      question is SURFACED instead — through the ONE §2.11 writer, on the
+  //      EXISTING closed-vocabulary origin, blocking no item (the run may still
+  //      have work it can do). kind:"human" is the legal way to record the same
+  //      question: that record IS the human's answer.
+  if (record.kind === "derived" && isHumanTerritory(record.question)) {
+    appendQuestion(
+      runDir,
+      {
+        runId,
+        question: record.question,
+        askedBy: { role: "orchestrator", sessionID: "" },
+        humanTerritory: true,
+        origin: "surface-tool",
+        blocksItems: [],
+      },
+      now(),
+    );
+    journal.log(
+      "info",
+      "state",
+      "question.surfaced",
+      { question: record.question, humanTerritory: true, refusedDecision: "derived" },
+      { runId },
+    );
+    throw new Error(
+      DECIDE_TOOL +
+        ': refusing a kind:"derived" decision for a §6.2 human territory question — "' +
+        record.question +
+        '". It has been surfaced as a §2.11 question instead; record the human\'s answer with kind:"human".',
+    );
   }
 
   // (2) persist the ledger line; (3) journal; (4) return.
@@ -983,17 +1057,71 @@ export function handleAnswer(input: AnswerInput): AnswerHandlerResult {
 
   const result = answerQuestion(runDir, input.questionId, input.answer, now());
 
+  // C-056's residual. handleSurface applies FIRST-BLOCK-WINS: a later question
+  // that names an already-blocked item is still appended, and still records that
+  // item in its own blocksItems, but the item's single §2.5 `blocked` disposition
+  // keeps pointing at the FIRST question. answerQuestion keys the release purely
+  // on blocked.questionId, so answering the first would RELEASE an item a second
+  // open question still gates — first-block-wins is only coherent if the block
+  // hands off. So a released item is re-blocked on the OLDEST still-open question
+  // that names it, and released only when none remains.
+  //
+  // The successor search runs AFTER answerQuestion has returned, so the ledger it
+  // reads already carries the answer and the answeredIso guard alone excludes the
+  // question just answered; the explicit id test beside it is defence in depth for
+  // any future caller that searches DURING the clear phase (answerQuestion marks
+  // the question answered LAST, the C-018/C-020 clear-first wedge order, so a scan
+  // inside that window would find it still open and re-block the item on the very
+  // question that just released it). A re-blocked item is NOT reported in
+  // clearedItemIds either — this journal says `blocked: null` for every id it
+  // returns there, and listing a still-blocked item would make the record say the
+  // opposite of the disk.
+  let ledger: QuestionRecord[] = [];
+  try {
+    ledger = readQuestions(runDir);
+  } catch {
+    ledger = [];
+  }
+  const clearedItemIds: string[] = [];
   for (const itemId of result.clearedItemIds) {
+    const successor = ledger.find(
+      (candidate) =>
+        candidate.id !== input.questionId &&
+        candidate.answeredIso === null &&
+        candidate.blocksItems.includes(itemId),
+    );
+    if (successor === undefined) {
+      clearedItemIds.push(itemId);
+      journal.log(
+        "info",
+        "state",
+        "item.updated",
+        { itemId, blocked: null, clearedQuestionId: input.questionId },
+        { runId, itemId },
+      );
+      continue;
+    }
+    let stage = "surface";
+    try {
+      stage = store.loadItem(runId, itemId).state;
+    } catch {
+      stage = "surface";
+    }
+    store.setBlocked(runId, itemId, {
+      reason: "blocked on surfaced question " + successor.id,
+      stage,
+      questionId: successor.id,
+    });
     journal.log(
       "info",
       "state",
       "item.updated",
-      { itemId, blocked: null, clearedQuestionId: input.questionId },
+      { itemId, blocked: true, questionId: successor.id, succeededQuestionId: input.questionId },
       { runId, itemId },
     );
   }
 
-  return { questionId: input.questionId, clearedItemIds: result.clearedItemIds };
+  return { questionId: input.questionId, clearedItemIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -3003,7 +3131,7 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
           lastRed.failureExcerpt) +
       "\nSay how this item's first failing test should be written, or whether the item itself " +
       "should be reshaped.";
-    const question = appendQuestion(
+    const question = reuseOrAppendBlockingQuestion(
       runDir,
       {
         runId,
@@ -3014,6 +3142,7 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
         blocksItems: [itemId],
       },
       now(),
+      itemId,
     );
     const reason =
       "test-writer could not produce a legal §2.6.1 red for the PENDING->RED stage: " +
@@ -3459,7 +3588,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       ".\nThe critics judge a test against the failure it actually produces, so this item cannot " +
       "be vetted until its test is a legal §2.6.1 red again. Say how the test should pin this " +
       "item's acceptance, or whether the item itself should be reshaped.";
-    const question = appendQuestion(
+    const question = reuseOrAppendBlockingQuestion(
       runDir,
       {
         runId,
@@ -3470,6 +3599,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
         blocksItems: [itemId],
       },
       now(),
+      itemId,
     );
     const blocked = store.setBlocked(runId, itemId, {
       reason: "the test vet could not proceed: " + detail,
@@ -4998,7 +5128,7 @@ function defaultStageExecutors(): Record<string, StageExecutor> {
 // question the driver asks — its own offer, and each member's next stage — is
 // answered from this ONE derivation, so the driver and the stage handlers can
 // never disagree about what may run (§3.2).
-function waveVerdict(store: StateStore, runId: string, runDir: string, queue: Queue): LegalToolsResult {
+export function waveVerdict(store: StateStore, runId: string, runDir: string, queue: Queue): LegalToolsResult {
   const run = store.loadRun(runId);
   const gateRun: GateRun = {
     state: run.state,
@@ -7560,7 +7690,7 @@ const OVERRIDE_TOOL = "conductor_override";
 // §2.8 anomalies.jsonl: validate, then append one line. Called AHEAD of the
 // rest of the triggering handler's writes (write-ahead), so a killed process
 // still leaves its trace.
-function appendAnomaly(runDir: string, record: AnomalyRecord): void {
+export function appendAnomaly(runDir: string, record: AnomalyRecord): void {
   const result = validate("AnomalyRecord", record);
   if (!result.ok) {
     throw new Error("tools: refusing to write an invalid AnomalyRecord: " + result.errors.join("; "));

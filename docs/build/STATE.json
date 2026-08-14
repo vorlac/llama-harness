@@ -1371,7 +1371,7 @@
       "taskId": "10.1",
       "manifest": true,
       "tier": "B",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 10.1 continuation + ask gate",
       "planLines": [
@@ -1379,14 +1379,41 @@
         2748
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
-      "startedAt": null,
-      "finishedAt": null
+      "tap": {
+        "tests": 1234,
+        "pass": 1234,
+        "fail": 0,
+        "skipped": 0,
+        "todo": 0,
+        "file": "33/33",
+        "suite": "tests=1234 pass=1234 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0; all five legs green (gatekeeper-observed)"
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh",
+        "exitCode": 1,
+        "failureClass": "missing-subject",
+        "verdict": "RED_OK",
+        "excerpt": "TAP: tests=1202 pass=1201 fail=1 cancelled=0 skipped=0 todo=0; scoped re-run surfaced the cause: Error [ERR_MODULE_NOT_FOUND]: Cannot find module 'conductor/adapter/continuation.ts' imported from 'conductor/tests/continuation.test.ts'.",
+        "reDerivedByGatekeeper": "M4 in a detached worktree at HEAD d984342 (the pre-implementation tree). Weak half: the test file alone => exit!=0, ERR_MODULE_NOT_FOUND naming conductor/adapter/continuation.ts \u2014 missing-subject, and the named path is inside this task's own scope. Strong half, RUN not reasoned: with all four working-tree files copied into the same worktree the file is 33/33, and three targeted reverts each bite distinct named rows. R1 \u2014 `if (false && store.isHalted() && !isTerminal(run))` in continuation.ts => 32/33, only [10.1-halt-interrupt] fails. R2 \u2014 signatureOf returns JSON.stringify(run), i.e. \u00a73.7.2's literal wording => 28/33, failing [10.1-futile-signature-excludes-counters], [10.1-signature-change-resets], [10.1-noop-after-three-futile], [10.1-noop-anomaly-write-ahead], [10.1-noop-stop-report-one-writer]. R3 \u2014 neutralise the C-029(b) guard and the C-056 successor search in tools.ts => 31/33, failing [10.1-binding-decide-human-territory] and [10.1-binding-answer-reblocks-on-next-open-question]. Worktree removed."
+      },
+      "filesTouched": [
+        "conductor/adapter/continuation.ts (new)",
+        "conductor/adapter/tools.ts",
+        "conductor/plugin/index.ts",
+        "conductor/tests/continuation.test.ts (new)"
+      ],
+      "revertAssertion": "[10.1-halt-interrupt] \u2014 RUN, not reasoned (M4 R1 above): with the full implementation present in a detached worktree, changing continuation.ts's halt branch to `if (false && store.isHalted() && !isTerminal(run))` takes the file from 33/33 to 32/33 with exactly that row failing. R2 and R3 pin the futility engine and the two tools.ts bindings the same way.",
+      "attempts": 1,
+      "deviations": [
+        "SG-1, recorded not papered over: the futility signature is a canonical projection EXCLUDING run.counters, contradicting \u00a73.7.2's literal 'hash of run.json'. The literal wording is self-defeating because counters live inside run.json, and M4's R2 proves it \u2014 the literal implementation fails five rows.",
+        "SG-3 / SG-5 / SG-8 / SG-9 / SG-10, all as promoted in the assertions spec: the debounce and one-in-flight latch are in-memory; the NEEDS_CONTEXT conversion is produced by the ask-gate and delivered by the continuation engine's next re-prompt rather than by the fan-out engine; an ACTIVE claim means inlineClaim != null AND state != PUBLISHED, with the mid-FSM half of \u00a73.6 expiry deliberately NOT implemented and re-parked to 15.1; the session tree resolves to entry.tree ?? workspace root and is recorded onto the registry entry so both gate seams read one value; ask-path extraction fails closed.",
+        "SG-6: the C-029(b) guard lives inside handleDecide (adapter/tools.ts) beside requireTwoOptions, not in continuation.ts \u2014 a tools.ts -> continuation.ts import would close a cycle.",
+        "conductor/tests/fixtures/fake-sdk.ts was named in intendedFiles but is UNCHANGED. The test file carries its own permission-reply recorder instead of extending the shared fixture: narrower than planned, and it leaves the committed fan-out fixture untouched.",
+        "SG-12's five parked crash/partial-write classes (C-030 E10, C-031 a-e) stay parked for 15.1 HONEST-LIMITS.md, exactly as the spec states.",
+        "Two residuals the gatekeeper found by reading the diff, recorded as C-067 rather than fixed inside a gate: (a) the C-032 E7 PREVENTION half is wired at two of the four appendQuestion sites carrying origin 'implementer-blocked' \u2014 the two the binding names \u2014 while the REPAIR half covers all four; (b) continuation.ts's header claims the projected signature 'survives a restart', but the comparison baseline lives in ContinuationState and does not."
+      ],
+      "startedAt": "2026-08-14T08:16:30-04:00",
+      "finishedAt": "2026-08-14T12:55:00-04:00"
     },
     "11.1": {
       "taskId": "11.1",
