@@ -18,6 +18,8 @@ if (CLANG_FORMAT_PROGRAM)
           "router/*.[hc]pp"
           "tools/*.[hc]"
           "tools/*.[hc]pp"
+          "dashboard/*.[hc]"
+          "dashboard/*.[hc]pp"
     )
 
     foreach(_src_file ${format_src_list})

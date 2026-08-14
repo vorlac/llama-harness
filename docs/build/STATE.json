@@ -1924,7 +1924,7 @@
       "taskId": "15.2",
       "manifest": true,
       "tier": "C",
-      "status": "NOT_STARTED",
+      "status": "COMMITTED",
       "commitSha": null,
       "commitMessage": "conductor: 15.2 dashboard",
       "planLines": [
@@ -1932,14 +1932,35 @@
         3053
       ],
       "canonicalTestCmd": "bash scripts/test-conductor.sh",
-      "tap": null,
-      "redEvidence": null,
-      "filesTouched": [],
-      "revertAssertion": null,
-      "attempts": 0,
-      "deviations": [],
+      "tap": {
+        "ctest": "1/1 PASS; doctest 90 cases / 27673 assertions (was 73 / 26392 before 15.2)"
+      },
+      "redEvidence": {
+        "cmd": "cmake --build .out/build/clang-relwdebinfo --target router-tests",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "router/tests/dashboard_test.cpp:201:10: fatal error: 'dashboard/ledger_view.hpp' file not found"
+      },
+      "filesTouched": [
+        "dashboard/ledger_view.hpp",
+        "dashboard/main.cpp",
+        "router/tests/dashboard_test.cpp",
+        "CMakeLists.txt",
+        "cmake/clang-format.cmake"
+      ],
+      "revertAssertion": "RUN, not reasoned, both directions, cp-snapshotted and cmp-verified. mv dashboard/ledger_view.hpp aside => router-tests FAILS TO COMPILE with \"router/tests/dashboard_test.cpp:201:10: fatal error: 'dashboard/ledger_view.hpp' file not found\"; restore => rebuild + 90 cases / 27673 assertions, ctest 1/1.",
+      "attempts": 1,
+      "deviations": [
+        "PATH DEVIATION: the assertions file says src/dashboard/ledger_view.hpp and src/dashboard/main.cpp. src/ no longer exists after the user-directed hoist; the files are at dashboard/ledger_view.hpp and dashboard/main.cpp beside router/ and tools/, and the include spelling the spec itself quotes (#include \"dashboard/ledger_view.hpp\") is correct as written because the repo root is the include root.",
+        "ORCHESTRATOR DEFECT, found by the implementer and proven with linker output: the CONDUCTOR_DASHBOARD CMake block the orchestrator wrote OMITTED nlohmann_json_schema_validator::validator. dashboard/main.cpp reuses router/config.hpp so the dashboard reads metrics.ledgerPath from the SAME config the router does, and that header validates through json-schema-validator, which is a COMPILED library. Without the line the target fails with undefined json_validator symbols. The implementer could not edit CMakeLists.txt, reported the exact one-line fix, and the orchestrator applied and VERIFIED it: with -DCONDUCTOR_DASHBOARD=ON the target now builds, links, and runs (--help/--version exit 0, usage errors exit 2, unreadable/invalid config exit 3, all measured standalone rather than through a pipe).",
+        "cmake/clang-format.cmake globbed only router/* and tools/*, so dashboard/ was outside AUTOFORMAT_SRC_ON_CONFIGURE. The glob now includes dashboard/*.[hc]pp; both new files were already hand-formatted and pass clang-format --dry-run --Werror.",
+        "router/tests/dashboard_test.cpp in the tree differs from staging (1977 -> 1984 lines). VERIFIED FORMAT-ONLY: the orchestrator's CMake edit triggered ninja's auto-reconfigure, which ran AUTOFORMAT over router/. The diff is #error re-indentation, comment-column alignment, and clang-format's SortUsingDeclarations reordering. CHECK/REQUIRE count identical at 413 and TEST_CASE count identical at 18. A whitespace-normalised comparison FLAGGED it as semantic because it cannot see reordering - the real textual diff settles it.",
+        "SPEC INACCURACY, recorded not fixed: row 15.2-parse-ledger-line lists queueWaitMs among the fields whose JSON null decodes to a disengaged optional. The committed writer CANNOT emit null there - RequestRecord::queueWaitMs is a non-optional std::int64_t (router/metrics.hpp:55) written unconditionally, so the wire value is always a number and 0 is a REAL sample meaning 'admitted promptly'. The reader is defensive on both sides and the test pins both: null decodes disengaged, 0 decodes ENGAGED. Treating 0 as absent would silently drop every promptly-admitted request out of the percentile input.",
+        "ONE disclosed surviving mutation, and it is genuinely redundant rather than untested-important: deleting the trailing-CR strip in LedgerTail::admit leaves all 90 cases green, because nlohmann::json::parse treats a trailing \\r as JSON whitespace (verified directly against the vendored nlohmann) AND the blank-line classifier already lists '\\r'. The strip is kept because the row asks for it in so many words and because it makes the CRLF property independent of a JSON parser's whitespace tolerance. Recorded as a known-untested line rather than pretended otherwise.",
+        "dashboard/main.cpp is built ONLY under -DCONDUCTOR_DASHBOARD=ON, which is OFF by default, so no default build compiles it and no doctest links it. Its contract is asserted textually by row 15.2-dashboard-builds-and-renders, and the orchestrator built and ran the real binary once to verify the block. Named here so the \u00a79 'every new source file is imported by a test' detector is not silently satisfied by a textual assertion."
+      ],
       "startedAt": null,
-      "finishedAt": null
+      "finishedAt": "2026-08-14T11:45:00Z"
     },
     "5.4": {
       "taskId": "5.4",

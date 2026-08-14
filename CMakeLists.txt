@@ -94,6 +94,7 @@ add_executable(router-tests
   "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/schema_observer_test.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/metrics_test.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/cli_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/dashboard_test.cpp"
 )
 target_compile_features(router-tests PRIVATE cxx_std_23)
 target_include_directories(router-tests
@@ -107,6 +108,38 @@ target_link_libraries(router-tests
   PRIVATE nlohmann_json_schema_validator::validator
 )
 add_test(NAME router-tests COMMAND router-tests)
+
+# conductor-dashboard (Task 15.2): the OPTIONAL ftxui TUI over the router's metrics
+# ledger. Plan line 2759 assigned this target to Task 11.1 Step 1 and 11.1 did not
+# deliver it; 15.2 lands it. OFF by default, so no ordinary build pays for ftxui and
+# neither committed target ever links it — the router proxies to llama-server and
+# needs no terminal UI, and router-tests exercises the dashboard's PURE aggregation
+# header (dashboard/ledger_view.hpp), which links nothing.
+# The dashboard's doctest cases live in the router-tests target above rather than a
+# separate one, so the pure half is always built and always run.
+option(CONDUCTOR_DASHBOARD "Build the optional ftxui metrics dashboard (conductor-dashboard)" OFF)
+if (CONDUCTOR_DASHBOARD)
+  find_package(ftxui CONFIG REQUIRED)
+  add_executable(conductor-dashboard
+    "${CMAKE_CURRENT_SOURCE_DIR}/dashboard/main.cpp"
+  )
+  target_compile_features(conductor-dashboard PRIVATE cxx_std_23)
+  target_include_directories(conductor-dashboard
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(conductor-dashboard
+    PRIVATE ftxui::screen
+    PRIVATE ftxui::dom
+    PRIVATE ftxui::component
+    PRIVATE spdlog::spdlog
+    PRIVATE nlohmann_json::nlohmann_json
+    # main.cpp reuses router/config.hpp to read metrics.ledgerPath from the SAME
+    # config the router does, and that header validates through json-schema-validator,
+    # which is a COMPILED library rather than header-only. Omitting it links clean
+    # until the first call and then fails with undefined json_validator symbols.
+    PRIVATE nlohmann_json_schema_validator::validator
+  )
+endif()
 
 # Standalone measurement tools. These carry no project dependencies so they can
 # also be built directly with a single compiler invocation - see tools/README.md.
