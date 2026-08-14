@@ -1,34 +1,33 @@
 {
-  "asOf": "2026-08-14 boot reconciliation. 45 of 54 ledger rows COMMITTED. Suite 1158/1158 GATE PASS, orchestrator-observed from a clean tree. Phases 0-9 and 11 are implementation-complete; phase gates 0-9 PASS; PHASE 11'S GATE IS OWED.",
+  "asOf": "2026-08-14. THREE tasks in flight at once, in three DIFFERENT gate legs so their reds cannot be confused: 12.1 (python unittest), 15.0 (node TS), 15.2 (ctest C++). Each red was observed by the orchestrator, not reported by an agent. 46 of 54 ledger rows committed.",
+  "redsInTree": {
+    "12.1": "scripts/test_conductor_wiring.py -> ModuleNotFoundError: No module named 'conductor_wiring'. exit 1. missing-subject. Run as: cd scripts && /usr/bin/python3 -m unittest test_conductor_wiring. NOT yet wired into scripts/test-conductor.sh - the python leg is added when 12.1 goes green, so the TS gate stays clean and interpretable while three reds coexist.",
+    "15.0": "conductor/tests/replay.test.ts -> ERR_MODULE_NOT_FOUND: Cannot find module 'conductor/tools/replay.ts'. tests=1 pass=0 fail=1. missing-subject.",
+    "15.2": "router/tests/dashboard_test.cpp -> fatal error: 'dashboard/ledger_view.hpp' file not found. missing-subject compile red. The test file IS wired into CMakeLists.txt router-tests (orchestrator edit)."
+  },
   "spineTask": {
     "taskId": "10.1",
-    "step": "Not yet started. 32 assertion rows are promoted at docs/build/specs/task-10.1.assertions.json. NEW conductor/adapter/continuation.ts plus ask-gate wiring in adapter/tools.ts. Carry the four deferred 10.1 bindings in as INPUTS rather than rediscovering them: classify's un-archived ANSWERED run (C-029a), decide's blindness to isHumanTerritory (C-029b), the stranded-question write ordering (C-032 E7), and first-block-wins releasing an item a second open question still names (C-056).",
+    "step": "STAGED, NOT YET MOVED IN. staging/task-10.1/continuation.test.ts (146KB) is written and its writer reported all 32 rows covered. It is held out of the tree deliberately: it is the TS spine and 15.0 already holds the TS leg's one red. Move it in the moment 15.0 is green and committed.",
     "intendedFiles": [
       "conductor/adapter/continuation.ts",
       "conductor/adapter/tools.ts",
+      "conductor/plugin/index.ts",
       "conductor/tests/continuation.test.ts"
     ]
   },
-  "branchB": {
-    "taskId": "none",
-    "step": "Branch B is COMPLETE through 11.8. The CLI runs and the live smoke artifact is committed and was re-verified at this boot (identical listening line, byte-identical /conductor/health, SIGTERM exit 0). What remains for Phase 11 is its PHASE GATE, which never ran."
+  "alsoStaged": {
+    "14.1": "staging/task-14.1/test_conductor_bench.py (85KB), all 33 rows covered, red verified by its writer as ModuleNotFoundError. Held out because 12.1 already holds the python leg's red. Move it in when 12.1 is green. 14.1 is on the critical path for 14.2, which is a 90-run detached benchmark measured in HOURS - get 14.1 committed early so 14.2 can start running in the background while 13.1 is built."
   },
   "openDecisions": {},
-  "readyToStart": {
-    "15.0": "Replay tool. Needs only 2.1, touches NEW conductor/tools/replay.ts + its test, and collides with nothing. The cheapest parallel work available.",
-    "12.1/12.2": "A named safe pair (12.1-core is python under scripts/, 12.2 is TS under conductor/). Both specs promoted.",
-    "13.1": "Everything it depends on is committed. Five scenarios; all five names must appear in the TAP output or acceptance fails."
-  },
   "processNotes": {
-    "phase11GateIsOwed": "Branch B ran parallel to the spine and its phase boundary was never adjudicated. Lenses per plan 7.2: correctness, protocol-conformance, concurrency, plus standing spec-conformance and the >=10-malformed-request red-team-by-data probe (the orchestrator executes the candidates against the exported pure functions and compares verdicts; an admitted input is a mechanically confirmed finding needing no skeptic round).",
-    "sameFileAgentsRunSequentially": "C-056: three fixes to adapter/tools.ts were dispatched in parallel. A clobbered fix does not fail the gate - it is simply absent, and the test that would have caught it is clobbered with it. Sequencing comes from the file touched, not from how small the change looks.",
-    "theRecurringDEFECTCLASS": "C-044 through C-047 were one shape: a check that PASSED while inspecting less than it appeared to. A name-level equation blind to types; a grep blind to a binary file; an assertion satisfiable by two mechanisms so it pinned neither; a green suite over a product whose tools all throw. A construction that enforces an invariant must ALSO assert that it ran.",
-    "mutationRevertTrap": "A mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. Snapshot with cp, restore from the snapshot, verify with cmp.",
-    "agentStrayFileTrap": "Test-writers told to typecheck by copying into conductor/tests/ and deleting have twice left or removed files at a path the orchestrator was also using. A CHANGED TEST COUNT is the tell. Run git status after ANY agent returns.",
-    "readTheInterface": "Read the exported SIGNATURE, never infer it from one call site.",
-    "reviewResultTrap": "An EMPTY finding set can mean the LENSES CRASHED. Check the run's failures and journal.jsonl before treating empty as a pass.",
-    "userParallelWork": "The user commits their own work on main concurrently. ALWAYS git add explicit paths, never -A, and never revert their files.",
-    "wireContractFlake": "conductor/tests/wire-contract.test.ts spawns a real `opencode serve`. Under heavy concurrent load its readiness probe times out and all 15 subtests CANCEL, failing the gate. Re-run on a quiet machine before treating a cancellation as a regression.",
-    "reasoningModelEmptyContent": "From the 11.8 live artifact: a reasoning model under a tight max_tokens spends the whole budget in reasoning_content and returns EMPTY content with status 200. This bites 12.1's per-role token budgets and any structured-output retry loop, which will spend the same budget the same way."
+    "serveIsOrchestratorOnly": "Task 12.1's deliverable includes scripts/serve.py and scripts/fetch_models.py, which the orchestrator prompt lists as files NO subagent may edit. Resolution: the implementer writes scripts/conductor_wiring.py (where all the logic lives by design - the plan itself says the pure functions are extracted so they are testable without serving) and RETURNS an exact unified diff for serve.py and fetch_models.py, which the orchestrator reads and applies. Recorded as C-059.",
+    "submodulePointersMoved": "extern/llama-cpp and extern/vcpkg show as modified in the working tree. They were CLEAN at this session's boot (05:48) and moved during it; no orchestrator command and no subagent touched them (three separate agents independently reported them and disclaimed them). A concurrent user session is the likely cause. DO NOT revert them and DO NOT stage them - every commit here uses explicit paths, so they stay out. Flagged to the user.",
+    "reasoningModelEmptyContent": "MEASURED at C-058 on the G13 model: with a declared json_schema, max_tokens 1024 produced 1024 completion tokens, 4024 chars of reasoning_content, and EMPTY content. The fix is chat_template_kwargs {enable_thinking:false} or reasoning_effort 'none' (96 tokens, schema-conformant). The prompt-level /no_think switch is IGNORED by this template. Binds 12.1's per-role token budgets and 12.2's setup probe.",
+    "ctxSizeIsTotalNotPerSlot": "MEASURED at C-058: --ctx-size is llama-server's TOTAL context, divided among slots. --parallel 6 with an unchanged --ctx-size 8192 cut per-slot context from 8192 to 1536. Task 12.1's derivation is TWO-valued: --parallel = slots AND --ctx-size = per_slot * slots.",
+    "readinessProbeTrap": "curl -s on /health EXITS 0 while the model is still loading (the body is a 503 JSON error). Poll the BODY for '\"status\":\"ok\"', or use curl -f. This session fell into it.",
+    "sameFileAgentsRunSequentially": "C-056: a clobbered fix does not fail the gate - it is simply absent, and the test that would have caught it is clobbered with it. Sequencing comes from the file touched, not from how small the change looks.",
+    "agentStrayFileTrap": "Run git status after ANY agent returns. A changed test count is the tell that a file arrived or vanished.",
+    "mutationRevertTrap": "A mutation harness that reverts with `git checkout <file>` DISCARDS UNCOMMITTED WORK. Snapshot with cp, restore from the snapshot, verify with cmp. The orchestrator did this to itself again at C-057 despite the note existing.",
+    "wireContractFlake": "conductor/tests/wire-contract.test.ts spawns a real `opencode serve`. Under heavy concurrent load its readiness probe times out and all 15 subtests CANCEL. Re-run on a quiet machine before treating a cancellation as a regression."
   }
 }

@@ -2288,3 +2288,127 @@ The artifact is 12.1's by ownership, and M6 would allow it in that commit. It is
 alone, because it is the product of a live measurement that took three model loads and cannot be
 re-derived from the repository — holding it uncommitted until 12.1's implementation lands would
 risk losing it to exactly the mid-task agent death this build has already seen twice.
+
+---
+
+## C-059 — Task 5.4's entire deliverable is unreachable in production (MAJOR)
+
+Found by the Task 10.1 test-writer, which could not make its own `10.1-plugin-event-hook-routes`
+row observable end to end and said so instead of working around it silently. Verified by the
+orchestrator at HEAD:
+
+```
+$ grep -rn "handleChatMessage" conductor --include="*.ts" | grep -v "adapter/chat-message.ts" | grep -v "tests/"
+(no output)
+```
+
+`conductor/adapter/chat-message.ts:105` exports `handleChatMessage` — Task 5.4's whole deliverable:
+run creation, `startHead`/`startBranch`/`startDirty` capture, and **orchestrator session
+registration**. The plugin factory at `conductor/plugin/index.ts:246` returns exactly
+`{ tool, "tool.execute.before" }`. Nothing else in the product calls it. `chat.message` is not a
+hook the plugin registers.
+
+So in a real opencode session: no run is ever created, and **no session is ever registered as the
+orchestrator**. `adapter/tools.ts:6777` is the only other place a `"orchestrator"` role string
+appears and it is a literal inside an unrelated record, not a registration.
+
+### Why 40 committed tasks did not notice
+
+`conductor/tests/chat-message.test.ts` drives `handleChatMessage` directly and passes. The gate
+asks whether the module behaves; it never asks whether anything calls it. This is the fifth
+instance of the class this build keeps rediscovering — **a check that passes while inspecting
+less than it appears to** — and the closest sibling is C-047, a green suite over a product whose
+tools all threw.
+
+The `verify-acceptance.sh` detector written earlier this session ("every §1.1 module is imported
+by at least one test") would not have caught it either: `chat-message.ts` IS imported by a test.
+The missing detector is "every adapter module is reachable from `plugin/index.ts`", and it is now
+worth having.
+
+### The comment that asserted it was done
+
+`conductor/plugin/index.ts:93-95`:
+
+> the registry is populated by the fan-out engine (when it creates a sub-session) **and the
+> chat.message hook (for the orchestrator) in later phases**
+
+The later phase arrived — Task 5.4, committed at `1176178` — and wired nothing. The comment now
+reads as a description of the code rather than a note about the future, which is exactly how
+C-033 hid: a comment claiming what the code below it did not do.
+
+### AMENDED, same session, before anything was built on it
+
+My first ruling here called this a new finding and opened a task-let for it. Then I read further
+into the plugin and found the gap is far larger than `chat.message`, and that **C-044 already
+recorded it**. Both corrections belong in the record.
+
+What the plugin actually is at HEAD: it never calls `openWorkspace()` (there is **no state
+store**), its journal is a `console.error` stub rather than `adapter/journal.ts`, its registry is
+a bare `Map` rather than a `SessionRegistry`, and every one of its 22 tools is bound to
+`handlerNotBound` — **which throws**. `chat.message` being unwired is one symptom of a plugin
+that is a shell.
+
+C-044 Finding 1 verified exactly this ("at HEAD the product is INERT: nine phases of handler work
+are reachable only from tests") and correctly found it is not unassigned: plan:2917 requires
+"REAL plugin hooks + REAL handlers" and plan:2958 says "Red -> **glue fixes** -> green". Glue
+fixes IS the composition root, and it belongs to Task 13.1.
+
+So the honest correction to my own entry: **this is not a new defect, it is a known one I
+rediscovered from a different direction.** What is genuinely new is the specific — `chat.message`
+is unwired and `handleChatMessage` has no production caller — and that specific has a consequence
+C-044 did not draw: **Task 10.1 cannot be implemented against a real production path.** Its
+`10.1-plugin-event-hook-routes` row needs a session registered as orchestrator, and nothing
+registers one. The 10.1 test-writer worked around it by pinning a reconstruction (the plugin
+re-seeds the registry entry from the persisted `Run.sessionID`) and flagged that it had done so.
+
+### Revised ruling — build the lifecycle half of the composition root now, as 5.4a
+
+C-044's own criticism of the arrangement was **timing**: "leaving every tool-to-handler
+correspondence unverified until the last coding task means each of Phases 9-12 can add another
+mismatch, and 13.1 discovers them all at once in the task least able to absorb surprises." That
+argument applies with more force now that 10.1 would otherwise be written against a fiction.
+
+**Task 5.4a takes the session/run lifecycle half only:** `openWorkspace`, the real JSONL journal,
+a real `SessionRegistry`, and the `chat.message` hook calling `handleChatMessage`. It does NOT
+take the tool-to-handler binding for the 22 tools — that stays 13.1's glue, and the tools keep
+throwing until then. That split is coherent and independently testable: after 5.4a a real session
+creates a run and registers its orchestrator; it still cannot advance state through a tool.
+
+Sequenced AFTER 15.0 (which currently holds the TypeScript leg's one red) and BEFORE 10.1, which
+edits the same `plugin/index.ts` hooks object — C-056's rule is that sequencing comes from the
+file touched.
+
+## C-060 — serve.py is orchestrator-only and is also Task 12.1's deliverable
+
+The orchestrator prompt §6.1 lists `scripts/serve.py` among the files **no subagent may ever
+edit**. Plan §8 Task 12.1's deliverable is, in large part, edits to `scripts/serve.py` and
+`scripts/fetch_models.py`. Taken together those two rules make 12.1 unimplementable by a subagent.
+
+**Resolution (DERIVE-AND-RECORD):** the split the plan itself already draws. Task 12.1's own text
+extracts the logic into `scripts/conductor_wiring.py` precisely "so they're testable without
+serving" — so the implementer writes that module, which is where every behaviour the 29 assertion
+rows check actually lives, and **returns an exact unified diff** for `serve.py` and
+`fetch_models.py`, which the orchestrator reads and applies by hand. The single-writer law over
+the harness's own tooling is preserved, the work still gets done, and the two signature changes
+land under the same eyes that own the file.
+
+## C-061 — I copied a test file out of staging while its writer was still writing
+
+Process error, mine. I set a watcher that fired on the *existence* of a staged file and copied
+`staging/task-15.2/dashboard_test.cpp` into `router/tests/` at 06:16:13. The writer's final
+version landed at 06:16:35, twenty-two seconds later. I then dispatched an implementer against
+the stale snapshot.
+
+The stale copy differed in a way that mattered: it contained an unqualified helper named `quoted`
+that resolved to `std::quoted` by ADL — a real compile defect the writer had already found and
+fixed by renaming it `jsonString`. The implementer would have hit an error the contract no longer
+contained.
+
+Caught only because the writer's final report explicitly said "the copy in `router/tests/` is a
+stale intermediate snapshot of my staging file" — it compared mtimes and told me. Re-copied,
+verified byte-identical with `cmp`, red re-observed, and the implementer was messaged mid-run
+with the diff that mattered.
+
+**RULE: a staged file is ready when its AGENT RETURNS, never when the file appears.** Watching
+the filesystem for a path is watching the wrong signal — writers edit in place, repeatedly, and
+an intermediate save is indistinguishable from a finished one by any file-level test.
