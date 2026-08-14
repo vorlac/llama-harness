@@ -2204,3 +2204,87 @@ after it cost half of C-035. Reading it did not stop me from repeating it.
 Redone with the discipline the note prescribes: `cp` snapshot first, restore from the snapshot,
 `cmp` to confirm. **The note was not enough; the habit has to be to snapshot BEFORE the first
 mutation, every time, including when the mutation is "just one line I will obviously undo".**
+
+---
+
+## C-058 — Task 11.1 Step 2 executed, and the number it produced contradicts the plan's own recipe
+
+The live upstream measurement deferred since Task 11.1 (`router/UPSTREAM_CONTRACT.md` carried
+`WIRE_CONTRACT_VERIFIED: <pending>` through eight Phase 11 tasks) has now been run against
+`qwen3.6-27b` on llama-server 10298. Full artifact in that file; three findings are recorded here
+because they change what other tasks must do.
+
+### F3 (MAJOR) — `--parallel N` silently divides the context window by N
+
+`--ctx-size` is llama-server's TOTAL context, partitioned across slots. Measured, one flag apart:
+
+| argv | n_slots | n_ctx_slot | kv_unified |
+|---|---|---|---|
+| `--ctx-size 8192` (no `--parallel`) | 4 | **8192** | true |
+| `--ctx-size 8192 --parallel 6` | 6 | **1536** | false |
+| `--ctx-size 49152 --parallel 6` | 6 | **8192** | false |
+
+Plan §8 Task 12.1 mandates "the llama-server command gains `--parallel <slots>` computed from
+`parallel.maxReaders`". Implemented as written — append `--parallel N` — that instruction cuts
+every sub-session's window from 8192 to 1536 tokens. llama-server reports it as a rounding
+notice, `/props` exposes only `total_slots`, and the symptom at the far end is bad model output
+rather than a configuration error.
+
+**Ruling (DERIVE-AND-RECORD):** the derivation is two-valued, not one.
+
+```
+slots      = max(1, parallel.maxReaders)
+--parallel = slots
+--ctx-size = per_slot_context * slots
+```
+
+This does not change a §2 schema, a closed vocabulary, a G-rule or a §11 row — it makes the
+existing mandate produce the configuration it was obviously intended to produce — so it is
+derive-and-record, not stop-and-park. Task 12.1's `parallel_server_args` owns both halves, and
+the 12.1 assertions already carry a `12.1-ctx-per-slot-preserved` row that pins the argv against
+the recorded measurement rather than against reasoning.
+
+### F1-CONFIRMED (MAJOR) — the G13 model returns EMPTY content, and 1024 tokens is not enough
+
+Task 11.8 observed this on `ornith-9b` and asked that `qwen3.6-27b` be checked before 12.1 set
+any token budgets. Checked: on "Finding 7 claims 2+2=4. Uphold or refute it", with a declared
+`json_schema`, **`max_tokens: 1024` produced 1024 completion tokens, 4024 characters of
+`reasoning_content`, and an EMPTY `content`** with `finish_reason: length` and status 200.
+
+A schema-validating caller sees an empty string, fails validation, and retries — and the retry
+spends the same budget the same way. That is an unbounded-cost loop under §3.3's whole fan-out.
+
+Measured fix: `"chat_template_kwargs": {"enable_thinking": false}` or `"reasoning_effort":
+"none"` (both require `--jinja`) turn that request into `finish_reason: stop`, **96** completion
+tokens, zero reasoning characters, and a body conforming exactly to the declared schema. The
+widely-cited prompt-level `/no_think` switch is **ignored** by this template and still returned
+empty content at 512 tokens — so anyone reaching for it will conclude the model is broken.
+
+Recorded as a binding on 12.1/12.2 rather than fixed here: the structured-output path must send
+one of the two switches, and per-role token budgets must be set with thinking either off or
+explicitly budgeted. Leaving thinking on is defensible; leaving it on *by accident*, with a
+budget sized for a non-reasoning model, is the failure this measurement exists to prevent.
+
+### A measured constraint on what fan-out buys
+
+Eight concurrent 24-token completions against 6 slots: six finished together at ~5.7 s and
+exactly two at ~8.0 s, which confirms the slot count and the queueing. But wall-clock rose
+almost linearly with N up to 6 (1.62 → 2.26 → 4.85 → 6.17 s). Decoding is bandwidth-bound here,
+so parallel fan-out buys pipelining and latency-hiding, **not speedup**. Phase 14's benchmark
+must be read with that in mind: an arm issuing more concurrent sub-sessions pays for them in
+wall-clock nearly proportionally.
+
+### A readiness-probe trap, recorded because this session fell into it
+
+`curl -s http://127.0.0.1:8080/health` **exits 0** while the model is still loading — the body is
+`{"error":{"message":"Loading model",…,"code":503}}` and a 503 is a successful HTTP transaction.
+`until curl -s …/health; do sleep 5; done` therefore returns immediately and declares a server
+ready that cannot serve. Poll the BODY (`grep -q '"status":"ok"'`) or use `curl -f`. Task 12.1's
+supervisor and Task 12.2's setup probe both depend on this.
+
+### Why this is committed separately rather than inside the 12.1 commit
+
+The artifact is 12.1's by ownership, and M6 would allow it in that commit. It is committed now,
+alone, because it is the product of a live measurement that took three model loads and cannot be
+re-derived from the repository — holding it uncommitted until 12.1's implementation lands would
+risk losing it to exactly the mid-task agent death this build has already seen twice.

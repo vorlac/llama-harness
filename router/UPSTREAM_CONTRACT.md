@@ -1,55 +1,260 @@
-# llama-server upstream contract (Task 11.1 Step 2)
+# llama-server upstream contract (Task 11.1 Step 2, executed at Task 12.1)
 
-`WIRE_CONTRACT_VERIFIED: <pending — see status>`
+`WIRE_CONTRACT_VERIFIED: 2026-08-14 12.1 — qwen3.6-27b on llama-server 10298, all six Step 2 items observed`
 
-## Status: DEFERRED to Task 12.1 (not fabricated, not yet measured)
+Every command below is reproduced verbatim with its raw output. Nothing here is reconstructed,
+and nothing is inferred from a value that was not printed. Run from the repo root
+`/Users/sal/development/vorlac/llama-harness` on macOS arm64 (64 GB), 2026-08-14.
 
-Task 11.1 Step 1 (build scaffold + schema export) is COMPLETE and green. Step 2 —
-the LIVE measurement of llama-server's `/v1` contract and the effective concurrent
-slot count — is **deferred to Task 12.1**, honestly and deliberately, for these
-reasons:
+Port 8080 was confirmed free before each server start and confirmed free after the last stop;
+no pre-existing server was disturbed and no server this run did not start was killed.
 
-1. **The plan specifies serve.py as Step 2's vehicle.** Step 2's own text runs the
-   probe against `scripts/serve.py --no-shell` (Task 12.1). serve.py is not built
-   yet. serve.py is where the correct llama-server invocation is encoded —
-   context size, `--parallel <N>`, host/port — and the load-bearing number Step 2
-   produces (the effective concurrent slot count) is exactly what serve.py's
-   `parallel.maxReaders` / `admission.maxInflightPerModel` must respect. Measuring
-   it with hand-guessed flags *before* serve.py exists risks a misleading number,
-   which the live-task discipline treats as nearly as harmful as fabrication.
-2. **The measurement is consumed at 12.1, not 11.1.** Nothing in the router
-   scaffold (11.1) or the router logic tasks (11.2-11.7, which test against a stub
-   upstream, not the live model) depends on this number. It is 12.1's config input.
+## Task 12.1 — Step 2 live measurement
 
-## Assets are confirmed present (so this is a clean deferral, not a hard block)
+```
+STEP2_ITEM_1: 11.8 docs/build/artifacts/11.8-live-smoke.md
+STEP2_ITEM_2: 11.8 docs/build/artifacts/11.8-live-smoke.md
+STEP2_ITEM_3: 11.8 docs/build/artifacts/11.8-live-smoke.md
+STEP2_ITEM_4: 11.8 docs/build/artifacts/11.8-live-smoke.md
+STEP2_ITEM_5: 12.1 router/UPSTREAM_CONTRACT.md
+STEP2_ITEM_6: 12.1 router/UPSTREAM_CONTRACT.md
+BASELINE_SLOT_COUNT_AUTO: 4
+EFFECTIVE_SLOT_COUNT: 6
+CTX_PER_SLOT_NO_PARALLEL: 8192
+CTX_PER_SLOT_WITH_PARALLEL: 1536
+CTX_PER_SLOT_PINNED_ARGV: 8192
+PER_SLOT_CONTEXT_ARGV: --parallel 6 --ctx-size 49152
+AUTOLOAD_LATENCY_MS: 2040
+```
 
-Observed 2026-08-13 (read-only checks, no server started):
-- llama-server binary: `.out/llamacpp/bin/llama-server` (present, prebuilt — NOT
-  from the pre-broken extern/llama-cpp submodule build).
-- model: `.data/models/qwen3.6-27b/` (present — the §8.4 / plan model for Step 2).
+Items 1–4 (the `/v1/models` shape, `response_format` + GBNF constraining, `usage`+`timings` on a
+non-stream response, and SSE framing) were observed at Task 11.8 and are recorded in
+`docs/build/artifacts/11.8-live-smoke.md` rather than copied here. **They were observed on a
+different model** — `ornith-9b` — because 11.8's smoke deliberately used the smallest real chat
+model. Items 5 and 6 below are on `qwen3.6-27b`, the G13 model every role actually runs.
 
-## The exact Step 2 procedure to run at 12.1 (record ONLY observed output)
+### Assets
 
-Once serve.py exists (12.1), run against the live server and record verbatim
-command lines + raw output here (M8 rule — fabrication is the single worst
-outcome; if it cannot run, record BLOCKED + the commands):
+```
+$ .data/tools/llama-server --version
+version: 10298 (15586e2d7)
 
-1. `scripts/serve.py --no-shell` (qwen3.6-27b) → then probe `GET /v1/models` (shape
-   in router mode).
-2. `response_format` / `json_schema` acceptance + GBNF constraining: send a schema'd
-   completion, confirm the output conforms.
-3. `usage` + `timings` fields present in a NON-stream response.
-4. SSE chunk framing for a streamed response.
-5. Non-resident-model request: router-mode autoload latency (load visible).
-6. **Effective concurrent slot count:** issue N concurrent trivial completions for
-   N ∈ {1,2,4,8}, with and without `--parallel`; record where latency starts
-   scaling linearly with N. That number feeds `parallel.maxReaders`,
-   `admission.maxInflightPerModel`, serve.py `--parallel` (12.1), and acceptance
-   row 10. If it is 1, every "6 reviewers in parallel" claim in §4 is false and
-   serve.py must set `--parallel` before any of it matters.
+$ ls -la .data/models/qwen3.6-27b/Qwen3.6-27B-Q6_K.gguf
+-rw-r--r--@ 1 sal  staff  22523238624 Aug  7 00:22 .data/models/qwen3.6-27b/Qwen3.6-27B-Q6_K.gguf
+```
 
-## Binding
+### Item 6 — effective concurrent slot count, and the flag that sets it
 
-Recorded as a deferred obligation in docs/build/HANDOFF.md and STATE.json (11.1):
-Task 12.1 MUST perform this live measurement and complete this file with a real
-`WIRE_CONTRACT_VERIFIED:` stamp before its own acceptance number is trusted.
+Three configurations were started, one at a time. The load-bearing line is llama-server's own
+`load_model: initializing, …`.
+
+**(a) No `--parallel` at all** — the default:
+
+```
+$ .data/tools/llama-server --model .data/models/qwen3.6-27b/Qwen3.6-27B-Q6_K.gguf \
+    --host 127.0.0.1 --port 8080 --ctx-size 8192 --jinja
+
+0.01.658.804 I srv    load_model: initializing, n_slots = 4, n_ctx_slot = 8192, kv_unified = 'true'
+0.01.661.327 I srv  llama_server: listening on http://127.0.0.1:8080
+
+$ curl -s http://127.0.0.1:8080/props | python3 -c "import json,sys; print(json.load(sys.stdin)['total_slots'])"
+4
+```
+
+**(b) `--parallel 6` with the SAME `--ctx-size 8192`:**
+
+```
+$ .data/tools/llama-server --model … --ctx-size 8192 --parallel 6 --jinja
+
+0.10.095.546 W llama_context: n_ctx is not divisible by n_seq_max - rounding down to 9216
+0.10.511.014 I srv    load_model: initializing, n_slots = 6, n_ctx_slot = 1536, kv_unified = 'false'
+```
+
+**(c) The pinned argv — `--parallel 6` with `--ctx-size 49152` (8192 × 6):**
+
+```
+$ .data/tools/llama-server --model … --ctx-size 49152 --parallel 6 --jinja
+
+0.01.733.326 I srv    load_model: initializing, n_slots = 6, n_ctx_slot = 8192, kv_unified = 'false'
+
+$ curl -s http://127.0.0.1:8080/props | python3 -c "import json,sys; print(json.load(sys.stdin)['total_slots'])"
+6
+```
+
+#### FINDING F3 (MAJOR, and it changes Task 12.1's implementation)
+
+**`--ctx-size` is the TOTAL context, divided among slots — not the per-slot context.** Passing
+`--parallel 6` alongside an unchanged `--ctx-size 8192` cut each slot's window from **8192 to
+1536 tokens**, a 5.3× reduction, and silently: llama-server logs it as a rounding notice, not a
+warning, and `/props` reports only `total_slots`.
+
+The plan's 12.1 mandates deriving `--parallel <slots>` from `parallel.maxReaders` so that
+admission control and the upstream cannot drift. Implemented naively — appending `--parallel N`
+to the existing command — that derivation **destroys the context window every sub-session gets**.
+A reviewer with a 1536-token window cannot hold a moderate diff, and the failure presents as
+poor model output, not as a configuration error.
+
+So the derivation has two halves, and Task 12.1 must implement both:
+
+```
+slots      = max(1, parallel.maxReaders)
+--parallel = slots
+--ctx-size = per_slot_context * slots        # NOT the bare per-slot value
+```
+
+Config (c) above is that formula at `per_slot_context = 8192`, and it produced exactly the
+intended `n_slots = 6, n_ctx_slot = 8192`.
+
+Also worth recording: `kv_unified` flips from `'true'` to `'false'` the moment `--parallel` is
+passed. The default configuration shares one KV cache across 4 slots; the parallel configuration
+partitions it.
+
+#### Concurrency behaviour at 6 slots
+
+Eight identical 24-token completions, issued from a thread pool, config (c):
+
+```
+$ python3 concur.py
+N=1  wall=1.62s  per-request=[1.62]
+N=2  wall=2.26s  per-request=[2.26, 2.26]
+N=4  wall=4.85s  per-request=[4.79, 4.85, 4.79, 4.79]
+N=6  wall=6.17s  per-request=[6.12, 6.12, 6.17, 6.12, 6.12, 6.12]
+N=8  wall=7.97s  per-request=[5.74, 5.74, 5.74, 5.74, 7.97, 5.74, 5.74, 7.97]
+```
+
+Two things this shows, and they pull in opposite directions:
+
+- **The slot count is real.** At N=8 against 6 slots, six requests finished together at ~5.7 s
+  and exactly two finished later at ~8.0 s — the seventh and eighth waited for a slot. That is
+  the queueing 6 slots predicts, and it is why `admission.maxInflightPerModel` must be ≤ this
+  number.
+- **Slots do not buy throughput on this machine.** Wall-clock rises very nearly linearly with N
+  up to 6 (1.62 → 2.26 → 4.85 → 6.17). Decoding is bandwidth-bound, so six concurrent requests
+  each run about six times slower rather than six finishing in the time of one. **Parallel
+  fan-out here buys pipelining and latency-hiding, not speedup.**
+
+That second point is a measured constraint on §4's read fan-out and on how Phase 14's benchmark
+must be read: an arm that issues more concurrent sub-sessions pays for them in wall-clock almost
+proportionally. It is not a reason to reduce `maxReaders` — the work still has to happen — but
+any claim that fan-out makes the pipeline *faster* on this hardware is not supported by this
+measurement.
+
+### Item 5 — autoload latency
+
+```
+AUTOLOAD_LATENCY_MS: 2040
+```
+
+Measured from process start to the first `/health` returning `{"status":"ok"}`, with the 21 GB
+GGUF already warm in the page cache (2040 ms). The **cold** figure from the first start of this
+session, same model, was **10 514 ms** — read directly off llama-server's own timestamped
+`listening on` line. Both are recorded because a supervisor's readiness budget has to cover the
+cold case.
+
+#### A readiness-probe trap worth recording
+
+The obvious probe is wrong:
+
+```
+$ curl -s http://127.0.0.1:8080/health          # while the model is still loading
+{"error":{"message":"Loading model","type":"unavailable_error","code":503}}
+```
+
+`curl -s` **exits 0** on that response, because a 503 is a successful HTTP transaction. A poll
+written as `until curl -s …/health; do sleep 5; done` therefore returns instantly and reports a
+server that cannot serve. This session made exactly that mistake and caught it only because the
+body was printed. Poll on the **body** — `grep -q '"status":"ok"'` — or use `curl -f`. Task
+12.1's supervisor and Task 12.2's setup probe both depend on getting this right.
+
+## FINDING F1-CONFIRMED (MAJOR) — the G13 model returns EMPTY content, and there is a fix
+
+Task 11.8 recorded, on `ornith-9b`, that a reasoning model under a tight `max_tokens` spends the
+whole budget in `reasoning_content` and returns an empty `content` with status 200. It flagged
+that `qwen3.6-27b` should be checked before Task 12.1 fixes any token budgets. It was checked,
+and it is worse than the 11.8 note assumed.
+
+```
+--- max_tokens=256, response_format json_schema ---
+finish_reason=length  completion_tokens=256  reasoning_chars=968
+content: ''
+
+--- max_tokens=1024, response_format json_schema ---
+finish_reason=length  completion_tokens=1024  reasoning_chars=4024
+content: ''
+```
+
+On a question as trivial as "Finding 7 claims 2+2=4. Uphold or refute it", **1024 completion
+tokens were not enough to reach the first character of the answer.** Every one of them went to
+thinking. A schema-validating caller sees an empty string, fails validation, and retries — and
+the retry spends the same budget the same way. That is an unbounded-cost failure mode sitting
+directly under §3.3's entire fan-out.
+
+**The fix, measured rather than guessed:**
+
+```
+--- chat_template_kwargs enable_thinking=false ---
+finish_reason=stop  completion_tokens=96  reasoning_chars=0
+content: '{\n  "findingId": "mathematical_identity_2_plus_2",\n  "upheld": true, …'
+VALID JSON, keys=['findingId', 'reasoning', 'upheld']
+
+--- reasoning_effort=none ---
+finish_reason=stop  completion_tokens=96  reasoning_chars=0
+VALID JSON, keys=['findingId', 'reasoning', 'upheld']
+```
+
+Either `"chat_template_kwargs": {"enable_thinking": false}` or `"reasoning_effort": "none"` turns
+a request that could not finish inside 1024 tokens into one that finishes in **96**, with output
+that conforms to the declared schema exactly. Both worked identically; both require `--jinja`.
+
+**And the folk remedy does not work:**
+
+```
+--- /no_think in the prompt ---
+finish_reason=length  completion_tokens=512  reasoning_chars=1843
+content: ''
+```
+
+Putting `/no_think` in the user message is ignored by this template — it produced the same empty
+content. Anyone reaching for the widely-cited prompt-level switch will conclude the model is
+broken.
+
+### What this obliges, recorded here rather than silently fixed
+
+Turning thinking off changes model behaviour for every schema-constrained role, and the §2.1
+per-role parameter block is Task 12.1/12.2 territory, not this file's. Recorded as a binding:
+**the fan-out's structured-output path must send one of the two switches above, and the per-role
+token budgets must be set with the thinking phase either disabled or explicitly budgeted for.**
+Choosing to leave thinking ON for some role is defensible; leaving it on *by accident*, with a
+budget sized for a non-reasoning model, is the failure this measurement exists to prevent.
+
+## `/v1/models` on the G13 model
+
+```
+$ curl -s http://127.0.0.1:8080/v1/models
+```
+
+The response carries BOTH an ollama-style `models[]` array and an OpenAI-style `data[]` array.
+The OpenAI `data[0].id` is the **full gguf path**, not a friendly name:
+
+```json
+"data": [{ "id": ".data/models/qwen3.6-27b/Qwen3.6-27B-Q6_K.gguf",
+           "object": "model", "owned_by": "llamacpp",
+           "meta": { "n_ctx": 1536, "n_ctx_train": 262144, "n_params": 26895998464,
+                     "size": 22512244736, "ftype": "Q6_K" } }]
+```
+
+Two consequences for Task 12.2's setup proof table, which fails setup when `models.default` is
+absent from `/v1/models`: the id to match is the **path**, not `qwen3.6-27b`, when the server is
+started with `--model`; and `data[0].meta.n_ctx` reports the **per-slot** context (1536 in the
+run above), which is a second, independent way to read the F3 finding off the wire.
+
+## What this run does NOT discharge
+
+- The measurement used `--model` directly, not `scripts/serve.py --no-shell`, because serve.py's
+  router wiring is Task 12.1's deliverable and did not exist when this was run. The numbers are
+  properties of llama-server and its flags, so they transfer; the **serve.py-generated**
+  invocation must still be checked against `PER_SLOT_CONTEXT_ARGV` above once it exists.
+- `admission.maxInflightPerModel ≤ slot count` (SG-E) is now checkable — the slot count is 6 —
+  but no run here drove the router and the upstream together under load.
+- Items 1–4 remain observed on `ornith-9b` only. Re-observing them on `qwen3.6-27b` would be
+  strictly better; it is not required by any acceptance row and was not done.
