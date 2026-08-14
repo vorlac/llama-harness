@@ -13,20 +13,32 @@ if [ "$#" -gt 0 ]; then
   FILES=("$@")
 else
   while IFS= read -r f; do FILES+=("$f"); done \
-    < <(git ls-files 'conductor/*.ts' 'conductor/**/*.ts' 'router/*' 'router/**' 'tools/*' 'tools/**' 2>/dev/null)
+    < <(git ls-files 'conductor/*.ts' 'conductor/**/*.ts' 'router/*' 'router/**' 'tools/*' 'tools/**' 'scripts/*.py' 2>/dev/null)
   # A glob that stops matching is the failure mode this scan cannot otherwise see: it
   # reports PASS over an empty set and reads exactly like a clean tree. The C++ half
   # went unscanned for two commits that way (the tree moved src/router -> router and
   # this list did not follow), so each half now carries a floor. The floors are
   # deliberately loose — they catch a path that has MOVED, not a file that was deleted.
+  #
+  # The python half was missing entirely until C-078: Phase 12's whole product is
+  # scripts/serve.py and scripts/conductor_wiring.py, and Phase 14's is
+  # scripts/conductor_bench.py, so every "M5 PASS (N files scanned)" through those two
+  # phases described a set that contained none of the code the phase had just written.
+  # Passing the files explicitly was the standing workaround, which is to say the scan
+  # was correct only when someone remembered it was not.
   TS_N=$(git ls-files 'conductor/*.ts' 'conductor/**/*.ts' 2>/dev/null | wc -l | tr -d ' ')
   CPP_N=$(git ls-files 'router/*' 'router/**' 'tools/*' 'tools/**' 2>/dev/null | wc -l | tr -d ' ')
+  PY_N=$(git ls-files 'scripts/*.py' 2>/dev/null | wc -l | tr -d ' ')
   if [ "$TS_N" -lt 40 ]; then
     echo "M5 FAIL: the TypeScript glob matched $TS_N tracked files (floor 40) — the tree moved and this scan did not follow"
     exit 1
   fi
   if [ "$CPP_N" -lt 10 ]; then
     echo "M5 FAIL: the C++ glob matched $CPP_N tracked files (floor 10) — the tree moved and this scan did not follow"
+    exit 1
+  fi
+  if [ "$PY_N" -lt 5 ]; then
+    echo "M5 FAIL: the python glob matched $PY_N tracked files (floor 5) — the tree moved and this scan did not follow"
     exit 1
   fi
 fi

@@ -14,6 +14,15 @@
 # Once conductor/tsconfig.json exists (Task 0.3), it also typechecks (M3).
 set -u
 
+# Per-invocation scratch files. These were fixed /tmp paths, which made two gates run
+# at the same time overwrite each other's leg output and read each other's counts —
+# so the standing rule was "run gates SERIALLY", i.e. the wrapper was correct only
+# while nobody did the obvious thing. Cleaned up on every exit path.
+LEG_TMP="$(mktemp -d "${TMPDIR:-/tmp}/conductor-legs.XXXXXX")"
+trap 'rm -rf "$LEG_TMP"' EXIT
+BUN_OUT="$LEG_TMP/bun-smoke.out"
+PY_OUT="$LEG_TMP/python-leg.out"
+
 GLOB="${1:-conductor/tests/**/*.test.ts}"
 # Convert a directory arg into a glob so node never sees a directory positional.
 if [ -d "$GLOB" ]; then
@@ -71,12 +80,12 @@ fi
 BUN_SMOKE=conductor/tests/bun-smoke.test.ts
 if [ -f "$BUN_SMOKE" ]; then
   if command -v bun >/dev/null 2>&1; then
-    if ! bun test "$BUN_SMOKE" >/tmp/bun-smoke.out 2>&1; then
+    if ! bun test "$BUN_SMOKE" >"$BUN_OUT" 2>&1; then
       echo "GATE FAIL: bun leg (bun test $BUN_SMOKE) — G14 dual-runtime divergence"
-      tail -30 /tmp/bun-smoke.out
+      tail -30 "$BUN_OUT"
       exit 1
     fi
-    echo "bun leg: OK ($(grep -Eo '[0-9]+ pass' /tmp/bun-smoke.out | head -1))"
+    echo "bun leg: OK ($(grep -Eo '[0-9]+ pass' "$BUN_OUT" | head -1))"
   else
     echo "GATE WARN: bun absent — bun-smoke leg SKIPPED (loud notice; bun was installed at preflight, so this is a regression to investigate)"
   fi
@@ -100,25 +109,25 @@ fi
 # export so router/tests/schemas/RouterConfig.schema.json is fresh when the
 # RouterConfig parity test reads it. The leg starts no server, opens no socket and
 # writes nothing under .data/ or .out/.
-if ! /usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py' >/tmp/python-leg.out 2>&1; then
+if ! /usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py' >"$PY_OUT" 2>&1; then
   echo "GATE FAIL: python leg (/usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py')"
-  tail -60 /tmp/python-leg.out
+  tail -60 "$PY_OUT"
   exit 1
 fi
 # unittest discover exits 0 on "Ran 0 tests" — the same vacuous-green hole the node
 # leg exists to close (a zero-match glob also exits 0). A leg that silently stops
 # discovering is indistinguishable from a passing one, so assert the count itself.
-PY_RAN=$(grep -Eo '^Ran ([0-9]+) tests?' /tmp/python-leg.out | grep -Eo '[0-9]+' | head -1)
+PY_RAN=$(grep -Eo '^Ran ([0-9]+) tests?' "$PY_OUT" | grep -Eo '[0-9]+' | head -1)
 PY_RAN=${PY_RAN:-0}
 if [ "$PY_RAN" -lt 1 ]; then
   echo "GATE FAIL: python leg discovered ZERO tests (scripts/test_*.py moved or renamed?)"
-  tail -20 /tmp/python-leg.out
+  tail -20 "$PY_OUT"
   exit 1
 fi
 # unittest reports skips in the trailer, e.g. "OK (skipped=3)". Skips are forbidden (G4).
-if grep -qE '\(.*(skipped|expected failures)=' /tmp/python-leg.out; then
+if grep -qE '\(.*(skipped|expected failures)=' "$PY_OUT"; then
   echo "GATE FAIL: python leg reported skipped/expected-failure tests (skips forbidden, G4)"
-  grep -E '\(.*(skipped|expected failures)=' /tmp/python-leg.out
+  grep -E '\(.*(skipped|expected failures)=' "$PY_OUT"
   exit 1
 fi
 echo "python leg: OK (Ran $PY_RAN tests)"

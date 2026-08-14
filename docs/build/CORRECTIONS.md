@@ -3536,3 +3536,36 @@ searches an output for `f(x)`, `f` itself is outside the test's reach and needs 
 `conductor-report.md` — the live artifact acceptance row 8 reads and the one HANDOFF calls the worst
 thing to fabricate. An unpinned honesty formatter in the driver is a fabrication route that needs no
 one to fabricate anything.
+
+## C-078 — the eighth appearance: M5's default set never reached the python half
+
+`scripts/conductor-gate.sh` is M5, the mechanical stub scan every task gate runs. Its default file set
+was `git ls-files 'conductor/**/*.ts' 'router/**' 'tools/**'` — and Phase 12's entire product is
+`scripts/serve.py` and `scripts/conductor_wiring.py`, Phase 14's is `scripts/conductor_bench.py`.
+Every `M5 PASS (117 file(s) scanned)` printed through those two phases described a set containing
+**none of the code the phase had just written**. The standing workaround was to pass the new files
+explicitly, which is to say the scan was correct only while somebody remembered that it was not —
+and HANDOFF had been carrying that reminder as an open orchestrator debt for three phases.
+
+**Fixed.** `scripts/*.py` joins the default set with its own floor of 5, matching the TS floor of 40
+and the C++ floor of 10 that exist for exactly this reason (a glob that stops matching reports PASS
+over an empty set and reads like a clean tree). The default scan now reports **128 files, was 117**.
+Verified no-op on content: the five scans were run over all 11 tracked python files before the change
+and came back `M5 PASS`, so the new coverage adds no exemptions and no false positives.
+
+**Not fixed, and named rather than left silent.** `PAT_CATCH` is TypeScript-shaped
+(`catch (...) {}`), so python's `except X: pass` is invisible to it. There are six such sites in
+existing tracked python, all deliberate best-effort cleanup, so adding the pattern would mean adding
+six exemptions on day one — noise for very little. The python leg's own G4 enforcement (skips and
+expected-failures rejected in the unittest trailer) is unaffected and still active.
+
+**Second defect, same commit.** `scripts/test-conductor.sh` wrote both its leg transcripts to FIXED
+paths, `/tmp/bun-smoke.out` and `/tmp/python-leg.out`. Two gates running at once overwrote each
+other's output and then parsed each other's counts — a gate that reads another gate's numbers is a
+wrong answer that looks exactly like a right one. The documented mitigation was the rule "**run gates
+SERIALLY**", which is the same shape of workaround: a correct tool only while nobody does the obvious
+thing. Both now go to a per-invocation `mktemp -d` under `$TMPDIR`, removed by an `EXIT` trap.
+Verified by running two gates concurrently: both `GATE PASS`, both reporting `Ran 68 tests`, no
+scratch directory left behind.
+
+Both files are orchestrator-owned; no subagent may edit either.
