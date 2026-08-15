@@ -4436,3 +4436,47 @@ OK, python `Ran 77 tests` OK, GATE PASS. `ps` confirmed the router process is de
 
 **ALL SIX of phase 12's confirmed MAJORs are now closed** (C-087, C-088, C-089). The phase-12 gate can be
 re-run; its stage-2 verdict of FAIL stands until it is.
+
+---
+
+## C-090 — C-062's three survivors, pinned: guards whose only value is that they can fail
+
+Three gaps recorded as C-062 survivors, all UNTESTED behaviour rather than broken behaviour. That makes the
+mutation proof the deliverable and the green almost irrelevant — a test that passes over working code
+proves nothing unless it also fails when the code stops working. All three were verified still live by the
+orchestrator immediately before the round.
+
+**(1) `wait_for_router_health` was reached by no test.** Its only callers were production
+(`conductor_wiring.py:575`, `:850`); a `return True` stub survived the whole suite. The specific danger it
+exists to avoid is the `curl -s 503` trap: a router answering with an ERROR STATUS is not healthy, but a
+probe that only asks "did the request complete" says it is. Now pinned in both directions against a real
+listener — 200 healthy, 503 not.
+
+The proof needed a second step and the agent took it rather than declaring victory: under the stub the test
+dies at its FIRST assertion (the stub never asks the listener anything), which does not by itself show the
+503 direction is load-bearing. So it drove the mutated function against a real 503 listener and measured
+`wait_for_router_health(503 listener) -> True`, confirming the status-line half would fail too.
+
+**(2) `ROUTER_TERM_GRACE_S` had a floor and no ceiling.** Asserted only `>= 5.0`, so `3600.0` passed — an
+operator ending a session would wait an hour for the router to go away.
+
+**The ceiling chosen is 30.0, and the reasoning is what makes it non-arbitrary:** it is exactly
+`ROUTER_READY_TIMEOUT_S`, and the test asserts `ceiling <= cw.ROUTER_READY_TIMEOUT_S` so the two move
+together. **A router given LONGER to die than it was given to be born is inverted** — that is the
+invariant, and 30.0 is where it currently sits. External precedent agrees (launchd allows 20s between
+SIGTERM and SIGKILL). The test also checks the number BAKED INTO `ROUTER_SUPERVISOR_SOURCE`, so the ceiling
+holds on the literal the detached supervisor actually waits on, not only on a module constant that
+supervisor never imports — the same single-source lesson C-087 fixed one layer down.
+
+**(3) `derive_slots`' bool guard was unpinned.** The function rejects `bool` before `int` because
+`isinstance(True, int)` is True in python — without it, `derive_slots(True)` silently returns 1 slot and
+`derive_slots(False)` floors to 1, turning a config TYPE ERROR into a plausible-looking slot count that
+propagates into `--parallel 1`. No test passed a bool. Now both are pinned, and the mutant was measured
+producing `derive_slots(True) -> 1` and `parallel_server_args(True) -> ['--parallel', '1']`.
+
+**Mutation re-run by the orchestrator:** deleting `isinstance(max_readers, bool) or` from the guard fails
+the new class; file restored byte-identical. All three mutations were run by the agent with `cp` snapshots
+and `cmp` restores, and production is byte-identical — only `scripts/test_conductor_wiring.py` changed.
+
+**Gate.** Full gate observed by the orchestrator: **1363/1363** node, typecheck OK, bun 8, schema export
+OK, **python `Ran 80 tests`** OK (77 -> 80), GATE PASS.
