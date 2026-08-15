@@ -4542,3 +4542,69 @@ OK, python `Ran 80 tests` OK, GATE PASS.
 the item's fileScope file is still untracked, so `git stash push -- <fileScope>` matches nothing and the
 probe SKIPS. That is the documented "where cheap" behaviour rather than a defect, and reaching it would
 have meant bending this scenario around it.
+
+---
+
+## C-092 — M7 for phase 13, scenario 1: the restructure was not bookkeeping
+
+The orchestrator scoped this round as traceability — "the behaviours are largely tested, what is missing is
+attributability" — and **that assessment was wrong.** Splitting `[13.1-full-pipeline]` into one named test
+per assertion row exposed FOUR rows whose mechanism is not exercised anywhere in the scenario, and TWELVE
+more asserted far more weakly than their spec text claims. Naming a row forces someone to point at the
+assertion that proves it, and three times here there was nothing to point at.
+
+**The restructure itself is pure.** `[13.1-full-pipeline]` became a `describe` + `before` + 19 `it`s. No
+assertion was weakened, strengthened, added or deleted — every one is the same assertion with the same
+message, relocated under a row id. The pipeline still runs exactly once (`runFullPipeline()` is the original
+body with the `assert.*` calls removed and the values they read captured instead), so runtime is unchanged
+and the G5 facts file and acceptance row 5 are unaffected. The scenario token stays in the describe title
+so `verify-acceptance.sh`'s TAP grep still hits.
+
+**A shared-setup trap was found and closed by measurement, not by reasoning.** A `before()` that THROWS
+makes node report its subtests `cancelled` — and cancelled is not failed. The setup now stashes its failure
+and each `it` rethrows it with the setup's own stack. Verified with a throwaway probe: throwing gives
+`cancelled`, this shape gives `# fail 2 / # skipped 0 / # cancelled 0`. Every row fails loudly, which is
+what C-015 demands and what the gate can actually see.
+
+### The four rows nothing proves
+
+1. **`13.1-s1-mark-green-handler-runs-the-test`** — the row demands the HANDLER re-run the item test before
+   TEST_VETTED->GREEN, "proven by a first implementer reply that claims DONE while the test still fails".
+   The scripted implementer always writes a correct module on its first reply, so **the lying-DONE
+   discriminator — the only thing separating "the handler measured it" from "the model claimed it" — is
+   never fed to the machine.** All that exists is `greens.length >= 2`, which a handler that simply trusted
+   the model would also satisfy. *Nothing in this scenario would change colour if mark_green stopped
+   re-running the test.*
+2. **`13.1-s1-validate-quarantined-stamped`** — nothing at all. Scenario 1 never reads a `verify` evidence
+   record: not its `startedMs`, not its head, not its tree, not its `excluded` list, and it never seeds a
+   stale-red entry. Quarantine round-tripping is asserted nowhere here.
+3. **`13.1-s1-report-real-closing-verify`** — nothing at all. `readEvidence` is captured BEFORE the report
+   call and never re-read after it. **A `handleReport` that reused an earlier verify record would pass
+   everything scenario 1 asserts.**
+4. **`13.1-s1-freeze-denies-test-file-edit`** — NOT bound, but the reachability question is now SETTLED and
+   the answer is good news. The row's own text says it "fails against the HEAD literal
+   `verifyInFlightTree: null` (SG-1)". That literal is gone from the gate path: `plugin/index.ts:1387` now
+   passes `verifyFreezeTree`, derived by `freezeTreeFor` walking `liveVerifyTrees` and translating each
+   slug through `verifyInFlightTreeFor` (CR-2, C-082). The only surviving `verifyInFlightTree: null` is
+   `adapter/continuation.ts:1234`, a different call site that is not the tool.execute.before gate. **The
+   row no longer needs excusing — it needs writing.**
+
+### Twelve rows named but partial
+
+Each carries an inline `// NOT proven here:` comment naming the exact clauses its test does not assert, so
+the gap is legible at the point of failure rather than only in a report. Examples:
+`13.1-s1-classify-work-stays-intake` asserts `classified.kind === "work"` but not that the run is read back
+at INTAKE with its classification recorded and NOT advanced.
+
+**Three assertions in the monolith belong to no row in the 20.** Rather than fold them into a neighbouring
+row's test — which would make that title claim work it does not do — they kept their own `it`s with no row
+id: the §2.6 stale-green publish refusal, the IF1 adjudication, and the G5 metrics-seam crossing. Nothing
+was dropped.
+
+**Gate.** Full gate observed by the orchestrator: **1382/1382** node (1364 -> 1382: one top-level test
+removed, 19 nested added), typecheck OK, bun 8, schema export OK, python `Ran 80 tests` OK, GATE PASS.
+Phase 13's M7 count moves from 6/42 named to **22/42**.
+
+**The lesson for the remaining M7 work:** this is not a formatting exercise. Every scenario still to be
+split should be expected to surface rows that nothing proves, and the four above are now open work rather
+than closed bookkeeping.
