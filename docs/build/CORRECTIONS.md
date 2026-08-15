@@ -4292,3 +4292,81 @@ OK, **python leg `Ran 76 tests` OK**, GATE PASS. Two source files changed: `scri
 
 **Phase 12 stays FAIL** until MAJORs 1 (G5 equivalence), 5 (setup's slot fan-out remedy) and 6
 (setupRequiredScopes coverage) are closed.
+
+---
+
+## C-088 — phase 12's setup half: two ways a successful setup left the repo unusable
+
+Phase 12's last two confirmed MAJORs, both in `conductor_setup`, both reproduced by running against the
+real `handleSetup`. Their common shape: **setup reports success and the repo cannot work afterwards.**
+
+**MAJOR 5 — a router outage mid-fan-out was misreported as a slot shortage.** `setupProofRequest`'s guard
+`if (result !== null || input.failoverState.useUpstream) return result;` made every concurrent request that
+RESUMED AFTER the first failover return null instead of retrying the upstream. Measured: six slot probes
+issued together, all six fail at the router, the first to resume latches `useUpstream` and succeeds
+upstream, **the other five return null without ever touching the healthy upstream**. Setup then reported
+`ok:false` with "of 6 concurrent readers the served origin held only 1 open ... restart llama-server with
+--parallel 6" — wrong in every particular, since llama-server was healthy with six slots — and the operator
+was left unconfigured. The exact shape of the §12.1 supervisor's restart window.
+
+**The fix is a narrowing, not the deletion the finding suggested, and the difference matters.** The guard
+conflated two questions. "Has the router already been recorded as failed?" decides whether to note a SECOND
+failover — it must not, since the router failed once, not once per reader, and a second note flips
+`probingDisabled`. "Where does this request go now?" is already answered by `resolveBaseUrl`, which after
+the latch names the upstream. Deleting the whole condition answers the first wrong (six failovers, six
+re-probes of the dead origin — the herd the latch exists to prevent); keeping it as a `return` answers the
+second wrong (five readers dropped). So only the failover BOOKKEEPING is now gated on `!useUpstream`, and
+`second === first` still stops a request that started on the upstream from probing it twice.
+
+**A test written specifically to catch the naive fix did its job.** `p12b-failover-latch-still-prevents-a-
+herd` counts what the DEAD origin received: HEAD measured 6 refusals for 6 readers, and the row requires at
+most one probe per reader plus `useUpstream` still SET at the end. The adjudicator's suggested deletion
+would have made the headline row green and this one red.
+
+**MAJOR 6a — zero ecosystems wrote empty coverage.** On a repo holding only `README.md` and a `Makefile`,
+setup returned `ok:true, written:true, failures:[]` with `verify.requiredScopes []`, which validates
+cleanly because core declares no `minItems`. `repoConfigured` then flipped true, gates-phase opened every
+gate, and every item afterwards threw at `tools.ts:2716` — while setup was now illegal to re-run without
+`reconfigure:true`. A wedged repo produced by a success.
+
+Fixed by refusing BEFORE the §2.1 proofs (so an uncharacterisable repo is refused without opening a
+socket), with a message naming the five markers detection keys on and stating that nothing was written so
+setup is legal to run again. **The "write coverage the operator completes" arm the spec left open was
+rejected on evidence:** that arm's own committed test requires every scope a `requiredScopes` entry names
+to exist in `verify.scopes`, so setup would have had to invent a verify COMMAND for a repo it had just said
+it could not characterise. Refusal is the only arm that does not contradict itself.
+
+**MAJOR 6b — multi-ecosystem coverage had a hole the single-ecosystem branch does not.** Each entry's
+pattern was that ecosystem's extension glob, so `globMatch` was false for `README.md`, `docs/guide.md`,
+`CMakeLists.txt`, `package.json` and `scripts/build.sh` against BOTH emitted patterns. The single branch
+writes `**` and has no hole. Downstream, a docs-only item — first-class per e2e scenario 4 — threw at
+`tools.ts:2716` and `conductor_report` threw at 7542.
+
+**THE LOAD-BEARING CONSTRAINT, AND AN HONEST LIMIT IT FORCES.** The spec offered a trailing `**` catch-all
+entry as a free choice. It is not available: the already-green, frozen row `[12.2-detect-multi-ecosystem]`
+asserts `required.length === 2`, `entry.pattern === scope.sourceGlob`, and an EXACT coverage map (src/a.js
+-> exactly ["node"], src/main.cpp -> exactly ["cmake"]). A third entry breaks the count; a `**` pattern on
+either breaks the map. And **`globMatch` has no negation, so a finite set of positive extension globs can
+never cover the set of ALL possible paths** — only a `**`-equivalent can, which the frozen map forbids.
+
+So universal coverage was mathematically unavailable under the existing contract; coverage of the repo's
+ACTUAL paths was. The fix walks the repo, collects every path no ecosystem's `sourceGlob` matches,
+generalises each to its KIND (`**/*.<ext>`, or `**/<name>` when there is no extension) and folds that list
+into every scope's own glob as a brace alternation. **RESIDUAL LIMIT, recorded rather than papered over: a
+file whose extension did not exist in the repo at setup time is not covered.** Re-running setup with
+`reconfigure:true` re-derives it. Whether the frozen row should be relaxed to permit a true catch-all is a
+question for the phase-12 gate re-run, not for this fix.
+
+**A second recorded cost:** unowned paths owe EVERY detected scope rather than one arbitrarily chosen one —
+the honest generalisation of the single branch, where `**` already makes every path owe the only scope.
+Consequence: in a multi-ecosystem repo a docs-only item's CLOSING verify runs both suites, though its
+targeted item test still routes to one, because the per-ecosystem entries are declared in detection order
+and `itemVerifyScope` picks the first candidate carrying an `itemTest`.
+
+**Mutation re-run by the orchestrator:** restoring the conflated guard re-fails exactly the three failover
+rows; file restored byte-identical. `ps` confirmed no stray stub origins before or after.
+
+**Gate.** Full gate observed by the orchestrator: **1356/1356** node, typecheck OK, bun 8, schema export
+OK, python `Ran 77 tests` OK, GATE PASS. One source file changed: `conductor/adapter/tools.ts`.
+
+**Phase 12 now has ONE confirmed MAJOR left: MAJOR 1, the G5 router-equivalence run.**
