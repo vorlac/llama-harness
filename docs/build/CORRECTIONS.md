@@ -3979,3 +3979,113 @@ python `Ran 68 tests`, GATE PASS. M5 PASS (130 files). e2e.test.ts is 10 tests, 
 **MAJORs 4 and 5 remain open** — scenario 3 asserts the wave SCHEDULE rather than the driver's interleaving
 (a strictly serial driver passes it), and scenario 5 omits the entire stop half the plan names, with one of
 its two rows asserted INVERTED.
+
+---
+
+## C-084 — phase 13 fix round, part 2: MAJOR 5 closed, and a run shape that wedges forever with no detector
+
+### First, two corrections to C-083 — both are the orchestrator's errors
+
+**(a) C-083 claimed MAJORs 4 and 5 remained open. MAJOR 4 was already closed, in commit `c27b3b3`.**
+The workflow covering MAJORs 4 and 5 was interrupted; the orchestrator inspected the tree, saw
+`e2e.test.ts` at 10 tests — the same count the previous round left — concluded the interrupted round had
+landed nothing, and committed under a message naming MAJORs 1-3. It had in fact landed MAJOR 4's
+`watchInterleaving` fix into the EXISTING scenario-3 test, which adds assertions without adding a test.
+Verified after the fact: `git show c27b3b3:conductor/tests/e2e.test.ts | grep -cE 'inFlightCount|
+watchInterleaving'` returns 2, and 0 at the commit before it.
+
+**The cause is the defect class this file has recorded nine times, committed by the orchestrator about its
+own work: a check that PASSES while inspecting less than it appears to.** A test COUNT is a proxy for a
+file's contents. The diff is the contents. The rule that already existed — *read the diff yourself* — was
+not applied because a cheaper signal looked sufficient.
+
+**(b) One of the four mutations the orchestrator specified was a NO-OP, and the agent said so rather than
+reporting a pass.** M-4 was written as "make the run-state signature constant, so no re-prompt is ever
+judged futile". Those two clauses are opposites. A CONSTANT signature is exactly what a wedged run already
+produces: `movedSinceLastRePrompt` stays false, `futileRePrompts` still counts 1,2,3, and the `noop` stop
+still fires — measured, 10/10 still green. The mutation's STATED EFFECT needs the opposite edit: append
+`String(Math.random())` so no two signatures ever compare equal, every pass looks like progress, and the
+futile counter is reset each time. That version fails, reporting `futileRePrompts` 0 where 2 was expected.
+An acceptance criterion that cannot fail is worth exactly as much as the vacuous tests this build keeps
+finding, and it was written by the orchestrator.
+
+### MAJOR 5 — closed
+
+`grep -cE 'idleRePrompts|futileRePrompts|disengage|handlePluginEvent'` went 0 -> 15. The scenario now
+drives `session.idle` through the REAL plugin bus hook — nothing imports `handleSessionIdle` or
+`handlePluginEvent` directly, because a scenario that called the engine would prove the engine works and
+prove nothing about whether anything ever reaches it. It asserts the counters climbing 1,2,3 with the run
+non-terminal throughout, then the FOURTH pass recording stop `{kind:"noop"}` with a §2.8 `disengage`
+anomaly and the counters frozen, then a FIFTH pass — waited past the real §3.7.4 debounce so its silence is
+a decision rather than a dropped call — producing no new prompt and no new journal record.
+
+The stop-report is asserted on content: the `noop` headline, `Closing verify: none`, the blocked item with
+its exact question id, the dependent's `PENDING`/unfinished disposition, and the newly-registered stale-red
+path — while the sibling's never-written test file appears nowhere. **No closing verify is proved by
+comparing `evidence.jsonl` BYTE FOR BYTE across the whole wedge path**, not by counting verify records,
+which would be `0 === 0` and vacuous.
+
+**Mutations re-run by the orchestrator:** the serial driver (`SERIAL_STAGES.includes(entry.tool)` ->
+`true`) fails scenario 3 on the interleaving assertion; `FUTILE_RE_PROMPT_LIMIT` -> `MAX_SAFE_INTEGER`
+fails scenario 5. Both restored byte-identical. Gutting the plugin's `event:` hook fails scenario 5 at
+`idle pass 1 really re-prompted the orchestrator, 0 !== 1`.
+
+### MAJOR (new, product) — the §3.7 wedge detector is blind to the exact shape SG-4 prescribes
+
+**A blocked item with a dependent behind it wedges SILENTLY AND FOREVER.** Measured, not reasoned: built
+with `B1 dependsOn: ["A1"]` exactly as the spec prescribes, the plugin's `session.idle` hook produced ZERO
+re-prompts, so `futileRePrompts` never left 0 and the `noop` stop was unreachable.
+
+Three committed rules, each individually right, compose into the hole:
+1. `core/gates-phase.ts` `cannotEverPublish` deliberately does NOT count a BLOCKED dependency as
+   permanently stuck ("a question can be answered and the item resumes"), so B1 is neither settled nor
+   stuck, `allSettled` is false, and `conductor_report` correctly refuses.
+2. The same function's `depsReady` excludes B1 from `nextWave` because A1 is not PUBLISHED, and excludes A1
+   because it is blocked. So `wave.parallel` is empty and `recommended` is null.
+3. `adapter/continuation.ts:743-750` — the SG-2 branch — sees `recommended === null`, journals
+   `continuation`/`idle`, and returns WITHOUT prompting. Its stated reasoning is sound in isolation:
+   "prompting a tool nobody offered would invent state; counting it as a futile RE-prompt would be a lie,
+   because nothing was re-prompted."
+
+**Result: no re-prompt, no `futileRePrompts`, no `noop`, no `disengage`, no stop-report, no archive. The
+run sits in EXECUTING indefinitely.** This is precisely the wedge §3.7 exists to end, and it is the one
+shape §3.7 cannot see. The only exits are a human answering the §2.11 question or dropping a halt file.
+Verified independently by the orchestrator at `continuation.ts:744-750` and `gates-phase.ts:173`.
+
+Note the spec's own scenario-5 row was written FOR this shape, so the acceptance row and the product
+disagree about what is reachable — which is why the scenario as landed uses two items with the dependent
+INDEPENDENT plus `parallel.maxImplementers: 1`, so the wave carries the blocking item alone and the
+sibling is genuinely unstarted. That deviation is recorded, not concealed: it satisfies "report refuses
+while an unsettled item remains" but NOT the specific blocked-dependency reasoning the row cites. **The row
+cannot be satisfied as written until the product defect is fixed.**
+
+### MAJOR (new, product) — the `event:` hook forwards `input.client` unvalidated
+
+`plugin/index.ts` passes `input.client as unknown as ContinuationClient` with no shape check. With a client
+that cannot be prompted — `{}`, which is what this suite's own `pluginInput` passed until this round, and a
+plausible degraded or restricted real client — `session.prompt(...)` throws synchronously inside
+`handleSessionIdle`. The engine then deliberately charges nothing: `sent = false`, both counters untouched,
+`lastRePromptMs` not advanced. That decision is individually correct and well argued in the source ("an
+accusation against a session that was never asked once") — **but it has no floor.** There is no counter for
+consecutive transport failures, no §2.8 anomaly, and no stop kind for "the orchestrator has been unreachable
+for N passes". A permanently dead transport makes the run un-endable and the wedge detector permanently
+inert, with the only trace an `error`-level journal line per idle event.
+
+### Recorded, not hidden
+
+- `handleReport`'s STOP-REPORT mode calls `registerStaleRed`, so the §2.11 registration that unpoisons the
+  repo now happens on the wedge path too. Measured: the blocked item's test file registered, the sibling's
+  NOT (below GREEN but never written, so the existence filter drops it). Scenario 5 previously reached the
+  registry through the `done` path only; the stop path's registration had no coverage.
+- `plugin/index.ts` `stateCoordinates` reads `XDG_STATE_HOME`/`homedir()` at event time with no injection
+  seam, so a stop-report driven through the bus hook resolves `stateHome` against the developer's real home.
+  Nothing landed there — the stop-report branch uses no verify and no quarantine — but the coupling is real,
+  so the scenario pins `XDG_STATE_HOME` to its scratch dir in a try/finally rather than trusting that branch
+  to stay verify-free.
+
+**Gate.** Full gate observed by the orchestrator: **1337/1337**, typecheck OK, bun 8, schema export OK,
+python `Ran 68 tests`, GATE PASS. M5 PASS (130 files). All four mutated source files restored byte-identical.
+
+**All five phase-13 e2e MAJORs are now closed.** What remains for phase 13 is the M7 traceability half — 42
+assertion rows still named by far fewer test titles — plus the two product defects above, the
+`acceptanceClusters` defect from C-083, and the still-unwalked DEBUG loop.
