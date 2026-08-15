@@ -4218,3 +4218,77 @@ python `Ran 68 tests`, GATE PASS. Two source files changed: `core/planning.ts`, 
 
 **Consequence:** the phase-13 e2e's one-line two-check workaround (flagged in a comment there) is now
 revertible.
+
+---
+
+## C-087 — phase 12, the python half: main() was executed by nothing, and three defects lived in its ordering
+
+Three of phase 12's six confirmed MAJORs, all downstream of one structural fact the gate's adjudicator
+named: **no test in either leg executed `scripts/serve.py`'s `main()`.** The seams below it were well
+tested and the call sites above them pinned only by source-text greps, so every defect that lives in
+main()'s ORDERING was invisible. The adjudicator predicted one such test would close three findings at
+once; it did.
+
+**MAJOR 3 — `--print-env` reported a session it had just displaced.** The socket-binding, sometimes-
+interactive port resolution ran BEFORE the `--print-env` early return, and `info()` is a bare `print()` to
+stdout. Reproduced through main() by the new harness: with the session on port 61806, `--print-env`
+reported **61808** — a port it took for itself, that nothing listens on — preceded by four prose lines on
+the stdout its own help reserves for `eval`, with `LLAMA_HARNESS_ROUTER=0`. So
+`eval "$(scripts/serve.py --print-env)"` died with `port: command not found` and then exported a dead URL;
+on a tty the same path reached `prompt("Port to use instead")` and blocked invisibly inside the caller's
+command substitution.
+
+Fixed by splitting main() at the `--print-env` return rather than patching symptoms: above the split only
+what both modes SHARE (host, wanted ports read from the saved session, the socket-free router preflight);
+below it everything that TAKES something (resolve_port, which binds and prompts; resolve_router_port;
+save_session). The normal path's ordering and output are byte-identical. `reported_port()` returns the
+configured port and separately asks `port_is_listening()` — a connect(), not a bind() — because the row
+opens a real connection to the reported port, so a bare early return reporting configured-but-unverified
+numbers would not have passed.
+
+**MAJOR 4 — the orphan window.** Between `wait_until_ready` succeeding and `start_watchdog` there was no
+try/finally, and Task 12.1 had inserted three raise sites into it. Measured twice: the llama-server child
+still alive a second after main() returned, holding a 20+GB model and its port; the next run then shifts
+port and leaks a second one. The asymmetry was the tell — the supervisor reaps llama-router, while the
+process 12.1 did not supervise was left behind.
+
+Fixed with one guard on the WINDOW, not on the raise sites, because the window IS the ownership gap: no
+bash trap yet, no watchdog yet. `start_watchdog` is the LAST statement inside the try and `os.execv` is
+outside it — that placement is the handover point, and it is what makes the success path leave the child
+running. `except BaseException` is deliberate: leg (a) raises SystemExit, which is not an Exception, and a
+Ctrl-C in that window should reap the model too.
+
+**MAJOR 2 — the supervisor's restart policy was a second copy that had already drifted.**
+`ROUTER_SUPERVISOR_SOURCE` carried its own inline `delay_ms` and `if code == 0 or code in FATAL:`, while
+`router_restart_decision`, `backoff_next` and `restart_delay_ms` had ZERO callers outside their definitions
+and the test file. The drift was measurable, not hypothetical: the new test edits `restart_delay_ms()` to
+return 2500ms and measured the shipped supervisor waiting **0.87s**.
+
+Fixed by having the generated supervisor LOAD the policy module by absolute path (it runs in a fresh
+interpreter with no sys.path entry reaching `scripts/`, so it cannot import by name) and call it. The
+inline `delay_ms`, the BASE/FACTOR/CAP constants, the FATAL tuple and the branch are deleted. A bonus the
+row forced: the give-up line now carries `verdict.message`, so the sentence telling the operator the router
+could not parse its config reaches `router.log` instead of just an exit number.
+
+**Mutations re-run by the orchestrator, both previously green:** `restart_delay_ms` -> `return 0` now fails
+two tests including the EXECUTED supervisor row; neutering `reap_server` fails both orphan rows. Files
+restored byte-identical, and `ps` confirmed no stray stub children on the machine before or after — these
+tests deliberately create children to prove the defect, so that check is part of the verification.
+
+**Recorded, not hidden — a behaviour change no row pinned.** The implementer also routed `--print-env`
+around `choose_model`, which violates BOTH stated `--print-env` properties through a different door (it
+writes its list with `info()` to stdout and blocks on "Select a model by number"). Leaving it would have
+made the fix true only for the arguments the tests happen to pass. **Cost: `--print-env` with no model in
+argv and none in the saved session now exits non-zero with a stderr error instead of opening a picker.**
+That is correct for a reporting flag and it is untested — owed a row, tracked in the spec.
+
+**Also seen and deliberately not fixed:** `log_handle = open(log_path, "w")` at serve.py:680 is never
+closed on the failure path (it surfaces as a ResourceWarning in the orphan tests). It is an fd in a process
+that is exiting, it predates this task, and no row touches it.
+
+**Gate.** Full gate observed by the orchestrator: **1350/1350** node, typecheck OK, bun 8, schema export
+OK, **python leg `Ran 76 tests` OK**, GATE PASS. Two source files changed: `scripts/serve.py`,
+`scripts/conductor_wiring.py`.
+
+**Phase 12 stays FAIL** until MAJORs 1 (G5 equivalence), 5 (setup's slot fan-out remedy) and 6
+(setupRequiredScopes coverage) are closed.
