@@ -3687,3 +3687,99 @@ re-adjudicated, and **a fix round's own author does not get to close the gate it
 **The rule.** M7 says every row maps to a named test. A task whose named test file does not exist
 should not be able to reach a gate, let alone pass one — and the check that would have caught it is
 one line: does the file the spec names exist, and does each row id appear in exactly one test title?
+
+---
+
+## C-081 — 13.1's Step-2 glue, three years late: the 22 tools bound, and what binding them exposed
+
+Task 13.1's own spec calls the plugin composition root its Step-2 production work — *"red → glue
+fixes → green, this is the harness proving itself"* — and 13.1 landed without it (a recorded
+deviation: "the plugin tool-map binding not done"). At HEAD `conductor/plugin/index.ts` built its
+`tool` map from `CONDUCTOR_TOOL_NAMES` and gave all 22 names `execute: handlerNotBound(name)`, so not
+one committed `handleX` was reachable through the plugin opencode actually loads, and a live session
+could not advance a single stage. This closes it, under `docs/build/specs/task-13.1-composition-root.assertions.json`.
+
+**The phase-13 gate's MAJOR 6 could not be fixed on its own.** It reads: the gate hook passes
+`fileScope: []`, `testScope: []`, `verifyInFlightTree: null` as literals. The scopes are derived from
+the calling session's registry entry, and only the fan-out engine writes an entry carrying an
+`itemId` — and nothing in production constructed a fan-out (`grep -rn createFanout conductor
+--include=*.ts | grep -v /tests/` returned one hit, the definition). So before the binding there was
+no session to derive a scope *from*, and any test for the derivation would have been a source-text
+check: the weak form that let it regress unobserved in the first place. MAJOR 6 is therefore CR-2 of
+this task, not a separate fix.
+
+**What the round cost, and where the findings came from.** Six agent rounds, ~1.43M tokens. Three
+defects were found by tests, four by the orchestrator reading the diff and running mutations by hand:
+
+| # | defect | found by |
+|---|---|---|
+| 1 | `conductor_queue_amend` cannot succeed: declared `ops: string[]`, handler needs `QueueAmendOp[]` | the sharpened `[C-047-shape]` guard |
+| 2 | `conductor_setup` softened to RETURN refusals as data while 21 tools throw | orchestrator, reading a test's own failure message |
+| 3 | `liveVerifyTrees` reports every marker FILE — a second, broader definition of "live" | orchestrator, reading the diff |
+| 4 | the runless `conductor_status` return is a second shape no compiler sees | orchestrator, reading the diff |
+| 5 | row 14 stayed GREEN with core's parser bypassed | orchestrator, running the mutation |
+| 6 | the fix for #1 wrote §2.4 down a second time | the implementer, flagging its own work |
+
+**#3 is the sharpest, and it is C-072/C-075's shape once more.** `runVerify` honours a marker only
+when `pidAlive(marker.pid) && now() - marker.startMs <= staleMarkerMs`, and its own comment states
+the guarantee: *"a recycled pid on an ancient marker (F6) is broken like a dead one, so a crashed run
+can never wedge a tree."* The new enumeration checked neither. A crashed verify's leftover — which
+`runVerify` would correctly break — would have reported its tree frozen forever, holding every
+write-capable wave member and, once CR-2 lands, denying every edit to that tree. **The function was
+named `liveVerifyTrees` and did not implement `live`.** The fix reuses `readMarker`, `pidAlive` and
+the `DEFAULT_STALE_MARKER_MS` constant itself rather than restating the rule, takes the same
+injectable bound and clock the verify path takes, and deletes nothing: breaking a marker stays
+`runVerify`'s move under §4.3, so the enumeration is read-only.
+
+**#5 is the tenth appearance of the recurring class, and only a mutation could see it.** Row 14 was a
+good-looking test: it drove real ops through the real bound tool against a real store and asserted a
+real amendment was applied. Replacing `parseAmendOps(asJson)` with a straight cast — exactly the
+pre-fix binding — left the suite at **20 pass / 0 fail**. The reason is that the row only ever handed
+the tool well-formed structure, which `QueueAmendInput.ops` accepts whether core's parser produced it
+or a cast waved it through. What the parser uniquely supplies is *refusal*: the closed
+add/update/remove vocabulary and a positioned message. The row now drives four malformed ops lists
+and requires the thrown message to contain **core's own `why`**, obtained by calling `parseAmendOps`
+on the same input — never typed into the test, never read back off the plugin under test (C-077).
+Re-run by the orchestrator after the fix: the same mutation fails exactly row 14.
+
+**#1's remedy was already in the tree, unused.** `core/queue-amend.ts:82 parseAmendOps(raw: readonly
+string[])` turns the declared wire shape into the closed union and is unit-pinned at
+`tools-9.4b.test.ts:2940`, in a test whose title calls it *"the binding Task 9.6 needs"*. Nothing had
+ever called it. The orchestrator's first prescription — call the parser, do not redeclare the
+argument — was **wrong**, and row 14's own test proved it: the row `safeParse`s the LIVE declared
+schema and requires it to admit `[{op:"remove",id:"I2"}]`, which no binding behaviour can satisfy
+while the declaration says `string[]`. The implementer did both and was right to: the declaration
+tells the model the truth, and core still owns the narrowing at the seam — which matters because
+in-process callers reach `execute` without zod ever running. The row was corrected to match.
+
+**#6 is this build's most-repeated class, caught by the agent that created it.** Declaring the
+structure meant writing a `queueEntry` zod shape that restates §2.4. Core's `validateQueue` remains
+the only validator, so a drift is a legible refusal rather than corruption — but it now carries a
+two-way guard derived at run time from `SCHEMAS.Queue`: every declared field must exist in core, and
+every core field must be declared or named in an explicit `Record<string, string>` of field → reason
+(both lists empty today), so a new core field forces a decision instead of vanishing. Proved
+non-vacuous by renaming the declared `dependsOn` to `dependsUpon`, which turns it red.
+
+**Deviations recorded, not hidden.**
+- `conductor_status`'s runless return is typed `Omit<StatusResult, "runId"|"state"> & {runId: null;
+  state: null}`. A field added to or retyped in `StatusResult` is now a compile error at that literal;
+  a *rename* of `runId`/`state` surfaces on the `Omit` key list instead. Widening `StatusResult`
+  itself was rejected deliberately: it would force every caller to handle a null `handleStatus` never
+  returns — one lie traded for another.
+- `conductor_setup`'s router/upstream origins come from the §12 session env `LLAMA_HARNESS_ROUTER_URL`
+  / `LLAMA_HARNESS_URL` that `serve.py` exports, falling back to the §2.2 defaults. Nothing in
+  `conductor/` read those before. No row pins this choice; it is unasserted surface.
+- `conductor_override` refuses when the calling session carries no registry `itemId` rather than
+  choosing one — fabricating it would spend the wrong item's §2.1 budget and taint the wrong item.
+- The fail-closed half of `13.1-cr-packs-loaded-fail-closed` is unbound and recorded under the spec's
+  `knownPartialCoverage`. The row text was deliberately NOT weakened to match what was testable:
+  editing an acceptance row to fit the test that was written is the C-076 failure.
+
+**Gate.** Full gate observed by the orchestrator: **1326/1326**, typecheck OK, bun 8, schema export
+OK, python `Ran 68 tests`, GATE PASS. M5 PASS (129 files). M7: all 21 CR-1 rows carry exactly one
+named test title. The `[5.4a-tools-still-throw-scope-fence]` negative row was REWRITTEN to assert the
+positive, never deleted — its count-of-22 and every-name-is-registered halves survive verbatim,
+because those were never about the throw.
+
+**Still open: CR-2**, the four `13.1-cr2-*` rows — the gate snapshot's three literals, which are now
+derivable because the registry finally holds sub-session entries.

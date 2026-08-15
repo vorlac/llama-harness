@@ -2199,6 +2199,48 @@
       ],
       "startedAt": null,
       "finishedAt": "2026-08-14T12:20:00Z"
+    },
+    "13.1-composition-root": {
+      "taskId": "13.1-composition-root",
+      "manifest": false,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "fa3e810",
+      "commitMessage": "conductor-build: 13.1 composition root, the 22 tools bound",
+      "planLines": [
+        2916,
+        2960
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "suite": "1326/1326 node, typecheck OK, bun 8 pass, schema export OK, python Ran 68 tests, GATE PASS - observed by the orchestrator in the main tree.",
+        "anchorTest": "bash scripts/test-conductor.sh conductor/tests/composition-root.test.ts -> tests=21 pass=21 fail=0.",
+        "m5": "M5 PASS (129 files scanned, 6 line exemptions all live).",
+        "m7": "all 21 CR-1 rows carry exactly one named test title; the 4 13.1-cr2-* rows are deferred to CR-2 and are NOT claimed."
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh conductor/tests/composition-root.test.ts",
+        "exitCode": 1,
+        "class": "missing-subject",
+        "excerpt": "tests=13 pass=2 fail=11 - nine failures on the handlerNotBound throw from plugin/index.ts:161, one on the absent liveVerifyTrees export, one on 0 state/lock.acquired records because no tool ever assembled a bundle."
+      },
+      "filesTouched": [
+        "conductor/plugin/index.ts",
+        "conductor/adapter/evidence.ts",
+        "conductor/tests/composition-root.test.ts",
+        "conductor/tests/composition.test.ts",
+        "conductor/tests/tool-binding.test.ts",
+        "docs/build/specs/task-13.1-composition-root.assertions.json"
+      ],
+      "deviations": [
+        "conductor_queue_amend's declared ops shape was CHANGED as well as routed through core parseAmendOps. The orchestrator's first prescription (call the parser, do not redeclare) was wrong: row 14 safeParses the LIVE declared schema and requires it to admit a structured remove op, which no binding behaviour can satisfy while the declaration says string[]. Recorded in C-081.",
+        "conductor_status's runless return is typed Omit<StatusResult,'runId'|'state'> & {runId: null; state: null} rather than StatusResult itself. Widening StatusResult was rejected: it would force every caller to handle a null handleStatus never returns.",
+        "conductor_setup's router/upstream origins are read from the SS12 session env LLAMA_HARNESS_ROUTER_URL / LLAMA_HARNESS_URL with the SS2.2 defaults as fallback. Nothing in conductor/ read those before and no row pins the choice - unasserted surface.",
+        "conductor_override refuses when the calling session carries no registry itemId rather than choosing one.",
+        "The fail-closed half of 13.1-cr-packs-loaded-fail-closed is UNBOUND, recorded in the spec's knownPartialCoverage. The row text was deliberately not weakened to match what was testable (C-076)."
+      ],
+      "revertAssertion": "Revert this commit and conductor/tests/composition-root.test.ts goes from 21/21 to 2/21: nine tools throw handlerNotBound again, liveVerifyTrees stops existing, and no tool assembles a dependency bundle so the plugin never opens a workspace. The two rows that survive a revert are the two preservation fences - the inventory row (keys still built by iterating CONDUCTOR_TOOL_NAMES) and the rewritten 5.4a fence. This is NOT a meter: the mutations were run by the orchestrator, not inferred - removing the over-age check in liveVerifyTrees fails exactly row 19, and bypassing core parseAmendOps fails exactly row 14 (it did NOT before row 14 was hardened, which is why C-081 records it as the tenth appearance of the recurring class).",
+      "openNext": "CR-2: the four 13.1-cr2-* rows - fileScope, testScope and verifyInFlightTree at the tool.execute.before seam, now derivable because the registry holds sub-session entries."
     }
   }
 }

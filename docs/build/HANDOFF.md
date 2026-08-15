@@ -4,7 +4,7 @@
 worktree of HEAD (plus `npm install` in `conductor/`), `bash scripts/verify-acceptance.sh` exits 1 —
 **16 PASS / 5 FAIL**. One of those five, **row 3, is environmental**: a worktree has no submodules so
 the cmake preset is disabled. In the main tree row 3 is green (`ctest`: 100% tests passed, 92 cases /
-27,726 assertions), so the real standing is **17 of 21**. The main-tree gate is **1280/1280 node,
+27,726 assertions), so the real standing is **17 of 21**. The main-tree gate is **1326/1326 node,
 typecheck OK, bun 8 pass, schema export OK, python `Ran 68 tests`, GATE PASS**.
 
 **53 of 55 rows are COMMITTED.** Only **`13.2`** (live smoke) and **`14.2`** (the 90-run POC campaign)
@@ -18,14 +18,16 @@ back to be scheduled deliberately — do not start either without saying so firs
 repo owner owns. `STATE.json` is machine truth; `NOW.md` is the human view.
 
 ## Do these in this order
-1. **Bind the 22 conductor tools.** `conductor/plugin/index.ts:471-478` maps every name in
-   `CONDUCTOR_TOOL_NAMES` to `handlerNotBound()`. This is the one blocker in front of both remaining
-   rows: **unbound, a live session cannot advance a single stage, so 13.2 cannot run and 14.2's
-   `conductor` arm cannot be measured.** It is 13.1 Step-2 glue that 13.1 landed without (a recorded
-   deviation — `tools.ts` had concurrent edits at the time). Note the fence:
-   `composition.test.ts:1537` `[5.4a-tools-still-throw-scope-fence]` **asserts the binding is absent**
-   and names 13.1 as its owner, so binding the tools means rewriting that row, not deleting it.
-   **This is non-live work and it is the highest-value thing left.**
+1. **The 22 tools are BOUND — this step is DONE** (C-081, spec
+   `docs/build/specs/task-13.1-composition-root.assertions.json`, 21 rows, `composition-root.test.ts`
+   21/21). Every name reaches its committed `handleX` through one dependency bundle; `handlerNotBound`
+   is deleted; the `[5.4a-tools-still-throw-scope-fence]` negative row was rewritten to assert the
+   positive. **What remains of that task is CR-2** — the four `13.1-cr2-*` rows, i.e. the phase-13
+   gate's MAJOR 6: `plugin/index.ts` still passes `fileScope: []`, `testScope: []`,
+   `verifyInFlightTree: null` as literals to `gateBeforeToolCall`. That was NOT fixable before the
+   binding (nothing constructed a fan-out, so no registry entry carried an `itemId` to derive a scope
+   from) and IS fixable now. **Do CR-2 next; it is small and it closes a confirmed MAJOR.**
+   Binding the tools also unblocks 13.2 and 14.2, which could not advance a stage before it.
 2. **Phase gates 12, 13 and 15 have now run stage 2 and ALL THREE FAIL** — 22 confirmed MAJORs, 20 of
    them upheld with neither skeptic able to refute. Full record:
    **`docs/build/artifacts/phase-gates-12-13-15-findings.md`**, summarised in C-079. Phase 14's gate
@@ -107,10 +109,20 @@ repo owner owns. `STATE.json` is machine truth; `NOW.md` is the human view.
   nothing about the phase** (C-072); **green legs prove nothing when the phase is empty** (C-075).
   Cut the worktree, `npm install`, run it FIRST.
 - **A scanner that PASSES while inspecting less than it appears to** is THE recurring defect class,
-  now eight appearances (C-044…C-047, C-063, C-072, C-075, C-078). Make every scanner report how much
+  now TEN appearances (C-044…C-047, C-063, C-072, C-075, C-078, C-081 ×2). The tenth is the one to
+  remember: a test that drove real ops through the real bound tool against a real store, and asserted
+  a real amendment was applied, stayed **20 pass / 0 fail** with core's validator bypassed entirely —
+  because it only ever handed the tool WELL-FORMED input, which the handler accepts either way. **A
+  test that only exercises the happy path cannot prove a validator is in the path; only its REFUSALS
+  can.** Nothing but running the mutation by hand found it. Make every scanner report how much
   it saw — **and check that against what you meant it to see.** M5's default set now includes
   `scripts/*.py` with its own floor (128 files, was 117); `test-conductor.sh` uses a per-run `mktemp`
   scratch dir, so gates no longer have to be run serially to avoid reading each other's leg output.
+- **A function whose name asserts a property must implement it** (C-081). `liveVerifyTrees` reported
+  every marker FILE while `runVerify` honours one only when `pidAlive(pid) && !overAge` — a SECOND,
+  broader definition of "live" one seam over, which would have let a crashed run wedge a tree forever,
+  the exact thing runVerify's own comment promises can never happen. Found by reading the diff, not by
+  a test. When a change adds a second reader of one fact, check it reads the fact the same way.
 - **An oracle computed by the code under test proves nothing about that code** (C-077). 14.1's report
   could be made to claim "30 of 30 recorded" for 22 recorded cells with the suite still green, because
   the assertion searched the report for a string built by calling the formatter under test. Whenever a
