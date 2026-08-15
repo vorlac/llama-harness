@@ -85,6 +85,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ConductorPlugin } from "../plugin/index.ts";
+import { isTerminal } from "../core/stops.ts";
 import {
   handleClassify,
   handleDecompose,
@@ -129,10 +130,19 @@ interface ToolBeforeHookInput {
 interface ToolBeforeHookOutput {
   args: Record<string, unknown>;
 }
+interface BusEventHookInput {
+  event: { type: string; properties?: Record<string, unknown> };
+}
 interface PluginHooks {
   tool?: Record<string, unknown>;
   "tool.execute.before"?: (i: ToolBeforeHookInput, o: ToolBeforeHookOutput) => Promise<void> | void;
   "chat.message"?: (i: ChatMessageHookInput, o: ChatMessageHookOutput) => Promise<void> | void;
+  // The bus hook. `session.idle` and `permission.asked` arrive here and NOWHERE
+  // else — the typed `permission.ask` plugin hook is never dispatched at
+  // 1.18.15 — so this is the SOLE production entry to the §3.7 continuation
+  // engine. A scenario that calls handleSessionIdle directly would prove the
+  // engine works and prove nothing about whether anything ever reaches it.
+  event?: (i: BusEventHookInput) => Promise<void> | void;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +320,7 @@ interface ConfigOpts {
   testRepairAttempts?: number;
   maxOverridesPerItem?: number;
   maxOverridesPerRun?: number;
+  maxImplementers?: number;
 }
 
 function makeConfig(opts: ConfigOpts = {}): Config {
@@ -344,7 +355,7 @@ function makeConfig(opts: ConfigOpts = {}): Config {
     },
     parallel: {
       writes: opts.writes ?? "off",
-      maxImplementers: 2,
+      maxImplementers: opts.maxImplementers ?? 2,
       maxReaders: 2,
       subSessionTimeoutMs: 120_000,
     },
@@ -664,9 +675,9 @@ function watchInterleaving(wiring: Wiring, expectItems: number): Watcher {
 // Driving the real plugin
 // ---------------------------------------------------------------------------
 
-function pluginInput(directory: string): unknown {
+function pluginInput(directory: string, client: unknown): unknown {
   return {
-    client: {},
+    client,
     project: { id: "prj_e2e", worktree: directory },
     directory,
     worktree: directory,
@@ -676,9 +687,92 @@ function pluginInput(directory: string): unknown {
   };
 }
 
-async function startPlugin(directory: string): Promise<PluginHooks> {
+async function startPlugin(directory: string, client: unknown = {}): Promise<PluginHooks> {
   const factory = ConductorPlugin as unknown as (input: unknown) => Promise<PluginHooks>;
-  return factory(pluginInput(directory));
+  return factory(pluginInput(directory, client));
+}
+
+// The opencode client the §3.7 idle engine re-prompts the ORCHESTRATOR through.
+// The plugin hands its own `input.client` straight to the continuation engine, so
+// this is the only place a re-prompt can be observed — and the only shape that
+// makes one countable. An engine whose client cannot be prompted takes a
+// SYNCHRONOUS throw out of `session.prompt`, and it deliberately charges nothing
+// to a session it never reached ("an accusation against a session that was never
+// asked once"), so the futility counter would sit at zero forever and the whole
+// wedge path would be unreachable.
+//
+// This one answers, and the scripted orchestrator does nothing in response. That
+// is what makes the re-prompts here FUTILE rather than merely undeliverable: the
+// orchestrator really was asked, three times, and the run really did not move.
+interface ContinuationClientCapture {
+  client: unknown;
+  prompts: Array<{ sessionID: string; text: string }>;
+}
+
+function makeContinuationClient(): ContinuationClientCapture {
+  const prompts: Array<{ sessionID: string; text: string }> = [];
+  const envelope = async (): Promise<{ data: null; error: null }> => ({ data: null, error: null });
+  const client = {
+    session: {
+      create: envelope,
+      prompt: async (opts: {
+        path: { id: string };
+        body: { parts?: Array<{ text?: string }> };
+      }): Promise<{ data: null; error: null }> => {
+        const parts = opts.body.parts ?? [];
+        prompts.push({ sessionID: opts.path.id, text: parts.map((p) => p.text ?? "").join("") });
+        return { data: null, error: null };
+      },
+      abort: envelope,
+      messages: envelope,
+    },
+    postSessionIdPermissionsPermissionId: envelope,
+  };
+  return { client, prompts };
+}
+
+// §3.7.4 (adapter/continuation.ts:154): re-prompts are paced from the LAST one,
+// and the plugin's event hook binds the engine's clock to Date.now — there is no
+// injection seam on that path, which is the point: this suite drives the wall
+// clock the shipped hook actually reads rather than a clock only a test can see.
+const CONTINUATION_DEBOUNCE_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// One `session.idle` bus event, through the REAL plugin hook.
+async function sendIdle(hooks: PluginHooks, sessionID: string): Promise<void> {
+  const hook = hooks.event;
+  assert.equal(
+    typeof hook,
+    "function",
+    "the plugin must keep its `event` bus hook: it is the SOLE production entry to the §3.7 continuation engine",
+  );
+  await (hook as (i: BusEventHookInput) => Promise<void>)({
+    event: { type: "session.idle", properties: { sessionID } },
+  });
+  // The re-prompt is FIRED, not awaited (the one-in-flight latch is what bounds
+  // concurrency), so yield a macrotask to let its .then(settle) land before the
+  // next pass reads that latch.
+  await sleep(0);
+}
+
+// The plugin's OWN journal — <runDir>/journal.jsonl, appended synchronously by
+// adapter/journal.ts. The scenarios drive the handler layer with a capturing
+// sink of their own, but the continuation engine is reached only through the
+// plugin, so its records land here and nowhere the capture can see them.
+function readRunJournal(runDir: string): Array<Record<string, unknown>> {
+  const file = path.join(runDir, "journal.jsonl");
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((l) => l.trim().length > 0)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+function rePromptRecords(runDir: string): Array<Record<string, unknown>> {
+  return readRunJournal(runDir).filter((r) => r.component === "continuation" && r.event === "reprompt");
 }
 
 async function sendPrompt(hooks: PluginHooks, sessionID: string, text: string): Promise<void> {
@@ -746,6 +840,9 @@ interface BenchOpts {
   config?: Config;
   script: Script;
   seed?: (root: string) => void;
+  // The opencode client the plugin hands the §3.7 continuation engine. Only the
+  // scenario that drives `session.idle` needs a real one.
+  client?: unknown;
 }
 
 // The run is created by the REAL chat.message hook — the same path a live session
@@ -764,7 +861,7 @@ async function makeBench(opts: BenchOpts): Promise<Bench> {
   writeRepoConfig(root, config);
 
   const baseCommit = git(root, ["rev-parse", "HEAD"]).trim();
-  const hooks = await startPlugin(root);
+  const hooks = await startPlugin(root, opts.client ?? {});
   await sendPrompt(hooks, ORCH, opts.prompt);
 
   const journal = makeJournal();
@@ -2360,17 +2457,28 @@ test(
 // ===========================================================================
 
 test(
-  "[13.1-bad-ending] conductor_report REFUSES to close a run whose items are still unsettled; the item then BLOCKS on an exhausted test-repair budget and the run closes with that block DISCLOSED — the closing verify excludes the unevaluable test and REGISTERS the exclusion on the §2.11 stale-red registry — and a SECOND run in the same fixture repo publishes an item on a green full verify that names the exclusion it rests on, instead of dying on a leftover red no later item owns",
+  "[13.1-bad-ending] conductor_report REFUSES to close a run whose items are still unsettled; one item then BLOCKS on an exhausted test-repair budget while its sibling is never started, and the §3.7 continuation engine — entered through the PLUGIN'S OWN `event` bus hook, the only door it has — re-prompts the orchestrator three times futilely, stops the run `noop` with a §2.8 disengage anomaly, writes a STOP-REPORT that runs no closing verify, and re-prompts no more; a SECOND run in the same fixture repo then publishes an item on a green full verify that names the §2.11 exclusion it rests on, instead of dying on a leftover red no later item owns",
   { timeout: 180_000 },
   async () => {
     const BAD_TEST = "tests/broken.test.ts";
+    const SIBLING_TEST = "tests/sibling.test.ts";
     // A test with a genuine syntax error: it cannot be evaluated at all, so
     // §2.6.1 classifies it `error` — never a legal red, however many times it is
     // repaired.
     const BROKEN_SOURCE = 'import test from "node:test";\ntest("broken", () => {\n  assert.equal(((;\n});\n';
 
+    // TWO items, and the second one is what makes this a bad ending rather than
+    // a tidy one. A LONE blocked item is SETTLED (core/gates-phase.ts isSettled
+    // counts `blocked !== null`), so a run holding only that closes `done` and
+    // conductor_report never refuses. B1 is a real, actionable, UNSTARTED item:
+    // with it in the queue `allSettled` is false, the report refuses, the gate
+    // still recommends a next step, and an orchestrator that answers three
+    // re-prompts by doing nothing is genuinely wedged rather than finished.
     const QUEUE = {
-      items: [queueItem({ id: "B1", title: "broken thing", fileScope: ["src/broken.ts"], testScope: [BAD_TEST] })],
+      items: [
+        queueItem({ id: "A1", title: "broken thing", fileScope: ["src/broken.ts"], testScope: [BAD_TEST] }),
+        queueItem({ id: "B1", title: "the sibling nobody started", fileScope: ["src/sibling.ts"], testScope: [SIBLING_TEST] }),
+      ],
     };
 
     const script: Script = (ctx) => {
@@ -2395,11 +2503,19 @@ test(
       return { body: done("nothing to do") };
     };
 
+    // The client the plugin hands the §3.7 engine. Every re-prompt this run makes
+    // is recorded here and answered with silence.
+    const cont = makeContinuationClient();
     const bench = await makeBench({
       tag: "badending",
       prompt: "build the broken thing",
-      config: makeConfig({ testRepairAttempts: 1 }),
+      // maxImplementers 1 caps the wave at ONE member (§4.2 (d)), so A1 is driven
+      // to its block while B1 is never dispatched at all. B1 must be genuinely
+      // UNSTARTED, not merely unfinished: an item the wave already touched would
+      // change the futility signature as it moved and the wedge would never form.
+      config: makeConfig({ testRepairAttempts: 1, maxImplementers: 1 }),
       script,
+      client: cont.client,
     });
 
     await handleClassify({ ...stageBase(bench) });
@@ -2418,14 +2534,19 @@ test(
     await handlePlanReview({ ...stageBase(bench) });
 
     const wave = await handleDispatchWave(waveArgs(bench));
-    const d = wave.items.find((x) => x.itemId === "B1");
+    assert.deepEqual(
+      wave.wave.parallel,
+      ["A1"],
+      "the wave carried A1 alone; B1 is left untouched so the run wedges with real work outstanding",
+    );
+    const d = wave.items.find((x) => x.itemId === "A1");
     assert.ok(d !== undefined, "the item was scheduled");
     assert.notEqual(d?.state, "PUBLISHED", "an item whose test never became a legal red must not publish");
 
     // The wave itself blocked the item and minted its question: a test whose
     // repair budget is exhausted is a question for a human, not a retry loop.
-    const blockedItem = itemOf(bench, "B1");
-    assert.ok(blockedItem.blocked !== null, "the item is BLOCKED after its repair budget was exhausted");
+    const blockedItem = itemOf(bench, "A1");
+    assert.ok(blockedItem.blocked !== null, "A1 is BLOCKED after its repair budget was exhausted");
     const questionId = blockedItem.blocked?.questionId ?? "";
     assert.ok(questionId.length > 0, "the block carries a question id a human can answer");
     const ledger = readQuestions(bench.runDir);
@@ -2433,25 +2554,170 @@ test(
     assert.ok(question !== undefined, "the blocking question is on the §2.11 ledger, not only in memory");
     assert.equal(question?.answeredIso, null, "it is genuinely unanswered — that is why the run cannot close cleanly");
 
-    // The run CAN close, because `blocked` is a real final disposition — but it
-    // closes with the failure disclosed rather than hidden: the closing verify
-    // EXCLUDES the unevaluable test and the exclusion is written to the §2.11
-    // stale-red registry, which is what stops it poisoning every later run.
-    const report = await handleReport(reportArgs(bench));
-    assert.equal(report.green, true, "the closing verify was green — with the dead test excluded, not with it pretended away");
-    assert.ok(
-      report.excluded.includes(BAD_TEST),
-      `the closing verify excluded the unevaluable test (saw ${JSON.stringify(report.excluded)})`,
+    // And the sibling really is UNSTARTED: no sub-session was ever opened for it,
+    // and it holds the PENDING disposition the stop-report has to disclose.
+    const sibling = itemOf(bench, "B1");
+    assert.equal(sibling.state, "PENDING", "B1 was never started");
+    assert.equal(sibling.blocked, null, "B1 is not blocked — it is simply undone, which is why the run cannot close");
+    assert.equal(sibling.deferred, null, "B1 was not deferred either: nobody judged it, nobody did it");
+    assert.equal(
+      bench.wiring.prompted.filter((p) => p.itemId === "B1").length,
+      0,
+      "no sub-session was ever dispatched for B1",
     );
-    assert.ok(
-      report.staleRedAdded.includes(BAD_TEST),
-      "the exclusion was REGISTERED, not merely applied: a silent exclusion is indistinguishable from a green",
+    assert.equal(existsSync(path.join(bench.root, SIBLING_TEST)), false, "B1's test was never written");
+
+    // NOW the refusal that matters, and it is a DIFFERENT refusal from the one
+    // above: the run holds a settled blocked item and an unsettled one, and the
+    // ONE derivation both the gate and the handler read (settledForReport) names
+    // the unfinished item rather than merely saying some work is unfinished.
+    const refusal = await expectDeny(
+      async () => {
+        await handleReport(reportArgs(bench));
+      },
+      "conductor_report over a blocked item plus an unstarted sibling",
+    );
+    assert.match(refusal.message, /B1/, "the refusal NAMES the item that is neither published, blocked nor deferred");
+    assert.equal(
+      /\bA1\b/.test(refusal.message),
+      false,
+      "the blocked item is SETTLED and is not named as unfinished — a lone blocked item would have closed the run",
+    );
+    assert.match(refusal.message, /no verify was run/i, "the refusal precedes the closing verify (§3.2, the C-018 binding)");
+
+    // ---- the §3.7 wedge, through the plugin's own bus hook -------------------
+    // Everything below enters the continuation engine the way a live session does
+    // and no other way: `session.idle` on the plugin's `event` hook. Nothing in
+    // this scenario imports handleSessionIdle, because a scenario that called it
+    // directly would prove the engine works and prove nothing about whether
+    // anything ever reaches it.
+    //
+    // The evidence ledger is fingerprinted here, byte for byte. A stop-report
+    // "proves no claim and re-runs nothing" (§2.9), so if the wedge path appends
+    // so much as one verify record the ledger below will not match.
+    const evidencePath = path.join(bench.runDir, "evidence.jsonl");
+    const evidenceBefore = readFileSync(evidencePath, "utf8");
+    const verifiesBefore = evidenceOf(readEvidence(bench.runDir), "verify").length;
+
+    const savedStateHome = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = bench.stateHome;
+    try {
+      // Three re-prompts, and the counters read 1, 2, 3 — the engine consults the
+      // wedge rule with the PERSISTED counters BEFORE the pass touches them, which
+      // is the only order in which "exactly three prompts, the fourth stops" and
+      // "futileRePrompts reads 1,2,3" are both true (§3.7:1463-1468).
+      //
+      // Each pass waits out the §3.7.4 debounce, which is what makes each one a
+      // real pass rather than a silently dropped one — and the run does not move
+      // between them, so every signature is identical and every re-prompt is
+      // futile by measurement rather than by assertion.
+      for (let pass = 1; pass <= 3; pass += 1) {
+        if (pass > 1) await sleep(CONTINUATION_DEBOUNCE_MS + 200);
+        await sendIdle(bench.hooks, ORCH);
+
+        const live = bench.store.loadRun(bench.runId);
+        assert.equal(cont.prompts.length, pass, `idle pass ${pass} really re-prompted the orchestrator`);
+        assert.equal(cont.prompts[pass - 1].sessionID, ORCH, "the re-prompt went to the ORCHESTRATOR's session");
+        assert.equal(live.counters.idleRePrompts, pass, `counters.idleRePrompts reads ${pass} after pass ${pass}`);
+        assert.equal(
+          live.counters.futileRePrompts,
+          pass,
+          `counters.futileRePrompts reads ${pass}: the run-state signature was identical, so the pass was FUTILE`,
+        );
+        assert.equal(live.stop, null, `the run is still live after ${pass} re-prompt(s): the limit is 3, not ${pass}`);
+        assert.equal(isTerminal(live), false, "and it is still non-terminal to the ONE §2.3 definition");
+        // The prompt is the gate's own next step, not a slogan — a re-prompt that
+        // named nothing to do would be indistinguishable from noise.
+        assert.match(cont.prompts[pass - 1].text, new RegExp(bench.runId), "the re-prompt names the run it is about");
+        assert.match(cont.prompts[pass - 1].text, /conductor_/, "and the §3.4 tool the phase gate recommends next");
+      }
+      assert.equal(rePromptRecords(bench.runDir).length, 3, "the journal recorded all three re-prompts");
+
+      // THE FOURTH PASS STOPS. futileRePrompts is already at the §3.7 limit, so
+      // the engine records the stop instead of prompting a fourth time.
+      await sleep(CONTINUATION_DEBOUNCE_MS + 200);
+      await sendIdle(bench.hooks, ORCH);
+
+      const stopped = bench.store.loadRun(bench.runId);
+      assert.notEqual(stopped.stop, null, "the fourth idle pass STOPPED the run rather than prompting again");
+      assert.equal(stopped.stop?.kind, "noop", "the §2.9 stop kind for a wedged run is `noop`");
+      assert.match(
+        stopped.stop?.reasonDisplay ?? "",
+        /no observable progress/i,
+        "the stop says WHY in words a human reads, not only in a kind",
+      );
+      assert.equal(isTerminal(stopped), true, "and the run is TERMINAL to core/stops.ts isTerminal");
+      assert.equal(stopped.counters.idleRePrompts, 3, "no fourth re-prompt was charged to the orchestrator");
+      assert.equal(stopped.counters.futileRePrompts, 3, "the futile counter stopped at the limit it fired on");
+      assert.equal(cont.prompts.length, 3, "and no fourth prompt left the process");
+
+      // §2.8: the disengage anomaly, written AHEAD of the stop so a process killed
+      // mid-disengagement still leaves its trace.
+      const disengage = readAnomalies(bench.runDir).filter((a) => a.kind === "disengage");
+      assert.equal(disengage.length, 1, "the wedge left exactly one §2.8 `disengage` anomaly");
+      assert.match(
+        String(disengage[0].detail ?? ""),
+        /re-prompt/i,
+        "the anomaly names what it disengaged from, not merely that it did",
+      );
+
+      // AND IT STOPS RE-PROMPTING. A fifth idle pass, waited past the debounce so
+      // its silence is a decision rather than a dropped call, adds no journal
+      // record and no prompt.
+      await sleep(CONTINUATION_DEBOUNCE_MS + 200);
+      await sendIdle(bench.hooks, ORCH);
+      assert.equal(cont.prompts.length, 3, "a terminal run is never re-prompted again");
+      assert.equal(
+        rePromptRecords(bench.runDir).length,
+        3,
+        "and no further continuation:reprompt record was journaled after the stop",
+      );
+      assert.equal(
+        bench.store.loadRun(bench.runId).counters.idleRePrompts,
+        3,
+        "the counters are frozen where the stop left them",
+      );
+    } finally {
+      if (savedStateHome === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = savedStateHome;
+    }
+
+    // ---- the stop-report ----------------------------------------------------
+    // A stop-report is the third mode of the ONE report writer, selected from the
+    // PERSISTED stop and nothing else. It has no all-settled precondition (a
+    // stopped run is by definition unsettled) and it runs NO closing verify.
+    const md = readFileSync(path.join(bench.runDir, "report.md"), "utf8");
+    assert.match(md, /^# conductor stop-report — noop — run /m, "the stop KIND is the report's headline");
+    assert.match(md, /^Stop kind: noop$/m, "and it is stated as a field, not only in prose");
+    assert.match(md, /^Closing verify: none/m, "the report declares that it re-ran nothing");
+    assert.match(md, /### A1 — /, "the stop-report names the blocked item");
+    assert.match(md, /^Disposition: blocked$/m, "with its settled disposition");
+    assert.match(md, new RegExp(questionId), "and the exact question id a human must answer to unwedge it");
+    assert.match(md, /### B1 — PENDING/, "it names the sibling at the FSM position nobody moved it off");
+    assert.match(md, /^Disposition: unfinished$/m, "and calls that disposition unfinished rather than settled");
+    assert.match(
+      md,
+      new RegExp("- " + BAD_TEST.replace(/\./g, "\\.") + " \\(A1\\)"),
+      "and it names the newly-registered stale-red path against the item that owns it",
+    );
+    assert.equal(
+      md.includes(SIBLING_TEST),
+      false,
+      "B1's test was never written, so nothing about it was registered stale-red: the registry records files that EXIST",
     );
 
-    const md = readFileSync(path.join(bench.runDir, "report.md"), "utf8");
-    assert.match(md, /B1/, "the closing report names the item that never published");
-    assert.match(md, new RegExp(questionId), "the report names the question id that blocked it");
-    assert.match(md, new RegExp(BAD_TEST.replace(".", "\\.")), "the report names the excluded test file by path");
+    // NO CLOSING VERIFY. Not "a verify that passed" — none at all. The ledger is
+    // byte-identical across the whole wedge path.
+    assert.equal(
+      readFileSync(evidencePath, "utf8"),
+      evidenceBefore,
+      "the stop path appended NOTHING to the §2.6 evidence ledger",
+    );
+    assert.equal(
+      evidenceOf(readEvidence(bench.runDir), "verify").length,
+      verifiesBefore,
+      "zero new verify records were appended during the stop path (§2.9: a stop-report proves no claim)",
+    );
 
     assert.ok(
       readQuestions(bench.runDir).some((q) => q.id === questionId),
