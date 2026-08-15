@@ -9,6 +9,7 @@ export const meta = {
 
 const REPO = '/Users/sal/development/vorlac/llama-harness'
 const DIR = `${REPO}/docs/reviews/conductor-review`
+const BATCH = 2 // small on purpose: a rate-limit kill takes few agents
 const PARTS = `${DIR}/parts-capability`
 
 const COMMON = [
@@ -31,6 +32,15 @@ const COMMON = [
   'that would let it re-derive X." The form that does not is "it would be good if the system also',
   'did Y." Anything ungrounded is marked SPECULATIVE and ranks below every grounded entry.',
   '',
+  '## WRITE YOUR SKELETON FIRST — this is not optional and not a formality',
+  '',
+  'Within your FIRST FEW TOOL CALLS, before any deep reading, create your output file containing a',
+  'title, your scope, the date, and empty section headers. Then APPEND to it continuously as you',
+  'work — every finding the moment you have it, not at the end.',
+  '',
+  'Why: this review may hit an account rate limit at any moment and be killed mid-flight. An agent',
+  'that reads for twenty-five minutes and then dies having written nothing has burned those tokens',
+  'for nothing. **Treat your output file as the deliverable and your context as scratch.**',
   'NON-NEGOTIABLES: never touch .data/ or .out/; never git commit/push/reset/clean; never',
   '`git checkout <file>`. Report, do not fix. Kill anything you spawn.',
   '',
@@ -81,15 +91,20 @@ const LENSES = [
 ]
 
 phase('Capability lenses')
-const results = await parallel(
-  LENSES.map(([f, t, b]) => () => agent([
+const results = []
+for (let i = 0; i < LENSES.length; i += BATCH) {
+  const batch = LENSES.slice(i, i + BATCH)
+  const res = await parallel(batch.map(([f, t, b]) => () => agent([
     COMMON, '', `## YOUR SCOPE — ${t}`, '', b, '',
     '## YOUR OUTPUT', '',
-    `Write **${PARTS}/${f}** (create the directory if needed), using GAP records per the briefing.`,
-    `Number them \`${f.replace(/\.md$/, '').toUpperCase()}-001\`… Include IDEA entries and a coverage`,
-    'ledger. Return a SHORT summary only.',
-  ].join('\n'), { label: `capability:${f.replace(/\.md$/, '')}`, phase: 'Capability lenses' })),
-)
+    `Write **${PARTS}/${f}** (create the directory if needed). Skeleton first, then append.`,
+    'Use GAP records per the briefing. Number them',
+    `\`${f.replace(/\.md$/, '').toUpperCase()}-001\`… Include IDEA entries and a coverage ledger.`,
+    'Return a SHORT summary only.',
+  ].join('\n'), { label: `capability:${f.replace(/\.md$/, '')}`, phase: 'Capability lenses' })))
+  results.push(...res)
+  log(`batch ${Math.floor(i / BATCH) + 1}: ${res.filter(Boolean).length}/${batch.length} complete — parts on disk`)
+}
 log(`capability lenses complete: ${results.filter(Boolean).length}/${LENSES.length}`)
 
 phase('Consolidate')
