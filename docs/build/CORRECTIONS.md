@@ -3633,3 +3633,57 @@ which passes while inspecting less than it appears to** is the defect that keeps
 its ninth appearance and the first time the check was M7 itself. Counting that a row id appears
 somewhere is not coverage; five titles claiming forty-two rows is not coverage; and a task whose
 named test file does not exist should not be able to reach a gate at all, let alone pass one.
+
+## C-080 — phase 15 fix round 1: write the test that was never written, then let it find the errors
+
+The phase-15 gate found ten confirmed factual errors in the two operator documents (C-079). None of
+them was fixed by hand. The cause was upstream of all ten: **Task 15.1 shipped with no test.** Its
+spec names `conductor/tests/ops-docs.test.ts`; that file did not exist; so 25 assertion rows were
+enforced by two counting checks — acceptance row 11a (the file is present and has N lines) and row
+11b (the doc contains 15 numbered items). 15.1's own `revertAssertion` said so plainly and did not
+notice it was a confession: *"The acceptance meter is the assertion."*
+
+**The fix round ran the loop the task should have run originally.** A test-writer wrote the missing
+anchor test — 1,495 lines, 25 tests, one row id per title — and was forbidden from touching either
+document. The orchestrator observed the red itself: **2 pass, 23 fail**, matching the writer's
+reported output exactly. An implementer then corrected the documents, forbidden from editing the
+test or any source file. The orchestrator observed the green itself and read the whole diff by hand.
+
+**The risk this file was most likely to fail at, checked directly.** A documentation test that reads
+the document and asserts the document says what the document says is worth nothing — the C-077
+self-referential-oracle shape, in doc form. So the binding was proved by mutating the **source**,
+never the docs:
+
+| mutation to the code | what the test's expectation did |
+|---|---|
+| add `if (cfg.impossible) return 5;` to `router/main.cpp` | `main() returns [0, 2, 3, 4]` → `[0, 2, 3, 4, 5]`, `missing` following |
+| rename `alive.json` → `heartbeat.json` in `conductor/adapter/state.ts` | the required run-dir filename set moved with it |
+
+Both restored from `cp` snapshots, `cmp`-verified. The expectations are derived from the code at run
+time, so the doc stays checkable as the code changes instead of decaying into folklore.
+
+**What was actually wrong.** The `llama-router` exit table claimed a code 1 that `main()` never
+returns and omitted 2, 3 and 4. `--ctx` was documented backwards — as a total the derivation
+overrides — when it is the per-slot window; the worked example (`--ctx 4096 --max-readers 6` "serves
+8192 per slot") was arithmetically false. The live-run pointer had lost its extension
+(`state/current-run` against the code's `current-run.json`). `report.md` was described as existing
+only for a `done` run, with the actively harmful gloss *"Anything other than `done` means the report
+was refused"* — the writer is guarded on `run.stop !== null`, so all six stop kinds produce one. The
+doc said the router never rejects, while `router/admission.hpp` pins a 503 admission envelope with
+two capacity refusals. `HONEST-LIMITS.md` carried none of the build-discovered limits it was the
+declared sink for. Both degraded modes — no-git and the advisory `run.lock` — were absent entirely.
+
+**The implementer's prose was spot-checked against source rather than believed**: the 503 envelope
+constants (`admission.hpp:56-58`), `/conductor/health` registered outside admission (`router.hpp:7`),
+`serve.py` exiting 130 on interrupt (`:672`), `MAX_ATTEMPTS = 3` (`fanout.ts:112`) and its verbatim
+reason string (`:332`), the fail-closed prefix (`tools.ts:290`), the watchdog's `subsession.abort` at
+`warn` (`fanout.ts:239-244`), `DEFAULT_STALE_LOCK_MS` at 24h (`state.ts:38`).
+
+**The gate is NOT recorded PASS, and that is deliberate.** Fix round 1 closed the ten MAJORs and each
+is now bound by a named test that fails without its fix. But stage 2 has not been re-run against
+documents that went from 293 to 576 lines and from 80 to 174, the five MINORs have not been
+re-adjudicated, and **a fix round's own author does not get to close the gate it answered.**
+
+**The rule.** M7 says every row maps to a named test. A task whose named test file does not exist
+should not be able to reach a gate, let alone pass one — and the check that would have caught it is
+one line: does the file the spec names exist, and does each row id appear in exactly one test title?

@@ -33,9 +33,15 @@ repo owner owns. `STATE.json` is machine truth; `NOW.md` is the human view.
    (`GATES.json` → `phaseGates.m7CrossCutting`): M7 was recorded PASS for 13.1 and 15.1 and is
    satisfied by neither** — 13.1's 42 assertion rows are named by 5 test titles, 15.1's 25 rows by
    nothing at all, because the `conductor/tests/ops-docs.test.ts` its spec names does not exist.
-   Fix that before fixing what it let through: **write the missing anchor test for 15.1 first, then
-   let it tell you which of phase 15's ten documentation MAJORs are real**, and give 13.1's uncovered
-   rows real tests rather than patching the five scenarios by hand. Phase 13's headline — every
+   **Phase 15's half of that is DONE** (C-080, commit `a6ad3cd`): `conductor/tests/ops-docs.test.ts`
+   now exists — 1,495 lines, 25 tests, one per assertion row — written first, observed red at 2/25,
+   and the documents corrected until green. All ten of phase 15's MAJORs are closed and each is bound
+   by a test that fails without its fix; the tests derive their expectations from the code (proved by
+   mutating `router/main.cpp` and `conductor/adapter/state.ts` and watching the expectations move),
+   so the docs stay checkable as the code changes. **The phase-15 gate is still NOT PASS**: stage 2
+   has not re-run against the rewritten docs and the five MINORs are unadjudicated — a fix round's
+   author does not close the gate it answered. **13.1 still needs the same treatment**: give its 37
+   uncovered rows real tests rather than patching the five scenarios by hand. Phase 13's headline — every
    full-verify green in `e2e.test.ts` rests on a zero-match glob, so scenario 4's "real full verify"
    executes nothing — is the vacuous-green trap `scripts/test-conductor.sh` exists to close, sitting
    inside the build's own end-to-end. Phase 12's six are genuine product defects (an orphaned
