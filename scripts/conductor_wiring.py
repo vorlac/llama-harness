@@ -640,31 +640,33 @@ def _supervisor_source() -> str:
 
     It mirrors serve.py's start_watchdog rather than inventing a second
     lifecycle: poll the session shell's pid, then SIGTERM, a bounded grace,
-    then SIGKILL. It cannot import this module - it runs in a fresh
-    interpreter with the repo root as cwd - so the policy constants are
-    formatted in from the definitions above and stay single-sourced.
+    then SIGKILL.
+
+    The restart policy is NOT written out a second time here. The supervisor
+    runs in a fresh interpreter with the repo root as cwd and no sys.path entry
+    that reaches scripts/, so it cannot ``import conductor_wiring`` by name -
+    but it can load THIS FILE by its absolute path and call
+    router_restart_decision and backoff_next out of it. That is the difference
+    between one policy with two callers and two copies kept in sync by hope: an
+    edit to those functions moves the shipped supervisor, and the operator-facing
+    reason for giving up is the policy's own message rather than a bare number.
     """
     return '''
-import os, signal, subprocess, sys, time
+import importlib.util, os, signal, subprocess, sys, time
 
 shell_pid = int(sys.argv[1])
 router_argv = sys.argv[2:]
-BASE_MS = %(base)d
-FACTOR = %(factor)d
-CAP_MS = %(cap)d
-HEALTHY_S = %(healthy)d
+POLICY_PATH = %(policy)r
 GRACE_S = %(grace).1f
-FATAL = %(fatal)r
 LOG_RELPATH = %(log)r
 
 
-def delay_ms(crashes):
-    value = BASE_MS
-    for _ in range(max(0, crashes - 1)):
-        if value >= CAP_MS:
-            break
-        value *= FACTOR
-    return CAP_MS if value > CAP_MS else value
+def load_policy():
+    """The restart policy, loaded by path: the same functions the tests pin."""
+    spec = importlib.util.spec_from_file_location("conductor_wiring_policy", POLICY_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def shell_alive():
@@ -702,8 +704,19 @@ def stop(proc):
         pass
 
 
+def note(log, text):
+    if log is not None:
+        log.write(text)
+
+
 log = open_log()
 sink = log if log is not None else subprocess.DEVNULL
+try:
+    policy = load_policy()
+except Exception as exc:
+    note(log, "supervisor: cannot load the restart policy from %%s: %%s\\n" %% (POLICY_PATH, exc))
+    sys.exit(1)
+
 crashes = 0
 while shell_alive():
     started = time.time()
@@ -712,8 +725,7 @@ while shell_alive():
             router_argv, stdout=sink, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL
         )
     except OSError as exc:
-        if log is not None:
-            log.write("supervisor: cannot start llama-router: %%s\\n" %% (exc,))
+        note(log, "supervisor: cannot start llama-router: %%s\\n" %% (exc,))
         break
     while proc.poll() is None and shell_alive():
         time.sleep(0.5)
@@ -721,30 +733,24 @@ while shell_alive():
         stop(proc)
         break
     code = proc.returncode
-    if code == 0 or code in FATAL:
-        if log is not None:
-            log.write(
-                "supervisor: llama-router exited %%d; not restarting "
-                "(see the lines above for its own message)\\n" %% (code,)
-            )
-        break
     uptime = time.time() - started
-    if uptime >= HEALTHY_S:
-        crashes = 0
-    crashes += 1
-    if log is not None:
-        log.write(
-            "supervisor: llama-router exited %%d after %%.1fs; restart %%d in %%dms\\n"
-            %% (code, uptime, crashes, delay_ms(crashes))
-        )
-    time.sleep(delay_ms(crashes) / 1000.0)
+    # The router's own stderr is already interleaved above this line - it is
+    # merged into this same log - so the policy is asked for the DECISION and
+    # its reason, not for a second rendering of a message the operator has.
+    verdict = policy.router_restart_decision(code, "")
+    if not verdict.restart:
+        note(log, "supervisor: %%s\\n" %% (verdict.message.strip(),))
+        break
+    delay, crashes = policy.backoff_next(crashes, uptime)
+    note(
+        log,
+        "supervisor: llama-router exited %%d after %%.1fs; restart %%d in %%dms\\n"
+        %% (code, uptime, crashes, delay),
+    )
+    time.sleep(delay / 1000.0)
 ''' % {
-        "base": BACKOFF_BASE_MS,
-        "factor": BACKOFF_FACTOR,
-        "cap": BACKOFF_CAP_MS,
-        "healthy": HEALTHY_RUN_SECONDS,
+        "policy": str(Path(__file__).resolve()),
         "grace": ROUTER_TERM_GRACE_S,
-        "fatal": FATAL_EXIT_CODES,
         "log": ROUTER_LOG_RELPATH,
     }
 

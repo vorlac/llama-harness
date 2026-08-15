@@ -16,6 +16,15 @@ supervisor source over a fake router binary and a fake session shell, entirely
 inside a temp dir, because reading that source as a string proves nothing about
 the signals it sends (C-072).
 
+The ``p12-`` sections (fix-phase12-serve) are the other executing parts. They
+DRIVE ``serve.main()`` - the ordering the seam-level cases above structurally
+cannot see - and they run the supervisor over a router that exits on its own.
+They spawn harmless ``time.sleep`` children in place of llama-server, and they
+listen on loopback ports the OS hands them, because the three defects they cover
+are only observable as a live child process and an occupied port. Nothing they
+touch lives outside the per-test temp dir, no llama-server is ever started, and
+no port the harness itself uses is bound.
+
 Run as::
 
     /usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py'
@@ -23,20 +32,27 @@ Run as::
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import http.server
+import importlib.util
 import inspect
+import io
 import json
 import os
 import re
 import signal
+import socket
+import socketserver
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent
@@ -1550,3 +1566,797 @@ class GateAndLiveRecord(WiringTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# fix-phase12-serve — the eight p12- rows.
+#
+# Every row below is downstream of ONE structural fact the phase-12 gate's
+# adjudicator named: no test in either leg executed scripts/serve.py's main().
+# The seams under main() are covered above; the defects live in main()'s
+# ORDERING, which no seam-level case can reach. So these drive main() itself,
+# with the process spawn and the readiness check stubbed and every path pointed
+# at a temp dir, and they assert on what the adjudicator measured - a child
+# process still alive, a port nothing listens on, prose on stdout - rather than
+# on a mock's call count.
+# ---------------------------------------------------------------------------
+
+
+class _ExecvReached(Exception):
+    """os.execv never returns, so the stub raises this in its place (serve.py:664)."""
+
+
+class _PromptCalled(Exception):
+    """serve.prompt() was reached. On a tty this is where --print-env blocks."""
+
+
+class _InjectedWindowFailure(Exception):
+    """A failure injected into the readiness -> watchdog window at a third point."""
+
+
+class _ModuleProxy(object):
+    """A module reference with named attributes replaced, everything else forwarded.
+
+    serve.main() reaches the two seams that make it undrivable - the llama-server
+    spawn and the exec into bash - through its own module globals
+    (``subprocess.Popen``, ``os.execv``). Rebinding ``serve.subprocess`` and
+    ``serve.os`` to one of these is therefore a genuine injection point that
+    needs no edit to serve.py and no test-only branch inside main() (P12-SG-1):
+    production behaviour is identical whether or not anything is stubbed, because
+    nothing in serve.py knows these objects can be swapped.
+    """
+
+    def __init__(self, wrapped: Any, **overrides: Any) -> None:
+        self.__dict__["_wrapped"] = wrapped
+        self.__dict__["_overrides"] = dict(overrides)
+
+    def __getattr__(self, name: str) -> Any:
+        overrides = self.__dict__["_overrides"]
+        if name in overrides:
+            return overrides[name]
+        return getattr(self.__dict__["_wrapped"], name)
+
+
+class _FakeStdin(object):
+    """stdin that answers isatty() and fails loudly if anything actually reads it."""
+
+    def __init__(self, tty: bool) -> None:
+        self.tty = tty
+        self.reads = 0
+
+    def isatty(self) -> bool:
+        return self.tty
+
+    def _refuse(self, *args: Any, **kwargs: Any) -> Any:
+        self.reads += 1
+        raise AssertionError(
+            "serve.main() read stdin; --print-env must never wait for input"
+        )
+
+    read = _refuse
+    readline = _refuse
+    fileno = _refuse
+
+
+class _FakeModel(object):
+    """Only the attributes serve.py reads off a catalog Model."""
+
+    def __init__(self, model_id: str) -> None:
+        self.id = model_id
+        self.category = "coding"
+        self.embedding = False
+        self.reranker = False
+        self.reasoning = False
+
+
+class _Run(object):
+    """One serve.main() call: what it returned or raised, and both its streams."""
+
+    def __init__(self, result: Any, raised: Any, stdout: str, stderr: str) -> None:
+        self.result = result
+        self.raised = raised
+        self.stdout = stdout
+        self.stderr = stderr
+
+    def __repr__(self) -> str:
+        return "<main() result=%r raised=%r stdout=%r stderr=%r>" % (
+            self.result,
+            self.raised,
+            self.stdout,
+            self.stderr,
+        )
+
+
+# The same id the committed base config's provider.models is keyed on, so the
+# session config serve.py writes is the one a real run would write.
+P12_MODEL_A = MODEL_ID
+P12_MODEL_B = "p12-second-model"
+NAME_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def free_port(host: str = LISTEN_HOST) -> int:
+    """A port the OS says is free, chosen by the OS and handed straight back."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
+def env_pairs(text: str) -> Dict[str, str]:
+    """Only the NAME=value lines, so a value assertion never dies on prose."""
+    out: Dict[str, str] = {}
+    for line in text.splitlines():
+        if NAME_VALUE_RE.match(line):
+            name, value = line.split("=", 1)
+            out[name] = value
+    return out
+
+
+class _HealthServer(http.server.HTTPServer):
+    """HTTPServer without the reverse-DNS lookup its server_bind does by default.
+
+    socket.getfqdn() on a loopback address is a network round trip that also
+    triggers a lazy ``encodings.idna`` import, and neither belongs in an offline
+    test leg that has already forked children.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = LISTEN_HOST
+        self.server_port = int(self.server_address[1])
+
+
+class _HealthHandler(http.server.BaseHTTPRequestHandler):
+    """A live router, reduced to the one thing --print-env asks it."""
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
+        body = b'{"status":"ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        return
+
+
+class ServeMainCase(WiringTestCase):
+    """serve.main(), DRIVEN — the harness the three MAJORs need.
+
+    The adjudicator's leak.py proved this is cheap: stub the spawn and the
+    readiness check, point every config path at a temp dir, and run it. The spawn
+    stub launches a REAL, harmless child (``time.sleep``) rather than a mock,
+    because the orphan rows are measured on that child's liveness after main()
+    returns - a mock would happily report a cleanup that does not work.
+    """
+
+    def setUp(self) -> None:
+        WiringTestCase.setUp(self)
+        self.spawned: List[Dict[str, Any]] = []
+        self.readiness: List[Tuple[str, int]] = []
+        self.watchdogs: List[Tuple[int, int]] = []
+        self.execs: List[Tuple[str, List[str]]] = []
+        self.prompts: List[str] = []
+        self.stdin = _FakeStdin(False)
+
+        self.patch_attr(serve, "SESSION_FILE", self.configs / "serve-session.json")
+        self.patch_attr(serve, "prompt", self._prompt)
+        self.patch_attr(serve, "wait_until_ready", self._wait_until_ready)
+        self.patch_attr(serve, "start_watchdog", self._start_watchdog)
+        self.patch_attr(serve, "subprocess", _ModuleProxy(subprocess, Popen=self._popen))
+        self.patch_attr(serve, "os", _ModuleProxy(os, execv=self._execv))
+        self.patch_attr(sys, "stdin", self.stdin)
+        self.drop_env(cw.ROUTER_BINARY_ENV)
+
+    def patch_attr(self, target: Any, name: str, value: Any) -> None:
+        previous = getattr(target, name)
+        setattr(target, name, value)
+        self.addCleanup(setattr, target, name, previous)
+
+    def drop_env(self, name: str) -> None:
+        if name in os.environ:
+            previous = os.environ.pop(name)
+            self.addCleanup(os.environ.__setitem__, name, previous)
+
+    def _prompt(self, question: str, default: Optional[str] = None) -> str:
+        self.prompts.append(question)
+        raise _PromptCalled(question)
+
+    def _wait_until_ready(self, host: str, port: int, proc: Any, timeout: int = 600) -> bool:
+        self.readiness.append((host, int(port)))
+        return True
+
+    def _start_watchdog(self, shell_pid: int, server_pid: int) -> None:
+        self.watchdogs.append((int(shell_pid), int(server_pid)))
+
+    def _execv(self, path: str, argv: List[str]) -> None:
+        self.execs.append((str(path), list(argv)))
+        raise _ExecvReached(str(path))
+
+    def _popen(self, cmd: List[str], **kwargs: Any) -> Any:
+        """llama-server's spawn, standing in a real child that holds no model."""
+        handle = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(600)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        self.spawned.append({"argv": list(cmd), "handle": handle})
+        self.addCleanup(self.kill_child, handle)
+        return handle
+
+    def kill_child(self, handle: Any) -> None:
+        try:
+            if handle.poll() is None:
+                handle.kill()
+        except OSError:
+            pass
+        try:
+            handle.wait(timeout=10)
+        except Exception as exc:  # an already-reaped child is the wanted outcome
+            del exc
+
+    def install_models(self) -> None:
+        entries = [
+            (_FakeModel(P12_MODEL_A), {"total_bytes": 1, "quant": "Q4_K_M"}),
+            (_FakeModel(P12_MODEL_B), {"total_bytes": 2, "quant": "Q4_K_M"}),
+        ]
+        self.patch_attr(fm, "installed_models", lambda: list(entries))
+
+    def write_session(self, **values: Any) -> None:
+        serve.SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        serve.SESSION_FILE.write_text(json.dumps(values, indent=2) + "\n")
+
+    def drive_main(self, argv: List[str]) -> _Run:
+        out = io.StringIO()
+        err = io.StringIO()
+        result: Any = None
+        raised: Any = None
+        with contextlib.redirect_stdout(out):
+            with contextlib.redirect_stderr(err):
+                try:
+                    result = serve.main(list(argv))
+                except BaseException as exc:  # SystemExit is one of the measured legs
+                    raised = exc
+        return _Run(result, raised, out.getvalue(), err.getvalue())
+
+    def last_child(self) -> Any:
+        self.assertTrue(self.spawned, "serve.main() never reached the llama-server spawn")
+        return self.spawned[-1]["handle"]
+
+    def assert_child_reaped(self, handle: Any, where: str) -> None:
+        """The measurement the adjudicator made: is the llama-server child still alive?"""
+        pid = int(handle.pid)
+        reaped = _wait_until(lambda: handle.poll() is not None, 6.0)
+        self.assertTrue(
+            reaped,
+            "%s: the llama-server child (pid %d) is STILL RUNNING after main() returned - "
+            "a 20+GB model and its port are orphaned with nothing left owning them" % (where, pid),
+        )
+        self.assertFalse(
+            _pid_alive(pid),
+            "%s: pid %d still exists after main() returned" % (where, pid),
+        )
+
+    def occupy_port(self) -> int:
+        """A listening socket on an OS-chosen loopback port, closed with the test."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((LISTEN_HOST, 0))
+        sock.listen(8)
+        self.addCleanup(sock.close)
+        return int(sock.getsockname()[1])
+
+    def start_router_health(self) -> int:
+        """A live router: something that answers 200 on /conductor/health."""
+        server = _HealthServer((LISTEN_HOST, 0), _HealthHandler)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+        thread.daemon = True
+        self.addCleanup(thread.join, 10)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        thread.start()
+        return int(server.server_address[1])
+
+    def plant_router_under_temp_root(self) -> Path:
+        """A router binary and schema under a THROWAWAY root, so preflight says launch."""
+        root = self.tmp / "repo"
+        root.mkdir(parents=True, exist_ok=True)
+        self.plant_router_binary(root, ".out/build/clang-relwdebinfo/llama-router")
+        self.plant_schema(root)
+        self.patch_attr(serve, "REPO_ROOT", root)
+        return root
+
+    def start_live_session(self) -> Tuple[int, int]:
+        """The state the adjudicator measured: both configured ports already in use.
+
+        llama-server's port is held by a listener and the router's port answers
+        /conductor/health, which is exactly what a serve.py session that is
+        already running looks like to a second invocation.
+        """
+        server_port = self.occupy_port()
+        router_port = self.start_router_health()
+        self.install_models()
+        self.plant_router_under_temp_root()
+        self.write_session(
+            model=P12_MODEL_A,
+            host=LISTEN_HOST,
+            port=server_port,
+            router_port=router_port,
+            models_max=1,
+            max_readers=cw.DEFAULT_MAX_READERS,
+        )
+        return server_port, router_port
+
+
+class ServeMainDriven(ServeMainCase):
+    def test_p12_main_is_driven_at_all(self) -> None:
+        """[p12-main-is-driven-at-all] main() is EXECUTED, past readiness, by the leg.
+
+        The parent finding: five of phase 12's ten trace to no test ever running
+        this function. Asserted on what main() leaves behind past the readiness
+        check - the session opencode config, the rcfile naming the child's pid,
+        the exec into bash - not on having imported serve.py and called a helper.
+        """
+        self.install_models()
+        self.write_base_config()
+        port = free_port()
+
+        run = self.drive_main(
+            [P12_MODEL_A, "--no-build-check", "--no-router", "--port", str(port)]
+        )
+
+        self.assertIsInstance(
+            run.raised,
+            _ExecvReached,
+            "main() never reached the exec at serve.py:664: %r" % (run,),
+        )
+        self.assertEqual(len(self.spawned), 1, "exactly one llama-server spawn")
+        argv = self.spawned[0]["argv"]
+        self.assertTrue(str(argv[0]).endswith("llama-server"), argv)
+        self.assertIn(str(port), argv)
+        self.assertEqual(
+            self.readiness,
+            [(fm.DEFAULT_HOST, port)],
+            "the readiness check is the gate main()'s post-readiness path is behind",
+        )
+
+        child = self.spawned[0]["handle"]
+        self.assertEqual(
+            self.watchdogs,
+            [(os.getpid(), child.pid)],
+            "start_watchdog (serve.py:663) closes the window every orphan row is about",
+        )
+
+        written = json.loads(Path(serve.SESSION_OPENCODE).read_text())
+        provider = written["provider"][fm.PROVIDER_ID]
+        self.assertEqual(
+            provider["options"]["baseURL"], "http://%s:%d/v1" % (fm.DEFAULT_HOST, port)
+        )
+        self.assertEqual(written["model"], "%s/%s" % (fm.PROVIDER_ID, P12_MODEL_A))
+
+        rc = self.configs / "session.bashrc"
+        self.assertTrue(rc.is_file(), "no session rcfile was written")
+        self.assertIn(str(child.pid), rc.read_text(), "the rcfile's trap names the child")
+        exec_path, exec_argv = self.execs[0]
+        self.assertTrue(exec_path.endswith("bash"), exec_path)
+        self.assertEqual(exec_argv[1:], ["--rcfile", str(rc), "-i"])
+
+        # The happy path leaves the model RUNNING: the orphan rows below must be
+        # satisfied by reaping on failure, never by reaping always.
+        self.assertIsNone(child.poll(), "a successful session must leave llama-server up")
+
+    def test_p12_no_orphan_between_readiness_and_watchdog(self) -> None:
+        """[p12-no-orphan-between-readiness-and-watchdog] both measured legs, on the child.
+
+        Between wait_until_ready succeeding (serve.py:610) and start_watchdog
+        (serve.py:663) there is no try/finally, and Task 12.1 put three raise
+        sites in that window. Measured the way the adjudicator measured it: the
+        llama-server child's liveness after main() returned, not a cleanup call.
+        """
+        self.install_models()
+
+        # Leg (a): no base opencode config -> SystemExit out of
+        # write_session_opencode_config (serve.py:231), called at serve.py:650.
+        run_a = self.drive_main(
+            [P12_MODEL_A, "--no-build-check", "--no-router", "--port", str(free_port())]
+        )
+        self.assertIsInstance(
+            run_a.raised, SystemExit, "leg (a) did not raise where it was measured: %r" % (run_a,)
+        )
+        self.assertEqual(self.watchdogs, [], "leg (a) must fail INSIDE the window")
+        self.assert_child_reaped(self.last_child(), "leg (a): missing base opencode config")
+
+        # Leg (b): the conductor fragment is missing -> an uncaught WiringError out
+        # of apply_conductor_wiring, the raise assertion 12.1-file-refs-exist added.
+        self.write_base_config()
+        fragmentless = self.tmp / "fragmentless-root"
+        fragmentless.mkdir(parents=True, exist_ok=True)
+        self.patch_attr(serve, "REPO_ROOT", fragmentless)
+
+        run_b = self.drive_main(
+            [P12_MODEL_A, "--no-build-check", "--no-router", "--port", str(free_port())]
+        )
+        self.assertIsInstance(
+            run_b.raised,
+            cw.WiringError,
+            "leg (b) did not raise where it was measured: %r" % (run_b,),
+        )
+        self.assertEqual(self.watchdogs, [], "leg (b) must fail INSIDE the window")
+        self.assertEqual(len(self.spawned), 2, "each leg spawns its own llama-server")
+        self.assert_child_reaped(self.last_child(), "leg (b): missing conductor fragment")
+
+    def test_p12_orphan_guard_covers_the_whole_window(self) -> None:
+        """[p12-orphan-guard-covers-the-whole-window] a THIRD raise site is reaped too.
+
+        A two-patch fix - one try/except around write_session_opencode_config,
+        another around apply_conductor_wiring - satisfies the two measured legs
+        and re-opens the leak the moment a fourth raise site appears. So the
+        failure here is injected at make_rcfile (serve.py:662), the LAST step
+        before start_watchdog and neither measured leg: only a guard covering the
+        whole window reaps this one.
+        """
+        self.install_models()
+        self.write_base_config()
+
+        def exploding_rcfile(model_id: str, env: Dict[str, str], server_pid: int, log_path: Path) -> Path:
+            raise _InjectedWindowFailure("injected at serve.py:662, inside the window")
+
+        self.patch_attr(serve, "make_rcfile", exploding_rcfile)
+
+        run = self.drive_main(
+            [P12_MODEL_A, "--no-build-check", "--no-router", "--port", str(free_port())]
+        )
+
+        self.assertIsInstance(
+            run.raised,
+            _InjectedWindowFailure,
+            "the injection did not reach the window: %r" % (run,),
+        )
+        self.assertEqual(self.watchdogs, [], "the injection must land before start_watchdog")
+        self.assertEqual(self.execs, [], "the injection must land before the exec")
+        self.assert_child_reaped(
+            self.last_child(), "a third raise site in the window (serve.py:662)"
+        )
+
+
+class ServeMainPrintEnv(ServeMainCase):
+    """--print-env, driven through main() with both configured ports already in use.
+
+    print_env_report itself is covered above and is not the defect: main() runs
+    the socket-binding, sometimes-interactive port resolution at serve.py:526 and
+    :551, BEFORE the early return at :552, and info() at serve.py:72 is a bare
+    print() to stdout. The measured result was four prose lines on stdout, a URL
+    naming a port nothing listens on, LLAMA_HARNESS_ROUTER=0 and an empty stderr.
+    """
+
+    def test_p12_print_env_stdout_is_only_name_value(self) -> None:
+        """[p12-print-env-stdout-is-only-name-value] `eval "$(serve.py --print-env)"` is safe.
+
+        The block's own comment at serve.py:553-556 already claims this: "every
+        diagnostic goes to stderr so stdout stays NAME=value". With the configured
+        ports in use, stdout carried "port %d is already in use" and "  using %d
+        instead" - and the caller's eval runs them, dying with `port: command not
+        found` before exporting anything.
+        """
+        self.start_live_session()
+        self.stdin.tty = False
+
+        run = self.drive_main([P12_MODEL_A, "--print-env", "--no-build-check"])
+
+        self.assertIsNone(run.raised, "--print-env raised: %r" % (run,))
+        self.assertEqual(run.result, 0)
+        for line in run.stdout.splitlines():
+            if not line.strip():
+                continue
+            self.assertRegex(
+                line,
+                NAME_VALUE_RE,
+                "--print-env wrote prose to stdout, so the caller's eval runs it as a "
+                "command: %r (stderr was %r)" % (line, run.stderr),
+            )
+            self.assertNotIn("\x1b", line, "stdout carried an ANSI escape: %r" % line)
+        env = env_pairs(run.stdout)
+        self.assertIn("LLAMA_HARNESS_URL", env, "stdout carried no session env at all")
+        self.assertIn("OPENCODE_CONFIG", env)
+
+    def test_p12_print_env_reports_the_live_session(self) -> None:
+        """[p12-print-env-reports-the-live-session] the ports the session IS on.
+
+        The row's own promise. Taking the early return before resolve_port would
+        satisfy the stdout row while still reporting numbers nothing is listening
+        on; a --print-env that picks NEW free ports has failed at its one job
+        (P12-SG-2). Here llama-server's port is held by a listener and the router
+        port answers /conductor/health, so both live answers are checkable.
+        """
+        server_port, router_port = self.start_live_session()
+        self.stdin.tty = False
+
+        run = self.drive_main([P12_MODEL_A, "--print-env", "--no-build-check"])
+
+        self.assertIsNone(run.raised, "--print-env raised: %r" % (run,))
+        env = env_pairs(run.stdout)
+        self.assertEqual(
+            env.get("LLAMA_HARNESS_URL"),
+            "http://%s:%d" % (LISTEN_HOST, server_port),
+            "--print-env reported a port the session is not on; the live session is on %d "
+            "(stdout %r)" % (server_port, run.stdout),
+        )
+        # Not an inference: the reported port answers a connection right now.
+        reported = int(env["LLAMA_HARNESS_URL"].rsplit(":", 1)[1])
+        connection = socket.create_connection((LISTEN_HOST, reported), timeout=5)
+        connection.close()
+
+        self.assertEqual(
+            env.get("LLAMA_HARNESS_ROUTER"),
+            "1",
+            "a session running through a live router must report ROUTER=1 (stdout %r)"
+            % run.stdout,
+        )
+        self.assertEqual(
+            env.get("LLAMA_HARNESS_ROUTER_URL"), "http://%s:%d" % (LISTEN_HOST, router_port)
+        )
+
+    def test_p12_print_env_never_prompts(self) -> None:
+        """[p12-print-env-never-prompts] the worst shape: an invisible block on a tty.
+
+        On a tty the pre-fix path reaches prompt("Port to use instead") at
+        serve.py:198 from INSIDE the caller's command substitution, so the
+        operator sees no output, no error and no prompt - just a hang. Driven with
+        a stdin that fails loudly if read and a prompt seam that raises if called.
+        """
+        self.start_live_session()
+        self.stdin.tty = True
+
+        run = self.drive_main([P12_MODEL_A, "--print-env", "--no-build-check"])
+
+        self.assertEqual(
+            self.prompts,
+            [],
+            "--print-env asked %r - inside `eval \"$(...)\"` that is an invisible hang"
+            % (self.prompts[:1],),
+        )
+        self.assertEqual(self.stdin.reads, 0, "--print-env read stdin")
+        self.assertIsNone(run.raised, "--print-env raised: %r" % (run,))
+        self.assertEqual(run.result, 0)
+
+
+_EXITING_ROUTER = '''#!%(python)s
+import os
+import sys
+import time
+
+EVENTS = os.path.join(os.getcwd(), "router-events.log")
+with open(EVENTS, "a") as handle:
+    handle.write("started %%.6f %%d\\n" %% (time.time(), os.getpid()))
+sys.stderr.write(%(message)r)
+sys.stderr.flush()
+sys.exit(%(code)d)
+'''
+
+MUTANT_DELAY_MS = 2500
+MUTANT_FATAL_CODE = 1
+
+
+def starts_of(events: Path) -> List[float]:
+    """The timestamp of every launch the fake router recorded."""
+    out: List[float] = []
+    for line in _read(events).splitlines():
+        if line.startswith("started "):
+            out.append(float(line.split()[1]))
+    return out
+
+
+def inject_after_def(source: str, name: str, statement: str) -> Optional[str]:
+    """Put ``statement`` first in ``name``'s body, whatever its signature says."""
+    marker = "\ndef %s(" % name
+    at = source.find(marker)
+    if at == -1:
+        return None
+    end = source.find(":\n", at)
+    if end == -1:
+        return None
+    return source[: end + 2] + statement + source[end + 2 :]
+
+
+class RouterRestartPolicyExecution(WiringTestCase):
+    """The supervisor's RESTART branch, executed against a router that exits itself.
+
+    All three executed supervisor cases above kill the session shell first, so
+    the router never exits while the shell lives and the restart branch has never
+    run. Everything here - the fake router, the session shell, the supervisor's
+    own router.log - lives under the per-test temp dir, and the fake router is a
+    python script that exits with a chosen code, so no real router is involved.
+    """
+
+    def reap(self, proc: Any) -> None:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+    def plant_exiting_router(self, root: Path, code: int, message: str) -> Path:
+        target = root / "fake-llama-router"
+        target.write_text(
+            _EXITING_ROUTER % {"python": sys.executable, "code": code, "message": message}
+        )
+        target.chmod(target.stat().st_mode | stat.S_IXUSR)
+        return target
+
+    def shut_down(self, shell: Any, supervisor: Any) -> None:
+        """The shell first: the supervisor is meant to end with it, and then reaps."""
+        self.reap(shell)
+        _wait_until(lambda: supervisor.poll() is not None, 15.0)
+        self.reap(supervisor)
+
+    def launch(self, module: Any, name: str, code: int, message: str) -> Tuple[Path, Path, Any, Any]:
+        root = self.tmp / name
+        root.mkdir(parents=True, exist_ok=True)
+        binary = self.plant_exiting_router(root, code, message)
+        schema = self.plant_schema(root)
+        config_path = root / cw.ROUTER_CONFIG_RELPATH
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("{}\n")
+
+        shell = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        supervisor = module.start_router_supervisor(binary, config_path, schema, shell.pid, root)
+        self.addCleanup(self.shut_down, shell, supervisor)
+
+        events = root / "router-events.log"
+        self.assertTrue(
+            _wait_until(lambda: "started " in _read(events), 20.0),
+            "the supervisor never spawned the router binary under %s" % root,
+        )
+        return root, events, supervisor, shell
+
+    def load_mutant(self) -> Any:
+        """scripts/conductor_wiring.py with its PURE policy functions mutated.
+
+        The copy keeps the scripts/<file> layout so anything the supervisor
+        derives from ``__file__`` resolves inside the temp tree rather than back
+        into the real module. Whether the shipped supervisor imports the policy
+        or is generated from it (P12-SG-3), one edit to these functions has to
+        move it; a hand-kept second copy cannot follow.
+        """
+        source = (SCRIPTS_DIR / "conductor_wiring.py").read_text()
+        mutated = inject_after_def(
+            source, "restart_delay_ms", "    return %d\n" % MUTANT_DELAY_MS
+        )
+        self.assertIsNotNone(
+            mutated, "restart_delay_ms is not defined in scripts/conductor_wiring.py"
+        )
+        mutated = inject_after_def(
+            mutated,
+            "router_restart_decision",
+            "    if int(exit_code) == %d:\n"
+            "        return RestartVerdict(False, True, 'mutant policy: fatal')\n"
+            % MUTANT_FATAL_CODE,
+        )
+        self.assertIsNotNone(
+            mutated,
+            "router_restart_decision(exit_code, ...) is not defined in "
+            "scripts/conductor_wiring.py; the mutation harness needs its parameter name",
+        )
+
+        path = self.tmp / "mutant" / "scripts" / "conductor_wiring.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(mutated)
+        spec = importlib.util.spec_from_file_location("conductor_wiring_p12_mutant", str(path))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(module)
+
+        # The mutation harness itself, checked before anything is concluded from it.
+        self.assertEqual(module.restart_delay_ms(1), MUTANT_DELAY_MS)
+        self.assertFalse(module.router_restart_decision(MUTANT_FATAL_CODE, "").restart)
+        return module
+
+    def test_p12_supervisor_restart_branch_is_executed(self) -> None:
+        """[p12-supervisor-restart-branch-is-executed] both directions, executed.
+
+        A retryable exit restarts after the backoff; a C-041 exit 3 does not
+        restart, ends the supervisor with the session shell still alive, and
+        leaves both the router's own stderr line naming the broken field AND the
+        policy's reason for giving up in the log the operator reads.
+        """
+        self.assertTrue(
+            cw.router_restart_decision(1, "").restart, "exit 1 is retryable under C-041"
+        )
+        _root, events, supervisor, shell = self.launch(
+            cw, "restart-retryable", 1, "llama-router: upstream connection reset\n"
+        )
+        self.assertTrue(
+            _wait_until(lambda: len(starts_of(events)) >= 2, 25.0),
+            "the supervisor never restarted a retryable exit 1 while the session shell "
+            "was alive: %r" % _read(events),
+        )
+        starts = starts_of(events)
+        self.assertGreaterEqual(
+            starts[1] - starts[0],
+            cw.BACKOFF_BASE_MS / 1000.0 - 0.1,
+            "the restart came back in %.2fs, faster than the %dms the policy's first "
+            "backoff is" % (starts[1] - starts[0], cw.BACKOFF_BASE_MS),
+        )
+        self.assertTrue(_pid_alive(shell.pid), "the session shell outlives the restart")
+        self.assertIsNone(supervisor.poll(), "the supervisor keeps supervising after a restart")
+
+        fatal = cw.router_restart_decision(3, "")
+        self.assertFalse(fatal.restart, "exit 3 is C-041's ConfigError")
+        self.assertTrue(fatal.fatal)
+        broken = "ConfigError: admission.maxInflightPerModel must be >= 1\n"
+        root3, events3, supervisor3, shell3 = self.launch(cw, "restart-fatal", 3, broken)
+        self.assertFalse(
+            _wait_until(lambda: len(starts_of(events3)) >= 2, 6.0),
+            "a C-041 exit 3 was RESTARTED - the spin that buries the one line naming the "
+            "broken field: %r" % _read(events3),
+        )
+        self.assertTrue(
+            _wait_until(lambda: supervisor3.poll() is not None, 20.0),
+            "the supervisor never gave up on a fatal exit, with the shell still alive",
+        )
+        self.assertTrue(_pid_alive(shell3.pid), "it stopped on its own, not with the shell")
+
+        log = _read(root3 / cw.ROUTER_LOG_RELPATH)
+        self.assertIn(
+            broken.strip(), log, "the router's own line naming the broken field is not visible"
+        )
+        self.assertIn(
+            cw.FATAL_EXIT_REASONS[3],
+            log,
+            "the supervisor's record of giving up carries only the exit number; the "
+            "policy's reason for it never reaches the operator, because the decision was "
+            "not the policy's (MAJOR 2). log was: %r" % log,
+        )
+
+    def test_p12_supervisor_uses_the_policy_functions(self) -> None:
+        """[p12-supervisor-uses-the-policy-functions] one edit moves the shipped supervisor.
+
+        ROUTER_SUPERVISOR_SOURCE carries its own `delay_ms` and `if code == 0 or
+        code in FATAL:` while router_restart_decision, backoff_next and
+        restart_delay_ms have no callers at all. Reading the source for tokens
+        cannot tell a single-sourced supervisor from a duplicate, so this mutates
+        the PURE FUNCTIONS in a throwaway copy of the module and runs THAT copy's
+        supervisor: the restart it makes and the delay it waits must follow the
+        mutation. The three mutations the adjudicator measured - `if True:`,
+        `if code == 0:` and `delay_ms -> return 0` - each break one of the two
+        legs below.
+        """
+        module = self.load_mutant()
+
+        # (1) The delay: the mutated restart_delay_ms is what the supervisor waits.
+        _root, events, _supervisor, _shell = self.launch(
+            module, "mutant-delay", 5, "transient\n"
+        )
+        self.assertTrue(
+            _wait_until(lambda: len(starts_of(events)) >= 2, 30.0),
+            "the supervisor never restarted a retryable exit 5: %r" % _read(events),
+        )
+        starts = starts_of(events)
+        self.assertGreaterEqual(
+            starts[1] - starts[0],
+            MUTANT_DELAY_MS / 1000.0 - 0.3,
+            "the supervisor waited %.2fs after an edit that makes restart_delay_ms() "
+            "return %dms - its backoff is a second copy of the policy, so the two can "
+            "drift with nothing to catch it" % (starts[1] - starts[0], MUTANT_DELAY_MS),
+        )
+
+        # (2) The decision: the mutated router_restart_decision is what it obeys.
+        self.assertTrue(
+            cw.router_restart_decision(MUTANT_FATAL_CODE, "").restart,
+            "exit %d is retryable under the SHIPPED policy; only the mutant calls it fatal"
+            % MUTANT_FATAL_CODE,
+        )
+        _root2, events2, supervisor2, shell2 = self.launch(
+            module, "mutant-decision", MUTANT_FATAL_CODE, "mutant\n"
+        )
+        self.assertFalse(
+            _wait_until(lambda: len(starts_of(events2)) >= 2, 6.0),
+            "the supervisor restarted an exit the mutated router_restart_decision() calls "
+            "FATAL - its restart test is a second copy of the policy (MAJOR 2): %r"
+            % _read(events2),
+        )
+        self.assertTrue(
+            _wait_until(lambda: supervisor2.poll() is not None, 20.0),
+            "the supervisor never gave up on what the policy now calls fatal",
+        )
+        self.assertTrue(_pid_alive(shell2.pid), "it stopped on its own, not with the shell")

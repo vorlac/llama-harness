@@ -212,6 +212,61 @@ def resolve_router_port(host: str, wanted: int, server_port: int) -> int:
     return resolve_port(host, wanted, False, avoid=(server_port,))
 
 
+def port_is_listening(host: str, port: int, timeout: float = 0.35) -> bool:
+    """Whether anything ANSWERS on this port, asked without binding it.
+
+    port_is_free asks the opposite question by binding, which is the one thing a
+    report about a running session must not do.
+    """
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def reported_port(host: str, wanted: int) -> Tuple[int, Optional[str]]:
+    """--print-env's port answer, with a notice when nothing is there.
+
+    resolve_port BINDS, and hands back a DIFFERENT port when the wanted one is
+    busy. For a run about to start llama-server that is right; for --print-env it
+    inverts the flag's one job, because a busy configured port is the signal that
+    the session being reported is running on it. save_session records the port a
+    run resolved to, so the saved number is the live one - this only verifies it,
+    and says so on stderr when the answer is no.
+    """
+    if port_is_listening(host, wanted):
+        return int(wanted), None
+    return int(wanted), (
+        "nothing is listening on %s:%d, so no session appears to be running there; "
+        "the printed URL names where a serve.py run will put one." % (host, int(wanted))
+    )
+
+
+def reported_model(entries, preferred: Optional[str]) -> Tuple[object, Dict[str, object]]:
+    """--print-env's model: the one already chosen, never a picker.
+
+    choose_model writes its list with info() - to stdout - and blocks on a
+    prompt when nothing is preselected. Inside `eval "$(serve.py --print-env)"`
+    the first lands in the caller's eval and the second is an invisible hang, so
+    --print-env reports the model the session was started with or says why it
+    cannot.
+    """
+    for model, man in entries:
+        if model.id == preferred:
+            return model, man
+    if not preferred and len(entries) == 1:
+        return entries[0]
+    if not preferred:
+        raise SystemExit(
+            fm.red("error: ") + "--print-env has no model to report: no model was named and "
+            "%s records none. Start a session first, or pass the model id." % SESSION_FILE
+        )
+    raise SystemExit(
+        fm.red("error: ") + "--print-env cannot report %r: it is not installed." % preferred
+    )
+
+
 def write_session_opencode_config(model_id: str, base_url: str) -> Path:
     """A session-scoped opencode config defaulting to the served model.
 
@@ -416,6 +471,27 @@ def start_watchdog(shell_pid: int, server_pid: int) -> None:
         info(yellow("warning: ") + "could not start cleanup watchdog: %s" % exc)
 
 
+def reap_server(proc: subprocess.Popen) -> None:
+    """Kill the llama-server this run started, for the window where nothing else can.
+
+    Between wait_until_ready succeeding and start_watchdog, the child has no
+    owner: the bash trap does not exist yet, the watchdog is not running, and the
+    router supervisor polls this pid but only ever reaps llama-router. An exit
+    anywhere in there leaves a 20+GB model and its port held by a process nothing
+    is left pointing at, and the next run resolves to the next port and leaks
+    another one.
+    """
+    try:
+        if proc.poll() is None:
+            proc.kill()
+    except OSError:
+        return
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="serve.py",
@@ -516,18 +592,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     saved = load_session(args.fresh)
     interactive = sys.stdin.isatty()
-    model, manifest = choose_model(
-        entries,
-        args.model or (saved.get("model") if not args.fresh else None),
+    preferred = args.model or (saved.get("model") if not args.fresh else None)
+    # --print-env reports a session that already exists, so it takes neither the
+    # picker nor a port: both would ask the operator a question from inside the
+    # caller's `eval "$(...)"`, where the question is invisible and the answer
+    # never comes. Everything it needs is what the last run recorded.
+    model, _manifest = (
+        reported_model(entries, preferred) if args.print_env else choose_model(entries, preferred)
     )
 
     host = args.host or str(saved.get("host") or fm.DEFAULT_HOST)
     wanted_port = args.port or int(saved.get("port") or fm.DEFAULT_PORT)
-    port = resolve_port(host, wanted_port, interactive and not args.port)
-    models_max = args.models_max or int(saved.get("models_max") or 1)
-    ctx = args.ctx or (int(saved["ctx"]) if saved.get("ctx") else None)
-    max_readers = args.max_readers or int(saved.get("max_readers") or cw.DEFAULT_MAX_READERS)
-    slots = cw.derive_slots(max_readers)
+    wanted_router_port = int(args.router_port or saved.get("router_port") or cw.DEFAULT_LISTEN_PORT)
 
     environ = dict(os.environ)
     decision = cw.router_preflight(
@@ -546,25 +622,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     if decision.notice and not args.print_env:
         info(yellow("notice: ") + decision.notice)
 
-    router_port = int(args.router_port or saved.get("router_port") or cw.DEFAULT_LISTEN_PORT)
-    if decision.action == "launch":
-        router_port = resolve_router_port(host, router_port, port)
-
     if args.print_env:
         # --print-env REPORTS the session (its own help: "for scripting"). It starts
         # nothing and writes nothing - not the session opencode config a live session
-        # is reading, not the saved settings - and every diagnostic goes to stderr so
-        # stdout stays NAME=value for the caller's eval.
+        # is reading, not the saved settings, and above all not a socket: the port
+        # resolution below is skipped entirely, because binding is how a report
+        # about a running session turns into a claim about a port nobody is on.
+        # Every diagnostic goes to stderr so stdout stays NAME=value for the
+        # caller's eval. The router's half needs no separate check - print_env_report
+        # asks it for /conductor/health, which is a better answer than a bind.
+        live_port, port_notice = reported_port(host, wanted_port)
         out, notices = cw.print_env_report(
             model.id,
             SESSION_OPENCODE,
             host,
-            port,
+            live_port,
             host,
-            router_port,
+            wanted_router_port,
             fm.CONFIGS_DIR / "conductor-router.json",
             decision,
         )
+        if port_notice:
+            notices.append(port_notice)
         if not SESSION_OPENCODE.is_file():
             notices.append(
                 "no session opencode config at %s yet; OPENCODE_CONFIG names where a "
@@ -576,6 +655,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         for line in out:
             print(line)
         return 0
+
+    # Past here the run is going to START something, so the ports are taken
+    # rather than reported: resolve_port binds to prove they are free and may ask
+    # which one to use instead, both of which only make sense on this side.
+    port = resolve_port(host, wanted_port, interactive and not args.port)
+    models_max = args.models_max or int(saved.get("models_max") or 1)
+    ctx = args.ctx or (int(saved["ctx"]) if saved.get("ctx") else None)
+    max_readers = args.max_readers or int(saved.get("max_readers") or cw.DEFAULT_MAX_READERS)
+    slots = cw.derive_slots(max_readers)
+
+    router_port = wanted_router_port
+    if decision.action == "launch":
+        router_port = resolve_router_port(host, router_port, port)
 
     save_session(
         {
@@ -619,48 +711,63 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     info("    %s ready on http://%s:%d" % (green("ok"), host, port))
 
-    router_config_path = fm.CONFIGS_DIR / "conductor-router.json"
-    routing = cw.Routing(False, cw.openai_base_url(host, port), None)
-    if decision.action == "launch":
-        write_router_config(
-            router_config_path, host, router_port, host, port, slots, args.fresh
-        )
-        # exec keeps this pid, so the shell we are about to become is the pid
-        # the supervisor polls - the same trick start_watchdog uses.
-        supervisor = cw.start_router_supervisor(
-            cw.find_router_binary(REPO_ROOT, environ),
-            router_config_path,
-            Path(decision.schema),
-            os.getpid(),
-            REPO_ROOT,
-        )
-        routing = cw.finalize_routing(decision, host, router_port, host, port)
-        if routing.router_enabled:
-            info("    %s router on http://%s:%d" % (green("ok"), host, router_port))
-        else:
-            # The supervisor only exits with the session shell, and on this leg that
-            # shell is exactly what carries on running - so nothing but this call can
-            # stop it restarting a router the session has stopped pointing at.
-            cw.stop_router_supervisor(supervisor)
-            if routing.notice:
-                info(yellow("notice: ") + routing.notice)
+    # llama-server is now up and UNOWNED. The bash trap does not exist yet, the
+    # watchdog is not running, and the router supervisor reaps llama-router only -
+    # so from here until start_watchdog, this frame is the sole owner of a process
+    # holding a 20+GB model and a port. The guard is on the WINDOW rather than on
+    # the raise sites inside it, because the window is what the ownership gap is:
+    # a step added below inherits the reaping instead of re-opening the leak.
+    try:
+        router_config_path = fm.CONFIGS_DIR / "conductor-router.json"
+        routing = cw.Routing(False, cw.openai_base_url(host, port), None)
+        if decision.action == "launch":
+            write_router_config(
+                router_config_path, host, router_port, host, port, slots, args.fresh
+            )
+            # exec keeps this pid, so the shell we are about to become is the pid
+            # the supervisor polls - the same trick start_watchdog uses.
+            supervisor = cw.start_router_supervisor(
+                cw.find_router_binary(REPO_ROOT, environ),
+                router_config_path,
+                Path(decision.schema),
+                os.getpid(),
+                REPO_ROOT,
+            )
+            routing = cw.finalize_routing(decision, host, router_port, host, port)
+            if routing.router_enabled:
+                info("    %s router on http://%s:%d" % (green("ok"), host, router_port))
+            else:
+                # The supervisor only exits with the session shell, and on this leg that
+                # shell is exactly what carries on running - so nothing but this call can
+                # stop it restarting a router the session has stopped pointing at.
+                cw.stop_router_supervisor(supervisor)
+                if routing.notice:
+                    info(yellow("notice: ") + routing.notice)
 
-    # Written only once the routing decision is final: a session config aimed
-    # at a router that never came up 502s from its first prompt.
-    config_path = write_session_opencode_config(model.id, routing.base_url)
-    env = cw.session_env(
-        model.id,
-        config_path,
-        host,
-        port,
-        proc.pid,
-        routing,
-        router_config_path=router_config_path if routing.router_enabled else None,
-    )
+        # Written only once the routing decision is final: a session config aimed
+        # at a router that never came up 502s from its first prompt.
+        config_path = write_session_opencode_config(model.id, routing.base_url)
+        env = cw.session_env(
+            model.id,
+            config_path,
+            host,
+            port,
+            proc.pid,
+            routing,
+            router_config_path=router_config_path if routing.router_enabled else None,
+        )
 
-    bash = shutil.which("bash") or "/bin/bash"
-    rc = make_rcfile(model.id, env, proc.pid, log_path)
-    start_watchdog(os.getpid(), proc.pid)
+        bash = shutil.which("bash") or "/bin/bash"
+        rc = make_rcfile(model.id, env, proc.pid, log_path)
+        # The handover: past this call the watchdog owns the child, so the guard
+        # ends here. A successful session must leave llama-server RUNNING - reaping
+        # on the way out of a window that closed would kill the model the session
+        # is about to use.
+        start_watchdog(os.getpid(), proc.pid)
+    except BaseException:
+        reap_server(proc)
+        raise
+
     os.execv(bash, [bash, "--rcfile", str(rc), "-i"])
     return 0  # unreachable
 
