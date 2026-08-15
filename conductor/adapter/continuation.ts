@@ -33,8 +33,9 @@
 // and nothing else: every extra field is another way for a wedged run to look like
 // it moved.
 //
-// THE DEBOUNCE, THE ONE-IN-FLIGHT LATCH AND THE LAST OBSERVED SIGNATURE ARE
-// IN-MEMORY (SG-3), held in a caller-owned ContinuationState — the same shape the
+// THE DEBOUNCE, THE ONE-IN-FLIGHT LATCH, THE LAST OBSERVED SIGNATURE AND THE
+// CONSECUTIVE-SEND-FAILURE COUNT ARE IN-MEMORY (SG-3), held in a caller-owned
+// ContinuationState — the same shape the
 // §3.5 registry and the §3.6 override-grant map already use. §2.3's schema has no
 // field for any of them and adding one would be a schema change. Only the counters
 // are durable, and the signature as of the PREVIOUS re-prompt is not recoverable
@@ -60,6 +61,7 @@ import {
 import type { RegistryEntry } from "./tools.ts";
 import type { StateStore } from "./state.ts";
 import { decideEdit } from "../core/gates-edit.ts";
+import type { LegalToolsResult } from "../core/gates-phase.ts";
 import { isHumanTerritory } from "../core/decide.ts";
 import { isTerminal, shouldTerminate } from "../core/stops.ts";
 import type { Config, Item, Queue, QuestionRecord, Run, StopKind } from "../core/types.ts";
@@ -138,6 +140,15 @@ export interface ContinuationState {
   lastSignature: string | null;
   adjudicated: Set<string>;
   pendingConversions: NeedsContextConversion[];
+  /**
+   * CONSECUTIVE re-prompts that never left this process (a synchronous throw out
+   * of the SDK call). It lives here, alongside the debounce clock and the last
+   * signature, for SG-3's reason: §2.3's schema has no field for it and adding
+   * one would be a schema change. In-memory is also the only place it MEANS
+   * anything — it counts failures of ONE live transport, and a restarted process
+   * holds a different one. It is reset by any send that leaves.
+   */
+  consecutiveSendFailures: number;
 }
 
 export function createContinuationState(): ContinuationState {
@@ -147,11 +158,30 @@ export function createContinuationState(): ContinuationState {
     lastSignature: null,
     adjudicated: new Set<string>(),
     pendingConversions: [],
+    consecutiveSendFailures: 0,
   };
 }
 
 /** §3.7.4: the debounce window, measured from the LAST re-prompt (plan line 1462). */
 const DEBOUNCE_MS = 2000;
+
+/**
+ * THE TRANSPORT FLOOR. A send that throws on the way out is charged to NOBODY
+ * per pass (FW-SG-3, and the reasoning at the accounting below): a session that
+ * was never asked cannot be accused of failing to progress. But a transport that
+ * is permanently dead then freezes the counters forever, and §3.7's futile
+ * re-prompt limit — the ONLY wedge detector — can never fire: the fault creates
+ * the very wedge the engine exists to end. So consecutive failures have a floor
+ * of their own, and it stops the run `env` (§2.9's kind for tooling broken).
+ *
+ * It is deliberately LOOSER than core/stops.ts's futile limit. That limit
+ * measures an orchestrator that received three messages and did nothing; this
+ * one measures a transport, where a handful of consecutive faults is still
+ * plausibly transient. A single failure followed by a successful send resets it
+ * and stops nothing — a fix that killed a run on one hiccup would be worse than
+ * the defect it repairs.
+ */
+const CONSECUTIVE_SEND_FAILURE_LIMIT = 5;
 
 export interface StopRecorded {
   kind: string;
@@ -554,20 +584,89 @@ function recordStop(store: StateStore, run: Run, stop: StopRecorded): Run {
 // The composed re-prompt
 // ---------------------------------------------------------------------------
 
+/**
+ * §3.7.1's ACTIONABLE WORK, half one: the items the plan names — "items not
+ * PUBLISHED/blocked". A deferred item is a judgment this run does not revisit,
+ * so it is settled here exactly as it is settled for the report (§3.4).
+ */
+function unfinishedItemIds(store: StateStore, runId: string, queue: Queue | null): string[] {
+  const ids: string[] = [];
+  for (const entry of queue === null ? [] : queue.items) {
+    let item: Item;
+    try {
+      item = store.loadItem(runId, entry.id);
+    } catch {
+      continue;
+    }
+    if (item.state === "PUBLISHED") continue;
+    if (item.blocked !== null) continue;
+    if (item.deferred !== null) continue;
+    ids.push(item.id);
+  }
+  ids.sort();
+  return ids;
+}
+
+/**
+ * The argless tools the gate legalizes for THIS position — the only vocabulary a
+ * re-prompt may reach for when no stage tool is offered (FW-SG-1). Read off the
+ * verdict, so the message can name nothing the gate withheld.
+ */
+function offeredMetaTools(gate: LegalToolsResult): string[] {
+  return [...gate.legal.entries()]
+    .filter(([, hint]) => hint.itemIds === undefined)
+    .map(([tool]) => tool)
+    .sort();
+}
+
+/**
+ * §3.2 makes conductor_status, conductor_decide, conductor_surface and
+ * conductor_defer legal in EVERY non-terminal state, so their presence says
+ * nothing about where the run actually is: the gate offers exactly them, and
+ * only them, on a run whose queue is empty — the one position with genuinely
+ * nothing left to do. A legal tool OUTSIDE this set is the gate naming a lever
+ * this position actually has (in the wedge, conductor_answer against the §2.11
+ * question the blocked item minted), which is what makes a re-prompt something
+ * other than an invented next step.
+ */
+const UNIVERSAL_META_TOOLS: readonly string[] = [
+  "conductor_status",
+  "conductor_decide",
+  "conductor_surface",
+  "conductor_defer",
+];
+
+function positionSpecificTools(offered: string[]): string[] {
+  return offered.filter((tool) => !UNIVERSAL_META_TOOLS.includes(tool));
+}
+
 function composeRePrompt(
   run: Run,
-  recommended: { tool: string; args: { itemId?: string } },
+  recommended: { tool: string; args: { itemId?: string } } | null,
   conversions: NeedsContextConversion[],
+  unfinished: string[],
+  offered: string[],
 ): string {
   const lines: string[] = [
     "conductor: this session has gone idle while run " + run.runId + " still has work to do.",
     "",
     "Run state: " + run.state + ".",
-    "The phase gate's next action is: " +
-      recommended.tool +
-      (recommended.args.itemId === undefined ? "" : " for item " + recommended.args.itemId) +
-      ".",
   ];
+  if (recommended === null) {
+    // FW-SG-1: no stage tool is offered here, so none is named. What the gate DID
+    // return is named instead, together with the work that is still outstanding —
+    // the fact §3.7.1 calls actionable.
+    lines.push("The phase gate offers no per-item stage tool here: nothing is schedulable this wave.");
+    lines.push("Still unfinished — neither published, blocked nor deferred: " + unfinished.join(", ") + ".");
+    lines.push("The actions the gate legalizes right now: " + offered.join(", ") + ".");
+  } else {
+    lines.push(
+      "The phase gate's next action is: " +
+        recommended.tool +
+        (recommended.args.itemId === undefined ? "" : " for item " + recommended.args.itemId) +
+        ".",
+    );
+  }
   if (conversions.length > 0) {
     lines.push("");
     lines.push("A sub-session was refused a permission and needs context before it can proceed:");
@@ -583,7 +682,11 @@ function composeRePrompt(
     }
   }
   lines.push("");
-  lines.push("Call that action now, or answer the open question that is holding the run.");
+  lines.push(
+    recommended === null
+      ? "Take one of those actions now — answering the open question that is holding the run is how the outstanding work becomes schedulable again."
+      : "Call that action now, or answer the open question that is holding the run.",
+  );
   return lines.join("\n");
 }
 
@@ -741,10 +844,27 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   // (h) The gate's own verdict. No second next-step derivation exists.
   const gate = waveVerdict(store, runId, runDir, queue ?? { items: [] });
   const recommended = gate.recommended;
-  if (recommended === null) {
-    // SG-2: a reachable non-terminal position where the gate offers no next step.
-    // Prompting a tool nobody offered would invent state; counting it as a futile
-    // RE-prompt would be a lie, because nothing was re-prompted.
+
+  // §3.7.1 gates re-prompting on ACTIONABLE WORK — "items not PUBLISHED/blocked,
+  // or a legal next run transition" — NOT on a recommended stage tool. The two
+  // came apart in exactly the shape §2.9:911-915 calls the worst failure of the
+  // original design: with A blocked behind an open question and B carrying
+  // dependsOn:[A], cannotEverPublish rightly refuses to call B permanently stuck
+  // (so conductor_report rightly refuses too) while depsReady rightly keeps both
+  // out of the wave (so `recommended` is null). Returning here on that position
+  // froze the counters, which disabled §3.7's ONLY wedge detector, and the run sat
+  // in EXECUTING forever with no human-readable artifact.
+  //
+  // SG-2's branch is kept for the case it was written for. Its concern is real —
+  // "prompting a tool nobody offered would invent state; counting it as a futile
+  // RE-prompt would be a lie, because nothing was re-prompted" — and it is honoured
+  // two ways: the engine stays silent when nothing is actionable, and when it does
+  // speak it names only what `offeredMetaTools` read off this very verdict.
+  const offered = offeredMetaTools(gate);
+  const unfinished = recommended === null ? unfinishedItemIds(store, runId, queue) : [];
+  const actionable =
+    recommended !== null || (unfinished.length > 0 && positionSpecificTools(offered).length > 0);
+  if (!actionable) {
     journal.log("info", "continuation", "idle", { why: gate.why, runState: run.state }, { runId, sessionID });
     return { runId, prompted: false, stop: null };
   }
@@ -779,7 +899,7 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   // is discarded here rather than delivered, and either way the queue is left
   // holding nothing that has already been accounted for.
   const conversions = takeConversionsFor(state, runId, journal, sessionID);
-  const text = composeRePrompt(run, recommended, conversions);
+  const text = composeRePrompt(run, recommended, conversions, unfinished, offered);
 
   // The prompt is FIRED, not awaited: the latch is what bounds concurrency, and
   // awaiting the orchestrator's reply here would hold the hook open for the whole
@@ -834,8 +954,44 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   //
   // A call that RETURNED, and rejects later, did leave: it is counted here, and its
   // rejection is fail-soft in `failed`, which puts the conversions back so nothing
-  // the sub-sessions raised is lost with it.
-  if (!sent) return { runId, prompted: false, stop: null };
+  // the sub-sessions raised is lost with it — and the futile rule above already
+  // bounds THAT case, because the pass was charged.
+  //
+  // What the un-charged case needs instead is a floor of its own. Nothing durable
+  // moves on a failed pass, so without one a permanently dead transport idles
+  // forever: the counters never move, §3.7's only wedge detector never fires, and
+  // the run has no artifact and no end. The count is CONSECUTIVE (any send that
+  // leaves resets it below), so a transient fault costs the run nothing.
+  if (!sent) {
+    state.consecutiveSendFailures += 1;
+    if (state.consecutiveSendFailures < CONSECUTIVE_SEND_FAILURE_LIMIT) {
+      return { runId, prompted: false, stop: null };
+    }
+    const tsMs = now();
+    const reasonDisplay =
+      "the orchestrator session could not be reached: " +
+      String(state.consecutiveSendFailures) +
+      " consecutive re-prompts failed in transport before they left this process, so the run is stopping rather than idling against a dead transport (§2.9 env: tooling broken)";
+    // §2.8 WRITE-AHEAD, as on the wedge path: the trace lands before the stop and
+    // the report, so a process killed mid-disengagement still leaves it.
+    appendAnomaly(runDir, { ts: tsMs, kind: "disengage", detail: reasonDisplay });
+    const stop: StopRecorded = { kind: "env", reasonDisplay, tsMs };
+    run = recordStop(store, run, stop);
+    journal.log(
+      "info",
+      "continuation",
+      "disengage",
+      { stop: stop.kind, consecutiveSendFailures: state.consecutiveSendFailures, reasonDisplay },
+      { runId, sessionID },
+    );
+    // §2.9's normative rule holds for THIS stop too: every stop writes a report,
+    // through the ONE writer, in its stop mode — no closing verify.
+    await driveStopReport(input, runId);
+    cleanupAndArchive(input, run, runDir);
+    state.consecutiveSendFailures = 0;
+    return { runId, prompted: false, stop };
+  }
+  state.consecutiveSendFailures = 0;
 
   run.counters.idleRePrompts += 1;
   if (!resumedMidCount) {
@@ -850,8 +1006,13 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     "continuation",
     "reprompt",
     {
-      tool: recommended.tool,
-      itemId: recommended.args.itemId ?? null,
+      // Null when the gate offered no stage tool and the re-prompt named the meta
+      // tools instead: the record states what the gate returned, not a tool the
+      // engine picked.
+      tool: recommended === null ? null : recommended.tool,
+      itemId: recommended === null ? null : (recommended.args.itemId ?? null),
+      unfinished,
+      offered,
       idleRePrompts: run.counters.idleRePrompts,
       futileRePrompts: run.counters.futileRePrompts,
       surfaced: conversions.length,

@@ -4543,3 +4543,416 @@ test("[10.1-one-reprompt-in-flight] a send that THREW is not accounted for as a 
   );
   store.release();
 });
+
+// ===========================================================================
+// fix-wedge-detector — §3.7.1's condition is ACTIONABLE WORK, and the transport
+// floor underneath it (plan §2.9:896-915, §3.7:1455-1478)
+// ===========================================================================
+//
+// [10.1-idle-null-recommendation] above pins the SG-2 branch on the fixture
+// "I1 BLOCKED, I2 dependsOn I1". That fixture is the WEDGE: §3.7.1 gates
+// re-prompting on ACTIONABLE WORK — "items not PUBLISHED/blocked, or a legal next
+// run transition" — and I2 is neither PUBLISHED nor blocked nor deferred, so by
+// the plan's own definition actionable work exists there. The branch's stated
+// reasoning stays sound for the case it was written for ("prompting a tool nobody
+// offered would invent state"), and the rows below hold it to exactly that case:
+// the re-prompt may name only what legalTools ACTUALLY returns for this position,
+// and a position with genuinely nothing actionable must still be silent.
+
+// The gate's verdict over an arbitrary ITEM VIEW of the same persisted run, built
+// through the same core function and the same input assembly waveVerdict performs.
+// The counterfactual row below uses it to ask the gate — never a string typed
+// here — which stage tool this position EXCLUDES.
+function verdictOver(store: StateStore, runId: string, items: GateItem[]): LegalToolsResult {
+  const run = store.loadRun(runId);
+  const gateRun: GateRun = {
+    state: run.state,
+    stop: run.stop === null ? null : { kind: run.stop.kind },
+    classification: { kind: run.classification.kind },
+  };
+  const questions = readQuestions(runDirOf(store, runId)).map((q) => ({
+    id: q.id,
+    answeredIso: q.answeredIso,
+  }));
+  return legalTools(gateRun, items, questions, true, isRepo(store.root));
+}
+
+interface WedgeFixture {
+  root: string;
+  store: StateStore;
+  runId: string;
+  queue: Queue;
+  questionId: string;
+  journal: { sink: JournalSink; records: CaptureRecord[] };
+  config: Config;
+}
+
+// The §3.7 WEDGE as a persisted fixture: A1 blocked behind an UNANSWERED §2.11
+// question (so conductor_answer is legal and the item can still resume — which is
+// exactly why cannotEverPublish refuses to call it permanently stuck), and B1
+// carrying dependsOn:["A1"] while neither PUBLISHED, blocked nor deferred.
+function seedWedgeFixture(): WedgeFixture {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const queue: Queue = {
+    items: [
+      makeQueueItem("A1", { fileScope: ["src/parser.mjs"], testScope: ["tests/a.test.mjs"] }),
+      makeQueueItem("B1", { fileScope: ["src/b.mjs"], testScope: ["tests/b.test.mjs"], dependsOn: ["A1"] }),
+    ],
+  };
+  seedExecuting(store, runId, queue);
+  const question = appendQuestion(
+    runDirOf(store, runId),
+    {
+      runId,
+      question: HUMAN_Q,
+      askedBy: { role: "testWriter", sessionID: SUB },
+      humanTerritory: true,
+      origin: "implementer-blocked",
+      blocksItems: ["A1"],
+    },
+    START_MS,
+  );
+  store.setBlocked(runId, "A1", {
+    reason: "the test-repair budget is exhausted; a human must answer " + question.id,
+    stage: "RED",
+    questionId: question.id,
+  });
+  return { root, store, runId, queue, questionId: question.id, journal, config };
+}
+
+// ===========================================================================
+// [fw-reprompt-names-only-legal-actions]
+// ===========================================================================
+
+test("[fw-reprompt-names-only-legal-actions] the SG-2 branch's real concern is HONOURED rather than discarded: in the wedge the re-prompt names an action core/gates-phase legalTools actually returns for this position (the meta tools) and names NO stage tool, proved by deriving both sets from the gate over the PERSISTED run — the legal set from legalTools itself, and the excluded stage tools from legalTools over a counterfactual where the blocker is published — never by matching a string typed into this test", async () => {
+  const fx = seedWedgeFixture();
+  const items = gateItemsOf(fx.store, fx.runId, fx.queue);
+  const verdict = verdictOver(fx.store, fx.runId, items);
+
+  // Premise 1: this really IS the SG-2 position — the gate recommends nothing and
+  // offers no per-item stage tool at all (a stage tool is exactly a legal entry
+  // that carries item ids).
+  assert.equal(verdict.recommended, null, "premise: the gate recommends nothing on the wedge fixture");
+  assert.deepEqual(
+    [...verdict.legal.entries()].filter(([, hint]) => hint.itemIds !== undefined).map(([tool]) => tool),
+    [],
+    "premise: and offers NO per-item stage tool — no item is schedulable this wave",
+  );
+  assert.ok(verdict.legal.size > 0, "premise: the run is non-terminal, so the meta tools ARE legal here");
+
+  // Premise 2: the stage tools this position EXCLUDES, asked of the gate rather
+  // than typed. Publishing the blocker is the one change that makes B1's
+  // dependency ready, so whatever stage tool appears is precisely what the wedge
+  // withholds — and what a re-prompt may never name.
+  const unblocked = items.map((it) =>
+    it.id === "A1" ? { ...it, state: "PUBLISHED", blocked: null } : it,
+  );
+  const counterfactual = verdictOver(fx.store, fx.runId, unblocked);
+  const excludedStage = [...counterfactual.legal.entries()]
+    .filter(([, hint]) => hint.itemIds !== undefined)
+    .map(([tool]) => tool)
+    .filter((tool) => !verdict.legal.has(tool));
+  assert.ok(
+    excludedStage.length > 0,
+    "premise: the position really does withhold a stage tool the gate would otherwise offer",
+  );
+
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  await handleSessionIdle({
+    store: fx.store,
+    state: createContinuationState(),
+    registry,
+    sessionID: ORCH,
+    client: wiring.client,
+    config: fx.config,
+    journal: fx.journal.sink,
+    stateHome: freshStateHome(),
+    workspaceKey: "wk",
+    now: makeClock().now,
+  });
+  await turns();
+
+  assert.equal(wiring.sdk.prompts.length, 1, "the wedge re-prompts exactly once: §3.7.1's condition is actionable work");
+  const text = wiring.sdk.prompts[0].text;
+  const named = toolNamesIn(text);
+  assert.ok(named.length > 0, `the re-prompt names an action; got: ${text}`);
+  for (const tool of named) {
+    assert.ok(
+      verdict.legal.has(tool),
+      `the re-prompt names "${tool}", which the gate did NOT legalize here (legal: ${[...verdict.legal.keys()].join(", ")})`,
+    );
+  }
+  for (const tool of excludedStage) {
+    assert.equal(
+      named.includes(tool),
+      false,
+      `the re-prompt names "${tool}", a STAGE tool this position withholds — prompting a tool nobody offered invents state`,
+    );
+  }
+  fx.store.release();
+});
+
+// ===========================================================================
+// [fw-silent-when-truly-nothing-actionable]
+// ===========================================================================
+
+test("[fw-silent-when-truly-nothing-actionable] the fix does NOT become `re-prompt always`, asserted in BOTH directions with the same engine: on a non-terminal EXECUTING run with genuinely nothing actionable — no item at all to be un-PUBLISHED/un-blocked and no legal next run transition, the gate offering neither a stage tool, nor conductor_dispatch_wave, nor conductor_report — the engine prompts NOTHING, charges NEITHER counter and emits exactly one continuation/idle record carrying legalTools' own `why`; while the wedge fixture, which differs only in having actionable work, re-prompts once", async () => {
+  // ---- direction A: genuinely nothing actionable ---------------------------
+  // A persisted queue that carries no work at all. This is the state
+  // adapter/continuation.ts already fails soft into (`queue ?? { items: [] }`), and
+  // it is the ONE position where the gate recommends nothing AND no legal run
+  // transition exists: with any unsettled item the report is refused but the item
+  // is actionable, and with every item settled the report itself becomes the legal
+  // next transition. Nothing to do, and nothing to say about it.
+  const rootA = scratchRepo();
+  const configA = makeConfig();
+  const journalA = makeJournal();
+  const storeA = openStore(rootA, journalA.sink, configA);
+  const runIdA = createRunFor(storeA);
+  const emptyQueue: Queue = { items: [] };
+  seedExecuting(storeA, runIdA, emptyQueue);
+
+  const verdictA = verdictOf(storeA, runIdA, emptyQueue);
+  assert.equal(verdictA.recommended, null, "premise A: the gate recommends nothing");
+  assert.deepEqual(
+    [...verdictA.legal.entries()].filter(([, hint]) => hint.itemIds !== undefined).map(([tool]) => tool),
+    [],
+    "premise A: no per-item stage tool is legal",
+  );
+  assert.equal(verdictA.legal.has("conductor_report"), false, "premise A: conductor_report is NOT a legal exit here");
+  assert.equal(
+    verdictA.legal.has("conductor_dispatch_wave"),
+    false,
+    "premise A: and neither is conductor_dispatch_wave — there is no legal next run transition at all",
+  );
+  assert.ok(verdictA.legal.size > 0, "premise A: the run is still non-terminal — the meta tools remain");
+
+  const beforeA = readRunFile(storeA, runIdA).counters;
+  const registryA = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiringA = makeWiring(registryA);
+  const resA: SessionIdleResult = await handleSessionIdle({
+    store: storeA,
+    state: createContinuationState(),
+    registry: registryA,
+    sessionID: ORCH,
+    client: wiringA.client,
+    config: configA,
+    journal: journalA.sink,
+    stateHome: freshStateHome(),
+    workspaceKey: "wk",
+    now: makeClock().now,
+  });
+  await turns();
+
+  assert.equal(resA.prompted, false, "nothing actionable: the engine still does not invent a next step");
+  assert.equal(wiringA.sdk.prompts.length, 0, "zero prompts");
+  const afterA = readRunFile(storeA, runIdA);
+  assert.equal(afterA.counters.idleRePrompts, beforeA.idleRePrompts, "idleRePrompts untouched — nothing was re-prompted");
+  assert.equal(
+    afterA.counters.futileRePrompts,
+    beforeA.futileRePrompts,
+    "futileRePrompts untouched — a run the engine cannot advance is not a futile RE-PROMPT",
+  );
+  assert.equal(afterA.stop, null, "and a run with nothing to do is not a wedged run: no stop is recorded");
+  const idlesA = continuationRecords(journalA.records, "idle");
+  assert.equal(idlesA.length, 1, "exactly one continuation/idle record, exactly as the SG-2 branch writes today");
+  assert.ok(
+    JSON.stringify(idlesA[0].data).includes(verdictA.why),
+    `the idle record carries legalTools' authoritative why verbatim; got: ${JSON.stringify(idlesA[0].data)}`,
+  );
+  storeA.release();
+
+  // ---- direction B: the wedge, which DOES have actionable work -------------
+  // Same engine, same call shape; the only difference is that B1 is an item
+  // neither PUBLISHED nor blocked nor deferred. A fix that satisfied direction A
+  // by never prompting would fail here, and one that prompted unconditionally
+  // would fail above.
+  const fx = seedWedgeFixture();
+  const itemsB = gateItemsOf(fx.store, fx.runId, fx.queue);
+  const verdictB = verdictOver(fx.store, fx.runId, itemsB);
+  assert.equal(verdictB.recommended, null, "premise B: the gate recommends nothing HERE TOO — the two positions differ only in the work outstanding");
+  const b1 = fx.store.loadItem(fx.runId, "B1");
+  assert.notEqual(b1.state, "PUBLISHED", "premise B: B1 is not PUBLISHED");
+  assert.equal(b1.blocked, null, "premise B: B1 is not blocked");
+  assert.equal(b1.deferred, null, "premise B: B1 is not deferred — §3.7.1 calls that actionable work");
+
+  const registryB = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiringB = makeWiring(registryB);
+  const resB: SessionIdleResult = await handleSessionIdle({
+    store: fx.store,
+    state: createContinuationState(),
+    registry: registryB,
+    sessionID: ORCH,
+    client: wiringB.client,
+    config: fx.config,
+    journal: fx.journal.sink,
+    stateHome: freshStateHome(),
+    workspaceKey: "wk",
+    now: makeClock().now,
+  });
+  await turns();
+
+  assert.equal(resB.prompted, true, "actionable work exists, so the engine re-prompts (§3.7.1)");
+  assert.equal(wiringB.sdk.prompts.length, 1, "exactly one prompt — a re-prompt is one message, not a burst");
+  assert.equal(
+    readRunFile(fx.store, fx.runId).counters.idleRePrompts,
+    1,
+    "and it is charged, because the orchestrator really was asked",
+  );
+  fx.store.release();
+});
+
+// ===========================================================================
+// [fw-transport-failure-charges-nothing-per-pass]
+// ===========================================================================
+
+// A client whose `session.prompt` throws synchronously while `fails()` says so,
+// and otherwise passes straight through to the recording fake.
+function throwingTransport(wiring: Wiring, fails: () => boolean, marker: string): ContinuationClient {
+  return {
+    session: {
+      create: (opts) => wiring.client.session.create(opts),
+      prompt: (opts) => {
+        if (fails()) throw new Error(marker);
+        return wiring.client.session.prompt(opts);
+      },
+      abort: (opts) => wiring.client.session.abort(opts),
+      messages: (opts) => wiring.client.session.messages(opts),
+    },
+    postSessionIdPermissionsPermissionId: (opts) => wiring.client.postSessionIdPermissionsPermissionId(opts),
+  };
+}
+
+test("[fw-transport-failure-charges-nothing-per-pass] the per-pass accounting is UNCHANGED by the transport floor (FW-SG-3): a failed send leaves idleRePrompts and futileRePrompts untouched and does not advance the §3.7.4 clock — a session that was never successfully asked is not accused of failing to progress — and the floor counts CONSECUTIVE failures only: with the floor discovered from the machine rather than typed here, one short of it, then a successful pass, then one short of it again stops nothing", async () => {
+  const MARKER = "INJECTED unreachable transport 4471";
+  const MAX_PASSES = 30;
+
+  // ---- the probe: discover the floor this build actually implements ---------
+  const probe = (() => {
+    const root = scratchRepo();
+    const config = makeConfig();
+    const journal = makeJournal();
+    const store = openStore(root, journal.sink, config);
+    const runId = createRunFor(store);
+    const queue = seedOneItemExecuting(store, runId);
+    return { root, config, journal, store, runId, queue };
+  })();
+  const probeVerdict = verdictOf(probe.store, probe.runId, probe.queue);
+  assert.notEqual(probeVerdict.recommended, null, "premise: the fixture has a live recommendation, so every pass really tries to send");
+
+  const probeRegistry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const probeWiring = makeWiring(probeRegistry);
+  const probeClient = throwingTransport(probeWiring, () => true, MARKER);
+  const probeClock = makeClock();
+  const probeState = createContinuationState();
+  const probeHome = freshStateHome();
+  const probeIdle = async (): Promise<void> => {
+    await handleSessionIdle({
+      store: probe.store,
+      state: probeState,
+      registry: probeRegistry,
+      sessionID: ORCH,
+      client: probeClient,
+      config: probe.config,
+      journal: probe.journal.sink,
+      stateHome: probeHome,
+      workspaceKey: "wk",
+      now: probeClock.now,
+    });
+    await turns();
+    probeClock.advance(DEBOUNCE_MS * 5);
+  };
+
+  // The FIRST failed pass, asserted on its own: nothing charged, and the §3.7.4
+  // clock not advanced (it paces re-prompts the orchestrator RECEIVES).
+  await probeIdle();
+  const afterOne = readRunFile(probe.store, probe.runId);
+  assert.equal(probeWiring.sdk.prompts.length, 0, "premise: not one prompt reached the transport");
+  assert.equal(afterOne.counters.idleRePrompts, 0, "a send that never left this process is not counted as a re-prompt");
+  assert.equal(afterOne.counters.futileRePrompts, 0, "nor charged to the futility rule");
+  assert.equal(probeState.lastRePromptMs, null, "and the §3.7.4 debounce clock was not advanced by a message nobody got");
+  assert.equal(afterOne.stop, null, "one transport hiccup stops nothing");
+
+  let floor: number | null = null;
+  for (let pass = 2; pass <= MAX_PASSES && floor === null; pass += 1) {
+    await probeIdle();
+    if (readRunFile(probe.store, probe.runId).stop !== null) floor = pass;
+  }
+  assert.notEqual(
+    floor,
+    null,
+    `a permanently dead transport must have a FLOOR: ${MAX_PASSES} consecutive failed passes recorded no stop, so §3.7's only wedge detector stays inert forever`,
+  );
+  const limit = floor ?? 0;
+  assert.ok(limit >= 2, `the floor is a floor, not a hair trigger; it fired on pass ${String(limit)}`);
+  assert.equal(
+    readRunFile(probe.store, probe.runId).counters.idleRePrompts,
+    0,
+    "and reaching the floor still charged the orchestrator nothing (FW-SG-3)",
+  );
+  probe.store.release();
+
+  // ---- the subject: a SINGLE transient failure resets the count -------------
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  seedOneItemExecuting(store, runId);
+
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  let failing = true;
+  const client = throwingTransport(wiring, () => failing, MARKER);
+  const clock = makeClock();
+  const state = createContinuationState();
+  const stateHome = freshStateHome();
+  const idle = async (): Promise<void> => {
+    await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client,
+      config,
+      journal: journal.sink,
+      stateHome,
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 5);
+  };
+
+  for (let pass = 1; pass < limit; pass += 1) await idle();
+  assert.equal(readRunFile(store, runId).stop, null, `one short of the floor (${limit - 1} failures) stops nothing`);
+
+  failing = false;
+  await idle();
+  assert.equal(wiring.sdk.prompts.length, 1, "the transport recovered and the orchestrator really was asked");
+  const afterSuccess = readRunFile(store, runId);
+  assert.equal(afterSuccess.counters.idleRePrompts, 1, "the ONE delivered re-prompt is the only one charged");
+  assert.equal(afterSuccess.stop, null, "and a recovered run is not stopped");
+  const clockAtSuccess = state.lastRePromptMs;
+  assert.notEqual(clockAtSuccess, null, "a DELIVERED re-prompt does advance the §3.7.4 clock");
+
+  failing = true;
+  for (let pass = 1; pass < limit; pass += 1) await idle();
+  const end = readRunFile(store, runId);
+  assert.equal(
+    end.stop,
+    null,
+    `the consecutive-failure count RESET on the successful pass: ${limit - 1} failures either side of it must not add up to the floor`,
+  );
+  assert.equal(isTerminal(end), false, "so the run is still live");
+  assert.equal(end.counters.idleRePrompts, 1, "and the later failures charged nothing either");
+  assert.equal(end.counters.futileRePrompts, afterSuccess.counters.futileRePrompts, "the futile counter is untouched by failed sends");
+  assert.equal(state.lastRePromptMs, clockAtSuccess, "and the §3.7.4 clock still reads the last DELIVERED re-prompt");
+  assert.equal(wiring.sdk.prompts.length, 1, "exactly one prompt ever left this process");
+  store.release();
+});

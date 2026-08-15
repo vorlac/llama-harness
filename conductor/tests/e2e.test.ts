@@ -105,6 +105,7 @@ import { openWorkspace } from "../adapter/state.ts";
 import type { StateStore } from "../adapter/state.ts";
 import { readQuestions } from "../adapter/questions.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
+import { validate } from "../core/types.ts";
 import type { Config, EvidenceRecord, Item, Run } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -2804,5 +2805,580 @@ test(
       `the green verify DISCLOSES the exclusion it rests on (§2.11): ${JSON.stringify(greenVerify)}`,
     );
 
+  },
+);
+
+// ===========================================================================
+// fix-wedge-detector — the blocked-DEPENDENT wedge (plan §2.9:911-915, §3.7.1)
+// ===========================================================================
+//
+// Scenario 5 above wedges a run behind an INDEPENDENT sibling nobody started.
+// This block wedges it behind a DEPENDENT one — item B carrying dependsOn:["A1"]
+// while A1 is blocked — and that difference is the whole defect. §3.7.1 gates
+// re-prompting on ACTIONABLE WORK ("items not PUBLISHED/blocked, or a legal next
+// run transition"), and B is neither PUBLISHED nor blocked nor deferred, so the
+// plan says actionable work EXISTS here. The committed code disagrees for three
+// individually-correct reasons that compose into a hole:
+//
+//   * core/gates-phase.ts cannotEverPublish deliberately does NOT treat a BLOCKED
+//     dependency as permanently stuck ("a question can be answered and the item
+//     resumes"), so B is unsettled and conductor_report CORRECTLY refuses;
+//   * depsReady excludes B (A1 is not PUBLISHED) and isActionable excludes A1 (it
+//     is blocked), so nextWave is empty and gate.recommended is null;
+//   * adapter/continuation.ts:743-750 returns WITHOUT prompting whenever
+//     recommended === null.
+//
+// Net: no re-prompt, so counters.futileRePrompts never moves, so core/stops.ts:113
+// — which §3.7.2 calls "the ONLY wedge detector" — can never fire. The run sits in
+// EXECUTING forever with no human-readable artifact, which is verbatim the failure
+// §2.9:911-915 says the design exists to close.
+//
+// THE THREE ROWS BELOW ARE THREE PROPERTIES OF ONE WALK. Building this fixture
+// costs a real repo, a real fan-out and real `node --test` spawns, and the wedge
+// itself costs four §3.7.4 debounce windows of wall clock, so the walk is
+// performed ONCE, it OBSERVES ONLY (it contains no assertion of its own), and each
+// test asserts over the record it left. Every idle pass enters through the
+// PLUGIN'S OWN `event` bus hook and no other door: a test that called
+// handleSessionIdle directly would prove the engine works and prove nothing about
+// whether anything reaches it, which is exactly what is broken.
+
+const WEDGE_BAD_TEST = "tests/wedge-broken.test.ts";
+const WEDGE_DEP_TEST = "tests/wedge-dependent.test.ts";
+// A test with a genuine syntax error: §2.6.1 classifies it `error`, never a legal
+// red, however many times the repair budget re-writes it.
+const WEDGE_BROKEN_SOURCE = 'import test from "node:test";\ntest("broken", () => {\n  assert.equal(((;\n});\n';
+// Three futile passes, a fourth that must stop, and a fifth whose silence is a
+// decision rather than a dropped call.
+const WEDGE_IDLE_PASSES = 5;
+
+interface WedgePass {
+  prompts: number;
+  idleRePrompts: number;
+  futileRePrompts: number;
+  stopKind: string | null;
+  stopReason: string | null;
+  terminal: boolean;
+  rePromptRecords: number;
+}
+
+interface WedgeObservation {
+  bench: Bench;
+  questionId: string;
+  ledgerQuestionIds: string[];
+  itemA: Item;
+  itemB: Item;
+  bDispatched: number;
+  reportRefusal: string | null;
+  prompts: Array<{ sessionID: string; text: string }>;
+  passes: WedgePass[];
+  evidenceBefore: string;
+  evidenceAfter: string;
+  anomalies: Array<Record<string, unknown>>;
+  reportMd: string | null;
+  staleRed: unknown;
+}
+
+let wedgeWalkPromise: Promise<WedgeObservation> | null = null;
+
+function wedgeWalk(): Promise<WedgeObservation> {
+  if (wedgeWalkPromise === null) wedgeWalkPromise = runWedgeWalk();
+  return wedgeWalkPromise;
+}
+
+async function runWedgeWalk(): Promise<WedgeObservation> {
+  const QUEUE = {
+    items: [
+      queueItem({ id: "A1", title: "the blocker", fileScope: ["src/wedge-a.ts"], testScope: [WEDGE_BAD_TEST] }),
+      queueItem({
+        id: "B1",
+        title: "the dependent nobody can start",
+        fileScope: ["src/wedge-b.ts"],
+        testScope: [WEDGE_DEP_TEST],
+        dependsOn: ["A1"],
+      }),
+    ],
+  };
+
+  const script: Script = (ctx) => {
+    if (ctx.role === "mechanical") {
+      return { body: { kind: "work", rationale: "a behavioural change", confidence: "high", trivialItem: null } };
+    }
+    if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+    if (ctx.role === "planner") {
+      if (ctx.nth === 0) return { body: QUEUE };
+      return { body: { markdown: "# plan\n\nBuild the blocker, then the dependent.\n", decisions: [] } };
+    }
+    if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+    if (ctx.role === "testWriter") {
+      // Every repair attempt writes the same unevaluable test, so the budget is
+      // really exhausted rather than short-circuited.
+      return { body: done("wrote the test"), write: [{ rel: WEDGE_BAD_TEST, text: WEDGE_BROKEN_SOURCE }] };
+    }
+    if (ctx.role === "reviewer") {
+      if (ctx.itemState === "RED") return { body: testVet() };
+      return { body: noFindings() };
+    }
+    return { body: done("nothing to do") };
+  };
+
+  const cont = makeContinuationClient();
+  const bench = await makeBench({
+    tag: "wedgedep",
+    prompt: "build the blocker and the thing that depends on it",
+    // maxImplementers is left at its default: the DEPENDENCY is what must keep B1
+    // out of the wave, not a wave-width cap. If B1 were merely crowded out this
+    // fixture would be scenario 5 again.
+    config: makeConfig({ testRepairAttempts: 1 }),
+    script,
+    client: cont.client,
+  });
+
+  await handleClassify({ ...stageBase(bench) });
+  await handleDecompose({ ...stageBase(bench) });
+  await handlePlan({ ...stageBase(bench) });
+  await handlePlanReview({ ...stageBase(bench) });
+  await handleDispatchWave(waveArgs(bench));
+
+  const itemA = itemOf(bench, "A1");
+  const itemB = itemOf(bench, "B1");
+  const questionId = itemA.blocked?.questionId ?? "";
+  const ledgerQuestionIds = readQuestions(bench.runDir)
+    .filter((q) => q.answeredIso === null)
+    .map((q) => q.id);
+  const bDispatched = bench.wiring.prompted.filter((p) => p.itemId === "B1").length;
+
+  // conductor_report's refusal is CORRECT and is not in scope for this fix
+  // (FW-SG-4). It is recorded because it is what makes the wedge a wedge: the run
+  // has no legal exit through the report, so if nothing re-prompts either, nothing
+  // ends it at all.
+  let reportRefusal: string | null = null;
+  try {
+    await handleReport(reportArgs(bench));
+  } catch (err) {
+    reportRefusal = err instanceof Error ? err.message : String(err);
+  }
+
+  // Fingerprinted BYTE FOR BYTE, not counted: a stop-report "proves no claim and
+  // re-runs nothing" (§2.9), and comparing verify-record COUNTS across a path that
+  // has none either way is 0 === 0 — vacuously true of an implementation that ran
+  // a full closing verify and of one that ran nothing.
+  const evidencePath = path.join(bench.runDir, "evidence.jsonl");
+  const evidenceBefore = readFileSync(evidencePath, "utf8");
+
+  const passes: WedgePass[] = [];
+  const savedStateHome = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = bench.stateHome;
+  try {
+    for (let pass = 1; pass <= WEDGE_IDLE_PASSES; pass += 1) {
+      // Each pass waits out the §3.7.4 window, which is what makes it a real pass
+      // rather than a silently debounced one. The run does not move between them,
+      // so every futility signature is identical by measurement.
+      if (pass > 1) await sleep(CONTINUATION_DEBOUNCE_MS + 200);
+      await sendIdle(bench.hooks, ORCH);
+      const live = bench.store.loadRun(bench.runId);
+      passes.push({
+        prompts: cont.prompts.length,
+        idleRePrompts: live.counters.idleRePrompts,
+        futileRePrompts: live.counters.futileRePrompts,
+        stopKind: live.stop === null ? null : live.stop.kind,
+        stopReason: live.stop === null ? null : live.stop.reasonDisplay,
+        terminal: isTerminal(live),
+        rePromptRecords: rePromptRecords(bench.runDir).length,
+      });
+    }
+  } finally {
+    if (savedStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = savedStateHome;
+  }
+
+  const reportPath = path.join(bench.runDir, "report.md");
+  return {
+    bench,
+    questionId,
+    ledgerQuestionIds,
+    itemA,
+    itemB,
+    bDispatched,
+    reportRefusal,
+    prompts: cont.prompts,
+    passes,
+    evidenceBefore,
+    evidenceAfter: readFileSync(evidencePath, "utf8"),
+    anomalies: readAnomalies(bench.runDir),
+    reportMd: existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null,
+    staleRed: bench.store.readStaleRed(),
+  };
+}
+
+test(
+  "[fw-blocked-dependent-reprompts] §3.7.1's condition is ACTIONABLE WORK, not a recommended stage tool: with A1 blocked on an unanswered §2.11 question and B1 carrying dependsOn:[A1] — B1 neither PUBLISHED nor blocked nor deferred, so actionable work exists by the plan's own definition — a session.idle through the REAL plugin bus hook RE-PROMPTS the orchestrator, even though the gate offers no stage tool for this position",
+  { timeout: 300_000 },
+  async () => {
+    const w = await wedgeWalk();
+
+    // --- the premises, all measured off persisted state ----------------------
+    assert.notEqual(w.itemA.blocked, null, "premise: A1 is BLOCKED after its test-repair budget was exhausted");
+    assert.ok(w.questionId.length > 0, "premise: the block carries a §2.11 question id a human can answer");
+    assert.ok(
+      w.ledgerQuestionIds.includes(w.questionId),
+      `premise: that question is OPEN on questions.jsonl (open ids: ${w.ledgerQuestionIds.join(", ")})`,
+    );
+    assert.equal(w.itemB.state, "PENDING", "premise: B1 was never started");
+    assert.notEqual(w.itemB.state, "PUBLISHED", "premise: B1 is not PUBLISHED");
+    assert.equal(w.itemB.blocked, null, "premise: B1 is not blocked");
+    assert.equal(w.itemB.deferred, null, "premise: B1 is not deferred — it is exactly §3.7.1's actionable item");
+    assert.equal(
+      w.bDispatched,
+      0,
+      "premise: no sub-session was ever opened for B1 — the DEPENDENCY kept it out of the wave, not a wave-width cap",
+    );
+    assert.notEqual(
+      w.reportRefusal,
+      null,
+      "premise: conductor_report REFUSES this run (FW-SG-4, correct and out of scope) — so the report is no exit either",
+    );
+    assert.match(
+      String(w.reportRefusal),
+      /B1/,
+      "premise: and the refusal names B1 as the unsettled item, which is the same fact §3.7.1 calls actionable",
+    );
+
+    // --- the row -------------------------------------------------------------
+    const first = w.passes[0];
+    assert.equal(
+      first.prompts,
+      1,
+      "the first session.idle RE-PROMPTED the orchestrator: §3.7.1 gates on actionable work, and B1 is actionable work",
+    );
+    assert.equal(w.prompts[0].sessionID, ORCH, "the re-prompt went to the ORCHESTRATOR's own session");
+    assert.ok(w.prompts[0].text.length > 0, "and carried a message, not an empty body");
+    assert.match(w.prompts[0].text, new RegExp(w.bench.runId), "the re-prompt names the run it is about");
+    assert.equal(first.idleRePrompts, 1, "counters.idleRePrompts was charged exactly once for it");
+    assert.equal(
+      first.rePromptRecords,
+      1,
+      "and the plugin's own journal carries exactly one continuation/reprompt record for the pass",
+    );
+  },
+);
+
+test(
+  "[fw-blocked-dependent-reaches-noop] the wedge now ENDS: three futile idle passes in the blocked-dependent shape drive counters.idleRePrompts and counters.futileRePrompts to 3 on an identical run-state signature, the FOURTH pass records stop {kind:'noop'} plus a §2.8 disengage anomaly and makes the run terminal to core/stops.ts isTerminal, and a FIFTH pass — waited past the real §3.7.4 debounce so its silence is a decision and not a dropped call — journals no further continuation/reprompt record",
+  { timeout: 300_000 },
+  async () => {
+    const w = await wedgeWalk();
+
+    for (let pass = 1; pass <= 3; pass += 1) {
+      const p = w.passes[pass - 1];
+      assert.equal(p.prompts, pass, `idle pass ${pass} really re-prompted the orchestrator`);
+      assert.equal(p.idleRePrompts, pass, `counters.idleRePrompts reads ${pass} after pass ${pass}`);
+      assert.equal(
+        p.futileRePrompts,
+        pass,
+        `counters.futileRePrompts reads ${pass}: the run-state signature was identical, so the pass was FUTILE by measurement`,
+      );
+      assert.equal(p.stopKind, null, `the run is still live after ${pass} re-prompt(s): the §3.7.2 limit is 3, not ${pass}`);
+      assert.equal(p.terminal, false, "and still non-terminal to the ONE §2.3 definition");
+    }
+    assert.equal(w.passes[2].rePromptRecords, 3, "the journal recorded all three re-prompts");
+
+    const fourth = w.passes[3];
+    assert.equal(fourth.stopKind, "noop", "the FOURTH pass stops the run: §2.9's kind for a wedged run is `noop`");
+    assert.match(
+      String(fourth.stopReason),
+      /no observable progress/i,
+      "and says WHY in words a human reads, not only in a kind",
+    );
+    assert.equal(fourth.terminal, true, "the run is TERMINAL to core/stops.ts isTerminal");
+    assert.equal(fourth.prompts, 3, "no fourth prompt left the process");
+    assert.equal(fourth.idleRePrompts, 3, "and no fourth re-prompt was charged to the orchestrator");
+    assert.equal(fourth.futileRePrompts, 3, "the futile counter stopped at the limit it fired on");
+
+    const disengage = w.anomalies.filter((a) => a.kind === "disengage");
+    assert.equal(disengage.length, 1, "the wedge left exactly one §2.8 `disengage` anomaly");
+    assert.match(
+      String(disengage[0].detail ?? ""),
+      /re-prompt/i,
+      "the anomaly names what it disengaged from, not merely that it did",
+    );
+
+    const fifth = w.passes[4];
+    assert.equal(fifth.prompts, 3, "a terminal run is never re-prompted again");
+    assert.equal(
+      fifth.rePromptRecords,
+      3,
+      "and no further continuation/reprompt record was journaled after the stop, on a pass waited past the debounce",
+    );
+    assert.equal(fifth.idleRePrompts, 3, "the counters are frozen where the stop left them");
+  },
+);
+
+test(
+  "[fw-wedge-stop-report-written] §2.9's normative 'every stop writes a report' holds on the blocked-dependent wedge path: report.md is written in stop-report mode with the noop kind as its headline, naming A1 with the exact question id its block carries on questions.jsonl, B1's unfinished disposition, and the abandoned red newly added to the §2.11 stale-red registry — and NO closing verify ran for it, proved by comparing evidence.jsonl BYTE FOR BYTE across the whole wedge path rather than by counting verify records",
+  { timeout: 300_000 },
+  async () => {
+    const w = await wedgeWalk();
+    assert.notEqual(
+      w.reportMd,
+      null,
+      "§2.9: recording a stop is not a terminal action on its own — the recorder MUST leave a report.md behind",
+    );
+    const md = String(w.reportMd);
+
+    assert.match(md, /^# conductor stop-report — noop — run /m, "the stop KIND is the report's headline");
+    assert.match(md, /^Stop kind: noop$/m, "and is stated as a field, not only in prose");
+    assert.match(md, /^Closing verify: none/m, "the report declares that it re-ran nothing (§2.9)");
+
+    // The per-item blocks, read as BLOCKS: a bare /^Disposition: blocked$/m would
+    // pass on a report that attached that disposition to the wrong item.
+    const block = (id: string): string => {
+      const found = md.split(/^### /m).find((part) => part.startsWith(id + " "));
+      assert.ok(found !== undefined, `the stop-report has a section for ${id}; got:\n${md}`);
+      return String(found);
+    };
+    assert.match(block("A1"), /^A1 — /, "the stop-report names the blocked item with its FSM position");
+    assert.match(block("A1"), /^Disposition: blocked$/m, "with its settled disposition");
+    assert.match(block("B1"), /^B1 — PENDING/, "it names the dependent at the position nobody moved it off");
+    assert.match(
+      block("B1"),
+      /^Disposition: unfinished$/m,
+      "and calls that disposition unfinished rather than settled — B1 is the reason the run could not close",
+    );
+
+    assert.match(
+      md,
+      new RegExp("- " + w.questionId + " — "),
+      "the open-questions section names the EXACT question id A1's block carries, which is what a human must answer to unwedge it",
+    );
+    assert.match(
+      md,
+      new RegExp("- " + WEDGE_BAD_TEST.replace(/\./g, "\\.") + " \\(A1\\)"),
+      "and it names the newly-registered stale-red path against the item that owns it",
+    );
+    assert.equal(
+      md.includes(WEDGE_DEP_TEST),
+      false,
+      "B1's test was never written, so nothing about it was registered stale-red: the registry records files that EXIST",
+    );
+    assert.ok(
+      JSON.stringify(w.staleRed).includes("wedge-broken"),
+      "the abandoned red really is on the §2.11 registry, not merely printed in the report",
+    );
+
+    // NO CLOSING VERIFY. Not "a verify that passed" — none at all, and asserted as
+    // BYTES: a count comparison over a path with zero verifies either way is
+    // 0 === 0 and would hold for an implementation that ran a full verify too.
+    assert.equal(
+      w.evidenceAfter,
+      w.evidenceBefore,
+      "the stop path appended NOTHING to the §2.6 evidence ledger — a stop-report proves no claim (§2.9)",
+    );
+  },
+);
+
+// ===========================================================================
+// fix-wedge-detector — the transport floor (plan §2.9:888-897, FW-SG-2/SG-3)
+// ===========================================================================
+//
+// The plugin's `event` hook hands `input.client` to the §3.7 engine with NO shape
+// check (plugin/index.ts: `input.client as unknown as ContinuationClient`). Give
+// it the emptiest client a caller can supply — `{}` — and every re-prompt takes a
+// SYNCHRONOUS throw out of `session.prompt`. handleSessionIdle then sets
+// sent=false and deliberately charges nothing, which is RIGHT per pass ("an
+// accusation against a session that was never asked once") and must stay. What is
+// missing is a FLOOR across passes: with none, a permanently dead transport freezes
+// the counters, the futile-re-prompt detector can never fire, and the run is
+// un-endable — the fault creates the very wedge the engine exists to end.
+//
+// Both rows below observe ONE walk, for the same reason the wedge rows do. Note
+// that this walk needs no sleeps: a failed send deliberately does NOT advance the
+// §3.7.4 debounce clock, so consecutive failing passes are never debounced.
+
+const TRANSPORT_MAX_IDLE_PASSES = 30;
+
+interface TransportObservation {
+  bench: Bench;
+  floor: number | null;
+  stopKind: string | null;
+  stopReason: string | null;
+  terminal: boolean;
+  idleRePrompts: number;
+  futileRePrompts: number;
+  anomalies: Array<Record<string, unknown>>;
+  reportMd: string | null;
+  journal: Array<Record<string, unknown>>;
+}
+
+let transportWalkPromise: Promise<TransportObservation> | null = null;
+
+function transportWalk(): Promise<TransportObservation> {
+  if (transportWalkPromise === null) transportWalkPromise = runTransportWalk();
+  return transportWalkPromise;
+}
+
+async function runTransportWalk(): Promise<TransportObservation> {
+  const script: Script = (ctx) => {
+    if (ctx.role === "mechanical") {
+      return { body: { kind: "work", rationale: "a behavioural change", confidence: "high", trivialItem: null } };
+    }
+    if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+    if (ctx.role === "planner") {
+      if (ctx.nth === 0) {
+        return {
+          body: {
+            items: [
+              queueItem({
+                id: "T1",
+                title: "the item nobody will ever hear about",
+                fileScope: ["src/transport.ts"],
+                testScope: ["tests/transport.test.ts"],
+              }),
+            ],
+          },
+        };
+      }
+      return { body: { markdown: "# plan\n\nAn item behind an unreachable orchestrator.\n", decisions: [] } };
+    }
+    return { body: done("nothing to do") };
+  };
+
+  const bench = await makeBench({
+    tag: "wedgetransport",
+    prompt: "build the thing behind a dead transport",
+    config: makeConfig(),
+    script,
+    // The C-081 shape: the emptiest client the plugin's unchecked cast accepts.
+    // `{}.session.prompt` is not a function, so every send throws synchronously —
+    // the machine is being fed a state it must REFUSE to act on indefinitely.
+    client: {},
+  });
+
+  // Classify + decompose so the run carries a queue.json: the §2.9 stop-report is
+  // written by the ONE report writer, which reads the queue to name dispositions.
+  await handleClassify({ ...stageBase(bench) });
+  await handleDecompose({ ...stageBase(bench) });
+
+  let floor: number | null = null;
+  const savedStateHome = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = bench.stateHome;
+  try {
+    for (let pass = 1; pass <= TRANSPORT_MAX_IDLE_PASSES && floor === null; pass += 1) {
+      await sendIdle(bench.hooks, ORCH);
+      if (bench.store.loadRun(bench.runId).stop !== null) floor = pass;
+    }
+  } finally {
+    if (savedStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = savedStateHome;
+  }
+
+  const live = bench.store.loadRun(bench.runId);
+  const reportPath = path.join(bench.runDir, "report.md");
+  return {
+    bench,
+    floor,
+    stopKind: live.stop === null ? null : live.stop.kind,
+    stopReason: live.stop === null ? null : live.stop.reasonDisplay,
+    terminal: isTerminal(live),
+    idleRePrompts: live.counters.idleRePrompts,
+    futileRePrompts: live.counters.futileRePrompts,
+    anomalies: readAnomalies(bench.runDir),
+    reportMd: existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null,
+    journal: readRunJournal(bench.runDir),
+  };
+}
+
+// The words a legible transport-failure reason may reach for. Deliberately a
+// UNION rather than one phrase this file invented: the assertion is that the
+// reason names the failure at all, not that it matches a sentence typed here.
+const TRANSPORT_WORDS = /transport|unreachable|deliver|could not (be )?(send|sent|prompt)|prompt|reach/i;
+
+test(
+  "[fw-transport-failure-has-a-floor] a client whose session.prompt throws — the `{}` the plugin's unchecked `input.client` cast happily forwards — can no longer disable the §3.7 detector forever: consecutive transport failures are COUNTED, and at the floor the run records a stop from the CLOSED §2.9 vocabulary — `env`, the kind whose definition covers tooling broken (FW-SG-2) — with the reason naming the transport failure, writes the stop-report, and becomes terminal to core/stops.ts isTerminal",
+  { timeout: 300_000 },
+  async () => {
+    const w = await transportWalk();
+
+    assert.notEqual(
+      w.floor,
+      null,
+      `a permanently dead transport must not leave the run un-endable: ${TRANSPORT_MAX_IDLE_PASSES} idle passes through the plugin's own bus hook recorded no stop at all, so §3.7's ONLY wedge detector is inert on this path`,
+    );
+    assert.ok(
+      (w.floor ?? 0) >= 2,
+      `the floor is a FLOOR, not a hair trigger: stopping on pass ${String(w.floor)} would kill a run on one transient hiccup, which is worse than the defect`,
+    );
+    assert.equal(
+      w.stopKind,
+      "env",
+      "§2.9 assigns `env` to tooling broken, and STOP_KINDS is closed — no kind may be invented and `noop` (no observable progress) would misreport a run whose orchestrator was never reachable",
+    );
+    assert.match(String(w.stopReason), TRANSPORT_WORDS, "the reason NAMES the transport failure");
+    assert.equal(
+      /no observable progress/i.test(String(w.stopReason)),
+      false,
+      "and does not reuse the wedge reason: this orchestrator made no progress because it was never asked",
+    );
+    assert.equal(w.terminal, true, "the run is TERMINAL to the ONE §2.3 definition, so it is genuinely over");
+    assert.notEqual(
+      w.reportMd,
+      null,
+      "§2.9: every stop writes a report — the recorder MUST invoke the report writer before the run goes quiet",
+    );
+    assert.match(String(w.reportMd), /^Stop kind: env$/m, "and the artifact carries the stop it was written for");
+
+    // FW-SG-3, restated at the floor: reaching it may not retroactively charge the
+    // orchestrator for messages it never received.
+    assert.equal(w.idleRePrompts, 0, "not one failed send was counted as a re-prompt");
+    assert.equal(w.futileRePrompts, 0, "nor charged to the futility rule, which describes the ORCHESTRATOR's silence");
+  },
+);
+
+test(
+  "[fw-transport-failure-is-visible] the transport stop is LEGIBLE to the human who has to act on it: a schema-valid §2.8 anomaly names the transport failure, the stop-report's headline carries the `env` kind and its reason, and the failure is journaled at error level — so a run whose orchestrator became unreachable reports that fact instead of leaving one error line per idle event as its only trace",
+  { timeout: 300_000 },
+  async () => {
+    const w = await transportWalk();
+
+    const named = w.anomalies.filter(
+      (a) =>
+        TRANSPORT_WORDS.test(String(a.detail ?? "")) &&
+        // The wedge reason also contains the word "re-prompt", so it is excluded
+        // explicitly: this run's orchestrator made no progress because it was
+        // never asked, not because it ignored three messages it received.
+        !/no observable progress/i.test(String(a.detail ?? "")),
+    );
+    assert.ok(
+      named.length >= 1,
+      `a §2.8 anomaly must name the transport failure; anomalies were: ${JSON.stringify(w.anomalies)}`,
+    );
+    assert.equal(
+      validate("AnomalyRecord", named[0]).ok,
+      true,
+      `the anomaly satisfies the §2.8 schema — its kind comes from the CLOSED vocabulary, it is not invented: ${JSON.stringify(named[0])}`,
+    );
+
+    assert.notEqual(w.reportMd, null, "the stop-report exists to be read");
+    const md = String(w.reportMd);
+    assert.match(
+      md,
+      new RegExp("^# conductor stop-report — env — run " + w.bench.runId + "$", "m"),
+      "the headline carries the env kind and the run it is about",
+    );
+    assert.match(md, /^Reason: /m, "the reason is a field of its own");
+    assert.match(
+      md.split("\n").filter((line) => line.startsWith("Reason: "))[0] ?? "",
+      TRANSPORT_WORDS,
+      "and it names the transport failure rather than restating the kind",
+    );
+
+    const errors = w.journal.filter((r) => r.level === "error");
+    assert.ok(
+      errors.length >= 1,
+      "the send failures are journaled at error level — the per-pass trace stays, it is simply no longer the ONLY trace",
+    );
+    assert.ok(
+      errors.some((r) => TRANSPORT_WORDS.test(JSON.stringify(r.data ?? {}))),
+      `at least one error record names the failing re-prompt; got: ${JSON.stringify(errors.slice(0, 3))}`,
+    );
   },
 );
