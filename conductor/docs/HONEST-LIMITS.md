@@ -1,10 +1,17 @@
 # Honest limits
 
-The plan's §9 is normative and this file is its copy. Every entry below states something
-conductor **does not** do, or does only partially, so that an operator reading this page
-before trusting a run knows exactly where the enforcement stops.
+The plan's §9 is normative and the numbered part of this file is its copy. Every entry
+below states something conductor **does not** do, or does only partially, so that an
+operator reading this page before trusting a run knows exactly where the enforcement
+stops.
 
-Read this together with [OPERATIONS.md](OPERATIONS.md), whose first rule — *no banner, no
+The whole document rests on the **G7** posture: **detection over prevention**. Conductor
+watches a session it does not own, inside a client it does not control. The honest
+consequence: a good deal of what could go wrong here is *documented rather than prevented*.
+A limit written down on this page is a limit you can plan around; a limit nobody wrote
+down is one you find out about from a bad commit.
+
+Read this together with [OPERATIONS.md](./OPERATIONS.md), whose first rule — *no banner, no
 conductor* — is limit 11 turned into a daily habit.
 
 ---
@@ -61,6 +68,93 @@ conductor* — is limit 11 turned into a daily habit.
 15. **Single-model routing is a POC constraint, not a finding.** G13 makes the quality
     delta attributable to process, and costs whatever a larger reviewer would have added.
     §10's multi-model stretch is how that question gets asked separately.
+
+---
+
+## Limits the build itself discovered
+
+The fifteen above were written before the code was. These were found while building it,
+and they are recorded here rather than in a commit message nobody reads. They follow the
+same rule: each says what conductor does **not** reach, and where the enforcement stops.
+
+### Git-command detection reaches the enumerated globals only
+
+The git gate decides on the **subcommand**, and finding the subcommand means skipping
+git's value-taking global options first. Three are enumerated by name: `-c k=v`, `-C dir`
+and `--git-dir <dir>` (plus the inline `--git-dir=<dir>`). Every other leading option is
+**non-enumerated** — `--work-tree <dir>`, `--exec-path <path>`, `--namespace <ns>`, and any
+option a future git adds — and the parser cannot know whether the token after it is that
+option's value or the real subcommand.
+
+It therefore **denies**: the unrecognised option is returned verbatim as the subcommand,
+lands on no allow-list, and the default-deny row fires. That is the safe direction, and it
+is a real cost: it **over-denies** legitimate read-only commands, so `git --no-pager log`
+or a `--work-tree` read is refused in a gated session even though it changes nothing. The
+model is told which token caused it and can re-issue the command without the global.
+
+### Freshness fails safe on a non-finite timestamp
+
+Freshness is a *proof* that no edit landed after a verify, and the proof is arithmetic on
+timestamps. A **non-finite** value — `NaN` or `Infinity` from a filesystem that answered
+strangely — makes the numeric comparison false, and a false comparison would read as
+*fresh*. So any non-finite `startedMs`, staged mtime, or (when a staged entry is a
+deletion) index mtime is treated as **stale** up front. The cost is a publish refused for
+a clock or filesystem oddity that may have been harmless; the alternative was a stale
+green reading fresh, which is the one failure this rule exists to prevent.
+
+### `classifyFailure` reads text, and only text
+
+The §2.6.1 verdict on a failing test — `assertion`, `missing-subject` or `error` — is
+decided from the runner's **output shape**, never from exit codes (runners disagree: pytest
+exits 2 for a collection error). That makes the causality **text-only**: it is bounded by
+the per-runner **runner rule** data — the regex sources that recognise an unresolved
+specifier and a genuine assertion. A runner whose rules are missing or whose message
+wording changes classifies as `error`, the conservative default, so a legal red can be
+demoted to an illegal one by nothing more than a version bump in the target's test runner.
+
+### Edit detection matches an enumerated set of write shapes
+
+The bash edit gate extracts write targets from an **enumerated** set of shapes: output
+redirects, `tee`, `sed -i`, `perl -i`, `gawk -i inplace`, `ex`/`ed`, `dd of=`, the
+destination of `mv`/`cp`, the operands of `rm`, and a bounded unwrap of `sh -c "…"` so a
+wrapper cannot hide one. It matches shapes, not intent. A write performed by a shape
+outside that set is not seen as a write, and adding a shape means adding it to the set —
+which is exactly the maintenance burden the enumeration buys in exchange for never
+guessing.
+
+### The M5 stub scan covers production sources only
+
+The mechanical stub-marker scan runs over **production** sources — the tracked TypeScript
+under `conductor/`, the C++ under `router/` and `tools/`, and `scripts/*.py`. Test files
+under `conductor/tests/` are deliberately excluded, because the markers appear there
+legitimately as test *data*, as the *subject* of anti-stub enforcement, and inside example
+strings. The real test-file risk — an unfinished test — is caught independently and does
+not rely on this scan: `scripts/test-conductor.sh` hard-fails any test the suite declined to
+execute, and the TAP directives that mark one, at any depth.
+
+### The current posture on shell expansion, and what it still misses
+
+The git gate's rule on expansion is a **shell-expansion sigil** rule, and it is a deny.
+When a command-word token still carries an **unresolved** expansion sigil after the
+splitter has done its work — a backtick, a `$VAR`, a `${…}` or `$(…)` splice, a `$'…'`
+span, or a backslash escape a real shell would decode — the command word names something
+knowable only at shell runtime. Detection resolves the command word by token equality, so
+such a word would read as "not git" and let a git write straight through. Conductor cannot
+adjudicate what it cannot read, so it **denies** the whole command and tells the model to
+surface a question through `conductor_surface` instead of executing it. The same rule
+covers the alias route: a command word that resolves to no real binary is denied rather
+than trusted.
+
+Two residuals survive that, and both are over- or under-reach rather than a hole:
+
+- **Over-blocking.** A perfectly legitimate expansion in command position — a path built
+  from a variable, a wrapper resolved at runtime — is denied in a gated session, because
+  the rule cannot tell it apart from the case it exists to stop. The refusal names the
+  token, and `conductor_surface` is the route through.
+- **In-place writers outside the write-shape set.** A program that opens a file and
+  rewrites it in place, invoked by a name the extractor's **write-shape** set does not
+  enumerate, writes without being recognised as a write. The journal still records the
+  command; the edit gate simply did not adjudicate it as an edit.
 
 ---
 
