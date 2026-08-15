@@ -262,6 +262,28 @@ Concretely, this inverts guidance that appears elsewhere in this repository:
 - **Do not stop early because you have "enough" findings.** There is no target count and no ceiling.
 - **Nothing is a permitted casualty.** Do not trade one section's depth for another's.
 
+### 5.1 Findings are the product; the format serves them
+
+The structure in this suite exists to make findings *plannable*, not to be satisfied for its own
+sake. The failure mode it could otherwise produce is **compliance theatre**: a beautifully formatted
+document that is mostly process and only incidentally discovery, whose entries are polished and whose
+findings are shallower than a looser review would have produced.
+
+So:
+
+- **If an enumeration is yielding nothing, say so and move on.** "I enumerated all 22 tools against
+  their handlers and found no mismatches" is a complete and valuable result. Performing the table
+  ceremonially while finding nothing is not.
+- **If the record format is fighting a finding, break the format.** Write the entry in whatever shape
+  conveys it, and say why you departed. A finding lost to a template is worse than an untidy register.
+- **More real findings beat more polished entries.** If you must choose between writing one entry
+  beautifully and finding one more defect, find the defect.
+- **P1–P13 is a starting set, not a closed vocabulary.** If you find a defect class not on the list,
+  name it, define it, and file it as new. That is a better outcome than any number of instances of
+  the known thirteen.
+- **Mechanical box-ticking is itself reportable.** If part of this process turns out to be busywork
+  on this codebase, say so in your coverage ledger. That feedback improves the next run.
+
 **Completion criterion — the review is done when, and only when:**
 1. Every item in every mandatory enumeration has an explicit verdict (including "not examined").
 2. Every source file in scope has been covered, and the coverage ledger says so file by file.
