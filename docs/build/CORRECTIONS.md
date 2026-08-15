@@ -3783,3 +3783,100 @@ because those were never about the throw.
 
 **Still open: CR-2**, the four `13.1-cr2-*` rows — the gate snapshot's three literals, which are now
 derivable because the registry finally holds sub-session entries.
+
+---
+
+## C-082 — CR-2: the gate snapshot derived, and a dead gate arm the adversarial process had already declared safe
+
+CR-2 closes the phase-13 gate's **MAJOR 6**. `plugin/index.ts` passed `fileScope: []`, `testScope: []`,
+`verifyInFlightTree: null` as literals to `gateBeforeToolCall`, sitting between `gitMode: config.git.mode`
+and `inlineClaimScope`, both derived. The gate had measured the consequence: widening the scopes to
+`["**"]` regressed nothing in the whole 1,280-test build, because `core/gates-edit.ts`'s implementer arm,
+test-writer arm and entire freeze branch had no production caller that could reach them.
+
+**Why this was not fixable before CR-1.** The scopes derive from the calling session's §3.5 registry
+entry, and only the fan-out engine writes an entry carrying an `itemId` — and nothing in production
+constructed a fan-out. There was no session to derive a scope *from*, so any test would have been a
+source-text check: the weak form that let this regress unobserved. Binding the tools is what made a
+behavioural test possible, which is why the binding went first.
+
+**What is derived now.** `fileScope`/`testScope` come from the calling session's registry entry → its
+`itemId` → that item's persisted queue entry, read through the handlers' own committed `readQueueJson`
+(the runtime item file carries the FSM position and the worktree, *not* the scopes). `verifyInFlightTree`
+comes from `liveVerifyTrees` (its own pid-alive + staleness rule, C-081) translated slug→path through the
+committed `verifyInFlightTreeFor`, and returned **only when it equals the calling session's own tree** —
+because `gates-edit.ts:196-198` is a tree comparison, not a global "something is verifying" flag. Every
+failure mode derives NO scope, which denies: the literal's one accidental virtue, kept deliberately.
+
+**The doctrine debt from C-081 is paid.** `LLAMA_HARNESS_DOCTRINE_DIR`, read at call time inside
+`ensurePacks`, defaulting to the unchanged module-relative shipped directory, with the pack memo keyed by
+the resolved directory so a broken override cannot be masked by an earlier successful load.
+
+### The dead arm, and the refutation that protected it
+
+Deriving the scopes exposed a defect underneath them. `core/gates-edit.ts:235` dispatched its test-writer
+edit-scope arm on `"test-writer"`; the fan-out has always registered that session as `"testWriter"`
+(`adapter/tools.ts:2991`) and persists that spelling into `askedBy.role`. **A real test-writer session
+matched no arm at all** and fell to the unknown-role fail-safe. `"implementer"` matched on both sides,
+which is exactly why only this one role stayed silently dead — the neighbouring arm worked, so nothing
+looked broken. The arm enforcing "an implementer may not edit test files, a test-writer may not edit
+source" has never once been reachable from production.
+
+**This was found before, and the build wrote it down as safe.** `STATE.json` records, of Task 9.4a:
+
+> *"One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics — the
+> string the diff uses is the one §3.3 and the pinned contract name — and is recorded in C-032 so it is
+> not re-litigated."*
+
+Found, escalated, refuted **unanimously**, and then recorded specifically so nobody would look again. It
+was true the whole time. This is the first known FALSE NEGATIVE of the adjudication ladder, and the
+damage was not the miss — it was the durable "do not re-litigate" note the miss produced.
+
+**Why the refutation failed, precisely.** The plan uses both spellings, in different positions:
+`test-writer` appears 17 times and **every one is English prose** ("nobody — not even a test-writer —
+edits any file in a tree with a live verify"); `testWriter` appears 5 times and **every one is an
+identifier** — plan:1185 `the test-writer sub-session (role `testWriter`, doctrine `tdd.md`)`, the §3.3
+routing table at 1259-1260 whose fix-destination column is `testWriter`, and the role table at 1523. The
+skeptics matched a string that occurs 17 times in prose and concluded the contract named it. The plan's
+role *identifier* has always been `testWriter`.
+
+**THE LESSON, and it generalises past this build:** *when checking whether code matches a spec's
+identifier, count only IDENTIFIER positions. A hyphenated English form of the same concept in prose is
+not the contract, and it will usually outnumber the identifier.* A refutation that rests on a string
+count has not read the string's position.
+
+**Fixed by renaming, not translating.** `core/gates-edit.ts:235` now says `"testWriter"` — one line of
+production logic. The CR-2 implementer's own workaround, an `EDIT_GATE_ROLES = { testWriter:
+"test-writer" }` table at the composition root, was **deleted**: it was a third site for one fact, and the
+implementer flagged it as such rather than leaving it to be found. Ten role-value strings across four test
+files were respelled; not one assertion, expected value or test title was touched, and the deny reason's
+English prose ("a test-writer may edit only its item's testScope") was deliberately left as prose.
+
+**The guard that makes it stick.** `[13.1-cr2-one-role-vocabulary]` derives THREE sets and compares them:
+the roles `core/gates-edit.ts` dispatches on (parsed, including the list it tests with
+`.includes(sessionRole)` — found through its USE, so renaming the list does not blind the guard), the
+roles `adapter/tools.ts` registers (parsed), and the roles this run's own
+`fanout/subsession.dispatched` journal records actually carried (observed). Every observed role must
+appear in the parsed set *before* the main comparison runs, so the source parse is grounded in what
+production really registered rather than trusted. A parse finding zero roles, or missing the known-good
+`"implementer"`, or a `.includes(sessionRole)` whose declaration cannot be resolved, is RED — anti-vacuity
+applied to the guard's own parser. The census it produced is the useful artifact: seven roles per side,
+agreeing on six, diverging on exactly one.
+
+**Retire C-032's F1 refutation.** It is wrong on the merits and it is load-bearing in the wrong direction:
+future reviewers were told not to re-litigate. Anyone reading C-032 should read this entry instead.
+
+**Recorded, not hidden.**
+- `conductor-test-writer` in `conductor/opencode-fragment.json:24` is an OPENCODE AGENT ID in a different
+  namespace, pinned by `fragment.test.ts:19` and `scripts/test_conductor_wiring.py:548`. NOT renamed —
+  that would be a behaviour change to the merged opencode config, not a spelling fix.
+- The guard observes only roles a run actually exercises (`implementer`, `testWriter` here). The five
+  reader roles reach the gate through `READER_ROLES` rather than a dispatch arm and are covered by the
+  parsed comparison, not the observed one.
+- `readQueueJson` throws for a run with no `queue.json`; the gate swallows it and derives no scope, which
+  denies. Fail-closed and correct, but it surfaces as a scope deny rather than a named "no queue" refusal
+  at that seam. The stage tools still give the named refusal on their own path.
+
+**Gate.** Full gate observed by the orchestrator: **1332/1332**, typecheck OK, bun 8, schema export OK,
+python `Ran 68 tests`, GATE PASS. The mutation the row names — `gateScopesFor` returning `["**"]` — was run
+and fails rows 22 and 23; the plugin was restored from a byte copy and the green re-observed after.

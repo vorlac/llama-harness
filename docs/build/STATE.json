@@ -1128,7 +1128,7 @@
         "The 9.4a/5.3 deferred binding is ENFORCE: core/gates-phase depsReady removes the stage tool for a dependency-unready item, so gate and handler cannot disagree. It introduced the E11 wedge (a deferred dependency left the run with no legal exit), fixed in the same commit by cannotEverPublish.",
         "An untargeted red (evidence legalRed=false) is NOT routed into the repair loop, unlike a class-'error' red: no edit the writer can make to its own test makes a full-suite fallback target it, so the stage stops and asks rather than spending the budget re-observing another suite's failure.",
         "C-032 pre-commit adversarial review (THROTTLED: 2 lenses, majors-only skeptics, spec quoted inline = 18 agents/2.3M tokens): 5 surviving MAJORs collapsing to 3 distinct defects, plus 6 minors/nits fixed; 1 crash-class finding deferred to 10.1; 6 policy questions raised at the Phase 9 gate.",
-        "One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics \u2014 the string the diff uses is the one \u00a73.3 and the pinned contract name \u2014 and is recorded in C-032 so it is not re-litigated.",
+        "OVERTURNED BY C-082 -- this refutation was WRONG and the finding was TRUE. Original note kept for the record: 'One MAJOR (F1: the testWriter vs test-writer role vocabulary) was REFUTED by both skeptics -- the string the diff uses is the one SS3.3 and the pinned contract name -- and is recorded in C-032 so it is not re-litigated.' core/gates-edit.ts:235 dispatched on \"test-writer\" while the fan-out registers \"testWriter\", so that edit-scope arm was NEVER reachable from production. The skeptics matched a string that appears 17 times in the plan as ENGLISH PROSE; the plan's role IDENTIFIER is testWriter (plan:1185, the SS3.3 routing table at 1259-1260, the role table at 1523). Fixed by renaming core to testWriter and guarded by [13.1-cr2-one-role-vocabulary].",
         "PROCESS SLIP (self-caught, corrected): the commit was first written with a long body and a Co-Authored-By trailer, against the standing convention recorded in HANDOFF ('Commits verbatim from STATE.json commitMessage; NO trailers') which every prior conductor: commit follows. Amended to the verbatim subject line before anything else was built on it; the narrative it carried already lives in CORRECTIONS.md C-032, which is its designated home."
       ],
       "startedAt": "2026-08-13T06:30:00Z",
@@ -2241,6 +2241,49 @@
       ],
       "revertAssertion": "Revert this commit and conductor/tests/composition-root.test.ts goes from 21/21 to 2/21: nine tools throw handlerNotBound again, liveVerifyTrees stops existing, and no tool assembles a dependency bundle so the plugin never opens a workspace. The two rows that survive a revert are the two preservation fences - the inventory row (keys still built by iterating CONDUCTOR_TOOL_NAMES) and the rewritten 5.4a fence. This is NOT a meter: the mutations were run by the orchestrator, not inferred - removing the over-age check in liveVerifyTrees fails exactly row 19, and bypassing core parseAmendOps fails exactly row 14 (it did NOT before row 14 was hardened, which is why C-081 records it as the tenth appearance of the recurring class).",
       "openNext": "CR-2: the four 13.1-cr2-* rows - fileScope, testScope and verifyInFlightTree at the tool.execute.before seam, now derivable because the registry holds sub-session entries."
+    },
+    "13.1-composition-root-CR2": {
+      "taskId": "13.1-composition-root-CR2",
+      "manifest": false,
+      "tier": "C",
+      "status": "COMMITTED",
+      "commitSha": "46bc73f",
+      "commitMessage": "conductor-build: CR-2 gate snapshot derived, one role vocabulary",
+      "planLines": [
+        2916,
+        2960
+      ],
+      "canonicalTestCmd": "bash scripts/test-conductor.sh",
+      "tap": {
+        "suite": "1332/1332 node, typecheck OK, bun 8 pass, schema export OK, python Ran 68 tests, GATE PASS - observed by the orchestrator.",
+        "anchorTest": "bash scripts/test-conductor.sh conductor/tests/composition-root.test.ts -> tests=27 pass=27 fail=0.",
+        "m4": "Mutation run by the orchestrator: gateScopesFor returning [\"**\"] fails rows 22 and 23; plugin restored from a byte copy and the green re-observed."
+      },
+      "redEvidence": {
+        "cmd": "bash scripts/test-conductor.sh conductor/tests/composition-root.test.ts",
+        "exitCode": 1,
+        "class": "assertion",
+        "excerpt": "tests=26 pass=21 fail=5 for the five 13.1-cr2-* rows, then tests=27 pass=26 fail=1 for the role-vocabulary guard added after the derivation exposed the dead gate arm."
+      },
+      "filesTouched": [
+        "conductor/plugin/index.ts",
+        "conductor/core/gates-edit.ts",
+        "conductor/adapter/tools.ts",
+        "conductor/tests/composition-root.test.ts",
+        "conductor/tests/gates-edit.test.ts",
+        "conductor/tests/tools-9.4b.test.ts",
+        "conductor/tests/tools-9.6.test.ts",
+        "conductor/tests/continuation.test.ts",
+        "docs/build/specs/task-13.1-composition-root.assertions.json"
+      ],
+      "closes": "Phase 13 gate MAJOR 6 (the three literal gate-snapshot fields). Also pays C-081's knownPartialCoverage debt (the SS6.4 fail-closed packs half) and overturns C-032's F1 refutation.",
+      "deviations": [
+        "adapter/tools.ts changed by ONE word: `export` added to readQueueJson's declaration so the gate can read the SS2.4 scopes from the run's queue.json. No logic change.",
+        "core/gates-edit.ts:235 renamed \"test-writer\" -> \"testWriter\". Ten role-VALUE strings across four test files respelled; no assertion, expected value or test title touched. The deny reason's English prose was deliberately left as prose.",
+        "conductor-test-writer in conductor/opencode-fragment.json:24 is an opencode AGENT ID in a different namespace and was NOT renamed - it is pinned by fragment.test.ts:19 and scripts/test_conductor_wiring.py:548."
+      ],
+      "revertAssertion": "Revert and composition-root.test.ts goes 27 -> 22, with rows 22-27 red: the gate returns to denying every implementer and test-writer edit through empty scopes, the freeze branch becomes unreachable again, the doctrine directory stops being resolvable, and core/gates-edit.ts's testWriter arm goes back to a spelling no session carries. NOT a meter: the widening mutation was run by the orchestrator, not inferred.",
+      "openNext": "Phase 13's e2e fix round - the 5 confirmed MAJORs and 37 uncovered rows in conductor/tests/e2e.test.ts, which can now drive through the real bound tool map."
     }
   }
 }
