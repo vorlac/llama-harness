@@ -4160,3 +4160,61 @@ python `Ran 68 tests`, GATE PASS. One source file changed: `conductor/adapter/co
 **Consequence for phase 13.** Acceptance row `13.1-s5-report-refuses-dependent-unsettled` was written FOR
 the blocked-dependency shape and the product could not reach it, which is why C-084 recorded the e2e's
 deviation to an independent sibling. That shape is now reachable and the deviation can be reverted.
+
+---
+
+## C-086 — two derivations made faithful to the facts they claimed to track
+
+**(a) `acceptanceClusters` read call syntax as a second subject.** `core/planning.ts` stripped only LEADING
+and TRAILING non-identifier runs from a criterion's first token, so internal call syntax survived:
+`pad("a")` -> `pad("a` (the trailing `")` went, the internal `("` stayed) while `pad("")` -> `pad` (the
+whole `("")` was trailing). Same function, two "subjects". `validateQueue` then rejected a legitimate item
+and quoted the nonsense cluster name `pad("a` back at the planner. Since §3.2's observable-check row asks
+for exactly that phrasing, the guard pushed planners to jam two checks onto one line — degrading the plan
+quality it exists to protect. Found while walking phase 13's correction loops (C-083), where the e2e had to
+adopt that very workaround.
+
+The rule is now two ordered steps: the existing strip-and-casefold, then the existing determiner skip, then
+take the token's LEADING identifier run and stop at the first character that cannot appear inside one
+(`[\w./-]` is in; parentheses and quotes are not). So `pad("a")`, `pad("")` and `pad` all reduce to `pad`,
+while `config.load(cfg)` reduces to `config.load` and stays DISTINCT from `config`.
+
+**The step ORDER is load-bearing and is now documented in the function.** The determiner test is a
+whole-word set lookup, so it must see the end-stripped token — `"the,"` is not `"the"`. Extracting the
+identifier run FIRST would let a trailing comma smuggle an article through as a subject and revive the
+"spans 2 clusters (parser, the)" defect the function's own comment records already fixing once. This is the
+second fix to this scan; the first was for determiners and the same reordering would undo it.
+
+**Four rows, and three of them exist to stop a wrong fix rather than to prove the right one.** The
+near-miss row (`config.load` vs `config`) turned out to be RED at HEAD as well, not merely a regression
+guard, and it asserts the subject NAMES rather than the count — the count alone is green at HEAD. It
+catches collapsing everything to one subject, stopping at the first dot, and stopping the identifier run in
+the wrong place. A separate row parses the cluster names out of the violation the planner actually receives
+and requires balanced brackets and even quote counts, so a fix that got the counts right while still
+emitting source fragments stays red.
+
+**(b) `UNIVERSAL_META_TOOLS` was a second spelling of a fact `gates-phase` owns.** C-085's implementer
+added a hand-written four-name list and flagged the drift itself rather than hiding it. It is now EXPORTED
+and DERIVED at module load by probing the owner: `legalTools` over a synthetic non-terminal run with an
+EMPTY item list and no open question — the probe that implementer identified — returns exactly the
+always-legal meta tools.
+
+**The derivation had to satisfy an existing guard, and the way it did is worth recording.**
+`tests/legaltools-callsites.test.ts` (C-048) scans production source and fails any `legalTools(` call that
+passes fewer than five arguments or hardcodes the fifth (`publishEnabled`) as a bare `true`/`false` — the
+default is `true`, so a call inheriting it silently claims publish is available in runs where it is not.
+The new probe has no honest value to pass: `publishEnabled` reaches only per-item stage tools and the probe
+carries no items. Rather than pass a literal (forbidden) or a named constant spelling a literal
+differently (which would pass the regex while defeating the guard's purpose), it asks the gate under BOTH
+modes and keeps the intersection. That is substantively what "the flag is irrelevant here" means: it
+asserts no value, inherits no default, and proves independence rather than claiming it.
+
+**Mutation run by the orchestrator:** dropping one tool from the derived set fails the new row AND
+`[10.1-idle-null-recommendation]` — two independent detectors, because the engine then misreads a universal
+tool as position-specific and re-prompts where it must stay silent. File restored byte-identical.
+
+**Gate.** Full gate observed by the orchestrator: **1350/1350**, typecheck OK, bun 8, schema export OK,
+python `Ran 68 tests`, GATE PASS. Two source files changed: `core/planning.ts`, `adapter/continuation.ts`.
+
+**Consequence:** the phase-13 e2e's one-line two-check workaround (flagged in a comment there) is now
+revertible.
