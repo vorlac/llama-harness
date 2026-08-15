@@ -2455,3 +2455,168 @@ class RouterRestartPolicyExecution(WiringTestCase):
             "the supervisor never gave up on what the policy now calls fatal",
         )
         self.assertTrue(_pid_alive(shell2.pid), "it stopped on its own, not with the shell")
+
+
+class _StatusRecorder(object):
+    """What a probe actually asked for, alongside the status it is answered with."""
+
+    def __init__(self, status: int) -> None:
+        self.status = int(status)
+        self.lock = threading.Lock()
+        self.paths: List[str] = []
+
+    def seen(self) -> List[str]:
+        with self.lock:
+            return list(self.paths)
+
+
+def _status_handler(recorder: _StatusRecorder) -> Any:
+    """A router that answers one fixed status - including the 503 of an unready one."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
+            with recorder.lock:
+                recorder.paths.append(self.path)
+            body = b'{"status":"probed"}'
+            self.send_response(recorder.status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt: str, *args: Any) -> None:
+            return
+
+    return Handler
+
+
+class RouterHealthProbe(WiringTestCase):
+    """wait_for_router_health() ITSELF - what production calls when no probe is injected.
+
+    finalize_routing()'s tests inject a lambda, so the real probe - the default
+    at conductor_wiring.py:575 and the one serve.py:850 uses - is reached by
+    nothing else in the suite.
+    """
+
+    def serve_status(self, status: int) -> Tuple[int, _StatusRecorder]:
+        """A live listener on loopback answering exactly ``status``, torn down with the test."""
+        recorder = _StatusRecorder(status)
+        server = _HealthServer((LISTEN_HOST, 0), _status_handler(recorder))
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+        thread.daemon = True
+        self.addCleanup(thread.join, 10)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        thread.start()
+        return int(server.server_address[1]), recorder
+
+    def closed_port(self) -> int:
+        """A loopback port with nothing behind it."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((LISTEN_HOST, 0))
+        port = int(sock.getsockname()[1])
+        sock.close()
+        return port
+
+    def test_12_1_health_probe_rejects_error_status(self) -> None:
+        """[12.1-health-probe-rejects-error-status] 200 is healthy; a 503 is NOT.
+
+        The trap this function exists to avoid: `curl -s` exits 0 on the 503 an
+        unready router returns, so a probe that only asks "did the request
+        complete" hands a session a router that cannot serve. Both directions
+        are pinned against a REAL listener, so the answer has to come from the
+        status line rather than from reachability.
+        """
+        ready_port, ready_seen = self.serve_status(200)
+        self.assertTrue(
+            cw.wait_for_router_health(LISTEN_HOST, ready_port, timeout=8.0),
+            "a router answering 200 on %s is healthy" % cw.ROUTER_HEALTH_PATH,
+        )
+        self.assertEqual(
+            ready_seen.seen()[:1],
+            [cw.ROUTER_HEALTH_PATH],
+            "the probe must ask %s, not some other path" % cw.ROUTER_HEALTH_PATH,
+        )
+
+        for status in (503, 500, 404):
+            port, seen = self.serve_status(status)
+            started = time.time()
+            healthy = cw.wait_for_router_health(LISTEN_HOST, port, timeout=0.6)
+            elapsed = time.time() - started
+            self.assertFalse(
+                healthy,
+                "a router answering %d is NOT healthy - the request completing is not "
+                "the question (the `curl -s 503` trap)" % status,
+            )
+            self.assertTrue(
+                seen.seen(),
+                "the probe never asked the %d listener anything - it decided without "
+                "looking" % status,
+            )
+            self.assertGreaterEqual(
+                elapsed,
+                0.4,
+                "a %d answer must be retried until the readiness budget runs out, not "
+                "resolved instantly" % status,
+            )
+
+        # Nothing listening is the other unhealthy shape: refused, not raised.
+        self.assertFalse(
+            cw.wait_for_router_health(LISTEN_HOST, self.closed_port(), timeout=0.4),
+            "a port with no router behind it is not healthy",
+        )
+
+    def test_12_1_router_term_grace_is_bounded(self) -> None:
+        """[12.1-router-term-grace-bounded] the SIGTERM grace is a BAND, not just a floor.
+
+        The floor alone (>= 5.0) is satisfied by any number at all, and the
+        grace is wall-clock an operator spends: the supervisor SIGTERMs the
+        router when the session shell dies and only SIGKILLs after it elapses,
+        so an unbounded value is a session that will not go away.
+        """
+        # Ceiling: launchd gives a stopping job 20s between SIGTERM and SIGKILL,
+        # and the grace must also stay inside the readiness budget - a router
+        # given longer to die than to be born is inverted.
+        ceiling = 30.0
+        self.assertLessEqual(ceiling, cw.ROUTER_READY_TIMEOUT_S)
+        self.assertGreaterEqual(cw.ROUTER_TERM_GRACE_S, 5.0, "a real drain window")
+        self.assertLessEqual(
+            cw.ROUTER_TERM_GRACE_S,
+            ceiling,
+            "an operator ending a session waits ROUTER_TERM_GRACE_S seconds for the "
+            "router to go away; %r is not a grace period"
+            % (cw.ROUTER_TERM_GRACE_S,),
+        )
+
+        # The number that is actually waited is the one BAKED INTO the detached
+        # supervisor's source, so the band is pinned there too, not only on the
+        # module constant the supervisor never imports.
+        baked = re.search(r"^GRACE_S = ([0-9.]+)$", cw.ROUTER_SUPERVISOR_SOURCE, re.M)
+        self.assertTrue(baked, "the supervisor source carries no GRACE_S literal")
+        self.assertEqual(float(baked.group(1)), float(cw.ROUTER_TERM_GRACE_S))
+        self.assertLessEqual(
+            float(baked.group(1)),
+            ceiling,
+            "the supervisor waits %s seconds before SIGKILL" % baked.group(1),
+        )
+
+    def test_12_1_derive_slots_rejects_bool(self) -> None:
+        """[12.1-derive-slots-rejects-bool] a bool is a config type error, not a slot count.
+
+        isinstance(True, int) is True in python, so without the bool check ahead
+        of the int check `maxReaders: true` returns 1 slot and `false` floors to
+        1 - a type error rendered as a plausible-looking number that then feeds
+        --parallel and admission.maxInflightPerModel.
+        """
+        for flag in (True, False):
+            with self.assertRaises(cw.WiringError) as caught:
+                cw.derive_slots(flag)
+            message = str(caught.exception)
+            self.assertIn("bool", message, "the error must name the type it got: %r" % message)
+            self.assertIn(repr(flag), message, message)
+
+        # The same rejection at the boundary the value arrives through: neither
+        # bool may reach an argv or a router config.
+        for flag in (True, False):
+            with self.assertRaises(cw.WiringError):
+                cw.parallel_server_args(flag)
