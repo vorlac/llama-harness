@@ -4370,3 +4370,69 @@ rows; file restored byte-identical. `ps` confirmed no stray stub origins before 
 OK, python `Ran 77 tests` OK, GATE PASS. One source file changed: `conductor/adapter/tools.ts`.
 
 **Phase 12 now has ONE confirmed MAJOR left: MAJOR 1, the G5 router-equivalence run.**
+
+---
+
+## C-089 — G5: an equivalence proof that was two identical commands
+
+Phase 12's last confirmed MAJOR. Plan:2884-2888 mandates running Task 13.1's scripted e2e twice — once
+with the router in the loop, once without — and asserting the same terminal state, the same item
+dispositions and the same commit set, explicitly so that "the identical process runs without the router" is
+true rather than aspirational.
+
+**What shipped was a tautology on two counts.** The recorded artifact's arms were
+`CONDUCTOR_OPENAI_BASE_URL=...:8088/v1 node --test e2e.test.ts` and the same command with `:8080/v1`, and
+`grep -rn CONDUCTOR_OPENAI_BASE_URL conductor/ scripts/` returns ZERO hits — the variable is read by
+nothing. **And the orchestrator found a second layer the gate had not:**
+`grep -rn 'fetchMetricsSummary|router' conductor/tests/e2e.test.ts` returned NOTHING. The e2e had no router
+touchpoint at all — `reportArgs` passed no `metrics` field and `handleReport` short-circuits on `undefined`
+— so even a correctly-wired variable would have changed nothing. The named driver
+`conductor/tests/e2e-g5.test.ts` did not exist.
+
+**A constraint shaped the fix.** `conductor/tests/router-client.test.ts:5` promises "the unit tests need
+neither the C++ llama-router nor a model", and a fresh detached worktree has no submodules and no built
+router. A test that SPAWNS the router must therefore not join the node suite's default run, or every
+fresh-checkout verification starts requiring a C++ build. So the WITHOUT arm is an ordinary node test and
+the WITH arm lives in a separate driver that produces the artifact — which is how "run it twice and assert"
+reads anyway.
+
+**The seam.** `reportArgs` now passes a real `metrics` function calling the UNSTUBBED `fetchMetricsSummary`
+over a real socket, defaulting to port 1 — a port an unprivileged process cannot bind, so the connection is
+refused instantly. Every crossing is recorded and the scenarios assert the count moved, so "the seam ran"
+is an OBSERVED CALL rather than a report line that renders identically when the field is absent. This also
+finally meets row `13.1-router-absent-fail-soft` and closes the phase-13 MINOR that named the same hole
+from the other side.
+
+**The proof the router was in the loop, which is the row that mattered.** The driver spawns the real
+binary, seeds it with a RANDOM 3-7 proxy requests that come back 502 from the router itself (the upstream
+is deliberately dead), and reads its ledger. Measured: the router served `{"502":6},"totalRequests":6`
+before the arm and `{"502":7},"totalRequests":7` after — **the e2e's own metrics request, on the router's
+own ledger.** The driver then kills the router, PROVES the port is dead, and runs the second arm. A router
+that started and was never contacted would be the same tautology in a new costume, and the driver fails if
+the summary reaching the report is not the one the router served.
+
+**The three compared facts, measured, per scenario:** terminal state (runState/stopKind read back from the
+persisted run), item dispositions (queue ids x persisted state/blocked/deferred), and commit set (sorted
+unique `git log --name-only base..HEAD` plus `rev-list --count`). All IDENTICAL across arms. The metrics
+section legitimately differs and is excluded from the comparison per G5-SG-2 — that difference is the
+entire point of having two arms.
+
+**The tautology cannot recur.** `conductor/tools/g5-artifact-check.ts` rejects an artifact whose arms are
+byte-identical, whose only differing env names are read by no file under `conductor/{core,adapter,plugin,
+tools,tests}` or `scripts/`, whose WITH arm carries no summary, whose WITH summary is not the one the
+router served, or whose WITHOUT arm carries a summary at all. It runs in the driver AND in the node suite
+against the SHIPPED artifact. Its negative cases feed it the old defect verbatim. A nice touch: the dead
+variable's name is assembled from two fragments in both scanned files, so mentioning it in the checker does
+not make "no source reads it" false.
+
+**Mutation re-run by the orchestrator:** the shipped artifact was reverted to the two-identical-commands
+shape and the node guard failed with "the shipped equivalence record passes its own anti-tautology check";
+restored byte-identical. (First attempt was invalid — the orchestrator ran the checker module directly, but
+it exports a function with no CLI entry, so it exited 0 doing nothing. Recorded because "the check passed"
+would have been the wrong conclusion from a command that never ran the check.)
+
+**Gate.** Full gate observed by the orchestrator: **1363/1363** node, typecheck OK, bun 8, schema export
+OK, python `Ran 77 tests` OK, GATE PASS. `ps` confirmed the router process is dead and no strays remain.
+
+**ALL SIX of phase 12's confirmed MAJORs are now closed** (C-087, C-088, C-089). The phase-12 gate can be
+re-run; its stage-2 verdict of FAIL stands until it is.
