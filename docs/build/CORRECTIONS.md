@@ -4089,3 +4089,74 @@ python `Ran 68 tests`, GATE PASS. M5 PASS (130 files). All four mutated source f
 **All five phase-13 e2e MAJORs are now closed.** What remains for phase 13 is the M7 traceability half — 42
 assertion rows still named by far fewer test titles — plus the two product defects above, the
 `acceptanceClusters` defect from C-083, and the still-unwalked DEBUG loop.
+
+---
+
+## C-085 — §3.7's only wedge detector, restored: the re-prompt condition and the transport floor
+
+Two MAJORs found while closing the phase-13 e2e gate (C-084), both fixed. Each made the counter the plan
+calls **"the ONLY wedge detector"** permanently inert on a path that had never run end to end, so a run
+could sit in EXECUTING forever with no human-readable artifact — the exact outcome §2.9:911-915 says the
+design exists to close.
+
+**The plan decided this, not the orchestrator.** §3.7.1 gates re-prompting on ACTIONABLE WORK — "items not
+PUBLISHED/blocked, or a legal next run transition" — not on a recommended stage tool. In the wedge (A
+blocked, B `dependsOn:[A]`) B is neither PUBLISHED nor blocked, so the plan says re-prompt. The code gated
+on `gate.recommended === null` and said nothing. Three individually-correct rules composed into the hole:
+`cannotEverPublish` deliberately does not treat a blocked dependency as stuck (so report CORRECTLY
+refuses); `depsReady` excludes both items from the wave (so nothing is recommended); and
+`continuation.ts:743-750` returned before prompting. Nothing in core needed new logic — `stops.ts:113`
+already returns `noop` at `futileRePrompts >= 3` and `handleReport` already has stop-report mode. **The
+counter simply never incremented.**
+
+**The SG-2 branch was preserved, not deleted.** Its reasoning is right for the case it was written for, and
+row `fw-silent-when-truly-nothing-actionable` asserts the engine is STILL silent, and still charges no
+futile count, when nothing is actionable. A fix that re-prompted unconditionally would have satisfied six
+of the eight rows and been wrong.
+
+**THE CONDITION IS NARROWER THAN §3.7.1's PROSE, AND THE REASON IS A GREEN TEST.**
+`[10.1-idle-null-recommendation]` pins SILENCE on the fixture "I1 BLOCKED, I2 dependsOn I1" — the same
+SHAPE as the wedge. The implementer measured both verdicts and found them identical in every field,
+including a byte-identical `why`. The only difference is that the wedge's block minted an OPEN §2.11
+question, so the gate legalizes `conductor_answer`. So the bare "items not PUBLISHED/blocked" reading
+cannot be the whole rule without turning 10.1 red, and the landed condition is: an unfinished item AND a
+legal tool outside the always-legal §3.2 meta baseline.
+
+**Residual hole, and why it is acceptable — VERIFIED BY THE ORCHESTRATOR, not assumed.** A blocked item
+carrying NO question, plus a dependent, would still go quiet. The implementer believed that state
+unreachable; the orchestrator checked all ELEVEN production `setBlocked` call sites: ten in `tools.ts` are
+question-paired, and the eleventh (`continuation.ts:442`, `reconcileOrphanQuestions`) exists precisely to
+complete a half-applied block for an ALREADY-OPEN question. So no production path blocks an item without a
+question, and the fix closes the shape §2.9 actually describes. Recorded because `[10.1-idle-null-
+recommendation]` now pins behaviour for a state production cannot produce — worth knowing before anyone
+"fixes" it.
+
+**The transport floor.** A client whose `session.prompt` throws — which the plugin's unchecked
+`input.client` cast forwards happily — left `sent = false` and charged nothing. That per-pass decision is
+correct and was preserved (FW-SG-3: a session never successfully asked cannot be accused of failing to
+progress). What was missing was a floor ACROSS passes. `ContinuationState` now carries
+`consecutiveSendFailures`; at the limit the engine appends a §2.8 `disengage` anomaly naming the transport
+failure, records stop `{kind:"env"}` — the only kind in the CLOSED §2.9 vocabulary whose definition covers
+tooling broken; `noop` would have misreported a run whose orchestrator was never reachable — and drives the
+one report writer in stop-report mode with no closing verify. Any send that leaves the process resets the
+count, so four failures, a success, and four more never reach the floor.
+
+**The floor value was bounded by a test, not chosen.** `[10.1-one-reprompt-in-flight]` drives FOUR
+consecutive synchronous failures and asserts no stop and no anomaly, so the floor must be >= 5. It is 5.
+
+**Mutations re-run by the orchestrator:** restoring the old `recommended === null` early return re-fails
+exactly three continuation rows; the file was restored byte-identical and the green re-observed.
+
+**Recorded, not hidden.** `UNIVERSAL_META_TOOLS` in `continuation.ts` restates four names
+`core/gates-phase.ts` owns. The implementer tried to derive them and could not — `legalTools` over the same
+run with an empty item list returns that same set, so no counterfactual separates "universal" from
+"position-specific". If gates-phase adds a fifth always-legal meta tool this list must follow by hand. That
+is the "two spellings of one fact" class this build keeps hitting, flagged rather than hidden, and it is
+owed a drift guard.
+
+**Gate.** Full gate observed by the orchestrator: **1345/1345**, typecheck OK, bun 8, schema export OK,
+python `Ran 68 tests`, GATE PASS. One source file changed: `conductor/adapter/continuation.ts`.
+
+**Consequence for phase 13.** Acceptance row `13.1-s5-report-refuses-dependent-unsettled` was written FOR
+the blocked-dependency shape and the product could not reach it, which is why C-084 recorded the e2e's
+deviation to an independent sibling. That shape is now reachable and the deviation can be reverted.
