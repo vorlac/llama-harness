@@ -3880,3 +3880,102 @@ future reviewers were told not to re-litigate. Anyone reading C-032 should read 
 **Gate.** Full gate observed by the orchestrator: **1332/1332**, typecheck OK, bun 8, schema export OK,
 python `Ran 68 tests`, GATE PASS. The mutation the row names — `gateScopesFor` returning `["**"]` — was run
 and fails rows 22 and 23; the plugin was restored from a byte copy and the green re-observed after.
+
+---
+
+## C-083 — phase 13 fix round, part 1: three of five MAJORs, and two product defects the loops exposed
+
+The phase-13 gate confirmed six MAJORs (C-079). One — the gate snapshot's literals — was MAJOR 6 and
+closed as CR-2 (C-082). This entry covers MAJORs 1, 2 and 3. Each was fixed test-side and each is bound by
+a mutation THE ORCHESTRATOR RAN ITSELF, because the agent writing the scripted model responses is also the
+agent writing the assertions over them, and a scenario that agrees with itself proves nothing.
+
+**MAJOR 1 — every full verify could have been vacuous.** `fixtureRepo()` created `tests/` EMPTY while the
+scope command was `node --test tests/*.test.ts`, and node 26.7.0 exits 0 with `tests 0` on a zero match.
+Scenario 4 writes no test at all, so its item reached VALIDATED on a verify that executed NOTHING and was
+structurally incapable of going red. Row `13.1-fixture-suite-discriminates` demanded a controlSuite step
+and had no test of its own — half of why it survived.
+
+Fixed by seeding a committed baseline subject+test into the fixture's OWN seed commit, and by adding the
+`tools-9.4b.test.ts:370` controlSuite idiom as a named test that runs before every scenario. Two design
+points that were not in the brief and matter: the control asserts an **execution witness** (the baseline
+test writes a file proving it RAN) rather than merely an exit code, which is the precise discriminator for
+a vacuous green; and the baseline is COMMITTED, so scenario 3's out-of-repo worktrees check it out too —
+seeded uncommitted, those verifies would have gone straight back to a zero-match glob. The witness writes
+only under an env var the control sets, so no pipeline verify ever dirties a tree the `preexistingDirty`
+assertions measure. **Mutation re-run by the orchestrator:** the glob -> `tests/*.nomatch.ts` now fails the
+control; before the fix the whole suite stayed 5/5.
+
+**MAJOR 2 — scenario 1's plan review exited at the CAP, and its own comment said otherwise.** `planRound`
+was assigned only AFTER `handlePlanReview` returned, so it was 0 for the entire call: the reviewer re-raised
+the same majors every round, the skeptic upheld every round, and each "revision" was the byte-identical
+round-0 markdown. A gate skeptic measured `rounds: 3` with four `plan-review-cap` questions and five planner
+prompts. The test asserted only `runState === "PLAN_REVIEWED"` (which the cap path also sets) and
+`rounds >= 1`.
+
+Fixed by making the plan-review script DOCUMENT-driven: each lens judges the `plan.md` text the handler
+actually put in its prompt and stops raising its finding only when the demanded sentence is really there. A
+driver that stopped rewriting `plan.md`, or re-reviewed stale text, now raises the same finding forever and
+exits at the cap. Pinned with `rounds === 2`, `questionIds === []`, `blockedItemIds === []` and zero
+persisted questions.
+
+**A REAL ARITHMETIC TRAP, found by the agent and not by the brief.** The orchestrator's acceptance criterion
+was "`planReviewMaxRounds` 3 -> 1 must go red". With only ONE revision before the clean round it does NOT:
+at max=1 the first exit check asks `round(0) >= max(1)`, which is false, so the single revision still
+happens and the following clean round exits with `rounds=1` and no cap questions — byte-identical to the
+unmutated result. TWO revisions are required before the mutation binds. The orchestrator's own criterion
+would have accepted a scenario that still could not detect a cap exit.
+
+**A CONTRADICTION IN THE ACCEPTANCE ROW ITSELF.** `13.1-s1-plan-review-refute-revise-clean` requires both
+"round 2 yields zero surviving majors" and "`run.planReviewRounds` is persisted as 2". The product cannot
+satisfy both: `planReviewRounds` counts REVISIONS (tools.ts:2170, 2196), so a clean round straight after the
+first revision persists 1. The explicit numeric assertion was taken as authoritative over the prose and the
+divergence recorded rather than silently resolved. Every other clause of the row holds exactly.
+
+**MAJOR 3 — no correction loop was ever entered.** `testVet()` was called with NO argument at all six
+responder sites, so `mustFix` was `[]` in every vet round of every scenario; the file's only item-review
+finding was scripted to be REFUTED; the string "adequacy" did not appear in the file at all. Four acceptance
+rows claimed these loops end-to-end. Skeptics measured that deleting the finding, or setting every budget to
+its minimum, left the suite at 5/5.
+
+Fixed with four new named tests, one per row, each feeding the machine something it MUST refuse: a tautology
+test the critics reject, a spec finding whose fix names only fileScope, a test-adequacy finding whose fix
+names only testScope, and an unparseable test attempt. The §3.3 ordering is proved off the §2.6 ledger's own
+sequence numbers rather than asserted in prose, and C-032 is pinned end-to-end at last —
+`item.evidence.red.seq` is the POST-repair failure, never the pre-repair one.
+**Mutation re-run by the orchestrator:** budgets-to-minimum now fails FOUR tests; before the fix it left the
+suite 5/5 green.
+
+### Two product defects the loops exposed on first contact
+
+**(a) The e2e's doctrine map was keyed so no handler could read it.** `PACKS[name.slice(0, -3)]` stripped the
+`.md`, while the shipped loader (`adapter/inject.ts:279`) keys by FULL FILENAME and both consumers read
+`packs["debug.md"]` and `packs["receive-review.md"]`. The first run of the new tests died on the product's
+own fail-closed refusal. **Every item-review fix dispatch and every DEBUG fix dispatch in this suite was
+unreachable, and nothing noticed** — because until now no scenario ever reached a pack-gated dispatch. That
+is MAJOR 3's claim in the form of a live defect. Checked and CONTAINED: no other fixture in the tree builds
+a pack map by hand this way.
+
+**(b) `acceptanceClusters` misreads two checks on one subject as two clusters.** `core/planning.ts:229-243`
+takes the criterion's first whitespace token and strips only LEADING and TRAILING non-word runs, so
+`pad("a")` -> `pad("a` and `pad("")` -> `pad`: same function, two "subjects". `validateQueue` then rejects the
+item as spanning 2 clusters and quotes the nonsense cluster name `pad("a` back at the planner. Call phrasing
+is exactly what §3.2's observable-check row asks for, so **the guard pushes a planner to jam two checks onto
+one line to get past it** — degrading the plan quality the guard exists to protect. This is the same class as
+the determiner bug the function's own comment (planning.ts:209-212) records already fixing once. Worked
+around in the test with a single criterion, flagged in a comment there; the heuristic is UNTOUCHED and owed
+a fix.
+
+**Still unwalked, recorded so it is not mistaken for coverage:** no scenario in this file ever takes a red
+validate, so GREEN->VALIDATED never enters DEBUG — `packs["debug.md"]` is never read, `item.attempts.
+debugFixes` is never incremented, and `debugFixCap` can be set to 0 with the suite green. It needs a scenario
+whose implementer ships a module that passes the item test and REGRESSES the full verify. The §3.3
+reverted-behavior probe is likewise exercised by nothing: the item's fileScope file is still untracked at
+review time, so `git stash push -- <fileScope>` matches nothing and the probe skips.
+
+**Gate.** Full gate observed by the orchestrator: **1337/1337**, typecheck OK, bun 8, schema export OK,
+python `Ran 68 tests`, GATE PASS. M5 PASS (130 files). e2e.test.ts is 10 tests, all green.
+
+**MAJORs 4 and 5 remain open** — scenario 3 asserts the wave SCHEDULE rather than the driver's interleaving
+(a strictly serial driver passes it), and scenario 5 omits the entire stop half the plan names, with one of
+its two rows asserted INVERTED.
