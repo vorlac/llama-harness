@@ -1531,10 +1531,25 @@ test("[5.4a-git-policy-comes-from-the-config] the gate's git policy is the repo'
 });
 
 // ===========================================================================
-// 5.4a-tools-still-throw-scope-fence  (spec SG-4, the deliberate NEGATIVE row)
+// 5.4a-tools-still-throw-scope-fence  (spec SG-4 — the fence, now CROSSED)
 // ===========================================================================
+//
+// This row was authored as a deliberate NEGATIVE: task-let 5.4a took the
+// session/run lifecycle half of the composition root and left the 22 tool
+// handlers bound to handlerNotBound, so the fence asserted the throw and named
+// plan:2958 and Task 13.1 as the owner of the binding.
+//
+// TASK 13.1'S COMPOSITION-ROOT ROUND IS THE AUTHORIZED CROSSING. It binds every
+// one of the 22 names to its committed adapter/tools.ts handler (spec
+// docs/build/specs/task-13.1-composition-root.assertions.json, row
+// 13.1-cr-fence-rewritten-not-deleted), so the throw this row used to assert is
+// exactly what must no longer happen. The row is REWRITTEN to assert the
+// positive, never deleted and never weakened: the count-of-22 assertion and the
+// every-name-is-registered loop it also carries were never about the throw, and
+// they survive verbatim. The behavioural depth of the binding lives in
+// conductor/tests/composition-root.test.ts; what stays here is the fence itself.
 
-test("[5.4a-tools-still-throw-scope-fence] every one of the 22 conductor tools is STILL bound to a handler that throws — binding them is plan:2958's glue and Task 13.1's, not this task-let's", async () => {
+test("[5.4a-tools-still-throw-scope-fence] every one of the 22 conductor tools is registered with a callable execute and NONE of them refuses with handlerNotBound any more — Task 13.1's composition-root round bound them to their committed handlers, and this fence records the crossing", async () => {
   const root = plainRoot("conductor-5.4a-fence-");
   const hooks = await startPlugin(root);
   const toolMap = hooks.tool ?? {};
@@ -1551,23 +1566,17 @@ test("[5.4a-tools-still-throw-scope-fence] every one of the 22 conductor tools i
     assert.equal(typeof definition.execute, "function", `${name} has an execute function`);
 
     let caught: unknown;
-    let threw = false;
     try {
       await definition.execute({}, {});
     } catch (err) {
-      threw = true;
       caught = err;
     }
-    assert.ok(threw, `${name} must still REFUSE to execute — 5.4a takes the lifecycle half only (C-044 Finding 1)`);
+    if (caught === undefined) continue; // a tool that ran is bound by definition
     assert.ok(caught instanceof Error, `${name}'s refusal is an Error`);
-    assert.match(
+    assert.doesNotMatch(
       (caught as Error).message,
       /no run handler is bound to this session/,
-      `${name} still refuses with the handlerNotBound message (plugin/index.ts:83-89)`,
-    );
-    assert.ok(
-      (caught as Error).message.includes(name),
-      `${name}'s refusal names the tool that was invoked`,
+      `${name} must NOT refuse with the handlerNotBound message any more — Task 13.1 bound it to its committed handler, and a tool that still throws it is a tool no live opencode session can use`,
     );
   }
 });

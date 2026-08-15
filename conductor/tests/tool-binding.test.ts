@@ -30,7 +30,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -520,6 +520,76 @@ function zodCoarseKind(schema: unknown): CoarseKind | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Resolving a NAMED handler type through the module that DEFINES it.
+//
+// The classifier below used to return null for any field spelled with a type
+// alias, and "cannot place" was the hole the queue_amend twin of C-047 sat in:
+// QueueAmendInput.ops is `QueueAmendOp[]`, the plugin declares
+// `ops: S.array(S.string())`, and because the guard could not classify the alias
+// it filed the pair as UNDETERMINED and waved it through on a hand-written
+// allow-list. An excuse list is not a comparison.
+//
+// The alias is read from conductor/core/ — the module that owns the union —
+// while the declared side is read from the live plugin. Neither side is derived
+// from the other (C-077).
+// ---------------------------------------------------------------------------
+
+const coreDir = path.resolve(testsDir, "../core");
+const pluginSourcePath = path.resolve(testsDir, "../plugin/index.ts");
+
+// The right-hand side of `export type <name> = ...`, terminated by the first
+// `;` at brace/paren depth 0. Returns null when core/ defines no such alias.
+function aliasBodyOf(aliasName: string): string | null {
+  for (const entry of readdirSync(coreDir).filter((f) => f.endsWith(".ts")).sort()) {
+    const source = readFileSync(path.join(coreDir, entry), "utf8");
+    const marker = new RegExp(`^export type ${aliasName}\\s*=`, "m");
+    const hit = marker.exec(source);
+    if (hit === null) continue;
+    const rest = source.slice(hit.index + (hit[0] as string).length);
+    let depth = 0;
+    for (let i = 0; i < rest.length; i += 1) {
+      const ch = rest[i];
+      if (ch === "{" || ch === "(") depth += 1;
+      else if (ch === "}" || ch === ")") depth -= 1;
+      else if (ch === ";" && depth === 0) return rest.slice(0, i);
+    }
+    return null;
+  }
+  return null;
+}
+
+// A union whose every member is an object literal is coarsely an OBJECT; a union
+// whose every member is a string (or a string literal) is coarsely a STRING.
+// A mixed union stays unplaceable and is reported, never excused.
+function aliasCoarseKind(aliasName: string): CoarseKind | null {
+  const body = aliasBodyOf(aliasName);
+  if (body === null) return null;
+  const stripped = body
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+  const members: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of stripped) {
+    if (ch === "{" || ch === "(") depth += 1;
+    if (ch === "}" || ch === ")") depth -= 1;
+    if (ch === "|" && depth === 0) {
+      members.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  members.push(current);
+  const parts = members.map((m) => m.trim()).filter((m) => m.length > 0);
+  if (parts.length === 0) return null;
+  if (parts.every((p) => p.startsWith("{"))) return "object";
+  if (parts.every((p) => /^(string|"[^"]*"|'[^']*')$/.test(p))) return "string";
+  return null;
+}
+
 function tsCoarseKind(typeText: string): CoarseKind | null {
   // Strip a trailing separator and any "| null" / "| undefined" tail.
   const text = typeText.replace(/;.*$/, "").replace(/\s*\|\s*(null|undefined)\b/g, "").trim();
@@ -529,7 +599,36 @@ function tsCoarseKind(typeText: string): CoarseKind | null {
   if (/^string\[\]$/.test(text) || /^Array<string>$/.test(text)) return "array<string>";
   if (/^Array<\s*\{/.test(text) || /^\{.*\}\[\]$/.test(text)) return "array<object>";
   if (/^\{/.test(text)) return "object";
+  // `<Alias>[]` / `Array<Alias>` — resolve the element through core/.
+  const named = /^(\w+)\[\]$/.exec(text) ?? /^Array<\s*(\w+)\s*>$/.exec(text);
+  if (named !== null) {
+    const element = aliasCoarseKind(named[1] as string);
+    if (element === "string") return "array<string>";
+    if (element === "object") return "array<object>";
+    return null;
+  }
+  if (/^\w+$/.test(text)) return aliasCoarseKind(text);
   return null;
+}
+
+// A declared shape may legitimately differ from the handler's field when a PURE,
+// separately tested widener stands between the two — but ONLY while that widener
+// is actually CALLED on the way through. A parser nobody calls is not a bridge,
+// it is a cast, and a cast from `string` to a structure is the C-047 defect
+// wearing a justification. Each entry names the parser that must be reachable in
+// the composition root or the handler for the mismatch to be excused.
+const CLAIMED_BRIDGES: Record<string, { parser: string; module: string }> = {
+  "conductor_queue_amend.ops": { parser: "parseAmendOps", module: "core/queue-amend.ts" },
+};
+
+// Is the named widener CALLED anywhere on the path from the declared arg to the
+// handler — the composition root (plugin/index.ts) or the handler file itself?
+function bridgeIsReal(parser: string): boolean {
+  const call = new RegExp(`\\b${parser}\\s*\\(`);
+  for (const file of [pluginSourcePath, toolsSourcePath]) {
+    if (call.test(readFileSync(file, "utf8"))) return true;
+  }
+  return false;
 }
 
 test("[C-047-shape] every declared tool arg has the same COARSE shape as the handler field it feeds, so a scalar can never be declared where the handler needs a structure", async () => {
@@ -556,40 +655,47 @@ test("[C-047-shape] every declared tool arg has the same COARSE shape as the han
         continue;
       }
       compared += 1;
-      if (declared !== wanted) {
-        mismatches.push(
-          `${toolName}.${argName}: the tool declares ${declared} but ${binding.input}.${argName} ` +
-            `is ${wanted} ("${typeText}") — the composition root cannot bridge that, and ` +
-            `fabricating the missing structure is exactly what it may not do`,
-        );
-      }
+      if (declared === wanted) continue;
+      const key = `${toolName}.${argName}`;
+      const bridge = CLAIMED_BRIDGES[key];
+      if (bridge !== undefined && bridgeIsReal(bridge.parser)) continue;
+      mismatches.push(
+        `${key}: the tool declares ${declared} but ${binding.input}.${argName} ` +
+          `is ${wanted} ("${typeText}") — the composition root cannot bridge that, and ` +
+          `fabricating the missing structure is exactly what it may not do` +
+          (bridge === undefined
+            ? ""
+            : `. A bridge through ${bridge.module} ${bridge.parser} is CLAIMED for this arg, but ` +
+              `${bridge.parser} is called nowhere in plugin/index.ts or adapter/tools.ts — the ` +
+              `binding casts the declared value straight into the handler's field instead, so a ` +
+              `caller that follows the DECLARED schema cannot make this tool succeed. Either ` +
+              `declare the structure the handler requires, or actually call ${bridge.parser} on ` +
+              `the way in`),
+      );
     }
   }
 
   // A guard that compared nothing would pass silently — the C-045 failure mode.
   assert.ok(
-    compared >= 12,
-    `only ${compared} arg shapes were comparable (expected at least 12 across the bound tools); ` +
+    compared >= 13,
+    `only ${compared} arg shapes were comparable (expected at least 13 across the bound tools); ` +
       `an extraction this thin means the parse or the zod introspection broke, and a guard ` +
       `that inspects nothing must be RED, never a vacuous green. Undetermined: ${undetermined.join("; ")}`,
   );
 
-  // Anything the coarse classifier cannot place is listed EXPLICITLY rather than
-  // skipped quietly, so a NEW unclassifiable arg is a red that someone has to
-  // look at. A skip list that grows by itself is how a guard rots.
-  //
-  // conductor_queue_amend.ops is the one entry, and it is deliberate: the tool
-  // declares `string[]` while the handler takes the closed QueueAmendOp union,
-  // bridged by core/queue-amend.ts parseAmendOps — a PURE, separately tested
-  // widening (C-035). That is a real bridge, not a fabrication, which is exactly
-  // what distinguishes it from the options defect this row exists to catch:
-  // parseAmendOps turns text into a structure it validates, whereas nothing can
-  // turn an unscored string into a §2.7 score.
+  // NOTHING is excused for being unclassifiable any more. The list used to carry
+  // one standing entry — conductor_queue_amend.ops — on the grounds that the
+  // `string[]` declaration was widened into the closed QueueAmendOp union by
+  // core/queue-amend.ts parseAmendOps. The alias is now resolved through the
+  // module that defines it, so the pair is COMPARABLE, and whether the claimed
+  // bridge exists is decided by looking for the call rather than by trusting the
+  // comment: an arg the classifier cannot place is a hole a scalar-for-structure
+  // defect hides in, which is exactly what this row exists to close.
   assert.deepEqual(
-    undetermined.map((entry) => entry.split(" ")[0]),
-    ["conductor_queue_amend.ops"],
-    "the coarse classifier could not place an argument it has not been told about; either give it " +
-      "a comparable shape or record here WHY it is bridged and by which pure parser",
+    undetermined,
+    [],
+    "the coarse classifier could not place an argument: teach it the shape (resolving the alias " +
+      "through the module that defines it) — an UNDETERMINED verdict may not stand in for a check",
   );
 
   assert.deepEqual(mismatches, [], mismatches.join("\n"));

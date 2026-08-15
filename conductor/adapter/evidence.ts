@@ -25,7 +25,15 @@
 //     module would misclassify as `error` and a legal greenfield red would die.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import * as path from "node:path";
 
 import { appendLedgerLineRaw, assertSafeId } from "./state.ts";
@@ -628,12 +636,75 @@ export type VerifyOutcome =
 // Mirrors state.ts's staleLockMs; 24h; injectable via VerifyOptions.staleMarkerMs (F6).
 const DEFAULT_STALE_MARKER_MS = 24 * 60 * 60 * 1000;
 
+// The per-tree verify marker's filename, spelled ONCE. Every seam that has to know
+// whether a tree is frozen reads it through this module — markerPathOf below to
+// compose one, liveVerifyTrees to enumerate them — because two independently-derived
+// spellings of one filename is how a freeze silently stops firing on one side only.
+const MARKER_PREFIX = "verify-running-";
+const MARKER_SUFFIX = ".json";
+
 function markerPathOf(runDir: string, tree: string): string {
   // F3 trust boundary: tree ("main" or a worktree item id) composes the marker filename
   // AND is later rmSync'd — a traversing tree ("../../tmp/evil") would let a poisoned key
   // write/delete outside runDir. Reject anything that is not a conservative slug.
   assertSafeId(tree, "tree");
-  return path.join(runDir, `verify-running-${tree}.json`);
+  return path.join(runDir, `${MARKER_PREFIX}${tree}${MARKER_SUFFIX}`);
+}
+
+export interface LiveMarkerOptions {
+  now?: () => number;
+  // The same over-age bound runVerify takes (VerifyOptions.staleMarkerMs, F6), so the
+  // two seams can never disagree about how old a marker may be.
+  staleMarkerMs?: number;
+}
+
+/**
+ * The LIVE per-tree verify markers in `runDir`, as the evidence layer's own TREE
+ * SLUGS ("main" for the shared tree, "<itemId>" for a worktree), sorted.
+ *
+ * The §3.5 freeze is one fact read at two seams — the wave driver's admission check
+ * and the edit gate's verifyInFlightTree — and neither of them owns this filename.
+ * A missing or unreadable run directory holds no markers rather than raising: a
+ * freeze that cannot be observed is absent, not fatal. A file whose slug is not a
+ * conservative slug is not a marker this module could ever have written, so it is
+ * ignored rather than reported as a frozen tree.
+ *
+ * LIVE means what runVerify's own marker gate means by it and nothing broader: the
+ * marker parses, its pid is alive, and it is not over-age. A marker runVerify would
+ * BREAK is not a freeze — reporting it would let a crashed verify's leftover hold
+ * every write-capable member of its tree forever. The rule is not restated here; the
+ * same readMarker/pidAlive/DEFAULT_STALE_MARKER_MS the gate reads are reused, because
+ * two derivations of one fact is exactly what this module exists to prevent.
+ *
+ * READ-ONLY: a broken marker is omitted, never deleted. Breaking one is runVerify's
+ * move under §4.3, which does it deliberately and reports the anomaly on its outcome.
+ */
+export function liveVerifyTrees(runDir: string, opts: LiveMarkerOptions = {}): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(runDir);
+  } catch {
+    return [];
+  }
+  const now = opts.now ?? Date.now;
+  const staleMarkerMs = opts.staleMarkerMs ?? DEFAULT_STALE_MARKER_MS;
+  const trees: string[] = [];
+  for (const name of names) {
+    if (!name.startsWith(MARKER_PREFIX) || !name.endsWith(MARKER_SUFFIX)) continue;
+    const tree = name.slice(MARKER_PREFIX.length, name.length - MARKER_SUFFIX.length);
+    if (tree.length === 0) continue;
+    try {
+      assertSafeId(tree, "tree");
+    } catch {
+      continue;
+    }
+    const marker = readMarker(path.join(runDir, name));
+    if (marker === null) continue;
+    if (!pidAlive(marker.pid)) continue;
+    if (now() - marker.startMs > staleMarkerMs) continue;
+    trees.push(tree);
+  }
+  return trees.sort();
 }
 
 function readMarker(markerPath: string): Marker | null {

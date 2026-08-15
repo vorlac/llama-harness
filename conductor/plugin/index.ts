@@ -50,6 +50,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { tool } from "@opencode-ai/plugin";
 import type { Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
@@ -64,17 +65,125 @@ import {
 } from "../adapter/continuation.ts";
 import type { ContinuationClient } from "../adapter/continuation.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../adapter/config-io.ts";
+import { liveVerifyTrees } from "../adapter/evidence.ts";
+import { createFanout } from "../adapter/fanout.ts";
+import type {
+  Fanout,
+  FanoutClient,
+  SessionRegistry as FanoutRegistry,
+} from "../adapter/fanout.ts";
+import { loadPacks } from "../adapter/inject.ts";
 import { createJournal } from "../adapter/journal.ts";
 import type { Journal } from "../adapter/journal.ts";
+import { createFailoverState } from "../adapter/router-client.ts";
+import type { FailoverState } from "../adapter/router-client.ts";
 import { openWorkspace } from "../adapter/state.ts";
 import type { StateStore } from "../adapter/state.ts";
-import { classifyTool, CONDUCTOR_TOOL_NAMES, gateBeforeToolCall } from "../adapter/tools.ts";
-import type { Corr, RegistryEntry } from "../adapter/tools.ts";
+import {
+  classifyTool,
+  CONDUCTOR_TOOL_NAMES,
+  gateBeforeToolCall,
+  handleAnswer,
+  handleClassify,
+  handleDecide,
+  handleDecompose,
+  handleDefer,
+  handleDispatchWave,
+  handleInlineClaim,
+  handleItemReview,
+  handleMarkGreen,
+  handleOverride,
+  handlePlan,
+  handlePlanReview,
+  handlePublish,
+  handleQueueAmend,
+  handleReport,
+  handleSetup,
+  handleStatus,
+  handleSubmitTest,
+  handleSurface,
+  handleValidate,
+  handleVetTest,
+  verifyInFlightTreeFor,
+} from "../adapter/tools.ts";
+import type {
+  Corr,
+  DecideInput,
+  OverrideGrant,
+  QueueAmendInput,
+  RegistryEntry,
+  SetupInput,
+  StatusResult,
+  WaveTreeState,
+} from "../adapter/tools.ts";
+import { AMEND_OP_KINDS, parseAmendOps } from "../core/queue-amend.ts";
 import type { Config, LogLevel } from "../core/types.ts";
 
 // The harness version stamped into the §3.8 liveness beacon openWorkspace writes,
 // so a `conductor doctor` reading alive.json can tell which harness left it.
 const CONDUCTOR_VERSION = "0.1.0";
+
+// The §6.4 doctrine pack directory, which ships beside this plugin. Resolved from
+// this module's own location rather than from a cwd: opencode loads the plugin
+// from wherever the repo lives, and a cwd-relative doctrine path would load nine
+// packs in a test and none in production.
+const DOCTRINE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "doctrine");
+
+// §12's session env (scripts/conductor_wiring.py:612-620): serve.py exports the
+// router's listen origin, the upstream llama-server's origin and the served model
+// id into the session the plugin runs in. Env is the channel because opencode
+// rejects unrecognized config keys and core Config has no router block, so nothing
+// else in the committed TS can learn where the router is listening.
+const ENV_ROUTER_URL = "LLAMA_HARNESS_ROUTER_URL";
+const ENV_UPSTREAM_URL = "LLAMA_HARNESS_URL";
+const ENV_MODEL_ID = "LLAMA_HARNESS_MODEL";
+
+// The §2.2 defaults the same two scripts fall back to (conductor_wiring.py
+// DEFAULT_LISTEN_PORT=8088, fetch_models.py DEFAULT_HOST/DEFAULT_PORT). They are
+// used ONLY when the session was not started by serve.py, so a setup run outside a
+// harness session probes where the harness would have put things rather than
+// nowhere at all.
+const DEFAULT_ORIGIN_HOST = "127.0.0.1";
+const DEFAULT_ROUTER_PORT = 8088;
+const DEFAULT_UPSTREAM_PORT = 8080;
+const ROUTER_PROBE_TIMEOUT_MS = 4_000;
+
+// How often the §3.5 freeze view re-reads the run directory while a write-capable
+// job is being held. Short enough that a cleared marker releases the held job
+// promptly; the timer exists only while something is actually waiting on it.
+const MARKER_POLL_MS = 40;
+
+// Parse an `http://host:port` origin into the {host, port} pair the §4.4 router
+// client takes. An absent or unparseable value falls back to the §2.2 default —
+// a malformed env var must not make the tool unable to run at all.
+function originOf(value: string | undefined, fallbackPort: number): { host: string; port: number } {
+  if (value !== undefined && value.length > 0) {
+    try {
+      const url = new URL(value);
+      const port = url.port.length > 0 ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+      if (url.hostname.length > 0 && Number.isFinite(port) && port > 0) {
+        return { host: url.hostname, port };
+      }
+    } catch {
+      // fall through to the default below
+    }
+  }
+  return { host: DEFAULT_ORIGIN_HOST, port: fallbackPort };
+}
+
+// The arguments a tool call arrived with, as a plain record. opencode hands the
+// zod-parsed object; a direct caller may hand anything.
+function argsOf(raw: unknown): Record<string, unknown> {
+  return raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+}
+
+// The calling session id from the opencode ToolContext, "" when the caller did not
+// supply one (which leaves the call unregistered, the safe default).
+function sessionIdOf(context: unknown): string {
+  if (context === null || typeof context !== "object") return "";
+  const id = (context as { sessionID?: unknown }).sessionID;
+  return typeof id === "string" ? id : "";
+}
 
 // The correlation triple as the WORKSPACE-level sinks model it: runId is optional
 // because the lock, the beacon and a failed hook all precede any run. Narrower
@@ -98,6 +207,11 @@ interface RebindableJournal {
     data: Record<string, unknown>,
     corr: HookCorr,
   ) => void;
+  // The evidence layer and the fan-out engine take the full adapter/journal.ts
+  // Journal (log + flushSync), and adapter/tools.ts forwards flushSync only when
+  // the sink it was handed carries one. Without it a verify's records would sit
+  // buffered while the very tool that wrote them returned.
+  flushSync: () => void;
 }
 
 // The lazily-opened workspace: everything a hook needs that costs filesystem I/O
@@ -126,6 +240,15 @@ interface ToolSpec {
   args: ArgShape;
 }
 
+// conductor_status is legal before any run exists, and the absent run is REPORTED
+// rather than invented — the two run-identifying fields are null and every other
+// field is the empty reading of itself. That case is DERIVED from the handler's own
+// declared result rather than typed out a second time: the bound tool hands its
+// value back as a JSON string, so this annotation is the only thing that ever
+// compares the runless return to StatusResult. A field added there is a compile
+// error here, which is what keeps one tool from carrying two shapes.
+type RunlessStatus = Omit<StatusResult, "runId" | "state"> & { runId: null; state: null };
+
 // §2.7's scored option, declared ONCE and shared by every tool that records a
 // decision. Every tool-recorded decision is `kind:"derived"` (§2.7 reserves
 // "human" for a decision that was ASKED of the human, which arrives through
@@ -152,18 +275,39 @@ const scoredOptions = S.array(
   }),
 );
 
-// A registered conductor tool whose handler is bound in later phases (§3.4:
-// handlers check gates-phase legality, re-derive evidence, and write state). Until
-// a run binds the handler layer to this session, invoking the tool is a real
-// error rather than a silent no-op.
-function handlerNotBound(name: string): () => Promise<string> {
-  return async (): Promise<string> => {
-    throw new Error(
-      `conductor tool "${name}" was invoked but no run handler is bound to this session — ` +
-        "conductor advances state only through its per-run handler layer (§3.4)",
-    );
-  };
-}
+// §2.4's queue entry, declared as the whole entry core's Queue schema requires: an
+// `add`/`update` op carries one of these, and a partial declaration would tell a
+// model to send an entry validateQueue then refuses. The field VOCABULARIES stay
+// core's — ladderRung is checked against §2.7's ladder there, not paraphrased here.
+const queueEntry = S.object({
+  id: S.string().describe("the item id"),
+  title: S.string().describe("what the item does"),
+  rationale: S.string().describe("why the item exists"),
+  fileScope: S.array(S.string()).describe("the paths this item may edit"),
+  testScope: S.array(S.string()).describe("the test paths this item owns"),
+  acceptance: S.array(S.string()).describe("the observable acceptance rows"),
+  behavioral: S.boolean().describe("true when the item changes observable behaviour"),
+  dependsOn: S.array(S.string()).describe("item ids this item depends on"),
+  ponytail: S.object({
+    necessary: S.string(),
+    reuse: S.string(),
+    ladderRung: S.string().describe("the §2.7 ladder rung this item sits on"),
+  }).describe("the §2.4 necessity/reuse/ladder record"),
+});
+
+// §2.4's amendment op, in the shape core/queue-amend.ts's QueueAmendOp union
+// requires: `remove` names an id, `add` and `update` carry the whole queue entry.
+// Declared as a bare string array, this argument told a model to send text that
+// amends nothing at all — the same C-047 defect conductor_decide's scored options
+// carried. The model supplies the structure because the composition root may not
+// invent it; core's parseAmendOps is what narrows what arrives to the union.
+const amendOps = S.array(
+  S.object({
+    op: S.enum([...AMEND_OP_KINDS]).describe(`one of ${AMEND_OP_KINDS.join("/")}`),
+    id: S.string().optional().describe("the queue item id to remove (remove only)"),
+    item: queueEntry.optional().describe("the whole §2.4 queue entry to add or update"),
+  }),
+);
 
 export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   // ONE registry, two consumers. adapter/tools.ts gateBeforeToolCall reads a
@@ -226,6 +370,12 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         ...(corr.itemId === undefined ? {} : { itemId: corr.itemId }),
         ...(corr.sessionID === undefined ? {} : { sessionID: corr.sessionID }),
       });
+    },
+    flushSync: () => {
+      // Nothing to flush before a run exists: the stderr sink writes each record
+      // as it is made.
+      const bound = runJournal;
+      if (bound !== null) bound.flushSync();
     },
   };
 
@@ -405,7 +555,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     conductor_queue_amend: {
       description: "Re-validate and apply queue amendment ops with a decision record.",
       args: {
-        ops: S.array(S.string()).describe("the amendment operations to apply"),
+        ops: amendOps.describe("the §2.4 amendment operations to apply, in order"),
         question: S.string().describe("the decision the amendment answers (§2.7)"),
         options: scoredOptions.describe("the options considered, each with its §2.7 ladder-5 score"),
         choice: S.string().describe("the chosen option"),
@@ -465,6 +615,505 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     },
   };
 
+  // =========================================================================
+  // The handler binding (§3.4). Everything below turns a tool CALL into the one
+  // committed adapter/tools.ts handler that serves it, and nothing else: the
+  // plugin performs no state transition, runs no verify and writes no ledger of
+  // its own. core/tool-bindings.ts is the data table this implements.
+  // =========================================================================
+
+  // §3.6's one-shot grant map — root-owned state, the sibling of the session
+  // registry above. handleOverride mints a grant into it; the gate hook below
+  // spends it. Two maps would leave a granted override unspendable.
+  const overrideGrants = new Map<string, OverrideGrant>();
+
+  // §4.4's per-session failover latch. Minted ONCE per plugin process, exactly
+  // like the continuation state: it IS the session's latch, and a fresh one per
+  // call would forget that the router already failed.
+  const failoverState: FailoverState = createFailoverState();
+
+  // §6.4/§3.8: the doctrine packs, loaded ONCE through the committed loader and
+  // FAIL-CLOSED. loadPacks names the offending pack in its own message; the
+  // failure is reported at error level on the §7.1 sink and re-thrown, so the
+  // tools refuse rather than dispatching sub-sessions carrying no doctrine —
+  // which is the silent-degradation shape §3.8 exists to forbid.
+  let packs: Record<string, string> | null = null;
+  function ensurePacks(hook: string, sessionID: string): Record<string, string> {
+    if (packs !== null) return packs;
+    try {
+      packs = loadPacks(DOCTRINE_DIR);
+      return packs;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      journal.log(
+        "error",
+        "state",
+        "hook.failed",
+        { hook, root: DOCTRINE_DIR, error: message },
+        { sessionID },
+      );
+      throw err instanceof Error ? err : new Error(message);
+    }
+  }
+
+  // The §3.5 freeze view, backed by the REAL per-tree verify markers. isFrozen
+  // answers from the marker set adapter/evidence.ts enumerates; onClear notices a
+  // marker LEAVING that set, which is what releases a write-capable job the
+  // fan-out engine is holding. A constant `false` here would make freeze
+  // admission dead on the driver side exactly as a hardcoded verifyInFlightTree
+  // does on the gate side — the same defect twice (CR-SG-3).
+  //
+  // The two seams speak different tree types (C-037 ruling 5): the marker's name
+  // is a SLUG ("main" | "<itemId>") while a fan-out job's tree is the PATH the
+  // edit gate compares by string equality. verifyInFlightTreeFor is the committed
+  // translation, and both the frozen test and the clear notification run through
+  // it so a worktree freeze cannot fire on one side only.
+  interface PluginTreeState extends WaveTreeState {
+    stop: () => void;
+  }
+
+  function createTreeState(store: StateStore, runId: string): PluginTreeState {
+    const runDir = runDirOf(store.root, runId);
+    const listeners = new Set<(tree: string) => void>();
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const snapshot = (): Set<string> =>
+      runId.length === 0 ? new Set<string>() : new Set(liveVerifyTrees(runDir));
+
+    // `live` is owned by the poll alone. isFrozen deliberately does NOT refresh
+    // it: a marker whose disappearance were absorbed by an admission check would
+    // never be announced, and the held job it was holding would wait forever.
+    let live = snapshot();
+
+    const pathOf = (slug: string): string | null => {
+      try {
+        return verifyInFlightTreeFor(store, runId, slug);
+      } catch {
+        return null;
+      }
+    };
+
+    const namesOf = (slug: string): string[] => {
+      const translated = pathOf(slug);
+      return translated === null || translated === slug ? [slug] : [slug, translated];
+    };
+
+    const announce = (tree: string): void => {
+      for (const listener of [...listeners]) listener(tree);
+    };
+
+    const poll = (): void => {
+      const next = snapshot();
+      const cleared: string[] = [];
+      for (const slug of live) if (!next.has(slug)) cleared.push(slug);
+      live = next;
+      for (const slug of cleared) for (const name of namesOf(slug)) announce(name);
+    };
+
+    const stopTimer = (): void => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    return {
+      isFrozen: (tree: string): boolean => {
+        for (const slug of snapshot()) {
+          if (slug === tree || pathOf(slug) === tree) return true;
+        }
+        return false;
+      },
+      onClear: (listener: (tree: string) => void): (() => void) => {
+        listeners.add(listener);
+        if (timer === null) {
+          timer = setInterval(poll, MARKER_POLL_MS);
+          // A watcher must never be the reason a process stays alive.
+          if (typeof timer.unref === "function") timer.unref();
+        }
+        return () => {
+          listeners.delete(listener);
+          if (listeners.size === 0) stopTimer();
+        };
+      },
+      // The DRIVER's own release: a stage that finished has done whatever it was
+      // going to do to its tree, so the view is told without waiting for a poll.
+      notifyClear: (tree: string): void => {
+        live = snapshot();
+        announce(tree);
+      },
+      stop: (): void => {
+        listeners.clear();
+        stopTimer();
+      },
+    };
+  }
+
+  // THE dependency bundle. adapter/tools.ts:7304-7311 says in its own words why
+  // the handler inputs are uniform — "so the composition root can call every
+  // handler alike" — so this is assembled ONCE per invocation and SPREAD into
+  // every handler input. Adding a field every handler takes is an edit to this
+  // one construction site, not to twenty-one call sites.
+  interface ToolDeps {
+    store: StateStore;
+    fanout: Fanout;
+    treeState: WaveTreeState;
+    runId: string;
+    config: Config;
+    journal: RebindableJournal;
+    stateHome: string;
+    workspaceKey: string;
+    packs: Record<string, string>;
+    overrideGrants: Map<string, OverrideGrant>;
+    sessionID: string;
+  }
+
+  interface Assembled {
+    deps: ToolDeps;
+    entry: RegistryEntry | undefined;
+    release: () => void;
+  }
+
+  function refuse(message: string): Error {
+    return new Error(message);
+  }
+
+  // CR-SG-1: a stage tool needs a live run, and store.currentRun() can legitimately
+  // return null (a fresh repo, an archived run). The refusal names the tool and the
+  // legal next action; it never fabricates a run id, never creates a run as a side
+  // effect of a stage tool, and never lets a null reach a handler as an empty string.
+  function noRunRefusal(name: string): Error {
+    return refuse(
+      `${name}: there is no live conductor run in this workspace, so there is no run state for ` +
+        "this tool to advance. A run is created when the orchestrator receives a prompt (§3.2) — " +
+        "send one to start work, or call conductor_status to see what this workspace already " +
+        `holds. ${name} creates no run of its own and has written nothing.`,
+    );
+  }
+
+  function assemble(name: string, sessionID: string, needsRun: boolean): Assembled {
+    const hook = `tool:${name}`;
+    const ws = ensureWorkspace(sessionID, hook);
+    if (ws === null) {
+      throw refuse(
+        `${name}: this workspace could not be opened, so conductor can neither read nor write ` +
+          "any of its state; the open failure was reported at error level on the §7.1 sink with " +
+          "its root and errno. Fix the workspace (or its permissions) and call the tool again.",
+      );
+    }
+
+    // The registry entry the gate hook reads is the one this call must read too —
+    // never a second copy (SG-9).
+    seedOrchestratorEntry(ws);
+    resolveSessionTree(ws.store, registry.get(sessionID));
+
+    let run: Awaited<ReturnType<StateStore["currentRun"]>> = null;
+    try {
+      run = ws.store.currentRun();
+    } catch {
+      run = null;
+    }
+    // A tool that finds a live run must bind the journal to it, or its own records
+    // land on the §7.1 stderr sink instead of that run's journal.jsonl.
+    if (run !== null && liveRunId !== run.runId) bindRunJournal(ws.root, ws.config, run.runId);
+    if (run === null && needsRun) throw noRunRefusal(name);
+
+    const runId = run === null ? "" : run.runId;
+    const loadedPacks = ensurePacks(hook, sessionID);
+    const coords = stateCoordinates(ws.root);
+    const treeState = createTreeState(ws.store, runId);
+    // The REAL engine over the opencode SDK client, built with the plugin's ONE
+    // registry so the sub-sessions it dispatches are visible to the gate hook that
+    // must honour them — the same cast the event hook below uses for the same client.
+    const fanout = createFanout(
+      input.client as unknown as FanoutClient,
+      ws.config,
+      journal,
+      registry as unknown as FanoutRegistry,
+      treeState,
+      runId,
+    );
+
+    return {
+      deps: {
+        store: ws.store,
+        fanout,
+        treeState,
+        runId,
+        config: ws.config,
+        journal,
+        stateHome: coords.stateHome,
+        workspaceKey: coords.workspaceKey,
+        packs: loadedPacks,
+        overrideGrants,
+        sessionID,
+      },
+      entry: registry.get(sessionID),
+      release: () => {
+        treeState.stop();
+      },
+    };
+  }
+
+  // CR-SG-2: the declared args are the model's to supply, and the composition root
+  // may not invent one. Required-ness comes from the SAME zod shapes the tool map
+  // registers (schema.isOptional()), so a spec and its enforcement cannot drift.
+  function requireDeclaredArgs(name: string, args: Record<string, unknown>): void {
+    const shape = (specs[name]?.args ?? {}) as Record<string, unknown>;
+    const missing: string[] = [];
+    for (const [field, schema] of Object.entries(shape)) {
+      const isOptional = (schema as { isOptional?: unknown }).isOptional;
+      if (typeof isOptional === "function" && (isOptional as () => boolean).call(schema)) continue;
+      const value = args[field];
+      if (value === undefined || value === null) missing.push(field);
+    }
+    if (missing.length === 0) return;
+    const named = missing.map((field) => `"${field}"`).join(", ");
+    throw refuse(
+      `${name}: required argument${missing.length > 1 ? "s" : ""} ${named} ` +
+        `${missing.length > 1 ? "were" : "was"} not supplied. Conductor's composition root never ` +
+        "invents a value its caller was supposed to give it (C-047: a fabricated argument makes a " +
+        `tool that cannot succeed), so this call is refused rather than run against a default — ` +
+        `re-issue ${name} with ${named} set.`,
+    );
+  }
+
+  // A declared argument read at its declared type. A value of the WRONG type is
+  // refused for the same reason a missing one is: substituting "" or [] would hand
+  // the handler a value the caller never gave it, which is the fabrication CR-SG-2
+  // forbids — and an empty string reaching a stage handler as an itemId is exactly
+  // the "null propagating into a handler" shape the no-run row names.
+  function wrongType(name: string, field: string, expected: string, value: unknown): Error {
+    return refuse(
+      `${name}: argument "${field}" must be ${expected}, but the call supplied ` +
+        `${value === undefined ? "nothing" : JSON.stringify(value)}. Conductor refuses rather ` +
+        `than coercing it to an empty value the caller never gave — re-issue ${name} with ` +
+        `"${field}" as ${expected}.`,
+    );
+  }
+
+  function stringArg(name: string, args: Record<string, unknown>, field: string): string {
+    const value = args[field];
+    if (typeof value !== "string") throw wrongType(name, field, "a string", value);
+    return value;
+  }
+
+  function stringsArg(name: string, args: Record<string, unknown>, field: string): string[] {
+    const value = args[field];
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+      throw wrongType(name, field, "an array of strings", value);
+    }
+    return value as string[];
+  }
+
+  // conductor_queue_amend's `ops` is the one argument that is not already the type
+  // its handler's field is: what arrives is whatever the model sent, and
+  // QueueAmendInput.ops is core's closed add/update/remove union. The narrowing is
+  // core/queue-amend.ts parseAmendOps' — the committed, separately tested widener
+  // that owns the vocabulary — so the root CALLS it and refuses with its verdict,
+  // which already names the offending position. Casting instead would let a
+  // malformed op through as though it were a union member, which is the one thing
+  // the composition root may never do.
+  function amendOpsArg(args: Record<string, unknown>): QueueAmendInput["ops"] {
+    const value = args.ops;
+    if (!Array.isArray(value)) {
+      throw wrongType("conductor_queue_amend", "ops", "an array of §2.4 amendment ops", value);
+    }
+    // parseAmendOps reads one JSON object per element, which is also the form a
+    // model that stringifies its structure sends. An op that arrived as a value is
+    // rendered back to that text; nothing about it is added or dropped on the way.
+    const asJson = value.map((entry) =>
+      typeof entry === "string" ? entry : (JSON.stringify(entry) ?? "null"),
+    );
+    const parsed = parseAmendOps(asJson);
+    if (!parsed.ok) throw refuse(`conductor_queue_amend: ${parsed.why}`);
+    return parsed.ops;
+  }
+
+  // The tools that are legal with no live run: §2.11's stale-red registry precedes
+  // every run, and conductor_status is read-only and legal in every state.
+  const RUNLESS_TOOLS: readonly string[] = ["conductor_status", "conductor_forget_stale"];
+
+  // One entry per §3.4 name. Every body reaches the COMMITTED handler and spreads
+  // the ONE bundle into it; what each adds is only what the model supplied.
+  type BoundTool = (args: Record<string, unknown>, assembled: Assembled) => Promise<unknown>;
+
+  const bound: Record<string, BoundTool> = {
+    conductor_classify: async (_args, { deps }) => handleClassify({ ...deps }),
+    conductor_decompose: async (_args, { deps }) => handleDecompose({ ...deps }),
+    conductor_plan: async (_args, { deps }) => handlePlan({ ...deps }),
+    conductor_plan_review: async (_args, { deps }) => handlePlanReview({ ...deps }),
+    conductor_dispatch_wave: async (_args, { deps }) => handleDispatchWave({ ...deps }),
+    conductor_submit_test: async (args, { deps }) =>
+      handleSubmitTest({ ...deps, itemId: stringArg("conductor_submit_test", args, "itemId") }),
+    conductor_vet_test: async (args, { deps }) =>
+      handleVetTest({ ...deps, itemId: stringArg("conductor_vet_test", args, "itemId") }),
+    conductor_mark_green: async (args, { deps }) =>
+      handleMarkGreen({ ...deps, itemId: stringArg("conductor_mark_green", args, "itemId") }),
+    conductor_validate: async (args, { deps }) =>
+      handleValidate({ ...deps, itemId: stringArg("conductor_validate", args, "itemId") }),
+    conductor_item_review: async (args, { deps }) =>
+      handleItemReview({ ...deps, itemId: stringArg("conductor_item_review", args, "itemId") }),
+    conductor_publish: async (args, { deps }) =>
+      handlePublish({ ...deps, itemId: stringArg("conductor_publish", args, "itemId") }),
+    conductor_report: async (_args, { deps }) => handleReport({ ...deps }),
+    conductor_surface: async (args, { deps, entry }) =>
+      handleSurface({
+        ...deps,
+        question: stringArg("conductor_surface", args, "question"),
+        blocksItems: stringsArg("conductor_surface", args, "blocksItems"),
+        // Caller identity, not a model-supplied argument: the §3.5 registry is
+        // what says which role this session speaks as.
+        askedBy: { role: entry?.role ?? "orchestrator", sessionID: deps.sessionID },
+        ...(typeof args.humanTerritory === "boolean"
+          ? { humanTerritory: args.humanTerritory }
+          : {}),
+      }),
+    conductor_answer: async (args, { deps }) =>
+      handleAnswer({
+        ...deps,
+        questionId: stringArg("conductor_answer", args, "questionId"),
+        answer: stringArg("conductor_answer", args, "answer"),
+      }),
+    conductor_defer: async (args, { deps }) =>
+      handleDefer({
+        ...deps,
+        itemId: stringArg("conductor_defer", args, "itemId"),
+        reason: stringArg("conductor_defer", args, "reason"),
+      }),
+    conductor_decide: async (args, { deps }) =>
+      handleDecide({
+        ...deps,
+        question: stringArg("conductor_decide", args, "question"),
+        options: args.options as DecideInput["options"],
+        choice: stringArg("conductor_decide", args, "choice"),
+        why: stringArg("conductor_decide", args, "why"),
+        appliedWhere: stringArg("conductor_decide", args, "appliedWhere"),
+        // C-044: §2.7 reserves "human" for a decision that was ASKED of a human,
+        // and a decision recorded through a tool call was not (the path that
+        // carries a human's answer is conductor_answer).
+        kind: "derived",
+      }),
+    conductor_queue_amend: async (args, { deps }) =>
+      handleQueueAmend({
+        ...deps,
+        ops: amendOpsArg(args),
+        question: stringArg("conductor_queue_amend", args, "question"),
+        options: args.options as DecideInput["options"],
+        choice: stringArg("conductor_queue_amend", args, "choice"),
+        why: stringArg("conductor_queue_amend", args, "why"),
+        appliedWhere: stringArg("conductor_queue_amend", args, "appliedWhere"),
+      }),
+    conductor_inline_claim: async (args, { deps }) =>
+      handleInlineClaim({
+        ...deps,
+        itemId: stringArg("conductor_inline_claim", args, "itemId"),
+        reason: stringArg("conductor_inline_claim", args, "reason"),
+        options: args.options as DecideInput["options"],
+        choice: stringArg("conductor_inline_claim", args, "choice"),
+      }),
+    conductor_override: async (args, { deps, entry }) => {
+      // §3.6's budget is spent BY an item's session, and which item that is comes
+      // from the registry — the root reads it, it does not ask the model for it.
+      const itemId = entry?.itemId;
+      if (itemId === undefined || itemId.length === 0) {
+        throw refuse(
+          "conductor_override: this session carries no conductor item assignment, so there is no " +
+            "item whose §2.1 override budget could be spent and no item to taint. The override " +
+            "hatch is spent by the session working the item it applies to (§3.6).",
+        );
+      }
+      return handleOverride({
+        ...deps,
+        itemId,
+        gate: stringArg("conductor_override", args, "gate"),
+        reason: stringArg("conductor_override", args, "reason"),
+        grantedAction: stringArg("conductor_override", args, "grantedAction"),
+      });
+    },
+    conductor_status: async (_args, { deps }) => {
+      // Legal in every state, including before any run exists. The absence of a
+      // run is reported, never invented: there is no runId to hand the handler.
+      if (deps.runId.length === 0) {
+        const runless: RunlessStatus = {
+          runId: null,
+          state: null,
+          classification: null,
+          items: [],
+          openQuestions: [],
+        };
+        return runless;
+      }
+      return handleStatus({ ...deps });
+    },
+    // The ONE name with no handleX handler. Bound to the committed store method
+    // and to nothing else — the registry's read-modify-write is state.ts's.
+    conductor_forget_stale: async (args, { deps }) => {
+      const entryPath = stringArg("conductor_forget_stale", args, "path");
+      return { forgot: entryPath, registry: deps.store.removeStaleRed(entryPath) };
+    },
+  };
+
+  // conductor_setup is the ONE tool that takes no store, no runId and no fan-out
+  // (adapter/tools.ts:8141-8156): §2.3's OpenOptions needs the very Config setup is
+  // producing, so the first-run path cannot go through openWorkspace at all. Its
+  // input is built from the RESOLVED workspace root and the §12 session env, never
+  // from placeholders, and it runs in a repo with no .conductor/ whatsoever.
+  async function runSetup(args: Record<string, unknown>): Promise<unknown> {
+    let root = input.directory;
+    try {
+      root = realpathSync(input.directory);
+    } catch {
+      // An unresolvable directory is still the caller's directory; setup's own
+      // detection is what reports what is (and is not) there.
+    }
+    const setupInput: SetupInput = {
+      root,
+      journal,
+      router: {
+        listen: originOf(process.env[ENV_ROUTER_URL], DEFAULT_ROUTER_PORT),
+        probeTimeoutMs: ROUTER_PROBE_TIMEOUT_MS,
+      },
+      upstream: originOf(process.env[ENV_UPSTREAM_URL], DEFAULT_UPSTREAM_PORT),
+      failoverState,
+      ...(typeof args.reconfigure === "boolean" ? { reconfigure: args.reconfigure } : {}),
+      ...(args.answers === undefined || args.answers === null
+        ? {}
+        : { answers: args.answers as SetupInput["answers"] }),
+      ...(typeof process.env[ENV_MODEL_ID] === "string"
+        ? { modelId: process.env[ENV_MODEL_ID] }
+        : {}),
+    };
+    // Setup's own legality refusals (§3.4: an already-configured repo without
+    // reconfigure, a live run) reach the caller the way every other tool's refusal
+    // does — by THROWING, which is what opencode reads back to the model. A refusal
+    // RETURNED as data reads as a successful call whose result happens to say no.
+    return handleSetup(setupInput);
+  }
+
+  // The ONE body every registered tool executes. Argument legality first (a
+  // refusal, never a default), then the bundle, then the committed handler.
+  async function runTool(name: string, rawArgs: unknown, context: unknown): Promise<string> {
+    const args = argsOf(rawArgs);
+    const sessionID = sessionIdOf(context);
+    requireDeclaredArgs(name, args);
+    if (name === "conductor_setup") return JSON.stringify(await runSetup(args));
+
+    const run = bound[name];
+    if (run === undefined) {
+      throw refuse(
+        `${name} is registered in the §3.4 inventory but no handler binding is declared for it; ` +
+          "conductor refuses the call rather than pretending the stage ran.",
+      );
+    }
+    const assembled = assemble(name, sessionID, !RUNLESS_TOOLS.includes(name));
+    try {
+      return JSON.stringify(await run(args, assembled));
+    } finally {
+      assembled.release();
+    }
+  }
+
   // Build the `tool` map FROM the inventory so its keys are exactly
   // CONDUCTOR_TOOL_NAMES — a renamed or forgotten tool cannot slip through.
   const toolMap: Record<string, ToolDefinition> = {};
@@ -473,7 +1122,8 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     toolMap[name] = tool({
       description: spec.description,
       args: spec.args,
-      execute: handlerNotBound(name),
+      execute: async (rawArgs: unknown, context: unknown): Promise<string> =>
+        runTool(name, rawArgs, context),
     });
   }
 
@@ -598,6 +1248,9 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         testScope: [],
         verifyInFlightTree: null,
         inlineClaimScope,
+        // §3.6: the ONE grant map conductor_override mints into. A second map
+        // here would leave every granted override unspendable.
+        overrideGrants,
         journal,
         corr,
       });
