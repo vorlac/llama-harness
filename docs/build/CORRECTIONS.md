@@ -3569,3 +3569,67 @@ Verified by running two gates concurrently: both `GATE PASS`, both reporting `Ra
 scratch directory left behind.
 
 Both files are orchestrator-owned; no subagent may edit either.
+
+## C-079 — phase gates 12, 13 and 15 all FAIL, and M7 is why
+
+Three phase gates ran stage 2 at HEAD `108ea25`: three blind lenses each, one adjudicator with
+permission to settle findings by running them, then two skeptics per surviving MAJOR briefed to
+refute. 62 agents, 4.79M tokens, just under three hours. **All three FAIL.** 25 MAJORs reached
+adjudication; **20 were upheld with neither skeptic able to refute**, 2 upheld on a split, 3 refuted
+unanimously and dropped. Every failure scenario, its exact proving mutation and both skeptics'
+reasoning are in `docs/build/artifacts/phase-gates-12-13-15-findings.md`.
+
+**The cross-cutting cause, and it is not one of the 22.** M7 — "every row in
+`task-<id>.assertions.json` maps to a named test" — was recorded PASS for 13.1 and 15.1 and is
+satisfied by neither.
+
+| task | rows | times a row id appears in the deliverables |
+|---|---|---|
+| 12.1 | 35 rows | 35, in `test_conductor_wiring.py` |
+| 12.2 | 28 rows | 93, in `setup.test.ts` |
+| 14.1 | 33 rows | 33, one test method each |
+| **13.1** | **42 rows** | **5** — five test titles, each a paragraph claiming many rows at once |
+| **15.1** | **25 rows** | **0** — the spec names `conductor/tests/ops-docs.test.ts`; it does not exist |
+
+Both gates' findings follow from that table rather than sitting beside it.
+
+**Phase 15's ten MAJORs are all factual errors an anchor test would have caught on the day**: the
+`llama-router` exit table claims a code 1 that `main()` never returns and omits 2, 3 and 4; the
+`--ctx` row states the derivation backwards and its worked example does not compute; the run-dir map
+names `state/current-run` where the code writes `current-run.json`, and omits `questions.jsonl`,
+`reviews/`, `plan.md`, `run.lock`, `stale-red.json` and both out-of-repo trees; the doc promises the
+router never rejects while the router emits a 503 admission envelope; `HONEST-LIMITS.md` omits the
+entire build-discovered section it was the declared sink for; neither degraded mode is documented.
+15.1's whole gate rested on acceptance row 11a (file present, line count) and row 11b (count the 15
+numbered limits) — a 25-row contract enforced by two counting checks.
+
+**Phase 13's headline MAJOR is the vacuous-green trap, inside the build's own end-to-end.**
+`e2e.test.ts:230` sets `VERIFY_CMD = [node, "--test", "tests/*.test.ts"]`, spawned without a shell.
+The fixture seeds an EMPTY `tests/` directory, and scenario 4 asserts that no test is ever written —
+so its "real full verify" matches zero files, and node exits 0 on a zero-match glob. Both skeptics
+tried to refute this and could not. One settled it decisively by substituting a wrapper that runs the
+identical glob but exits 1 when `# tests` is 0: **3 pass / 2 fail**, scenario 4 among the failures.
+The other reproduced the mutation (`tests/*.nomatch.ts`) at 5/5 green and the contrast
+(`node -e "process.exit(1)"`) at 0/5, proving the command really is spawned and its exit code really
+is consumed — the green is unearned, not unread. `scripts/test-conductor.sh` was written to close
+exactly this hole; the row that would have closed it here,
+`13.1-fixture-suite-discriminates` ("the scope command matches at least one file, never a zero-match
+glob … No later 'validate passed' assertion in this file is vacuous"), is one of the 37 rows that
+appear nowhere in the file.
+
+**Phase 12's six are product defects rather than test gaps**, which is its own kind of good news —
+its suite names its rows and the lenses had to go past the tests to find these. `serve.py` orphans a
+loaded llama-server on any failure between readiness and `start_watchdog` (reproduced twice, child
+alive one second after `main()` returned); `--print-env` re-resolves ports off the live session and
+reports a URL nothing listens on plus `ROUTER=0` for a running router, with four lines of prose on
+stdout where a shell is meant to `eval`; a router dying during setup's slot fan-out fails setup with
+a `--parallel` remedy that has nothing to do with the cause; `setupRequiredScopes` writes coverage
+that is empty at zero ecosystems and source-only at two or more, after which an item no entry covers
+has no constructible test command; and the supervisor re-implements its restart policy inline while
+the three tested policy functions have no caller in production.
+
+**The rule.** M7 is a coverage check, and this build's own longest-running lesson is that **a check
+which passes while inspecting less than it appears to** is the defect that keeps returning — this is
+its ninth appearance and the first time the check was M7 itself. Counting that a row id appears
+somewhere is not coverage; five titles claiming forty-two rows is not coverage; and a task whose
+named test file does not exist should not be able to reach a gate at all, let alone pass one.

@@ -1127,11 +1127,11 @@
       "ctestAfterFix": "92 cases / 27726 assertions, 0 failed, 0 skipped; ctest 1/1 (orchestrator-observed)"
     },
     "12": {
-      "at": "2026-08-14T12:10:00Z",
-      "stage": "1 (mechanical prelude)",
+      "at": "2026-08-14T22:03:00Z",
+      "stage": "stage 2 (blind lens fan-out + adjudication)",
       "verdict": "FAIL",
       "priorVerdict": "none \u2014 phase 12 had no entry in phaseGates before this run; phases 0-11 all PASS",
-      "headAtGate": "203016d",
+      "headAtGate": "108ea25",
       "blocking": [
         "PHASE INCOMPLETE \u2014 the gate was dispatched over unfinished work. STATE.json has 12.2 status NOT_STARTED and 12.1-G5 NOT_STARTED (G5 is deferred by design until after 13.1). IN_PROGRESS.json holds taskId 12.2 at step red-observation. Task 12.2's entire product is UNCOMMITTED: 1068 changed lines across conductor/adapter/gitio.ts, conductor/adapter/tools.ts, conductor/core/journal-events.ts, conductor/core/tool-bindings.ts, conductor/plugin/index.ts, plus an untracked 2240-line conductor/tests/setup.test.ts. No 12.2 commit exists.",
         "MAIN-TREE GATE RED \u2014 bash scripts/test-conductor.sh exits 1: TAP tests=1272 pass=1271 fail=1. The node leg fails first, so the tsc, bun, schema-export and python legs are never reached in the main tree.",
@@ -1295,7 +1295,77 @@
           "3. 12.1-G5 remains deferred to immediately after 13.1 goes green, by design."
         ]
       },
-      "verdictHistory": "stage 1 FAIL at 2026-08-14T12:10:00Z (this record's top-level `verdict`), then one fix round, then stage 1 PASS at 2026-08-14T12:40:00Z (`stage1Rerun.verdict`). The phase gate as a whole is NOT yet PASS \u2014 stage 2 has not run."
+      "verdictHistory": "stage 1 FAIL at 2026-08-14T12:10:00Z (this record's top-level `verdict`), then one fix round, then stage 1 PASS at 2026-08-14T12:40:00Z (`stage1Rerun.verdict`). The phase gate as a whole is NOT yet PASS \u2014 stage 2 has not run.",
+      "stage1": "Measured by the orchestrator at HEAD 108ea25 before dispatch, not re-derived by the lenses: `bash scripts/test-conductor.sh` TAP tests=1280 pass=1280 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0, typecheck OK, bun 8 pass, schema export OK, python leg Ran 68 tests, GATE PASS exit 0; M5 PASS 128 files / 6 live exemptions (the default set reaches scripts/*.py from C-078 onward); ctest 100% passed, 92 cases / 27,726 assertions; verify-acceptance.sh in a fresh worktree 16 PASS / 5 FAIL, row 3 environmental and the other four owed by the unbuilt 13.2 and 14.2.",
+      "method": "Three blind lenses per phase, dispatched concurrently and unable to see each other, each given the phase's extracted assertion rows and exact line ranges rather than the plan; one adjudicator merging, dropping and RE-GRADING, permitted to settle findings by running them; then two skeptics per surviving MAJOR, each briefed to refute it and to default to refuted when it could not confirm. Refuting takes BOTH skeptics: a tie upholds, and a skeptic that died is not a refutation.",
+      "counts": {
+        "lensesDispatched": 3,
+        "lensesReturned": 3,
+        "rawFindings": 12,
+        "afterTriage": 10,
+        "majorsAdjudicated": 6,
+        "majorsConfirmed": 6,
+        "majorsRefuted": 0,
+        "minors": 4
+      },
+      "confirmedMajors": [
+        {
+          "title": "G5 equivalence step not discharged: the two \"arms\" differ only by an env var no code reads",
+          "at": "scripts/test_conductor_wiring.py:1503",
+          "claim": "Plan:2884-2888 mandates \"run Task 13.1's scripted e2e twice \u2014 once with the router in the loop, once with --no-router \u2014 and assert the same terminal state, the same item dispositions, and the same commit set\", explicitly to make \"the identical process runs without the router\" true rather than aspirational. What shipped is a python unit test comparing two config dicts / env dicts / argv lists (it never runs the e2e), plus a recorded artifact whose two arms are the same command run twice under CONDUCTOR_OPENAI_BASE_URL \u2014 a variable that appears nowhere in the codebase. The named driver conductor/tests/e2e-g5.test.ts does not exist.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "The running supervisor re-implements restart policy inline; the tested policy functions have no caller",
+          "at": "scripts/conductor_wiring.py:724",
+          "claim": "12.1-exit-code-policy states \"the supervisor's restart DECISION is a pure function of the router's exit status\" and 12.1-supervisor-lifecycle states the supervisor \"restarts a crashed router per the backoff and exit-code policies\". The shipped supervisor uses neither: ROUTER_SUPERVISOR_SOURCE carries its own inline `delay_ms` and `if code == 0 or code in FATAL:`, while `router_restart_decision`, `backoff_next` and `restart_delay_ms` have zero callers outside their own definitions and the test file. No test ever executes the supervisor's restart branch \u2014 the three executed cases all kill the session shell first, so the router never exits on its own while the shell lives.",
+          "adjudication": "UPHELD, 2 skeptic(s), 1 refuted (split; a tie upholds)"
+        },
+        {
+          "title": "--print-env re-resolves ports off the live session: prose on stdout, dead URL, router reported down",
+          "at": "scripts/serve.py:526",
+          "claim": "serve.py runs the socket-binding, sometimes-interactive port resolution (lines 526 and 551) BEFORE the --print-env early return at 552, and `info()` at serve.py:72 is a bare `print()` to stdout. So against the live session it exists to report, --print-env picks NEW free ports, emits prose onto the stdout its own help reserves for `eval`, reports an endpoint nothing listens on, and reports LLAMA_HARNESS_ROUTER=0. The block's own comment at 553-556 asserts the opposite (\"every diagnostic goes to stderr so stdout stays NAME=value\").",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "serve.py orphans a loaded llama-server on any failure between readiness and start_watchdog",
+          "at": "scripts/serve.py:650",
+          "claim": "Between `wait_until_ready` succeeding (serve.py:610) and `start_watchdog` (serve.py:663) there is no try/finally and no other reaper, and Task 12.1 inserted three new raise sites into that window \u2014 write_router_config, start_router_supervisor, and apply_conductor_wiring's fragment load / file-reference verification. Any raise there leaves the model resident with no trap, no shell and no watchdog, holding its port forever.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "A router dying during setup's slot fan-out fails setup with a bogus --parallel remedy",
+          "at": "conductor/adapter/tools.ts:8564",
+          "claim": "12.2-proofs-origin-fail-soft states \"a DOWN router is never itself a setup failure ... Setup fails only on what the proofs themselves prove false\". setupProofRequest's guard `if (result !== null || input.failoverState.useUpstream) return result;` makes every concurrent request that resumes AFTER the first failover return null instead of retrying the upstream, so one router outage during the maxReaders-wide fan-out is misreported as a slot shortage.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "setupRequiredScopes writes coverage that is empty (0 ecosystems) or source-only (2+), yet setup succeeds",
+          "at": "conductor/adapter/tools.ts:8422",
+          "claim": "12.2-detect-multi-ecosystem states \"requiredScopes is never written as an empty array (which would validate cleanly while leaving every path unverified)\". setupRequiredScopes returns `[]` for zero detected scopes and handleSetup has no coverage guard, so that exact state is written. The multi-ecosystem branch is the same hole partially: each entry's pattern is that ecosystem's extension glob, so every non-source path (README.md, docs/*.md, CMakeLists.txt, package.json, shell scripts) is covered by none of them \u2014 while the single-ecosystem branch writes \"**\" and has no hole at all.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        }
+      ],
+      "minors": [
+        {
+          "title": "serve.py's router call sites are executed by no test: readiness probe and supervisor launch are deletable",
+          "at": "scripts/serve.py:637"
+        },
+        {
+          "title": "The slot proof counts HTTP 200s, not overlap; a serializing origin that answers every reader passes",
+          "at": "conductor/adapter/tools.ts:8741"
+        },
+        {
+          "title": "serve.py --max-readers 0 is silently replaced by the default 6 instead of flooring to one slot",
+          "at": "scripts/serve.py:529"
+        },
+        {
+          "title": "The python leg binds real TCP sockets, contradicting 12.1-python-test-leg's \"opens no socket\"",
+          "at": "scripts/test_conductor_wiring.py:505"
+        }
+      ],
+      "fullFindings": "docs/build/artifacts/phase-gates-12-13-15-findings.md - every failure scenario, the exact mutation that proves it, and both skeptics' reasoning.",
+      "adjudicatorNote": "Ten findings survived from twelve raised. HEAD is 108ea25, tree clean (only two pre-existing untracked docs); the modified-files list in my prompt was a stale snapshot. Python leg baseline at HEAD: `Ran 68 tests ... OK`.\n\nWHAT I RAN AND SETTLED MYSELF (I did not take any lens's word where a command could decide it; nothing in the repo was edited, no git writes, .data untouched):\n- Dead-code policy functions: `grep -rn 'router_restart_decision|backoff_next|restart_delay_ms' scripts/ conductor/ router/` -> definitions at conductor_wiring.py:499/509/520 and callers only in test_conductor_wiring.py. Confirmed. Read conductor_wiring.py:720-745 and saw the inline duplicate (`if code == 0 or code in FATAL:`, `delay_ms`) the shipped supervisor actually uses.\n- G5: `grep -rn CONDUCTOR_OPENAI_BASE_URL conductor/ scripts/` -> 0 hits; `ls conductor/tests/e2e-g5.test.ts` -> No such file. Read plan:2866-2913, which mandates the two-run comparison verbatim.\n- --print-env: started HTTP stubs on 127.0.0.1:8080 and :8088, ran `scripts/serve.py --no-build-check --print-env` and again with `--router`. Both times stdout carried four prose lines then `LLAMA_HARNESS_URL=http://127.0.0.1:8081` and `LLAMA_HARNESS_ROUTER=0`; stderr was empty. Read serve.py:72 (`info` = bare print to stdout) and 552-576 (the early return sits after both resolve_port calls). Stubs killed, ports verified free afterwards.\n- Orphaned server: ran leak.py and leak2.py; both printed VERDICT: LEAKED with the child pid alive 1s after serve.main() exited. Read serve.py:600-665 and confirmed no try/finally between wait_until_ready and start_watchdog. No stray processes left.\n- Setup failover: ran repro.mts against the real handleSetup \u2014 control ok:true, router-dies-before-fan-out ok:false with `upstream saw: [\"POST /v1/chat/completions\"]` (1 of 6) and the bogus --parallel remedy. Read the guard at tools.ts:8564.\n- requiredScopes: ran the zero-eco probe (ok:true, requiredScopes [], validates:true) and the globMatch check (README.md / docs/guide.md / CMakeLists.txt / package.json / scripts/build.sh all false against both multi-eco patterns). Read setupRequiredScopes at tools.ts:8422 and itemVerifyScope's throw at tools.ts:2708-2726.\n- max_readers: reproduced serve.py:529 \u2014 `0` resolves to 6 (slots 6) while `-1` floors to 1.\n- Socket binding: reproduced the SystemExit from serve.py:201 by stubbing port_is_free.\n- Read the exact assertion-row text for 12.1-python-test-leg, -exit-code-policy, -backoff-policy, -supervisor-lifecycle, -readiness-fallback-direct, -parallel-degenerate-input, 12.2-proof-slot-count, -proofs-origin-fail-soft, -detect-multi-ecosystem, plus test_conductor_wiring.py:1052-1110 \u2014 grading against what each row actually promises rather than the lens's paraphrase.\n\nRE-GRADED DOWN (three):\n- \"serve.py's router wiring is executed by no test\" MAJOR -> MINOR. Mutations C and D do survive, but 12.1-readiness-fallback-direct and 12.1-supervisor-lifecycle each specify the test they want (\"drives the decision function with a health probe seam\", \"asserted through an injected spawn seam so the unittest starts no process\") and that test exists. This is the spec's reach falling short of its own headline, not an unmet row. The concrete consequences that ARE bugs are carried by the --print-env and orphan-server findings.\n- 12.1-backoff-policy: NOT a violation on its own \u2014 the row asks for a pure function with those four constants and a specific sequence, and that is exactly what shipped. The violated rows are 12.1-exit-code-policy (\"the supervisor's restart DECISION is a pure function of...\") and 12.1-supervisor-lifecycle (\"restarts a crashed router per the backoff and exit-code policies\"). I restated the merged finding around those two.\n- Slot proof: kept MINOR, not raised to MAJOR. Leg 2's total_slots check does catch the dominant real case (llama-server at --parallel 1 reports 1 slot), so the reachable hole needs a serializing intermediary that is not the slot-reporting server. The row's language (\"measures OVERLAP\", \"concurrency actually observed on the server side\") is genuinely not implemented, but the practical exposure is narrow.\n\nMERGED (two pairs):\n- EROSION's supervisor-dead-code finding and OPERATIONAL's supervisor-never-restarts finding are one defect with two mutations pointing at it (`if True:` and `if code == 0:` are the two directions of the same blind spot). Kept as one, both mutations recorded.\n- EROSION's zero-ecosystem empty requiredScopes and CONTRACT's multi-ecosystem uncovered-paths are one function (setupRequiredScopes) with one missing guard (handleSetup never checks coverage) and one downstream throw (tools.ts:2716). Merged, both measured scenarios kept. Worth flagging the asymmetry inside them: the empty-array half is an explicit row violation (\"requiredScopes is never written as an empty array\"), while the multi-eco half conforms to the row's stated shape and is a design hole the row's own parenthetical anticipates.\n\nNOTHING WAS DISPROVED \u2014 every finding I could settle by running, I reproduced. The one claim I softened without disproving is OPERATIONAL's \"LLAMA_HARNESS_ROUTER=0 for a healthy router\": in my runs ROUTER=0 was reached whether or not --router was passed, so I did not separately isolate the launch-path probe against the shifted port. The reported endpoint being a port nothing listens on is measured and is the load-bearing half either way.\n\nCROSS-CUTTING OBSERVATION for the gate decision, not a separate finding: five of the ten trace to one structural fact \u2014 no test in either leg executes scripts/serve.py's main(). The seams below it are well tested and the call sites above them are pinned by source-text greps. The leak.py harness already in scratch is an existence proof that driving main() with a stubbed spawn and readiness check is cheap; one such test would close findings 3, 4 and 7 at once."
     },
     "14": {
       "at": "2026-08-14T15:20:00Z",
@@ -1376,6 +1446,196 @@
         "5. Only then start 14.1 - move scratchpad/staging/task-14.1/test_conductor_bench.py into scripts/, observe its red yourself, implement, and take it through its task gate. Re-run this phase-14 stage-1 gate afterwards; this record is the prior verdict it must name.",
         "6. Serialize gate runs until /tmp/python-leg.out is made per-run."
       ]
+    },
+    "13": {
+      "at": "2026-08-14T22:03:00Z",
+      "stage": "stage 2 (blind lens fan-out + adjudication)",
+      "verdict": "FAIL",
+      "headAtGate": "108ea25",
+      "stage1": "Measured by the orchestrator at HEAD 108ea25 before dispatch, not re-derived by the lenses: `bash scripts/test-conductor.sh` TAP tests=1280 pass=1280 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0, typecheck OK, bun 8 pass, schema export OK, python leg Ran 68 tests, GATE PASS exit 0; M5 PASS 128 files / 6 live exemptions (the default set reaches scripts/*.py from C-078 onward); ctest 100% passed, 92 cases / 27,726 assertions; verify-acceptance.sh in a fresh worktree 16 PASS / 5 FAIL, row 3 environmental and the other four owed by the unbuilt 13.2 and 14.2.",
+      "method": "Three blind lenses per phase, dispatched concurrently and unable to see each other, each given the phase's extracted assertion rows and exact line ranges rather than the plan; one adjudicator merging, dropping and RE-GRADING, permitted to settle findings by running them; then two skeptics per surviving MAJOR, each briefed to refute it and to default to refuted when it could not confirm. Refuting takes BOTH skeptics: a tie upholds, and a skeptic that died is not a refutation.",
+      "counts": {
+        "lensesDispatched": 3,
+        "lensesReturned": 3,
+        "rawFindings": 30,
+        "afterTriage": 14,
+        "majorsAdjudicated": 9,
+        "majorsConfirmed": 6,
+        "majorsRefuted": 3,
+        "minors": 5
+      },
+      "confirmedMajors": [
+        {
+          "title": "Every full-verify green rests on a zero-match glob; scenario 4's \"real full verify\" runs zero tests",
+          "at": "conductor/tests/e2e.test.ts:230",
+          "claim": "VERIFY_CMD is `[node, --test, \"tests/*.test.ts\"]`, spawned without a shell so node does the expansion; node v26.7.0 exits 0 with `tests 0` on a zero match. In scenario 4 the fixture's tests/ dir is empty for the whole scenario (it asserts zero testWriter dispatches at 1356-1361), so D1 reaches VALIDATED on a verify that executed nothing \u2014 and changing the glob to one that matches nothing everywhere leaves the suite at 5/5.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Scenario 1's plan review exits at the CAP after three futile revisions, not on a clean round",
+          "at": "conductor/tests/e2e.test.ts:972",
+          "claim": "`planRound` is set to 1 only AFTER handlePlanReview returns (in the `--- the wave ---` block), so it is 0 for the entire call: the reviewer returns the same two majors on every round, the skeptic upholds PF2 on every round, and the planner's \"revision\" is the byte-identical round-0 markdown. handlePlanReview's loop exits only on survivingMajors===0 or round>=max (core/fsm-run.ts:67-89), and planReviewMaxRounds is 3.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "No correction loop is ever entered: no vet mustFix, no surviving item finding, no repair, no debug fix",
+          "at": "conductor/tests/e2e.test.ts:903",
+          "claim": "`testVet()` is called with no argument at all six responder sites, so mustFix is [] in every vet round; the file's only item-review finding (IF1) is scripted to be REFUTED by its skeptic; there is no test-adequacy finding anywhere; and every retry budget can be set to its minimum with the suite still green.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Scenario 3 asserts the wave SCHEDULE, not the driver's interleaving; a strictly serial driver passes 5/5",
+          "at": "conductor/tests/e2e.test.ts:1230",
+          "claim": "The worktree scenario's concurrency proof is `wave.wave.parallel.length === 2` \u2014 the schedule the planner computed before any sub-session ran \u2014 plus `greens.length >= 2`. The fake SDK exposes the in-flight accessor the row names (fixtures/fake-sdk.ts:183, :370) and e2e.test.ts never calls it.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Scenario 5 omits the entire stop half the plan names: no continuation engine, no futile re-prompts, no noop stop",
+          "at": "conductor/tests/e2e.test.ts:1451",
+          "claim": "Plan lines 2951-2953 require the continuation engine to re-prompt three times futilely, the run to stop `noop`, and a stop-report to be written. The file never imports or invokes adapter/continuation.ts, never calls the plugin's `event` hook (the sole production entry to handlePluginEvent), and closes scenario 5 with an ordinary handleReport asserting `report.green === true`.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Every scope and freeze input to the gate is a constant in both seams; widening them keeps 1280/1280 green",
+          "at": "conductor/plugin/index.ts:597",
+          "claim": "plugin/index.ts:597-599 passes `fileScope: []`, `testScope: []`, `verifyInFlightTree: null` as literals rather than deriving them per call, and the e2e's own wiring hardcodes `isFrozen: (): boolean => false` (e2e.test.ts:434). decideEdit's implementer/test-writer scope arms and its entire freeze branch are therefore unreachable from either seam, and nothing in the 1280-test build detects them being widened.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        }
+      ],
+      "minors": [
+        {
+          "title": "The journal is an in-memory array in all five scenarios and journal.jsonl is never opened",
+          "at": "conductor/tests/e2e.test.ts:318"
+        },
+        {
+          "title": "The router fail-soft property is not exercised: the metrics seam is omitted, not stubbed against a dead endpoint",
+          "at": "conductor/tests/e2e.test.ts:642"
+        },
+        {
+          "title": "The publish-excludes-preexisting-dirty stage is unreachable: makeBench's `seed` hook has no caller",
+          "at": "conductor/tests/e2e.test.ts:543"
+        },
+        {
+          "title": "The trailer-free commit check reads only the commit SUBJECT and only two of the four denylisted tokens",
+          "at": "conductor/tests/e2e.test.ts:1036"
+        },
+        {
+          "title": "The scripted responder's catch-all hands every unprogrammed dispatch a valid DONE payload",
+          "at": "conductor/tests/e2e.test.ts:922"
+        }
+      ],
+      "fullFindings": "docs/build/artifacts/phase-gates-12-13-15-findings.md - every failure scenario, the exact mutation that proves it, and both skeptics' reasoning.",
+      "adjudicatorNote": "What I ran myself (not re-reviewed, just settled): (1) symbol counts in conductor/tests/e2e.test.ts \u2014 inFlightCount 0, inFlight 0, journal.jsonl 0, metrics 0, `seed:` 0, idleRePrompts|futileRePrompts|disengage|handlePluginEvent 0, verifyInFlight 0, planReviewRounds 0, quarantin 1 (a prose comment), callGate( 4 (1 definition + 3 uses), testVet( 7 (1 definition + 6 no-arg call sites), isFrozen 2 (type + the constant-false stub); (2) `grep -n overrideGrants conductor/plugin/index.ts` => no match, and the gate snapshot literals at 595-599; (3) `grep -rn createFanout conductor --include=*.ts | grep -v /tests/` => one hit, the definition; (4) `node -e '/legal|settle|EXECUT|PLANNED|report/i.test(\"conductor_report: kaboom\")'` => true; (5) node v26.7.0 zero-match glob: `mkdir -p $TMPDIR/gp/tests && node --test 'tests/*.test.ts'` => `fail 0`, exit 0; (6) targeted reads of e2e.test.ts (196-235, 305-325, 425-440, 236-300, 810-1080, 1375-1460), tools.ts (2126-2300), core/fsm-run.ts:67-89, and the 42-row task-13.1 assertion spec. I did NOT re-run any lens mutation \u2014 each finding names which lens ran which one, and all three lenses reported a clean 5/5 baseline. I did not edit the repo; `git status` is untouched.\n\nMerges and drops. Nine of the original 29 lens items were the same defect from two or three angles and are merged (gate deny-only + sub-session writes bypassing the hook; zero-match glob + scenario 4's empty verify; vet-mustFix + item-review routing + repair budgets, which are one family \u2014 the scripted critics never object; scenario 3 schedule-vs-interleaving; scenario 5's missing stop half; the freeze stub + the plugin's literal snapshot). I dropped SEAM's \"nothing in production builds a Fanout / registry holds only orchestrator entries\" as a standalone finding: `docs/build/CORRECTIONS.md:1413` records \"VERIFIED AT HEAD: plugin/index.ts binds every one of its 22 tools to handlerNotBound\", and the CONTRACT lens's own brief puts tool binding out of scope, so that is a known-and-recorded item. Its measurable, unrecorded half \u2014 that widening the gate snapshot's scope literals regresses nothing in the whole 1280-test build \u2014 survives inside the merged finding.\n\nCorrections to the lens reports. CONTRACT's plan-review finding claims `reviewed.questionIds` has one entry; I read the cap branch (tools.ts:2214-2262) and it mints one question per SURVIVOR regardless of whether the finding names an item, with `findingBlocksItems` deciding only what gets blocked \u2014 PF2 names no item, so a question is minted and nothing is blocked, which is why both items still publish and the suite stays green. The cap-exit claim itself is solid (planRound is 0 for the whole call; the exit guard is clean-or-cap only) and is corroborated by EROSION's independent M2 result. EROSION self-corrected its initial `rounds >= 1` suspicion in the same place. One thing worth flagging to the phase owner rather than as a finding: every one of the 42 rows in docs/build/specs/task-13.1.assertions.json has `coveredByTest: null`, so nothing links the file's ~85 assertions to the rows they are supposed to close \u2014 and row 13.1-s1-freeze-denies-test-file-edit states in its own text that it \"fails against the HEAD literal verifyInFlightTree: null (SG-1)\", i.e. the spec already knew that row could not pass."
+    },
+    "15": {
+      "at": "2026-08-14T22:03:00Z",
+      "stage": "stage 2 (blind lens fan-out + adjudication)",
+      "verdict": "FAIL",
+      "headAtGate": "108ea25",
+      "stage1": "Measured by the orchestrator at HEAD 108ea25 before dispatch, not re-derived by the lenses: `bash scripts/test-conductor.sh` TAP tests=1280 pass=1280 fail=0 cancelled=0 skipped=0 todo=0 skipdirectives=0, typecheck OK, bun 8 pass, schema export OK, python leg Ran 68 tests, GATE PASS exit 0; M5 PASS 128 files / 6 live exemptions (the default set reaches scripts/*.py from C-078 onward); ctest 100% passed, 92 cases / 27,726 assertions; verify-acceptance.sh in a fresh worktree 16 PASS / 5 FAIL, row 3 environmental and the other four owed by the unbuilt 13.2 and 14.2.",
+      "method": "Three blind lenses per phase, dispatched concurrently and unable to see each other, each given the phase's extracted assertion rows and exact line ranges rather than the plan; one adjudicator merging, dropping and RE-GRADING, permitted to settle findings by running them; then two skeptics per surviving MAJOR, each briefed to refute it and to default to refuted when it could not confirm. Refuting takes BOTH skeptics: a tie upholds, and a skeptic that died is not a refutation.",
+      "counts": {
+        "lensesDispatched": 3,
+        "lensesReturned": 3,
+        "rawFindings": 32,
+        "afterTriage": 15,
+        "majorsAdjudicated": 10,
+        "majorsConfirmed": 10,
+        "majorsRefuted": 0,
+        "minors": 5
+      },
+      "confirmedMajors": [
+        {
+          "title": "Phase 15's named anchor test does not exist; all 25 assertion rows are unenforced",
+          "at": "docs/build/specs/task-15.1.assertions.json:1",
+          "claim": "The task spec ships two .md files and a test; commit 4afdf2b shipped only the two .md files. `find . -name docs.test.ts` and `find conductor/tests -name ops-docs.test.ts` both return nothing, `grep -rl 'OPERATIONS.md\\|HONEST-LIMITS' conductor/tests/` returns nothing, and every one of the 25 rows in task-15.1.assertions.json carries `coveredByTest: None`. The only surviving gate is verify-acceptance.sh:239-256, where row 11a is `[ -f ]` plus a printed `wc -l` and row 11b compares the COUNT of `^[0-9]+\\. \\*\\*` lines in HONEST-LIMITS.md against the same count in plan \u00a79. Neither reads a word of either file.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "llama-router exit table claims code 1, which main() never returns, and omits 2, 3 and 4",
+          "at": "conductor/docs/OPERATIONS.md:190",
+          "claim": "The process-exit table gives `llama-router` 0 = clean SIGTERM shutdown, 1 = \"startup or config failure\", and an em-dash in the 2 column. `grep -n 'return [0-9]' router/main.cpp` returns 2 (line 62, CLI parse), 0, 0, 3 (line 81, unreadable config), 3 (line 94, ConfigError), 4 (line 109, Router::start throw / bind failure), 0 (line 118). There is no `return 1` anywhere in the file. Row 15.1-exit-table-process states the constraint verbatim: \"the table must document exactly the codes the binary implements and invent none (SG-2)\".",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "The --ctx row states the derivation backwards and its worked example is arithmetically false",
+          "at": "conductor/docs/OPERATIONS.md:33",
+          "claim": "Line 33 says \"At `slots > 1` the derived `--ctx-size` overrides it \u2014 `--ctx 4096 --max-readers 6` serves 8192 per slot.\" scripts/conductor_wiring.py:194-197 does the opposite: `per_slot = PER_SLOT_CONTEXT_TOKENS if ctx is None else int(ctx)`, so the operator's --ctx IS the per-slot window at every slot count and --ctx-size becomes ctx * slots. The doc's own example serves 4096 per slot, not 8192; 8192 is the default that applies only when --ctx is omitted.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Doc says report.md exists only for a done run and any other stop means the report was refused",
+          "at": "conductor/docs/OPERATIONS.md:73",
+          "claim": "Line 73 annotates report.md as \"written by conductor_report at the end of a done run\" and line 80 says \"Anything other than `done` means the report was refused\". tools.ts:7444 guards the stop-report writer on `run.stop !== null` alone and writes `path.join(runDir, REPORT_FILE)` headed `# conductor stop-report \u2014 <kind> \u2014 run <runId>` for EVERY stop kind; continuation.ts:661-678 takes that path for a halt (kind `interrupt`). Row 15.1-exit-table-run requires the doc to state the opposite normative rule: \"EVERY stop kind writes report.md\". The same section's reading order also starts at run.json, where row 15.1-rundir-entry-point requires report.md first as the curated human read.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Doc promises the router never rejects; the router emits a 503 admission envelope the doc never mentions",
+          "at": "conductor/docs/OPERATIONS.md:41",
+          "claim": "Line 41 states \"It never rejects. Anything the direct path would have served, the router serves.\" router/router.hpp:1237-1254 (sendAdmissionError) sets `response.status = 503` with `{\"error\":{\"message\":\u2026,\"type\":\"unavailable_error\",\"code\":\"queue_timeout\"|\"queue_overflow\"}}` from the literals at router/admission.hpp:56-58. \u00a77 is titled \"Exit codes and error envelopes\" and documents gate denials, handler refusals and fail-soft, but grep over OPERATIONS.md returns 0 for each of `503`, `unavailable_error`, `queue_timeout`, `queue_overflow` and `health`. Row 15.1-envelope-router-503 requires all three literals plus the statement that /conductor/health answers while every slot is held.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "HONEST-LIMITS.md omits the entire build-discovered part it was the declared sink for",
+          "at": "conductor/docs/HONEST-LIMITS.md:65",
+          "claim": "docs/build/honest-limits-pending.md line 1 reads \"HONEST-LIMITS accumulator (folded into conductor/docs/HONEST-LIMITS.md at Task 15.1)\" and has six sections: git-command detection gaps, freshness, classifyFailure causality, the C-022 Update posture, the M5 stub scan, and router request-side-only schema observation. None reached the doc, which runs from limit 15 straight into a two-bullet \"How to use this list\". Three rows require this content: 15.1-honest-limits-build-discovered-appended, -current-posture and -detection-posture-stated. The verbatim-fifteen requirement itself PASSES (a lens extracted all 15 \u00a79 items and substring-matched all 15 in order) \u2014 the miss is the whole second part.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Run-dir map omits questions.jsonl, reviews/, plan.md, run.lock, stale-red.json and both out-of-repo trees",
+          "at": "conductor/docs/OPERATIONS.md:59",
+          "claim": "Row 15.1-rundir-map-complete enumerates every \u00a71.2 path the tree must name. The shipped tree at lines 59-74 lists eight and omits questions.jsonl, reviews/<itemId|plan>-r<N>.json, plan.md, state/run.lock, state/stale-red.json, the verify-running-<TREE>.json marker, and the two OUT-OF-REPO directories quarantine/<runId>/ and worktrees/<runId>/<itemId>/ under <stateHome>/conductor/<workspaceKey>/. It also never says .conductor/ is git-ignored via .git/info/exclude. Line 69 additionally claims evidence.jsonl is \"the ONLY file adapter/evidence.ts writes\", but evidence.ts:636 also writes verify-running-<TREE>.json into the run dir.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Run-dir map names the live-run pointer state/current-run; the code writes current-run.json",
+          "at": "conductor/docs/OPERATIONS.md:62",
+          "claim": "Line 62 documents `state/current-run  the live runId`; conductor/adapter/state.ts:258 builds `path.join(stateDir, \"current-run.json\")`. Row 15.1-rundir-entry-point names current-run.json explicitly and also requires the doc to state that it holds `{runId}` or `null` and that older runs are pruned to retention.keepRuns at run creation \u2014 grep returns 0 for `runId}`, `null` and `pruned` in the doc.",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Verbosity section has no trace-cost warning and neither retention bound; both defaults are absent doc-wide",
+          "at": "conductor/docs/OPERATIONS.md:143",
+          "claim": "Row 15.1-verbosity-trace-warning requires \u00a75 to carry the \u00a77.1 warning that at `trace` the journal holds full sub-session prompts and outputs in a git-ignored directory nothing else will notice growing, and to name both bounds by config key. `grep -ci` over the whole document returns 0 for `retention`, `keepRuns`, `maxRunDirBytes` and `DEFAULT_LEVEL`, though core/types.ts:170-171 defines both keys and journal-events.ts:121-122 defines DEFAULT_LEVEL info / DEFAULT_CONSOLE_LEVEL warn. \u00a75 (lines 143-160) shows `CONDUCTOR_LOG=gates:trace,fanout:debug` as a worked example with no cost note. (Partially mitigating, against what two lenses reported: the five levels and all eight COMPONENTS DO appear in the document, at lines 113-114 \u2014 but in the \u00a73 replay table, not in the verbosity section the row scopes them to.)",
+          "adjudication": "UPHELD, 2 skeptic(s), 0 refuted (unanimous uphold)"
+        },
+        {
+          "title": "Neither degraded mode is documented: no-git mode and the run.lock second-session behaviour are absent",
+          "at": "conductor/docs/OPERATIONS.md:287",
+          "claim": "Row 15.1-degraded-modes requires the doc to cover the \u00a73.9 no-git mode (git.mode 'read-only', publish DISABLED with items terminating at REVIEWED, worktree mode off, HEAD term dropped from freshness, no .git/info/exclude registration) and the run.lock advisory single-writer lock (second conductor session gets read-only conductor, a dead holder's lock is broken automatically). grep returns 0 for `no-git`, `run.lock`, `read-only` and `advisory`. \u00a79 instead actively disclaims the subject: \"so is any guarantee about a second terminal in the same repo\".",
+          "adjudication": "UPHELD, 2 skeptic(s), 1 refuted (split; a tie upholds)"
+        }
+      ],
+      "minors": [
+        {
+          "title": "serve.py flag table misdescribes --fresh and --no-shell; --no-shell will hang a wrapper script",
+          "at": "conductor/docs/OPERATIONS.md:35"
+        },
+        {
+          "title": "Halt section claims the check is state-independent; isHalted has one call site, the idle re-entry path",
+          "at": "conductor/docs/OPERATIONS.md:138"
+        },
+        {
+          "title": "The plan-mandated no-banner troubleshooting entry is last, not first, and omits serve.py and alive.json",
+          "at": "conductor/docs/OPERATIONS.md:268"
+        },
+        {
+          "title": "No table of contents, which row 15.1-ops-sections requires over the nine subjects",
+          "at": "conductor/docs/OPERATIONS.md:1"
+        },
+        {
+          "title": "No prerequisites before the doc's first command, and three real serve.py flags are undocumented",
+          "at": "conductor/docs/OPERATIONS.md:22"
+        }
+      ],
+      "fullFindings": "docs/build/artifacts/phase-gates-12-13-15-findings.md - every failure scenario, the exact mutation that proves it, and both skeptics' reasoning.",
+      "adjudicatorNote": "Fifteen findings survive from thirty-one raised. I re-ran everything cheap rather than trusting the lenses.\n\nWHAT I RAN AND CONFIRMED MYSELF (all read-only, no edits, no git, no mutation):\n- Anchor test absence: `find . -name docs.test.ts` and `find conductor/tests -name ops-docs.test.ts` both empty; `grep -rl 'OPERATIONS.md|HONEST-LIMITS' conductor/tests/` empty. Stronger than any lens had: I parsed docs/build/specs/task-15.1.assertions.json and every one of its 25 rows carries `coveredByTest: None` \u2014 the spec itself records that nothing tests them. I did not run the gut-the-doc mutation; the spec metadata plus the grep make it unnecessary, and the ground rules prefer describing it. The mutation recipe is in the finding if the orchestrator wants it closed by experiment.\n- ctx derivation: parallel_server_args(6,4096) -> --ctx-size 24576 (4096/slot), (6,None) -> 49152. Doc's worked example is arithmetically false.\n- `grep -n 'return [0-9]' router/main.cpp` -> 2,0,0,3,3,4,0. No 1.\n- state.ts:257-261 -> run.lock, current-run.json, stale-red.json, alive.json, halt; :274 questions.jsonl; :564 clears the pointer on archive.\n- router.hpp:1237-1254 sendAdmissionError -> status 503, admission.hpp:56-58 holds all three literals.\n- tools.ts:7444 guards the stop-report writer on `run.stop !== null` alone; continuation.ts:661-678 takes it for a halt.\n- honest-limits-pending.md: six `## ` sections, header declares the 15.1 fold; zero of the six subjects appear in HONEST-LIMITS.md.\n- verify-acceptance.sh:239-256 read in full: row 11a is `[ -f ]` + printed wc -l, row 11b compares two counts of `^[0-9]+. **`. Neither reads text. Confirms the lenses' characterisation exactly.\n- Full keyword census over OPERATIONS.md and the four `### ` heading offsets (214/233/250/268).\n\nCORRECTIONS I MADE TO THE LENSES:\n- Two lenses claimed the doc never lists the eight COMPONENTS or the five levels. False \u2014 both lists are at lines 113-114, in the \u00a73 replay table. The row scopes them to \u00a75, so it is a placement miss, not an absence. I rewrote that finding to lead with what IS absent document-wide (trace-cost warning, retention.keepRuns, retention.maxRunDirBytes, both defaults) and flagged the correction inline.\n- One lens graded the banner-ordering miss MAJOR. Downgraded: line 6 leads the whole file with \"First rule: no banner, no conductor\", so the message is not lost, only the mandated placement and the alive.json beacon.\n- One lens graded the missing TOC as part of a larger MAJOR. Split out as MINOR; the nine `## ` headings themselves are all present and correctly named, so only the TOC half of the row is unmet.\n- Merged the two --fresh findings with the --no-shell one; kept MINOR rather than the MAJOR one lens gave, because the mechanical row for serve flags only checks token presence in argparse, not description fidelity. The --no-shell hang is the sharper half and I put it first.\n- Dropped nothing as disproved \u2014 no lens claim failed verification. The closest thing to a false alarm was the components/levels one above.\n\nWHAT HELD AND IS THEREFORE NOT A FINDING (recorded so the orchestrator does not re-check): the verbatim-fifteen requirement PASSES (a lens extracted all 15 \u00a79 items between the \u00a79/\u00a710 headings and substring-matched all 15, in ascending order, with no reassurance-rewrite); \u00a73 replay.ts is fully accurate \u2014 flags, --component list equals COMPONENTS, and the 0/1/2 exit table all verified by execution; the plugin probe prints exactly `[ 'ConductorPlugin' ]`; conductor/doctrine/ holds exactly the nine packs the doc lists; every long flag the doc uses in a serve.py command line exists in argparse; CONDUCTOR_LOG parse semantics, the error/warn-always rule, logging.level and logging.components all match the code; failureClass and STOP_KINDS tables match core/fsm-item.ts:28 and core/stops.ts:12; the HONEST-LIMITS cross-references (limits 2, 7, 11, 12) all resolve correctly.\n\nSHAPE OF THE GATE: finding 1 causes the other fourteen. Nine of them are single-line factual contradictions a content-reading test would have reddened on the first run. Recommend the anchor test be written before any of the doc fixes, so the fixes land against a red test rather than a reviewer's list."
+    },
+    "m7CrossCutting": {
+      "at": "2026-08-14T22:03:00Z",
+      "finding": "M7 ('every row in task-<id>.assertions.json maps to a named test', commission line 526) was recorded PASS for tasks 13.1 and 15.1 and is not satisfied by either. 13.1's 42 rows are named by FIVE test titles, each a paragraph-long summary claiming many rows at once: `grep -c '13\\.1-' conductor/tests/e2e.test.ts` returns 5, and 13.1-fixture-suite-discriminates -- the row that demands a control suite and concludes 'No later validate-passed assertion in this file is vacuous' -- appears nowhere in the file. 15.1's 25 rows are named by NOTHING: the spec names conductor/tests/ops-docs.test.ts and that file does not exist, so 15.1's whole gate rests on acceptance rows 11a (file present, line count) and 11b (count the 15 numbered limits). For contrast, 12.2 names its rows 93 times in setup.test.ts and 12.1 names its 35 times in test_conductor_wiring.py.",
+      "why": "This is the cause of the two gates' findings rather than a finding beside them. Phase 15's ten confirmed MAJORs are all factual doc errors -- a wrong exit-code table, a backwards --ctx derivation whose worked example does not compute, a run-dir map naming state/current-run where the code writes current-run.json -- exactly what an anchor test over those 25 rows would have caught on the day. Phase 13's headline MAJOR is that every full-verify green in the e2e rests on a zero-match glob, which is the vacuous-green trap scripts/test-conductor.sh exists to close, reproduced inside the file that was supposed to be the build's end-to-end proof.",
+      "classification": "The recurring defect class, ninth appearance: a check that passes while inspecting less than it appears to. Here the check is M7 itself."
     }
   },
   "rejections": [

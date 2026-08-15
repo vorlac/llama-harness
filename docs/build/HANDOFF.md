@@ -26,8 +26,22 @@ repo owner owns. `STATE.json` is machine truth; `NOW.md` is the human view.
    `composition.test.ts:1537` `[5.4a-tools-still-throw-scope-fence]` **asserts the binding is absent**
    and names 13.1 as its owner, so binding the tools means rewriting that row, not deleting it.
    **This is non-live work and it is the highest-value thing left.**
-2. **Phase gates 12 (stage 2), 13 and 15 have never run**; phase 14's is recorded FAIL and cannot
-   pass until 14.2 exists. Stage 1 for 12 passed. These are review, not construction.
+2. **Phase gates 12, 13 and 15 have now run stage 2 and ALL THREE FAIL** — 22 confirmed MAJORs, 20 of
+   them upheld with neither skeptic able to refute. Full record:
+   **`docs/build/artifacts/phase-gates-12-13-15-findings.md`**, summarised in C-079. Phase 14's gate
+   is FAIL and cannot pass until 14.2 exists. **Read the cross-cutting finding first
+   (`GATES.json` → `phaseGates.m7CrossCutting`): M7 was recorded PASS for 13.1 and 15.1 and is
+   satisfied by neither** — 13.1's 42 assertion rows are named by 5 test titles, 15.1's 25 rows by
+   nothing at all, because the `conductor/tests/ops-docs.test.ts` its spec names does not exist.
+   Fix that before fixing what it let through: **write the missing anchor test for 15.1 first, then
+   let it tell you which of phase 15's ten documentation MAJORs are real**, and give 13.1's uncovered
+   rows real tests rather than patching the five scenarios by hand. Phase 13's headline — every
+   full-verify green in `e2e.test.ts` rests on a zero-match glob, so scenario 4's "real full verify"
+   executes nothing — is the vacuous-green trap `scripts/test-conductor.sh` exists to close, sitting
+   inside the build's own end-to-end. Phase 12's six are genuine product defects (an orphaned
+   llama-server, a `--print-env` that reports a dead URL, a setup failover with an unrelated remedy,
+   `setupRequiredScopes` writing empty or source-only coverage) and its suite is the one that does
+   name its rows.
 3. **Then 13.2 live smoke** → `conductor/SMOKE.md` (row 6, half of detector E). Also where the
    `permission.asked` payload gets pinned into `wire-notes.md` (10.1's SG-10 holds until then).
 4. **Then 14.2** → row 8. 90 headless runs, HOURS: **launch detached.** **FIRST fix its spec**, and
