@@ -470,16 +470,102 @@ After the register, give these — each one just references ISSUE-NNN ids, no re
 
 ### 10.4 Standards for the register
 
-- **Completeness beats prose.** If you must choose, record one more issue in full rather than
-  polishing a paragraph.
-- **Every entry must be actionable by someone else.** If a reader cannot start work from the entry
-  alone, it is not finished.
-- **Reward reproductions, not volume.** A SUSPECTED entry is allowed and useful — but it must say
-  exactly what evidence would settle it, so it can be scheduled as an investigation.
+**Write it explanatory.** The per-issue structure is for organisation and planning, not a licence to
+be terse. Each field is PROSE — full sentences that teach the mechanism to someone who has never
+opened the file. A reader should finish an entry understanding *why* the defect exists and *why it
+was invisible*, not merely that it is there. Terse field notes are a failure of this deliverable even
+if every field is filled in.
+
+Two things follow from that, and they are in tension only apparently:
+
+- **Completeness is not a reason to compress.** Record every issue, and write each one fully. If the
+  document gets long, that is the correct outcome — it is a planning input for weeks of work, not a
+  summary.
+- **Length is not a substitute for evidence.** A paragraph of speculation is worth less than two
+  sentences plus a reproduction. Explain mechanisms at length; state findings exactly.
+
+Also:
+
+- **Every entry must be actionable by someone else, alone.** If a reader cannot start work from the
+  entry without asking you a question, it is not finished.
+- **Write for iteration.** These will be worked one at a time, out of order, possibly weeks apart, by
+  someone without your context. Say what state the tree must be in, what to read first, and what
+  "done" looks like.
+- **A SUSPECTED entry is welcome** — but it must say exactly what evidence would settle it, so it can
+  be scheduled as an investigation rather than an argument.
 - **Record failed refutations.** "I tried to break X these four ways and could not" belongs in
-  *Cleared areas* with the four ways named.
-- **No issue is too small.** Ten-minute fixes still need to appear; they are the cheapest wins and
-  they get lost otherwise.
+  *Cleared areas*, with the four ways named.
+- **No issue is too small.** Ten-minute fixes still get a full entry; they are the cheapest wins and
+  they are the ones that get lost.
+
+### 10.5 A worked entry — the standard, using an already-fixed defect
+
+This is C-082, already fixed, reproduced here ONLY to show the depth and voice expected. Your entries
+will describe new findings; match this level of explanation.
+
+```
+### ISSUE-007 — The edit gate's test-writer arm has never been reachable in production
+
+Pattern:        P3 (two spellings of one fact), compounded by P10 (a sealed false negative)
+Severity:       MAJOR
+Confidence:     REPRODUCED
+Location:       conductor/core/gates-edit.ts:235 (the arm) · conductor/adapter/tools.ts:2991,
+                :3143, :3600 (the registered role) · docs/build/STATE.json (the sealing note)
+Subsystem:      gate regime / §3.5 edit scope
+
+WHAT THE SYSTEM CLAIMS
+  Plan §3.5:1392-1393 requires that implementer and test-writer sessions may edit only inside their
+  assigned scope — "test-writer: the item's `testScope` only" — and gates-edit.ts:235 implements
+  that as a dedicated dispatch arm. Assertion row 13.1-s1-freeze-denies-test-file-edit depends on
+  the arm being reachable.
+
+WHAT IT ACTUALLY DOES
+  The arm tests `sessionRole === "test-writer"`. The fan-out engine has always registered that
+  session as `"testWriter"` and persists that spelling into askedBy.role. A role matching NO arm
+  falls through to gates-edit.ts:249's unknown-role fail-safe, which denies everything. So the arm
+  enforcing "an implementer may not edit test files, and a test-writer may not edit source" has
+  never executed against a real session. `"implementer"` matches on both sides, which is exactly why
+  only this one role stayed silently dead — the neighbouring arm worked, so nothing looked broken.
+
+REPRODUCTION
+  $ grep -n '"test-writer"' conductor/core/gates-edit.ts     # :235, the only source occurrence
+  $ grep -n 'role: "testWriter"' conductor/adapter/tools.ts  # :2991 and others
+  Then drive a registered testWriter session through the gate and observe the deny reason is the
+  unknown-role fail-safe, not the testScope arm.
+
+BLAST RADIUS
+  The implementer/test-writer separation is unenforced for the test-writer direction: the specific
+  protection that a test-writer cannot edit source is absent. NOT affected: the implementer arm,
+  which matches correctly, and normalizeUnderTree, which independently denies paths outside the
+  session tree — so this is a scope-separation hole, not a filesystem-wide one.
+
+WHY NOTHING CAUGHT IT
+  Three reasons, and the third is the important one. (a) No production path populated the registry
+  with a sub-session entry until the tools were bound, so the arm had no caller to be wrong for.
+  (b) The unit tests fed the gate the hyphenated spelling directly, so they exercised the arm with a
+  role production never produces. (c) The defect WAS found once, escalated to skeptics, and refuted
+  unanimously — "the string the diff uses is the one §3.3 and the pinned contract name" — then
+  recorded as "so it is not re-litigated". The refutation failed because the plan uses `test-writer`
+  17 times in ENGLISH PROSE and `testWriter` 5 times as an IDENTIFIER; the skeptics matched on
+  frequency rather than on position.
+
+FIX DIRECTION
+  Rename, do not translate. `"testWriter"` is the production vocabulary and the plan's identifier
+  spelling (plan:1185, the §3.3 routing table at 1259-1260, the role table at 1523), so core is the
+  outlier. A translation table at the composition root was considered and rejected: it would be a
+  THIRD site for one fact. Test-side occurrences of the old spelling are mechanical respellings of
+  the role VALUE only — no assertion or title should change.
+
+VERIFYING MUTATION
+  Rename the role in either file alone. A guard must go red that derives BOTH sets at run time — the
+  roles gates-edit dispatches on, and the roles the fan-out actually registers — and requires every
+  gate role to be one the fan-out produces. Green today: no such guard exists.
+
+EFFORT / DEPENDENCIES
+  One-line production change plus ~10 test-side respellings; one round. Depends on the tool binding
+  landing first, since without it no session carries a role into the gate at all. Unblocks
+  13.1-s1-freeze-denies-test-file-edit. No live model needed.
+```
 
 **One closing instruction.** Every defect in §2 was invisible to a review that asked "does the code
 match the spec?" and visible to one that asked "what would still be green if this were broken?" Ask
