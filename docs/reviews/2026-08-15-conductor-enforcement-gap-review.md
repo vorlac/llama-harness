@@ -361,6 +361,201 @@ pressure? This is a real question about the thesis, not a rhetorical one.
 
 ---
 
+## 8a. Part E2 — The macro view: organisation, design coherence, and whether the SHAPE is right
+
+§2–§7 work at the micro level: individual checks, individual claims, individual defects. That is the
+spine and it stays the spine. But a system can pass every local test and still be the wrong shape —
+and shape defects are invisible from inside a single file, which is exactly where all the other
+sections look.
+
+Zoom out. File these as `MACRO-NNN` (§10.1d). Ground each in something observable; an architectural
+opinion with no evidence behind it is noise.
+
+**Organisation, judged by the system's own standard.** This project's thesis is that small,
+context-limited models can do good work here. So the codebase is not just *implemented* for small
+models — it must be *navigable* by them. Measure it:
+- `conductor/adapter/tools.ts` is **9,253 lines**. `conductor/tests/e2e.test.ts` is **4,317**.
+  `conductor/plugin/index.ts` is **1,427**. Every agent brief written during this build had to carry
+  an explicit "NEVER read this file whole" warning, and agents routinely had to be handed exact line
+  ranges to work at all.
+- Ask directly: **can a 32k-context model do a task in this repo without being told where to look?**
+  If the answer is no, that is a first-order design finding about a system whose entire purpose is
+  to be worked on by such models. What is the right decomposition, and what does the current one
+  cost — in tokens, in error rate, in the amount of orchestrator hand-holding each task needs?
+- Is there a discoverable path from "I need to change X" to the file that owns X? Or does it require
+  the kind of repo-wide grep the cost discipline forbids?
+
+**Layering and responsibility.**
+- Is the **G3 pure-core / thin-adapter** split actually holding, or has `adapter/` accumulated
+  decision logic that belongs in `core/`? Check the direction of dependencies and whether any core
+  module has grown I/O, a clock, or network awareness.
+- Where does responsibility for one concern live? The gate regime spans `core/gates-*.ts`,
+  `adapter/tools.ts`, and `plugin/index.ts`. Is that a clean seam or a smear? Several defects in
+  `CORRECTIONS.md` are exactly "two layers each believed the other owned this."
+- Is the composition root the right size, and does it do only composition?
+
+**Design coherence.**
+- Do the parts share one philosophy, or are there competing ones? (e.g. detection-over-prevention in
+  some places and prevention in others — is that principled or accidental?)
+- Are there concepts that exist twice under different names, at the *design* level rather than the
+  string level — two mechanisms doing one job?
+- Is the role decomposition (7 roles, 9 doctrine packs) the right cut? Would a small model do better
+  with fewer, sharper roles, or does it need more? What evidence exists either way?
+- Is the run/item FSM pair the right abstraction, or does it force awkward states? Look at every
+  recorded deviation that mentions a state being "settled but not finished" or similar — those are
+  where the model of the world is straining.
+
+**The build process itself is part of the design.**
+- The task gates (M1–M9), phase gates, blind lens fan-out and skeptic ladder are machinery that
+  produced this codebase. **That machinery has a confirmed false negative it then sealed** (P10). Is
+  its design sound? What would you change about the gate regime, given what its output looks like
+  after 92 corrections?
+- What does the DISTRIBUTION of `CORRECTIONS.md` tell you? Cluster the 92 by root cause and ask what
+  the biggest clusters say about where the design — not the implementation — is weak. That analysis
+  is a deliverable in itself.
+- Is the assertion-row mechanism working as intended? Rows have been found unreachable,
+  self-contradictory, and named-but-unproven. Is the concept sound with better discipline, or does
+  it need a structural change?
+
+**Fitness for what comes next.**
+- Two live tasks remain and the system has never run against a real model end to end. Read the
+  design and say where you expect it to break on first real contact, and why.
+- What happens as the repo grows — at 2× the tasks, 2× the tools, a second router backend? Which
+  structures scale and which are already at their limit?
+- What would a second contributor (or a second orchestrating agent) need that does not exist?
+
+---
+
+## 8b. Part F — What is MISSING (capability review, not defect review)
+
+**Priority, stated plainly: the enforcement audit (§4) is the spine of this review and remains the
+primary deliverable. This section does not replace it or compete with it.** If your time runs out,
+it runs out here, not there — an under-explored capability list is a smaller loss than an
+under-attacked enforcement point. A defect that lets a lazy model produce unverified work TODAY
+outranks a mechanism that would be nice to have.
+
+The two are also not independent, and the dependency runs one way: **a capability gap earns its place
+by being grounded in an enforcement failure you actually observed.** "The harness cannot re-derive X,
+so a model can assert X freely, so here is the mechanism that would let it re-derive X" is a strong
+finding. "It would be nice if the system also did Y" is not, and should be marked low confidence or
+left out. Run §4 first; let it generate this section's candidates.
+
+With that said — everything above hunts defects: things that exist and are wrong. This section covers
+what is ABSENT, which no amount of attacking existing code will reveal. The question is not "does the
+code match the plan" — the plan is immutable and might itself be incomplete. The question is:
+
+> **What mechanism does not exist, that would materially raise the floor on what a small, lazy,
+> fallible model can be made to produce?**
+
+The plan is a design from before the system had ever been run in anger. Several of its assumptions
+have since been contradicted by measurement (see `CORRECTIONS.md`). Treat it as authoritative for
+what it *does* specify and as **potentially incomplete** for what it does not. Proposing an addition
+is not a violation of its immutability — it is a finding, filed as `GAP-NNN` (see §10.1).
+
+Work these angles concretely:
+
+- **Where does the harness detect but not prevent?** G7 is "detection over prevention", honestly
+  disclosed. For each disclosed detection-only gap, ask: is prevention now *cheap* given what has
+  since been built? Several things that were expensive in the original design are now trivial
+  because the composition root, the live gate snapshot and the marker enumeration exist.
+- **Where does a human have to notice something?** Any failure whose only trace is a journal line at
+  `error` level is a failure nobody will see. Every terminal state should produce an artifact a human
+  is handed. Enumerate the states that go quiet. (One such wedge was found and fixed as C-085 — find
+  the rest.)
+- **What can the model claim that nothing re-derives?** The §4 enumeration produces this list. For
+  every entry where re-derivation is *absent*, ask whether it is absent because it is impossible or
+  because nobody built it. Those are different findings and only the second is a GAP.
+- **What would a second, cheap, mechanical check catch?** The highest-value additions in this build's
+  history were not clever — they were dumb cross-checks: a control suite proving the fixture
+  discriminates, an execution witness proving a test really ran, a two-way field-set comparison
+  proving two spellings agree, a counter on the router's own ledger proving it was contacted. Where
+  else is a dumb cross-check available and absent?
+- **What does the model get told, and is it enough?** Read all nine packs in `conductor/doctrine/`
+  as if you were a 32k-context model with weak instruction-following. Which instruction gets dropped
+  first under context pressure? Which are abstract where they could be procedural? Is there doctrine
+  for a situation the model will certainly hit and has no guidance for? A missing pack, or a pack
+  that is too long to survive truncation, is a GAP.
+- **What would make failures self-diagnosing?** When a run goes wrong, how long does it take a human
+  to find out why? What is not recorded that would have to be reconstructed by hand?
+- **What is unenforceable-by-construction and could be made structural?** The plan's best ideas are
+  the ones where doing the wrong thing is impossible rather than forbidden (item FSM ordering,
+  handler-run evidence, the single-writer rule). Where is the system still relying on a rule the
+  model is asked to follow, when the same property could be made structural?
+
+For each: state the mechanism, what it would prevent or reveal, roughly what it would cost, and
+**what evidence from this repo suggests it is needed** — a correction, a near-miss, a path nothing
+walks. A GAP with no grounding in observed behaviour is speculation; say so and mark it low
+confidence.
+
+---
+
+## 8c. Mandatory enumerations — the completeness forcing function
+
+Reading and probing finds what you thought to look for. **Enumerating with a per-item verdict finds
+what you did not.** Every high-value defect in this build's history came out of a list where each
+member had to be accounted for.
+
+Produce each inventory below **in full**, as a table, with a verdict for **every** row. "Not
+examined" is a permitted verdict and is far more useful than silent omission — it tells the planner
+where the coverage ends.
+
+1. **Every conductor tool** (22 in `CONDUCTOR_TOOL_NAMES`) — is it bound, does it reach a committed
+   handler, are its declared args the shape the handler needs, is there a test that drives it?
+2. **Every role** (7 in §4.1) — which doctrine pack, which params/headers, which gate arm, and is
+   that arm reachable with the role name production actually registers?
+3. **Every closed vocabulary** (run states, item states, classification kinds, decision kinds, stop
+   kinds, journal events, anomaly kinds, failure classes) — who OWNS it, who RESTATES it, is there a
+   drift guard?
+4. **Every gate and check** — `test-conductor.sh`, `conductor-gate.sh`, `verify-acceptance.sh`'s 21
+   rows, M1–M9, and every `*-callsites`/`*-vocab`/`*-binding` source-audit test. For each: what
+   mutation makes it fail? If you cannot name one, it is decorative.
+5. **Every assertion row** across `docs/build/specs/*.assertions.json` — named by a test? proven by
+   that test's assertions? reachable at all? (Phase 13's `task-13.1` is known 22/42 named with four
+   proven by nothing; treat that as a floor and check the others.)
+6. **Every correction C-001…C-092** — for each, does the same defect CLASS exist elsewhere,
+   unfixed? This is mechanical and high-yield: the corrections are a map of how this system fails.
+7. **Every branch requiring an unusual precondition** — a failure, a cap, a timeout, a retry, a
+   degraded mode, a second attempt. Which has a test that reaches it? (P12.)
+8. **Every place the harness accepts a model claim** — the §4 enumeration, as a table.
+
+---
+
+## 8d. How to run this review (structure, not a single sweep)
+
+A single pass has the same blind spots as any single agent. Work in **at least three passes with
+different lenses**, and do not let the first pass's framing decide what the later ones look at:
+
+- **Pass 1 — enumerate.** Produce §8c's inventories. No judgement yet; just render every list and
+  mark the unknowns. This pass tells you the size of the territory.
+- **Pass 2 — attack.** Mutation-test the checks (§5), attack the enforcement points (§4), run the
+  adversary simulation (§8). This is where reproductions come from.
+- **Pass 3 — invert and zoom out.** Ask §8a's shape questions and §8b's missing-capability
+  questions, and re-open §7's refuted findings. This pass deliberately does not trust pass 1's
+  framing or the build's own records.
+
+**A sequencing rule, because the failure mode here is predictable.** Passes 1 and 2 are
+uncomfortable: they require enumerating dull lists and breaking code to see what stays green. Pass 3
+is comfortable — it is analysis, and it is easy to produce fluent, plausible output for without
+having verified anything. **Do not begin Part E2 or Part F until §8c's enumerations are complete and
+§5's mutation table has real entries in it.** If your budget runs out mid-review, the correct
+casualty is the macro and capability sections, not the attacking. A register of twenty reproduced
+enforcement defects with no architectural commentary is a success; a beautiful design critique
+resting on three unverified issues is not.
+
+**Adversarially verify your own findings before filing them.** For each candidate issue, try to
+refute it — construct the reading under which the code is right. File it only if you cannot, and
+record the failed refutation in the entry. A finding that survives your own attack is worth ten that
+did not face one. (And note P10: the build's own skeptic panel produced a confirmed false negative by
+accepting a plausible-sounding refutation. Yours can too.)
+
+**Expected volume, so you can calibrate.** A targeted campaign over a *subset* of this system found
+roughly fifteen real defects, plus two more found only by reading a production diff by hand. A review
+of the whole system that returns fewer than that has almost certainly under-covered rather than found
+a clean codebase — treat a short register as a signal to go back to §8c and finish the enumerations.
+Conversely, do not pad: a NIT recorded honestly is fine, an invented MAJOR is not.
+
+---
+
 ## 9. Known-open — do not spend time re-deriving these
 
 So you go deeper rather than re-finding what is already recorded:
@@ -439,6 +634,96 @@ EFFORT / DEPENDENCIES
   Rough size (single edit / one round / multi-round restructure), what must land first, and what
   this unblocks. Flag anything that needs a live model — those cannot be scheduled freely.
 ```
+
+### 10.1b GAP entries — missing capabilities (§8b)
+
+Findings from Part F go in the SAME register, numbered `GAP-NNN` so they sort separately but plan
+together. They use these fields instead:
+
+```
+### GAP-NNN — <the mechanism that does not exist, stated as a capability>
+
+Severity:       HIGH | MEDIUM | LOW  (by how much it raises the floor on a lazy model)
+Confidence:     GROUNDED (cite the enforcement gap / correction / near-miss it answers) |
+                SPECULATIVE (say so — these are ranked below every GROUNDED entry)
+Subsystem:      where it would live
+
+THE ENFORCEMENT GAP IT ANSWERS
+  Which ISSUE-NNN, which correction, or which observed behaviour makes this necessary. A GAP with
+  nothing here is speculation and must be marked SPECULATIVE.
+
+WHAT THE MODEL CAN GET AWAY WITH TODAY
+  Concretely, with file:line — the work a lazy model could produce that nothing would catch.
+
+THE MECHANISM
+  What to build, in enough detail to estimate. Prefer dumb mechanical cross-checks over clever ones;
+  this build's highest-value additions were all boring (a control suite, an execution witness, a
+  two-way field-set comparison, a counter on the router's own ledger).
+
+WHAT IT WOULD PREVENT OR REVEAL
+  The specific class of bad outcome that becomes impossible or visible.
+
+STRUCTURAL OR ADVISORY?
+  Does it make the wrong thing IMPOSSIBLE, or merely detected? Structural beats detected; say which
+  this is and whether a structural version exists at higher cost.
+
+COST / RISK
+  Rough size, what it touches, and what it might break. Flag if it needs a plan amendment, a §2
+  schema change, or a change to a closed vocabulary — those are design decisions for the repo owner,
+  not fixes, and must be called out as such.
+```
+
+### 10.1d MACRO entries — shape, organisation, design coherence (§8a)
+
+Findings from Part E2 go in the same register as `MACRO-NNN`. They are the only entries permitted to
+be about structure rather than behaviour, and they carry the heaviest evidence burden precisely
+because they are the easiest to write persuasively without proof.
+
+```
+### MACRO-NNN — <the structural problem, stated as a consequence not a preference>
+
+Severity:       HIGH | MEDIUM | LOW  (by cost to correctness, or to a small model's ability to work)
+Confidence:     MEASURED (numbers, or a cited pattern across >=3 corrections) |
+                ARGUED (reasoning from observed behaviour) |
+                OPINION (say so — ranked last, and keep these few)
+Scope:          which subsystems / how much of the tree
+
+THE OBSERVATION
+  What is measurably true. Line counts, dependency directions, correction clusters, the number of
+  files that must be read to make one change, how often a brief had to name exact line ranges.
+  Numbers where numbers exist.
+
+THE CONSEQUENCE
+  What this costs, concretely — in defects, in tokens, in a small model's error rate, in how long a
+  human takes to find a cause. Tie it to something that has ACTUALLY happened where you can: a
+  correction, a near-miss, a defect that took a diff-read to find.
+
+WHY IT IS STRUCTURAL, NOT LOCAL
+  Why fixing the individual instances would not fix this. If it would, this is an ISSUE, not a MACRO.
+
+WHAT A BETTER SHAPE LOOKS LIKE
+  The alternative, concretely enough to argue with. Include what it would cost and what it would
+  break — a restructuring proposal with no migration cost stated is not actionable.
+
+PLAN IMPACT
+  Does this require amending the immutable plan, a §2 schema, or a closed vocabulary? Say so
+  explicitly. These are decisions for the repo owner and must never be presented as fixes.
+
+WHAT WOULD CHANGE YOUR MIND
+  The evidence that would make this finding wrong. If you cannot name any, downgrade it to OPINION.
+```
+
+### 10.1c The coverage ledger — this document's own anti-vacuity floor
+
+A review that did not look and a review that found nothing produce identical registers. Close that,
+the same way this codebase learned to (P1): **make the reviewer report how much it saw.**
+
+Include a table covering every subsystem — `core/`, `adapter/`, `plugin/`, `doctrine/`, `tests/`,
+`scripts/`, `router/`, and the build ledgers — with, for each: what you actually did to it (read /
+enumerated / mutation-tested / attacked / not examined), roughly how much of it you covered, what you
+concluded, and the ISSUE/GAP ids it produced. **"Not examined" is an acceptable and expected entry**
+— an honest coverage boundary is worth far more than a silent one, because the planner then knows
+where the review ends and can commission the rest.
 
 ### 10.2 Planning views over the register
 
