@@ -232,7 +232,7 @@ export function decideEdit(input: EditInput): Decision {
     );
   }
 
-  if (sessionRole === "test-writer") {
+  if (sessionRole === "testWriter") {
     if (scopeMatches(testScope, normalized)) {
       return ALLOW;
     }

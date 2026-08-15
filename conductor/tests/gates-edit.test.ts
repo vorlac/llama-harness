@@ -20,7 +20,7 @@
 //
 //   decideEdit({
 //     sessionRole: string;                 // "orchestrator" | "implementer" |
-//                                          // "test-writer" | "reviewer" |
+//                                          // "testWriter" | "reviewer" |
 //                                          // "skeptic" | "planner" | "mechanical"
 //     registered: boolean;                 // has a registry entry
 //     fileScope: string[];                 // the item's source globs
@@ -215,7 +215,7 @@ test("[5.2-implementer] implementer is denied outside its fileScope, and the rea
 
 test("[5.2-test-writer] test-writer is allowed inside its testScope", () => {
   const d = decideEdit(
-    editInput({ sessionRole: "test-writer", testScope: ["tests/**"], path: p("tests/a.test.ts") }),
+    editInput({ sessionRole: "testWriter", testScope: ["tests/**"], path: p("tests/a.test.ts") }),
   );
   assertAllow(d, "test-writer inside testScope");
 });
@@ -225,7 +225,7 @@ test("[5.2-test-writer] test-writer is denied on a fileScope source path, and th
   // but a test-writer may write only testScope, so it is denied, testScope named.
   const d = decideEdit(
     editInput({
-      sessionRole: "test-writer",
+      sessionRole: "testWriter",
       fileScope: ["src/**"],
       testScope: ["tests/**"],
       path: p("src/a.ts"),
@@ -291,7 +291,7 @@ test("[5.2-normalization] <tree>/.conductor/… normalizes to .conductor/… and
 test("[5.2-freeze] a live verify on the session's own tree denies even a test-writer's in-testScope edit", () => {
   const d = decideEdit(
     editInput({
-      sessionRole: "test-writer",
+      sessionRole: "testWriter",
       testScope: ["tests/**"],
       sessionTree: TREE_A,
       path: `${TREE_A}/tests/a.test.ts`, // in testScope — allowed but for the freeze
@@ -305,7 +305,7 @@ test("[5.2-freeze] a live verify on the session's own tree denies even a test-wr
 test("[5.2-freeze] the SAME edit in a DIFFERENT tree (not the frozen one) is allowed", () => {
   const d = decideEdit(
     editInput({
-      sessionRole: "test-writer",
+      sessionRole: "testWriter",
       testScope: ["tests/**"],
       sessionTree: TREE_A,
       path: `${TREE_A}/tests/a.test.ts`,
@@ -318,7 +318,7 @@ test("[5.2-freeze] the SAME edit in a DIFFERENT tree (not the frozen one) is all
 test("[5.2-freeze] with no live verify marker the in-testScope edit is allowed", () => {
   const d = decideEdit(
     editInput({
-      sessionRole: "test-writer",
+      sessionRole: "testWriter",
       testScope: ["tests/**"],
       sessionTree: TREE_A,
       path: `${TREE_A}/tests/a.test.ts`,

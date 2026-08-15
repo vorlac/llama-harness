@@ -1506,7 +1506,7 @@ test("[9.6-tree-identity-slug-to-path] C-037 ruling 5, the slug/path bridge: ver
 
   const frozenTest = attemptEdit({
     ...base,
-    role: "test-writer",
+    role: "testWriter",
     testScope: ["tests/**"],
     editPath: testEdit,
     verifyInFlightTree: translated,
@@ -1594,7 +1594,7 @@ test("[9.6-cross-tree-freeze-independence] a LIVE verify marker in tree A does n
     runId,
     journal: journal.sink,
     sessionID: "ses_test_a",
-    role: "test-writer",
+    role: "testWriter",
     itemId: "I1",
     tree: wt1,
     editPath: path.join(wt1, "tests", "i1.test.mjs"),

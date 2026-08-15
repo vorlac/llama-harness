@@ -2535,7 +2535,7 @@ test("[10.1-ask-subsession-reject-once] §3.5(b): a permission.asked from any su
   const runId = createRunFor(store);
   seedOneItemExecuting(store, runId);
 
-  const roles = ["implementer", "test-writer", "reviewer", "skeptic", "planner", "mechanical"];
+  const roles = ["implementer", "testWriter", "reviewer", "skeptic", "planner", "mechanical"];
   const kinds = ["edit", "question", "bash", "webfetch"];
 
   for (const role of roles) {

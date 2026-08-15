@@ -1365,7 +1365,7 @@ test("[9.4b-validate-freeze-denies-edits] while the verify is in flight the free
       testScope: ["tests/**"],
       checks: [
         { role: "implementer", rel: "src/a.mjs" },
-        { role: "test-writer", rel: "tests/a.test.mjs" },
+        { role: "testWriter", rel: "tests/a.test.mjs" },
       ],
     }),
   });
@@ -1410,7 +1410,7 @@ test("[9.4b-validate-freeze-denies-edits] while the verify is in flight the free
   assert.equal(existsSync(markerPathOf(bench.runDir)), false, "the marker is gone once the verify completes");
   const registry = new Map<string, RegistryEntry>([
     ["ses_impl", { role: "implementer", itemId: "I1", tree: bench.root }],
-    ["ses_writer", { role: "test-writer", itemId: "I1", tree: bench.root }],
+    ["ses_writer", { role: "testWriter", itemId: "I1", tree: bench.root }],
   ]);
   const gateJournal = makeJournal();
   const callGate = (sessionID: string, rel: string, verifyInFlightTree: string | null): void => {

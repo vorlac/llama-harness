@@ -1,8 +1,9 @@
 // Task 13.1 COMPOSITION-ROOT round — red tests.
 // Destination: conductor/tests/composition-root.test.ts
-// Spec: docs/build/specs/task-13.1-composition-root.assertions.json (the 13
-// `13.1-cr-` rows; the four `13.1-cr2-` gate-snapshot rows are the SECOND commit
-// and are deliberately not touched here).
+// Spec: docs/build/specs/task-13.1-composition-root.assertions.json — the 13
+// `13.1-cr-` rows (CR-1, the binding) and the five `13.1-cr2-` rows (CR-2, the
+// gate snapshot at the tool.execute.before seam). The CR-2 block is at the END
+// of this file, under its own banner, and is RED at the CR-1 commit.
 //
 // SUBJECT: conductor/plugin/index.ts — the opencode plugin factory, EDITED.
 //
@@ -2343,5 +2344,892 @@ test("[13.1-cr-runless-status-shape-not-a-second-shape] conductor_status returns
   assert.ok(
     !buildsItsOwnLiteral || checkedByAType,
     "the runless return is a BARE object literal in the tool body — no annotation, no `satisfies`, and the bound tool's own return type is a JSON string, so nothing ever compares it to the handler's declared StatusResult (adapter/tools.ts:808-814, where runId and state are both non-nullable). It is a second shape authored by hand, and the key-set agreement asserted above holds only by coincidence: add a field to StatusResult and the real-run branch grows it while this literal silently does not. Bind the runless return to the handler's own result — return what the handler produces for the empty case, or annotate the object with the handler's declared result type — so the drift is a compile error instead of two shapes on one tool",
+  );
+});
+
+// ===========================================================================
+// ===========================================================================
+// CR-2 — THE GATE SNAPSHOT AT THE `tool.execute.before` SEAM.
+// ===========================================================================
+// ===========================================================================
+//
+// WHY THESE FIVE ARE RED AT THE CR-1 COMMIT. plugin/index.ts:1247-1249 hands
+// gateBeforeToolCall three LITERALS —
+//
+//     fileScope: [],
+//     testScope: [],
+//     verifyInFlightTree: null,
+//
+// — sitting between `gitMode: config.git.mode` and `inlineClaimScope`, both of
+// which ARE derived. The phase-13 gate confirmed the MAJOR and MEASURED it: it
+// widened the two scopes to ["**"] and the whole build stayed green at
+// 1280/1280, because core/gates-edit.ts's implementer arm (:226), test-writer
+// arm (:235) and entire freeze branch (:196-198) had no production caller that
+// could reach them. Nothing in production constructed a fan-out, so the §3.5
+// registry never held an entry carrying an `itemId`, so no scope was derivable
+// and no session had a role either arm dispatches on.
+//
+// CR-1 IS WHAT MAKES THESE BEHAVIOURAL. The bound tools build a REAL createFanout
+// over the plugin's ONE registry (plugin/index.ts:826-835), so a dispatching tool
+// now leaves {role, itemId, tree} entries the gate hook reads — which is why four
+// of these five rows drive the real plugin instead of auditing its text.
+//
+// THE TREE THESE ROWS USE. A registry entry's `tree` is the value
+// adapter/tools.ts:2362 sessionTreeOf produced for the item: its persisted §4.2
+// worktree PATH when it has one, else the STAGE_TREE SLUG "main". The edit gate
+// compares that value to the edit path by string equality
+// (core/gates-edit.ts:128-134 normalizeUnderTree), so these rows give each item a
+// worktree of its own — the configuration in which the per-role scope arms are
+// reachable at all, and the one in which the freeze row's slug->path translation
+// is observable, because verifyInFlightTreeFor("<itemId>") IS that item's
+// persisted worktree (adapter/tools.ts:2376-2379).
+//
+// C-077 THROUGHOUT: every expected scope is read back OFF DISK from the queue.json
+// this file wrote, never from anything the plugin reports.
+//
+// ===========================================================================
+// EXPECTED PRODUCTION SURFACE — the one NEW affordance CR-2 requires.
+// ===========================================================================
+//
+// -- conductor/plugin/index.ts ----------------------------------------------
+//
+// The doctrine directory becomes RESOLVABLE instead of the fixed module-relative
+// DOCTRINE_DIR const at :130. It DEFAULTS to the shipped conductor/doctrine and is
+// overridable through the plugin's existing session-env channel — the same shape
+// :137-139 already uses for LLAMA_HARNESS_ROUTER_URL / _URL / _MODEL, read at CALL
+// time (:1074-1084), not frozen at module load:
+//
+//   const ENV_DOCTRINE_DIR = "LLAMA_HARNESS_DOCTRINE_DIR";
+//   // in ensurePacks: process.env[ENV_DOCTRINE_DIR] ?? DOCTRINE_DIR
+//
+// Nothing else about §6.4 changes: loadPacks stays the loader, its message stays
+// the one that names the absent pack, and the failure stays LOUD and fail-closed.
+// This is the affordance the spec's knownPartialCoverage entry deferred to CR-2
+// ("if the doctrine directory is made injectable there, the half becomes a
+// three-line test"), and the row below is written against it.
+
+// The override channel the packs row drives. Named here once so the row and the
+// implementation cannot spell it two ways.
+const ENV_DOCTRINE_DIR = "LLAMA_HARNESS_DOCTRINE_DIR";
+
+// ---------------------------------------------------------------------------
+// CR-2 fixtures
+// ---------------------------------------------------------------------------
+
+// A §4.2 tree of an item's own: a real directory, because a stage handler runs the
+// item's test with this as its cwd once its sub-session replies.
+function itemTreeDir(tag: string): string {
+  const dir = plainRoot(tag);
+  mkdirSync(path.join(dir, "src"), { recursive: true });
+  mkdirSync(path.join(dir, "tests"), { recursive: true });
+  return dir;
+}
+
+interface ItemScopes {
+  fileScope: string[];
+  testScope: string[];
+}
+
+// Give a seeded item its OWN §2.4 scopes and its OWN §4.2 tree, ON DISK, exactly
+// where the composition root has to read them from: the run's queue.json (the
+// §2.4 entry) and the item's persisted worktree (the §2.5 runtime field). Written
+// through the same seed-on-disk discipline the rest of this file uses — never
+// through another task's handler.
+function scopeItemOnDisk(
+  store: StateStore,
+  runId: string,
+  itemId: string,
+  scopes: ItemScopes,
+  worktree: string,
+): void {
+  const queuePath = path.join(runDirOf(store.root, runId), "queue.json");
+  const queue = JSON.parse(readFileSync(queuePath, "utf8")) as Queue;
+  const entry = queue.items.find((candidate) => candidate.id === itemId);
+  assert.ok(entry !== undefined, `premise: ${itemId} is in the seeded queue`);
+  entry.fileScope = [...scopes.fileScope];
+  entry.testScope = [...scopes.testScope];
+  writeFileSync(queuePath, JSON.stringify(queue, null, 2));
+  const item = store.loadItem(runId, itemId);
+  item.worktree = worktree;
+  store.saveItem(runId, item);
+}
+
+// The scopes as they are PERSISTED — the expectation source for every scope
+// assertion below (C-077: an expected value is never computed by calling the thing
+// under test, so it comes off the file this test wrote, not off the plugin).
+function persistedScopes(store: StateStore, runId: string, itemId: string): ItemScopes {
+  const queuePath = path.join(runDirOf(store.root, runId), "queue.json");
+  const queue = JSON.parse(readFileSync(queuePath, "utf8")) as Queue;
+  const entry = queue.items.find((candidate) => candidate.id === itemId);
+  assert.ok(entry !== undefined, `premise: ${itemId} is in the persisted queue`);
+  return { fileScope: [...entry.fileScope], testScope: [...entry.testScope] };
+}
+
+interface Dispatched {
+  sessionID: string;
+  role: string;
+  tree: string;
+}
+
+// Which session the fan-out registered for an item, read off the run's OWN
+// fanout/subsession.dispatched record rather than off the fake SDK's creation
+// order: the record is production's own statement of which session belongs to
+// which item, and it carries the role and tree that went into the registry entry.
+function dispatchOf(runDir: string, itemId: string): Dispatched | null {
+  for (const rec of readRunJournal(runDir)) {
+    if (rec.event !== "subsession.dispatched") continue;
+    const data = (rec.data ?? {}) as Record<string, unknown>;
+    if (data.itemId !== itemId) continue;
+    const sessionID = rec.sessionID;
+    if (typeof sessionID !== "string" || sessionID.length === 0) continue;
+    return {
+      sessionID,
+      role: typeof data.role === "string" ? data.role : "",
+      tree: typeof data.tree === "string" ? data.tree : "",
+    };
+  }
+  return null;
+}
+
+async function awaitDispatch(runDir: string, itemId: string, budgetMs: number): Promise<Dispatched> {
+  await waitFor(() => dispatchOf(runDir, itemId) !== null, budgetMs);
+  const dispatched = dispatchOf(runDir, itemId);
+  assert.ok(
+    dispatched !== null,
+    `premise: a sub-session for ${itemId} was dispatched and REGISTERED — no fanout/subsession.dispatched record for that item reached the run journal, so there is no §3.5 registry entry for the gate to derive anything from`,
+  );
+  return dispatched;
+}
+
+// One `edit` tool call as the gate hook receives it.
+function editOf(sessionID: string, filePath: string): {
+  tool: string;
+  sessionID: string;
+  args: Record<string, unknown>;
+} {
+  return { tool: "edit", sessionID, args: { filePath } };
+}
+
+interface GateOutcome {
+  denied: boolean;
+  reason: string;
+}
+
+// Drive the REAL gate hook and report BOTH dispositions. gateDeny above asserts a
+// deny; these rows must assert allows too, because a derivation that returns
+// nothing denies everything and would sail through a deny-only test.
+async function gateOutcome(
+  hooks: PluginHooks,
+  input: { tool: string; sessionID: string; args: Record<string, unknown> },
+): Promise<GateOutcome> {
+  const outcome = await attempt(async () => {
+    await callGate(hooks, input);
+  });
+  return { denied: outcome.threw, reason: outcome.threw ? messageOf(outcome.error) : "" };
+}
+
+// The scope array a per-role deny NAMES, parsed back out of core/gates-edit.ts's
+// own message (:231 `fileScope [...]`, :240 `testScope [...]`). Doubles as an
+// assertion that the deny is the per-role SCOPE deny and not the tree deny, the
+// freeze deny, the .conductor deny or the unknown-role fail-safe — so a row can
+// never mistake one refusal for another.
+function scopeNamedInDeny(reason: string, ctx: string): string[] {
+  const match = /(?:fileScope|testScope) \[([^\]]*)\]/.exec(reason);
+  assert.ok(
+    match !== null,
+    `${ctx}: the refusal must be core/gates-edit.ts's per-role SCOPE deny, which names the scope it judged against — got instead: ${reason}`,
+  );
+  const inner = (match as RegExpExecArray)[1];
+  return inner.length === 0 ? [] : inner.split(", ");
+}
+
+// ===========================================================================
+// 13.1-cr2-gate-scope-derived-from-registry
+// ===========================================================================
+
+test("[13.1-cr2-gate-scope-derived-from-registry] the gate's fileScope and testScope are DERIVED PER CALL from the calling session's §3.5 registry entry — its itemId's persisted §2.4 scopes — and BOTH directions are asserted on BOTH arms, because a derivation that returns nothing denies everything and would sail through a deny-only test", async () => {
+  const root = gitRoot("conductor-13.1-cr2-scope-");
+  const config = makeConfig({ subSessionTimeoutMs: 30_000 });
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "TEST_VETTED", I2: "PENDING", I3: "PENDING" });
+
+  // Three items with DISJOINT scopes and a tree each. I2 is never dispatched: it
+  // exists so that "the union of every item's scope" is a DIFFERENT answer from
+  // "this session's item's scope", and the assertions below can tell them apart.
+  const treeI1 = itemTreeDir("conductor-13.1-cr2-tree-i1-");
+  const treeI2 = itemTreeDir("conductor-13.1-cr2-tree-i2-");
+  const treeI3 = itemTreeDir("conductor-13.1-cr2-tree-i3-");
+  scopeItemOnDisk(store, runId, "I1", { fileScope: ["src/alpha/**"], testScope: ["tests/alpha/**"] }, treeI1);
+  scopeItemOnDisk(store, runId, "I2", { fileScope: ["src/beta/**"], testScope: ["tests/beta/**"] }, treeI2);
+  scopeItemOnDisk(store, runId, "I3", { fileScope: ["src/gamma/**"], testScope: ["tests/gamma/**"] }, treeI3);
+
+  const scopeI1 = persistedScopes(store, runId, "I1");
+  const scopeI3 = persistedScopes(store, runId, "I3");
+
+  const sdk = makeFakeSdk({
+    registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+    idPrefix: "ses_cr2_scope_",
+  });
+  const hooks = await startPlugin(root, sdk.client);
+
+  // A TEST_VETTED item's stage dispatches the write-capable IMPLEMENTER
+  // (adapter/tools.ts:3895-3904); a PENDING behavioral item's dispatches the
+  // write-capable TEST-WRITER (:2988-2998). Both are kicked without awaiting, so
+  // the gate can be driven while their sub-sessions are live and registered.
+  const implRun = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I1" }, root));
+  const writerRun = kick(() => callTool(hooks, "conductor_submit_test", { itemId: "I3" }, root));
+  try {
+    const impl = await awaitDispatch(runDir, "I1", 20_000);
+    const writer = await awaitDispatch(runDir, "I3", 20_000);
+    assert.equal(
+      impl.tree,
+      treeI1,
+      "premise: the implementer's registry entry carries I1's OWN tree, which is what the edit gate normalizes an edit path against",
+    );
+    assert.equal(writer.tree, treeI3, "premise: and the test-writer's carries I3's");
+
+    // ---- the IMPLEMENTER arm (core/gates-edit.ts:226-233) -------------------
+
+    // ALLOW. This is the half `fileScope: []` cannot pass and a deny-only test
+    // would never have noticed: an empty scope matches nothing, so the HEAD
+    // literal denies every edit an implementer could ever make.
+    const inScope = await gateOutcome(hooks, editOf(impl.sessionID, path.join(treeI1, "src", "alpha", "one.ts")));
+    assert.equal(
+      inScope.denied,
+      false,
+      `an implementer registered to I1 must be ALLOWED to edit inside I1's OWN persisted fileScope ${JSON.stringify(scopeI1.fileScope)} — the gate refused with: ${inScope.reason}. plugin/index.ts:1247 passes \`fileScope: []\`, and an empty scope denies EVERYTHING; the scopes must be derived per call from the calling session's registry entry (its itemId's queue.json fileScope/testScope), exactly as gitMode and inlineClaimScope beside them already are`,
+    );
+
+    // DENY, and the scope the gate judged against is I1's own. `src/beta/**` is
+    // I2's fileScope, so a derivation that unions every item's scope — or that
+    // reads the wrong item — is caught here rather than mistaken for a pass.
+    const otherItem = await gateOutcome(hooks, editOf(impl.sessionID, path.join(treeI1, "src", "beta", "one.ts")));
+    assert.equal(
+      otherItem.denied,
+      true,
+      "an implementer must be DENIED outside its own item's fileScope — src/beta/** belongs to I2, and one session's edit permission is never the union of every item's scope",
+    );
+    assert.deepEqual(
+      scopeNamedInDeny(otherItem.reason, "the implementer's out-of-scope edit"),
+      scopeI1.fileScope,
+      `the scope the gate judged against must be I1's OWN persisted fileScope (read back off queue.json: ${JSON.stringify(scopeI1.fileScope)}) — not another item's, not a union, and not a constant`,
+    );
+
+    // And the two scopes are not conflated: I1's TEST scope is not an
+    // implementer's edit permission.
+    const ownTestScope = await gateOutcome(
+      hooks,
+      editOf(impl.sessionID, path.join(treeI1, "tests", "alpha", "one.test.ts")),
+    );
+    assert.equal(
+      ownTestScope.denied,
+      true,
+      `an implementer is scoped by fileScope alone: I1's testScope ${JSON.stringify(scopeI1.testScope)} is the TEST-WRITER's permission, and handing the same array to both fields would let each role edit the other's files`,
+    );
+
+    // ---- the TEST-WRITER arm (core/gates-edit.ts:235-242) -------------------
+    //
+    // core/gates-edit.ts:235 dispatches its testScope arm on the role string
+    // "test-writer"; adapter/tools.ts:2991 registers the write-capable writer as
+    // "testWriter". Both spellings are named here so a red is legible rather than
+    // mysterious: the row's claim is that a test-writer session is ALLOWED inside
+    // its testScope, and a role no arm matches falls to :249's unknown-role
+    // fail-safe, which denies everything — the same shape as an empty scope, and
+    // the same reason a deny-only test would have missed it.
+    const writerRoleNote =
+      `the fan-out registered this session's role as "${writer.role}"; core/gates-edit.ts:235 ` +
+      'dispatches its testScope arm on "test-writer" and :249 denies every role it does not ' +
+      "recognise, so the two vocabularies have to be ONE fact for this arm to be reachable at all";
+
+    const writerInTests = await gateOutcome(
+      hooks,
+      editOf(writer.sessionID, path.join(treeI3, "tests", "gamma", "one.test.ts")),
+    );
+    assert.equal(
+      writerInTests.denied,
+      false,
+      `a test-writer registered to I3 must be ALLOWED inside I3's OWN persisted testScope ${JSON.stringify(scopeI3.testScope)} — the gate refused with: ${writerInTests.reason}. ${writerRoleNote}`,
+    );
+
+    const writerInSrc = await gateOutcome(
+      hooks,
+      editOf(writer.sessionID, path.join(treeI3, "src", "gamma", "one.ts")),
+    );
+    assert.equal(
+      writerInSrc.denied,
+      true,
+      `a test-writer must be DENIED inside its item's fileScope ${JSON.stringify(scopeI3.fileScope)} — writing production code is the implementer's charge, and §2.4's two scopes exist so the two roles cannot reach each other's files`,
+    );
+    assert.deepEqual(
+      scopeNamedInDeny(writerInSrc.reason, "the test-writer's production-file edit"),
+      scopeI3.testScope,
+      `and the scope the gate judged a test-writer against is the item's TESTSCOPE (${JSON.stringify(scopeI3.testScope)}), read from I3's own persisted queue entry — a snapshot that fills both fields from one array cannot tell these two denies apart`,
+    );
+  } finally {
+    await drain(sdk, implRun, 15_000);
+    await drain(sdk, writerRun, 15_000);
+  }
+});
+
+// ===========================================================================
+// 13.1-cr2-widening-the-scope-goes-red
+// ===========================================================================
+
+test("[13.1-cr2-widening-the-scope-goes-red] widening the derived scope to ['**'] turns this suite RED: the exact mutation the phase-13 gate ran at 1280/1280 green (findings §Phase 13 MAJOR 6) is caught by requiring every deny to NAME the item's own persisted fileScope, so a derivation that ignores the item and returns a permissive constant cannot recur unobserved", async () => {
+  const root = gitRoot("conductor-13.1-cr2-widen-");
+  const config = makeConfig({ subSessionTimeoutMs: 30_000 });
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "TEST_VETTED" });
+
+  const tree = itemTreeDir("conductor-13.1-cr2-widen-tree-");
+  scopeItemOnDisk(store, runId, "I1", { fileScope: ["src/alpha/**"], testScope: ["tests/alpha/**"] }, tree);
+  const scope = persistedScopes(store, runId, "I1");
+
+  const sdk = makeFakeSdk({
+    registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+    idPrefix: "ses_cr2_widen_",
+  });
+  const hooks = await startPlugin(root, sdk.client);
+
+  const tracked = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I1" }, root));
+  try {
+    const impl = await awaitDispatch(runDir, "I1", 20_000);
+
+    // Anti-vacuity FIRST: a scope that admits nothing denies everything, and every
+    // deny below would be green against it. The allow is what makes the denies
+    // mean something.
+    const admitted = await gateOutcome(hooks, editOf(impl.sessionID, path.join(tree, "src", "alpha", "one.ts")));
+    assert.equal(
+      admitted.denied,
+      false,
+      `premise: the derived scope ADMITS the item's own files (${JSON.stringify(scope.fileScope)}) — the gate refused with: ${admitted.reason}. Every deny asserted below is vacuous against a scope that admits nothing`,
+    );
+
+    // `**` spans separators including the leading one (core/gates-edit.ts:123-127),
+    // so each of these paths is matched by the mutation and by NOTHING the item
+    // declared. Each must be a deny, and each deny must name the item's own scope.
+    const widenedButNotOurs = [
+      path.join(tree, "src", "beta", "one.ts"),
+      path.join(tree, "tests", "alpha", "one.test.ts"),
+      path.join(tree, "README.md"),
+    ];
+    for (const filePath of widenedButNotOurs) {
+      const outcome = await gateOutcome(hooks, editOf(impl.sessionID, filePath));
+      assert.equal(
+        outcome.denied,
+        true,
+        `${filePath} is outside the item's declared fileScope ${JSON.stringify(scope.fileScope)} and must be DENIED. Widening the derived scopes to ["**"] admits it — that is the mutation the phase-13 gate ran against the whole build without turning a single test red, because no production caller could reach core/gates-edit.ts's implementer arm at all`,
+      );
+      assert.deepEqual(
+        scopeNamedInDeny(outcome.reason, `the deny for ${filePath}`),
+        scope.fileScope,
+        `and the deny must NAME the item's own persisted fileScope, so a permissive constant is red by its own message: expected ${JSON.stringify(scope.fileScope)}, and a derivation that returned ["**"] would not have denied this at all`,
+      );
+    }
+  } finally {
+    await drain(sdk, tracked, 15_000);
+  }
+});
+
+// ===========================================================================
+// 13.1-cr2-freeze-denies-only-its-own-tree
+// ===========================================================================
+
+test("[13.1-cr2-freeze-denies-only-its-own-tree] verifyInFlightTree is derived from the LIVE marker set and translated slug->path through the committed verifyInFlightTreeFor: while a marker is live for tree T an edit by a session in T is DENIED, an edit by a session in a DIFFERENT tree is ALLOWED, and once the marker clears the same denied edit succeeds — the allow half is what proves the field is a TREE COMPARISON and not a global 'something is verifying' boolean", async () => {
+  const root = gitRoot("conductor-13.1-cr2-freeze-");
+  const config = makeConfig({ subSessionTimeoutMs: 30_000 });
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "TEST_VETTED", I2: "TEST_VETTED" });
+
+  const treeI1 = itemTreeDir("conductor-13.1-cr2-freeze-i1-");
+  const treeI2 = itemTreeDir("conductor-13.1-cr2-freeze-i2-");
+  scopeItemOnDisk(store, runId, "I1", { fileScope: ["src/alpha/**"], testScope: ["tests/alpha/**"] }, treeI1);
+  scopeItemOnDisk(store, runId, "I2", { fileScope: ["src/beta/**"], testScope: ["tests/beta/**"] }, treeI2);
+
+  const sdk = makeFakeSdk({
+    registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+    idPrefix: "ses_cr2_freeze_",
+  });
+  const hooks = await startPlugin(root, sdk.client);
+
+  // Both sub-sessions are registered BEFORE any marker exists: the fan-out's own
+  // §3.5 freeze admission (the treeState CR-1 built) holds a write-capable job out
+  // of a frozen tree, so a marker written first would prevent the very
+  // registration these assertions need.
+  const runI1 = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I1" }, root));
+  const runI2 = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I2" }, root));
+  const editI1 = path.join(treeI1, "src", "alpha", "one.ts");
+  const editI2 = path.join(treeI2, "src", "beta", "one.ts");
+
+  // The §2.6 marker adapter/evidence.ts writes, named by the evidence layer's tree
+  // SLUG — which for an item that has a worktree is its ITEM ID, not a path. That
+  // is the whole of C-037 ruling 5: verifyInFlightTreeFor("I1") is the only thing
+  // that turns this filename into the PATH core/gates-edit.ts:196-198 compares.
+  const markerPath = path.join(runDir, "verify-running-I1.json");
+
+  try {
+    const implI1 = await awaitDispatch(runDir, "I1", 20_000);
+    const implI2 = await awaitDispatch(runDir, "I2", 20_000);
+
+    const beforeI1 = await gateOutcome(hooks, editOf(implI1.sessionID, editI1));
+    assert.equal(
+      beforeI1.denied,
+      false,
+      `premise: with NO marker on disk, I1's implementer may edit inside its own scope — the gate refused with: ${beforeI1.reason}`,
+    );
+    const beforeI2 = await gateOutcome(hooks, editOf(implI2.sessionID, editI2));
+    assert.equal(beforeI2.denied, false, `premise: and so may I2's — the gate refused with: ${beforeI2.reason}`);
+
+    writeFileSync(markerPath, JSON.stringify({ pid: process.pid, startMs: Date.now() }));
+
+    // (a) DENY — the frozen tree's own session. The path is inside I1's fileScope,
+    //     so a scope deny here would be the WRONG refusal and the assertion on the
+    //     reason says so.
+    const frozen = await gateOutcome(hooks, editOf(implI1.sessionID, editI1));
+    assert.equal(
+      frozen.denied,
+      true,
+      `while ${path.basename(markerPath)} is live, EVERY edit in I1's tree is denied (§3.5's strict reading, core/gates-edit.ts:196-198) — source, test and config alike. plugin/index.ts:1249 passes \`verifyInFlightTree: null\`, which makes that branch unreachable and this freeze silently never fire`,
+    );
+    assert.match(
+      frozen.reason,
+      /verify marker is live for this tree/,
+      `and the refusal is the FREEZE, not a scope deny: ${editI1} is inside I1's own fileScope. The marker's name carries the evidence layer's SLUG ("I1"), while the gate compares a PATH by string equality — adapter/tools.ts:2376 verifyInFlightTreeFor is the committed translation, and a snapshot that hands the raw slug across matches no session tree and fires nothing (got: ${frozen.reason})`,
+    );
+
+    // (b) ALLOW — a DIFFERENT tree, while the same marker is still live. This is
+    //     the half that proves the field is a tree comparison: a global
+    //     "something is verifying" boolean, or a marker enumeration whose first
+    //     entry is used for every session, denies this and is wrong.
+    const neighbour = await gateOutcome(hooks, editOf(implI2.sessionID, editI2));
+    assert.equal(
+      neighbour.denied,
+      false,
+      `I2's tree has NO live marker, so its implementer must still be ALLOWED while I1's verify runs — the gate refused with: ${neighbour.reason}. core/gates-edit.ts:196-198 freezes on tree EQUALITY, not on the mere presence of a marker somewhere in the run`,
+    );
+
+    // (c) and the freeze LIFTS: the same denied edit succeeds once the marker goes.
+    rmSync(markerPath);
+    const thawed = await gateOutcome(hooks, editOf(implI1.sessionID, editI1));
+    assert.equal(
+      thawed.denied,
+      false,
+      `once the marker clears, the SAME edit must be allowed again — the gate refused with: ${thawed.reason}. A verifyInFlightTree derived once and cached would wedge the tree for the rest of the session, which is the §3.5 half adapter/evidence.ts liveVerifyTrees exists to keep honest`,
+    );
+  } finally {
+    await drain(sdk, runI1, 15_000);
+    await drain(sdk, runI2, 15_000);
+    if (existsSync(markerPath)) rmSync(markerPath);
+  }
+});
+
+// ===========================================================================
+// 13.1-cr2-no-literals-left-at-the-seam
+// ===========================================================================
+
+test("[13.1-cr2-no-literals-left-at-the-seam] the source guard for the half no probe can see: the extracted gateBeforeToolCall argument object matches none of `fileScope: []`, `testScope: []`, `verifyInFlightTree: null`, and every one of the three is assigned from a DERIVATION — including when the literal merely moves one line up into the identifier the seam now passes", async () => {
+  // The committed composition.test.ts:1493-1530 idiom, extended: extract the call
+  // site, drop whole-line comments so prose ABOVE a field can neither satisfy nor
+  // trip a check, hold an anti-vacuity floor so a broken extraction is RED rather
+  // than a silent pass, and only then assert.
+  const source = readFileSync(pluginPath, "utf8");
+  const hookStart = source.indexOf('"tool.execute.before"');
+  assert.ok(hookStart >= 0, "premise: the plugin still registers the tool.execute.before gate hook");
+  const callStart = source.indexOf("gateBeforeToolCall({", hookStart);
+  assert.ok(callStart > hookStart, "premise: the hook still delegates the whole decision to gateBeforeToolCall");
+  const callEnd = source.indexOf("});", callStart);
+  assert.ok(callEnd > callStart, "premise: the call site's argument object terminates readably");
+
+  const callSite = dropWholeLineComments(source.slice(callStart, callEnd));
+  assert.ok(
+    callSite.length > 120,
+    `premise: the extracted call site is the real argument object (got ${callSite.length} chars) — a broken extraction must be red, never a vacuous green`,
+  );
+  // A positive control on the extraction itself: the two fields that were ALREADY
+  // derived at HEAD sit in this object, so their absence means the slice missed.
+  assert.match(
+    callSite,
+    /gitMode\s*:\s*config\.git\.mode\b/,
+    "premise: the extracted slice is the gate snapshot — it carries the already-derived gitMode",
+  );
+  assert.match(
+    callSite,
+    /branchPolicy\s*:\s*config\.git\.branchPolicy\b/,
+    "premise: and the already-derived branchPolicy",
+  );
+
+  // The hook body up to the call, for the second half of the check below.
+  const hookBody = dropWholeLineComments(source.slice(hookStart, callStart));
+  assert.ok(
+    hookBody.length > 120,
+    `premise: the hook body above the call site extracted (got ${hookBody.length} chars)`,
+  );
+
+  const BARE_LITERAL = /^(\[\s*\]|null|undefined|\[[^\]]*\]|""|''|``)$/;
+
+  const fields: { name: string; head: RegExp; literal: RegExp; wasLiterally: string }[] = [
+    { name: "fileScope", head: /fileScope\s*:\s*([A-Za-z_$])/, literal: /fileScope\s*:\s*(\[|null\b|undefined\b|["'`])/, wasLiterally: "[]" },
+    { name: "testScope", head: /testScope\s*:\s*([A-Za-z_$])/, literal: /testScope\s*:\s*(\[|null\b|undefined\b|["'`])/, wasLiterally: "[]" },
+    {
+      name: "verifyInFlightTree",
+      head: /verifyInFlightTree\s*:\s*([A-Za-z_$])/,
+      literal: /verifyInFlightTree\s*:\s*(null\b|undefined\b|false\b|true\b|\[|["'`])/,
+      wasLiterally: "null",
+    },
+  ];
+
+  for (const field of fields) {
+    assert.doesNotMatch(
+      callSite,
+      field.literal,
+      `the gate's \`${field.name}\` is still a LITERAL at the seam (it was \`${field.name}: ${field.wasLiterally}\` at HEAD, plugin/index.ts:1247-1249). It sits between \`gitMode: config.git.mode\` and \`inlineClaimScope\`, both derived — this is the whole of the phase-13 gate's MAJOR 6, and a hardcoded ["**"] is the exact mutation that regression demonstrated`,
+    );
+    assert.match(
+      callSite,
+      field.head,
+      `and \`${field.name}\` must be assigned from a DERIVATION — an identifier, a property read, a call or a conditional — not a value written out at the call site`,
+    );
+
+    // The half a "no literal at the seam" check alone cannot see: the literal
+    // moving one line up into the identifier the seam now passes. If the value is
+    // rooted in a name the hook itself binds, at least one of that name's
+    // assignments must be something other than a bare literal.
+    const value = new RegExp(`${field.name}\\s*:\\s*([^,\\n]*)`).exec(callSite);
+    assert.ok(value !== null, `premise: ${field.name}'s value at the call site is readable`);
+    const rootIdent = /^[A-Za-z_$][\w$]*/.exec((value as RegExpExecArray)[1].trim());
+    if (rootIdent === null) continue;
+    const assignments = [
+      ...hookBody.matchAll(new RegExp(`\\b${rootIdent[0]}\\b[^=;\\n]*(?<![=!<>])=(?!=)\\s*([^;\\n]+)`, "g")),
+    ].map((match) => (match[1] ?? "").trim().replace(/,$/, ""));
+    if (assignments.length === 0) continue;
+    assert.ok(
+      assignments.some((rhs) => !BARE_LITERAL.test(rhs)),
+      `\`${field.name}\` is passed as \`${rootIdent[0]}\`, but every assignment to \`${rootIdent[0]}\` in the hook is a bare literal (${JSON.stringify(assignments)}) — the literal moved one line up, it did not become a derivation. The scopes come from the calling session's §3.5 registry entry (its itemId's persisted §2.4 scopes) and the freeze from the live marker set through adapter/tools.ts:2376 verifyInFlightTreeFor`,
+    );
+  }
+});
+
+// ===========================================================================
+// 13.1-cr2-packs-missing-fails-closed
+// ===========================================================================
+
+test("[13.1-cr2-packs-missing-fails-closed] the doctrine directory is RESOLVABLE — defaulting to the shipped conductor/doctrine, overridable by an explicit channel — and against a directory missing a required pack the tools REFUSE: the failure is reported at error level NAMING the absent pack, no sub-session is dispatched, and the refusal reaches the caller", async () => {
+  // The shipped pack set, read off disk. It is the source for BOTH the copy the
+  // legs below build and the name of the pack that is withheld — nothing here is
+  // a list typed into this test.
+  const shipped = readdirSync(doctrineDir)
+    .filter((name) => name.endsWith(".md"))
+    .sort();
+  assert.ok(
+    shipped.length >= 9,
+    `premise: conductor/doctrine ships the §6.4 pack set (found ${JSON.stringify(shipped)})`,
+  );
+  const withheld = shipped.includes("tdd.md") ? "tdd.md" : shipped[0];
+
+  function doctrineCopy(tag: string, omit: string | null): string {
+    const dir = plainRoot(tag);
+    for (const name of shipped) {
+      if (name === omit) continue;
+      writeFileSync(path.join(dir, name), readFileSync(path.join(doctrineDir, name), "utf8"));
+    }
+    return dir;
+  }
+
+  // One dispatching leg: a PENDING behavioral item, whose stage tool dispatches a
+  // write-capable sub-session. "No sub-session is dispatched" is then observable
+  // as a fact about the fake SDK, not as an absence of evidence.
+  interface Leg {
+    threw: boolean;
+    message: string;
+    creates: number;
+    records: Rec[];
+  }
+
+  async function driveSubmitTest(tag: string, doctrine: string | null): Promise<Leg> {
+    const root = gitRoot(tag);
+    const config = makeConfig({ subSessionTimeoutMs: 8_000 });
+    writeRepoConfig(root, config);
+    const store = openTestStore(root, config);
+    const runId = createRunFor(store, SESSION);
+    const runDir = runDirOf(root, runId);
+    seedQueue(store, runId, "EXECUTING", { I1: "PENDING" });
+
+    const priorDoctrine = process.env[ENV_DOCTRINE_DIR];
+    if (doctrine === null) delete process.env[ENV_DOCTRINE_DIR];
+    else process.env[ENV_DOCTRINE_DIR] = doctrine;
+
+    const stderrLines: string[] = [];
+    const originalError = console.error;
+    const sdk = makeFakeSdk({
+      registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+      idPrefix: `ses_cr2_packs_${tag}`,
+    });
+    let outcome: Attempt;
+    let tracked: Tracked | null = null;
+    try {
+      console.error = (...args: unknown[]): void => {
+        stderrLines.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+      };
+      // The env is set BEFORE the factory runs and read on the way to the handler:
+      // the doctrine directory is resolved per plugin instance, exactly as
+      // plugin/index.ts:1074-1084 already reads its LLAMA_HARNESS_* session env at
+      // call time rather than freezing it at module load.
+      const hooks = await startPlugin(root, sdk.client);
+      tracked = kick(() => callTool(hooks, "conductor_submit_test", { itemId: "I1" }, root));
+      await waitFor(() => sdk.creates.length > 0 || tracked?.settled() !== null, 10_000);
+      await drain(sdk, tracked, 10_000);
+      const settled = tracked.settled();
+      outcome =
+        settled === null || settled.ok
+          ? { threw: false, error: undefined, value: settled?.value }
+          : { threw: true, error: settled.error, value: undefined };
+    } finally {
+      console.error = originalError;
+      if (priorDoctrine === undefined) delete process.env[ENV_DOCTRINE_DIR];
+      else process.env[ENV_DOCTRINE_DIR] = priorDoctrine;
+      if (tracked !== null) await drain(sdk, tracked, 5_000);
+    }
+
+    // The §7.1 stderr sink AND the run's own journal.jsonl: which of the two a
+    // record lands on depends only on whether the journal was already bound to a
+    // run when it was written, and this row is about the record's LEVEL and
+    // CONTENT, not about which sink carried it (the bundle row above reads both
+    // for the same reason).
+    const records: Rec[] = [];
+    for (const line of stderrLines) {
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (parsed !== null && typeof parsed === "object") records.push(parsed as Rec);
+      } catch {
+        continue;
+      }
+    }
+    records.push(...readRunJournal(runDir));
+    return {
+      threw: outcome.threw,
+      message: outcome.threw ? messageOf(outcome.error) : "",
+      creates: sdk.creates.length,
+      records,
+    };
+  }
+
+  // ---- (a) the override, pointed at a directory MISSING a required pack ------
+  const broken = await driveSubmitTest("conductor-13.1-cr2-packs-missing-", doctrineCopy("conductor-13.1-cr2-doctrine-broken-", withheld));
+  assert.equal(
+    broken.creates,
+    0,
+    `with the doctrine directory missing "${withheld}", NO sub-session may be dispatched: doctrine is checked before the fan-out is driven, never after a write-capable session is already carrying none. The fake SDK saw ${broken.creates} session.create calls, which is what an IGNORED override looks like — plugin/index.ts:130 resolves DOCTRINE_DIR from the plugin's own module URL and nothing in conductor/ overrides it, so the shipped packs loaded and the stage tool dispatched regardless of what the operator's doctrine directory actually contains. That unresolvable directory is why the §6.4 fail-closed half of 13.1-cr-packs-loaded-fail-closed could not be bound at CR-1 (spec knownPartialCoverage), and making it resolvable is what pays that debt`,
+  );
+  assert.equal(
+    broken.threw,
+    true,
+    `and the tool REFUSES, with the refusal reaching the caller — §6.4 fail-closed. A composition root that swallows the load failure and hands the handlers an empty \`packs\` record is the §3.8 silent-degradation shape this row exists to forbid`,
+  );
+  assert.match(
+    broken.message,
+    new RegExp(withheld.replace(".", "\\.")),
+    `and the refusal NAMES the absent pack — adapter/inject.ts:256 loadPacks already puts the filename in its own message, so the composition root has only to let it through: got ${broken.message}`,
+  );
+  const named = broken.records.filter(
+    (rec) => rec.level === "error" && JSON.stringify(rec.data ?? {}).includes(withheld),
+  );
+  assert.ok(
+    named.length > 0,
+    `and the failure is REPORTED at error level naming the absent pack — a refusal the caller sees but the operator's record does not is half a fail-closed. Records seen: ${JSON.stringify(broken.records.map((rec) => ({ level: rec.level, component: rec.component, event: rec.event })))}`,
+  );
+
+  // ---- (b) the SAME override, pointed at a COMPLETE copy --------------------
+  // Proves (a)'s refusal was caused by the ABSENT PACK and not by the existence of
+  // the override: an override that always refuses is not a resolution.
+  const complete = await driveSubmitTest("conductor-13.1-cr2-packs-complete-", doctrineCopy("conductor-13.1-cr2-doctrine-complete-", null));
+  assert.doesNotMatch(
+    complete.message,
+    /doctrine pack/,
+    `an override pointed at a COMPLETE pack set must load: ${complete.message}`,
+  );
+  assert.ok(
+    complete.creates > 0,
+    `and the stage tool goes on to dispatch its write-capable sub-session (the fake SDK saw ${complete.creates} session.create calls) — so the override is a directory RESOLUTION, not a kill switch`,
+  );
+
+  // ---- (c) NO override: the default resolution is unchanged -----------------
+  const shippedLeg = await driveSubmitTest("conductor-13.1-cr2-packs-default-", null);
+  assert.doesNotMatch(
+    shippedLeg.message,
+    /doctrine pack/,
+    `with no override set, production must still load the shipped pack set from conductor/doctrine — the default resolution is not allowed to change: ${shippedLeg.message}`,
+  );
+  assert.ok(
+    shippedLeg.creates > 0,
+    `and the stage tool dispatches exactly as it does today (the fake SDK saw ${shippedLeg.creates} session.create calls). A resolution that reads the env but loses the shipped default refuses EVERY tool in a repo that never set it`,
+  );
+});
+
+// ===========================================================================
+// 13.1-cr2-one-role-vocabulary
+// ===========================================================================
+//
+// Two files name the same fact and they disagree, so the guard has to read BOTH
+// of them (C-077: neither side's expectation may be computed from the other's
+// file). The gate side is a SOURCE AUDIT — a role string an arm compares against
+// is unobservable from outside unless a session carrying it already exists, which
+// is precisely what is missing — so it reuses conductor/tests/journal-vocab.test.ts's
+// idiom and carries the same anti-vacuity floor: whole-line comments dropped so
+// prose cannot satisfy a match, and a parse that finds nothing, or that loses the
+// known-good "implementer", is RED rather than a silent pass.
+
+const gatesEditPath = path.join(conductorDir, "core", "gates-edit.ts");
+const toolsPath = path.join(conductorDir, "adapter", "tools.ts");
+const repoRootDir = path.dirname(conductorDir);
+const gatesEditLabel = path.relative(repoRootDir, gatesEditPath);
+const toolsLabel = path.relative(repoRootDir, toolsPath);
+
+// Every role string core/gates-edit.ts DISPATCHES on: the `sessionRole === "..."`
+// arms, plus the roles in whatever list it tests with `<LIST>.includes(sessionRole)`
+// — the list is found through its USE, not by its name, so renaming READER_ROLES
+// does not quietly shrink this set to the equality arms alone.
+function gateDispatchRoles(): string[] {
+  const source = dropWholeLineComments(readFileSync(gatesEditPath, "utf8"));
+  const roles = new Set<string>();
+  for (const match of source.matchAll(/sessionRole\s*===\s*"([^"]+)"/g)) roles.add(match[1]);
+  const listNames = new Set(
+    [...source.matchAll(/\b([A-Za-z_$][\w$]*)\s*\.includes\(\s*sessionRole\s*\)/g)].map(
+      (match) => match[1],
+    ),
+  );
+  for (const name of listNames) {
+    const declared = new RegExp(`\\b${name}\\b[^=\\n]*=\\s*\\[([^\\]]*)\\]`).exec(source);
+    assert.ok(
+      declared !== null,
+      `ANTI-VACUITY: ${gatesEditLabel} dispatches through \`${name}.includes(sessionRole)\` but this extraction cannot find ${name}'s array literal, so the roles reached through that list are invisible to this guard — a parse that silently sees nothing is a guard that silently passes`,
+    );
+    const listed = [...(declared === null ? "" : declared[1]).matchAll(/"([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+    assert.ok(
+      listed.length > 0,
+      `ANTI-VACUITY: ${name} is dispatched on in ${gatesEditLabel} but its declaration yielded no role strings`,
+    );
+    for (const role of listed) roles.add(role);
+  }
+  return [...roles].sort();
+}
+
+// The fan-out's OWN role vocabulary, read from the other file: the `role:` literals
+// on FanoutJob construction (the registry entry a sub-session is registered with)
+// and on the persisted `askedBy.role` beside them. Read from source because no
+// single run dispatches all nine roles; the run below grounds it in what production
+// actually registered.
+function fanoutRegisteredRoles(): string[] {
+  const source = dropWholeLineComments(readFileSync(toolsPath, "utf8"));
+  const roles = new Set<string>();
+  for (const match of source.matchAll(/\brole:\s*"([^"]+)"\s*,\s*\n\s*itemId\s*[,:]/g)) {
+    roles.add(match[1]);
+  }
+  for (const match of source.matchAll(/askedBy:\s*\{\s*role:\s*"([^"]+)"/g)) roles.add(match[1]);
+  return [...roles].sort();
+}
+
+test("[13.1-cr2-one-role-vocabulary] the roles the EDIT GATE dispatches on and the roles the FAN-OUT registers are ONE vocabulary, not two: every role string core/gates-edit.ts compares sessionRole against must be a role adapter/tools.ts actually registers — both sets derived at run time from the two DIFFERENT files, the fan-out's grounded in the roles this run really registered, so a rename on either side is RED instead of a silently dead gate arm", async () => {
+  // ---- (a) OBSERVED: the roles production actually registers -----------------
+  //
+  // Two write-capable stage tools through the real bound plugin: a TEST_VETTED
+  // item's mark_green dispatches the implementer, a PENDING behavioral item's
+  // submit_test dispatches the write-capable test author. Their roles are read off
+  // the run's OWN fanout/subsession.dispatched records — production's statement of
+  // what went into the §3.5 registry entry, not this test's opinion of it.
+  const root = gitRoot("conductor-13.1-cr2-vocab-");
+  const config = makeConfig({ subSessionTimeoutMs: 30_000 });
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "TEST_VETTED", I2: "PENDING" });
+
+  const treeI1 = itemTreeDir("conductor-13.1-cr2-vocab-i1-");
+  const treeI2 = itemTreeDir("conductor-13.1-cr2-vocab-i2-");
+  scopeItemOnDisk(
+    store,
+    runId,
+    "I1",
+    { fileScope: ["src/alpha/**"], testScope: ["tests/alpha/**"] },
+    treeI1,
+  );
+  scopeItemOnDisk(
+    store,
+    runId,
+    "I2",
+    { fileScope: ["src/beta/**"], testScope: ["tests/beta/**"] },
+    treeI2,
+  );
+
+  const sdk = makeFakeSdk({
+    registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+    idPrefix: "ses_cr2_vocab_",
+  });
+  const hooks = await startPlugin(root, sdk.client);
+
+  const implRun = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I1" }, root));
+  const writerRun = kick(() => callTool(hooks, "conductor_submit_test", { itemId: "I2" }, root));
+  let observed: string[] = [];
+  try {
+    const implementerSide = await awaitDispatch(runDir, "I1", 20_000);
+    const writerSide = await awaitDispatch(runDir, "I2", 20_000);
+    observed = [...new Set([implementerSide.role, writerSide.role])].sort();
+  } finally {
+    await drain(sdk, implRun, 15_000);
+    await drain(sdk, writerRun, 15_000);
+  }
+
+  assert.equal(
+    observed.length,
+    2,
+    `premise: this run must register TWO DIFFERENT write-capable roles — the implementer (I1, mark_green) and the test author (I2, submit_test). Observed on the run's fanout/subsession.dispatched records: ${JSON.stringify(observed)}`,
+  );
+
+  // ---- (b) the two derived sets --------------------------------------------
+  const gateRoles = gateDispatchRoles();
+  const fanoutRoles = fanoutRegisteredRoles();
+
+  assert.ok(
+    gateRoles.length > 0 && gateRoles.includes("implementer"),
+    `ANTI-VACUITY (gate side): reading ${gatesEditLabel} produced ${JSON.stringify(gateRoles)}, which does not contain the known-good role "implementer" that both files spell the same way today — the extraction is broken, and a broken extraction must be RED, never a vacuous pass`,
+  );
+  assert.ok(
+    fanoutRoles.length > 0 && fanoutRoles.includes("implementer"),
+    `ANTI-VACUITY (fan-out side): reading ${toolsLabel} produced ${JSON.stringify(fanoutRoles)}, which does not contain the known-good role "implementer" — the extraction is broken`,
+  );
+  const unseen = observed.filter((role) => !fanoutRoles.includes(role));
+  assert.deepEqual(
+    unseen,
+    [],
+    `ANTI-VACUITY (fan-out side, grounded): the roles this run REALLY registered (${JSON.stringify(observed)}, off the run's fanout/subsession.dispatched records) must all appear in the vocabulary read out of ${toolsLabel} (${JSON.stringify(fanoutRoles)}) — ${JSON.stringify(unseen)} did not, so the source read is not describing what production does and nothing below it can be trusted`,
+  );
+
+  // ---- (c) ONE vocabulary ---------------------------------------------------
+  //
+  // Not "the two sets overlap" — "implementer" overlaps today and the dead arm
+  // would survive that. Every role the gate dispatches on must be one the fan-out
+  // registers, or that arm is unreachable and the session it was written for falls
+  // through to the unknown-role fail-safe, which denies every edit it makes.
+  const registered = new Set([...fanoutRoles, ...observed]);
+  const unregistered = gateRoles.filter((role) => !registered.has(role));
+  assert.deepEqual(
+    unregistered,
+    [],
+    `${gatesEditLabel} dispatches on ${unregistered.length} role string(s) NO session can ever carry: ${JSON.stringify(unregistered)}.\n` +
+      `  GATE side, derived from ${gatesEditLabel} (its \`sessionRole === "..."\` arms plus the list it tests with \`.includes(sessionRole)\`): ${JSON.stringify(gateRoles)}\n` +
+      `  FAN-OUT side, derived from ${toolsLabel} (the \`role:\` literals on FanoutJob construction and on the persisted \`askedBy.role\`): ${JSON.stringify(fanoutRoles)}\n` +
+      `  and OBSERVED on this run's own fanout/subsession.dispatched records: ${JSON.stringify(observed)}\n` +
+      `A session registered as one of ${JSON.stringify(observed)} matches none of ${JSON.stringify(unregistered)}, so it falls past every arm to ${gatesEditLabel}'s unknown-role fail-safe and is DENIED EVERY EDIT — the arm written for it has never once been reachable from production. Resolve it by RENAMING one side so the two files spell one fact one way; a table at the composition root that translates ${JSON.stringify(unregistered)} into what the fan-out registers (plugin/index.ts's EDIT_GATE_ROLES) is a THIRD site for the same fact and is deleted, not extended`,
   );
 });

@@ -1441,7 +1441,7 @@ export interface PlanResult {
 // Read the run's decomposed queue back for the plan prompt. A DECOMPOSED run
 // that has no (or a malformed) queue.json is corrupt, not plannable — and that
 // is a legality failure, so it throws BEFORE any sub-session is spent.
-function readQueueJson(runDir: string, tool: string): Queue {
+export function readQueueJson(runDir: string, tool: string): Queue {
   const queuePath = path.join(runDir, "queue.json");
   if (!existsSync(queuePath)) {
     throw new Error(

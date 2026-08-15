@@ -104,6 +104,7 @@ import {
   handleSurface,
   handleValidate,
   handleVetTest,
+  readQueueJson,
   verifyInFlightTreeFor,
 } from "../adapter/tools.ts";
 import type {
@@ -137,6 +138,22 @@ const DOCTRINE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const ENV_ROUTER_URL = "LLAMA_HARNESS_ROUTER_URL";
 const ENV_UPSTREAM_URL = "LLAMA_HARNESS_URL";
 const ENV_MODEL_ID = "LLAMA_HARNESS_MODEL";
+
+// The §6.4 doctrine directory an operator can point somewhere else — the same
+// session-env channel as the three above, and read at CALL time rather than frozen
+// at module load, so a directory that changes between two tool calls is honoured
+// by the second. DOCTRINE_DIR stays the default, so a workspace that never sets it
+// loads the shipped packs exactly as it does today; an override that is missing a
+// required pack fails CLOSED through loadPacks, which is the half the composition
+// root could not bind while the directory was a module-relative const.
+const ENV_DOCTRINE_DIR = "LLAMA_HARNESS_DOCTRINE_DIR";
+
+// Where the §6.4 packs are read from for THIS call: the override when the session
+// carries one, else the directory that ships beside this plugin.
+function doctrineDirOf(): string {
+  const override = process.env[ENV_DOCTRINE_DIR];
+  return override !== undefined && override.length > 0 ? override : DOCTRINE_DIR;
+}
 
 // The §2.2 defaults the same two scripts fall back to (conductor_wiring.py
 // DEFAULT_LISTEN_PORT=8088, fetch_models.py DEFAULT_HOST/DEFAULT_PORT). They are
@@ -632,24 +649,34 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   // call would forget that the router already failed.
   const failoverState: FailoverState = createFailoverState();
 
-  // §6.4/§3.8: the doctrine packs, loaded ONCE through the committed loader and
-  // FAIL-CLOSED. loadPacks names the offending pack in its own message; the
-  // failure is reported at error level on the §7.1 sink and re-thrown, so the
-  // tools refuse rather than dispatching sub-sessions carrying no doctrine —
-  // which is the silent-degradation shape §3.8 exists to forbid.
+  // §6.4/§3.8: the doctrine packs, loaded ONCE PER DIRECTORY through the committed
+  // loader and FAIL-CLOSED. loadPacks names the offending pack in its own message;
+  // the failure is reported at error level on the §7.1 sink and re-thrown, so the
+  // tools refuse rather than dispatching sub-sessions carrying no doctrine — which
+  // is the silent-degradation shape §3.8 exists to forbid.
+  //
+  // The memo is keyed by the RESOLVED directory rather than by "have we loaded
+  // anything yet": the directory is read at call time (doctrineDirOf), so a memo
+  // that ignored it would serve one session's packs to a session pointed somewhere
+  // else — and would make the failure of a broken override depend on call order.
   let packs: Record<string, string> | null = null;
+  let packsDir: string | null = null;
   function ensurePacks(hook: string, sessionID: string): Record<string, string> {
-    if (packs !== null) return packs;
+    const doctrineDir = doctrineDirOf();
+    if (packs !== null && packsDir === doctrineDir) return packs;
     try {
-      packs = loadPacks(DOCTRINE_DIR);
+      packs = loadPacks(doctrineDir);
+      packsDir = doctrineDir;
       return packs;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      packs = null;
+      packsDir = null;
       journal.log(
         "error",
         "state",
         "hook.failed",
-        { hook, root: DOCTRINE_DIR, error: message },
+        { hook, root: doctrineDir, error: message },
         { sessionID },
       );
       throw err instanceof Error ? err : new Error(message);
@@ -747,6 +774,109 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         stopTimer();
       },
     };
+  }
+
+  // =========================================================================
+  // THE §3.5 GATE SNAPSHOT. The three facts core/gates-edit.ts judges an edit
+  // against that only the composition root can know — the calling session's two
+  // §2.4 item scopes, and the tree a verify has frozen. Each is derived PER CALL
+  // from live state, beside the gitMode / branchPolicy / inlineClaimScope
+  // derivations the same seam already carried.
+  // =========================================================================
+
+  interface GateScopes {
+    fileScope: string[];
+    testScope: string[];
+  }
+
+  // FAIL CLOSED. A session with no registry entry, no itemId, no live run, or an
+  // item whose queue entry will not load derives NO scope — and no scope denies
+  // every edit, which is the safe direction. The permissive alternative is the
+  // exact mutation the phase-13 gate ran (both scopes widened to ["**"]) with the
+  // whole build staying green, because nothing in production could reach the arms.
+  const NO_GATE_SCOPE: GateScopes = { fileScope: [], testScope: [] };
+
+  // The scopes the calling session is judged by: its §3.5 registry entry names an
+  // item, and that item's PERSISTED §2.4 fileScope / testScope are the scope. Read
+  // off the SAME entry the hook resolves the tree onto (never a second copy), or
+  // the gate would scope a path against one item and normalize it against
+  // another's tree.
+  function gateScopesFor(ws: Workspace | null, sessionID: string): GateScopes {
+    if (ws === null) return NO_GATE_SCOPE;
+    const itemId = registry.get(sessionID)?.itemId;
+    if (itemId === undefined || itemId.length === 0) return NO_GATE_SCOPE;
+    try {
+      const run = ws.store.currentRun();
+      if (run === null) return NO_GATE_SCOPE;
+      // queue.json is where §2.4 persists the two scopes — the runtime item file
+      // carries the FSM position and the worktree, not the scope — and it is read
+      // through the handlers' OWN committed reader, so the gate and every stage
+      // tool validate that file against one schema rather than two.
+      const queue = readQueueJson(runDirOf(ws.store.root, run.runId), "the edit gate");
+      const entry = queue.items.find((candidate) => candidate.id === itemId);
+      if (entry === undefined) return NO_GATE_SCOPE;
+      return { fileScope: [...entry.fileScope], testScope: [...entry.testScope] };
+    } catch {
+      return NO_GATE_SCOPE;
+    }
+  }
+
+  // Trailing slashes and nothing else: core/gates-edit.ts:196-198 compares the
+  // frozen tree to the session's tree by string equality after stripping exactly
+  // those, so the SELECTION below tolerates exactly what that comparison does.
+  // gates-edit stays the authority on the decision; this only chooses WHICH live
+  // marker's tree is put in front of it.
+  function sameTree(a: string, b: string): boolean {
+    const strip = (value: string): string => {
+      let end = value.length;
+      while (end > 0 && value[end - 1] === "/") end -= 1;
+      return value.slice(0, end);
+    };
+    return strip(a) === strip(b);
+  }
+
+  // The tree a LIVE verify has frozen, in the terms core/gates-edit.ts:196-198
+  // reads it: a PATH, compared to the calling session's own tree. Two committed
+  // translations stand between the marker file and that comparison and neither is
+  // re-derived here — adapter/evidence.ts liveVerifyTrees applies the verify
+  // path's OWN liveness rule (a dead pid or an over-age marker is not live, so a
+  // crashed run can never wedge a tree), and adapter/tools.ts verifyInFlightTreeFor
+  // is the C-037 ruling-5 slug->path translation whose own doc comment names this
+  // seam as its obligation.
+  //
+  // It is a TREE COMPARISON, not a global "something is verifying" flag: a session
+  // editing in a DIFFERENT tree while a marker is live elsewhere stays allowed. So
+  // this hands over the live tree that IS this session's, and null when none is.
+  function freezeTreeFor(
+    ws: Workspace | null,
+    sessionID: string,
+    sessionTree: string,
+  ): string | null {
+    if (ws === null || sessionTree.length === 0) return null;
+    let runId: string;
+    try {
+      const run = ws.store.currentRun();
+      if (run === null) return null;
+      runId = run.runId;
+    } catch {
+      return null;
+    }
+    for (const slug of liveVerifyTrees(runDirOf(ws.store.root, runId))) {
+      let treePath: string | null;
+      try {
+        treePath = verifyInFlightTreeFor(ws.store, runId, slug);
+      } catch {
+        // A live marker whose slug will not translate cannot be ruled OUT of this
+        // session's tree, so it freezes it: fail closed, the direction §3.5's
+        // strict reading takes everywhere else.
+        return sessionTree;
+      }
+      // null is the committed answer for an item with no worktree — "no path can
+      // be frozen for it" — not a failure, so it rules that marker OUT.
+      if (treePath === null) continue;
+      if (sameTree(treePath, sessionTree)) return treePath;
+    }
+    return null;
   }
 
   // THE dependency bundle. adapter/tools.ts:7304-7311 says in its own words why
@@ -1221,8 +1351,9 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       // through the same one helper, so neither seam can judge a path against a
       // different tree than the other.
       let inlineClaimScope: string[] | null = null;
+      let sessionTree = "";
       if (ws !== null) {
-        resolveSessionTree(ws.store, registry.get(hook.sessionID));
+        sessionTree = resolveSessionTree(ws.store, registry.get(hook.sessionID));
         try {
           const run = ws.store.currentRun();
           if (run !== null) inlineClaimScope = activeInlineClaimScope(ws.store, run.runId);
@@ -1230,6 +1361,13 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
           inlineClaimScope = null; // fail closed: no claim derived, no edit allowed
         }
       }
+
+      // §3.5's other two derivations, from the SAME registry entry the tree above
+      // was resolved onto: the item's persisted §2.4 scopes, and the tree a live
+      // verify marker has frozen. Both fail closed — no entry, no item, no run
+      // derives no scope, which denies.
+      const scopes = gateScopesFor(ws, hook.sessionID);
+      const verifyFreezeTree = freezeTreeFor(ws, hook.sessionID, sessionTree);
 
       const corr: Corr = { runId: liveRunId ?? input.project.id, sessionID: hook.sessionID };
       gateBeforeToolCall({
@@ -1244,9 +1382,9 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         gitMode: config.git.mode,
         runActive: true,
         branchPolicy: config.git.branchPolicy,
-        fileScope: [],
-        testScope: [],
-        verifyInFlightTree: null,
+        fileScope: scopes.fileScope,
+        testScope: scopes.testScope,
+        verifyInFlightTree: verifyFreezeTree,
         inlineClaimScope,
         // §3.6: the ONE grant map conductor_override mints into. A second map
         // here would leave every granted override unspendable.
