@@ -2120,6 +2120,101 @@ class ServeMainPrintEnv(ServeMainCase):
         self.assertIsNone(run.raised, "--print-env raised: %r" % (run,))
         self.assertEqual(run.result, 0)
 
+    def test_p12b_print_env_without_a_model_refuses_loudly(self) -> None:
+        """[p12b-print-env-without-a-model-refuses-loudly] C-087's behaviour change, pinned.
+
+        The second door into the same defect the port resolution already closed.
+        With no model in argv and none in the saved session, the pre-C-087 path
+        called choose_model, which writes its whole list to STDOUT with info()
+        and then blocks on "Select a model by number" - inside
+        `eval "$(serve.py --print-env)"` that is the caller evaluating a model
+        list and then hanging with nothing on screen. A reporting flag has one
+        honest answer to "there is nothing to report": say so on stderr and exit
+        non-zero. Driven on a tty, where the picker's block is at its worst, and
+        with two models installed so nothing can be inferred.
+        """
+        self.install_models()
+        self.plant_router_under_temp_root()
+        self.stdin.tty = True
+        port = free_port()
+
+        for label, prepare in (
+            ("no session file at all", lambda: None),
+            (
+                "a session that records no model",
+                lambda: self.write_session(
+                    host=LISTEN_HOST, port=port, router_port=free_port(), models_max=1
+                ),
+            ),
+        ):
+            prepare()
+            self.prompts = []
+            self.stdin.reads = 0
+
+            run = self.drive_main(["--print-env", "--no-build-check", "--port", str(port)])
+
+            # (1) NEVER the picker. Both of its symptoms, separately: the prompt
+            #     seam was not reached, and stdin was not read.
+            self.assertEqual(
+                self.prompts,
+                [],
+                "%s: --print-env opened the interactive picker (%r) - inside "
+                'eval "$(...)" that is an invisible hang' % (label, self.prompts[:1]),
+            )
+            self.assertEqual(self.stdin.reads, 0, "%s: --print-env read stdin" % label)
+
+            # (2) NOTHING on stdout. choose_model's list goes there through info(),
+            #     and the caller's eval would run every line of it.
+            self.assertEqual(
+                run.stdout,
+                "",
+                "%s: --print-env wrote %r to stdout with no session to report; the "
+                "caller's eval runs it" % (label, run.stdout),
+            )
+
+            # (3) A non-zero exit carrying a message. SystemExit's contract: a code
+            #     that is neither None nor 0 is a non-zero exit, and a STRING code is
+            #     written to stderr by the interpreter before it exits 1.
+            self.assertIsInstance(
+                run.raised,
+                SystemExit,
+                "%s: --print-env did not exit; it returned %r" % (label, run.result),
+            )
+            code = run.raised.code
+            self.assertIsInstance(
+                code, str, "%s: the exit code must be the stderr message, got %r" % (label, code)
+            )
+            self.assertNotEqual(code, "", "%s: exited with an empty message" % label)
+            self.assertNotIn(code, (None, 0), "%s: --print-env exited zero" % label)
+            self.assertIn(
+                "--print-env",
+                code,
+                "%s: the error must name the flag that refused: %r" % (label, code),
+            )
+            self.assertTrue(
+                "model" in code.lower(),
+                "%s: the error must name what it could not report: %r" % (label, code),
+            )
+
+            # (4) It reported nothing and started nothing.
+            self.assertEqual(self.spawned, [], "%s: --print-env spawned a server" % label)
+            self.assertEqual(self.execs, [], "%s: --print-env exec'd a shell" % label)
+
+        # The contrast, so the refusal above is about the MISSING model and not
+        # about --print-env being broken: name a model in argv and the same
+        # invocation reports normally and exits 0.
+        run_ok = self.drive_main(
+            [P12_MODEL_A, "--print-env", "--no-build-check", "--port", str(port)]
+        )
+        self.assertIsNone(run_ok.raised, "--print-env with a named model raised: %r" % (run_ok,))
+        self.assertEqual(run_ok.result, 0)
+        self.assertEqual(
+            env_pairs(run_ok.stdout).get("LLAMA_HARNESS_MODEL"),
+            P12_MODEL_A,
+            "the contrast leg must actually report a session: %r" % run_ok.stdout,
+        )
+        self.assertEqual(self.prompts, [], "the contrast leg must not prompt either")
+
 
 _EXITING_ROUTER = '''#!%(python)s
 import os

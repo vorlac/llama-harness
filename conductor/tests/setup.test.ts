@@ -193,6 +193,10 @@ import { fileURLToPath } from "node:url";
 
 // THE SUBJECTS — absent at red time.
 import { handleSetup, SETUP_PROBE_SCHEMA_NAME } from "../adapter/tools.ts";
+// The DOWNSTREAM victims of a config setup wrote: the two handlers that refuse an
+// item (2716) and a run (7542) no verify.requiredScopes entry covers.
+import { handleItemReview, handleReport } from "../adapter/tools.ts";
+import type { Fanout, FanoutJob, FanoutResult } from "../adapter/fanout.ts";
 import { initRepo } from "../adapter/gitio.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../adapter/config-io.ts";
 
@@ -210,7 +214,7 @@ import type { GateRun } from "../core/gates-phase.ts";
 import { isTerminal } from "../core/stops.ts";
 import { globMatch, shellTokens } from "../core/shell-parse.ts";
 import { SCHEMAS, validate } from "../core/types.ts";
-import type { Config, GitMode, LogLevel } from "../core/types.ts";
+import type { Config, GitMode, Item, ItemState, LogLevel, Queue, QueueItem } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 
@@ -2437,5 +2441,710 @@ test("[12.2-no-new-runtime-dependency] G1/G14 — the setup path imports only no
     }
 
     assert.ok(seen > 0, `${file}: the scan must actually find imports (it would pass vacuously otherwise)`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// fix-phase12-setup — MAJOR 5: a ROUTER OUTAGE MID-FAN-OUT
+//
+// The committed [12.2-proofs-origin-fail-soft] G5 test above kills the router
+// BEFORE the first proof. That ordering latches useUpstream on the sequential
+// /v1/models request, so the whole maxReaders-wide fan-out afterwards resolves
+// straight to the upstream and setup succeeds even at HEAD. The leg no test
+// reaches is the other one: a router that answers the two SEQUENTIAL proofs and
+// dies during the CONCURRENT fan-out, which is what the 12.1 supervisor's
+// restart window looks like from here.
+// ---------------------------------------------------------------------------
+
+interface DyingRouter {
+  host: string;
+  port: number;
+  /** Every request this origin ANSWERED, in order. */
+  requests: StubRequest[];
+  /** Connections that arrived after it died — one per reader that probed it. */
+  refused: () => number;
+  close: () => Promise<void>;
+}
+
+/**
+ * A router that serves `serveBeforeDying` requests and then refuses every later
+ * connection, counting the refusals. It is a REFUSAL, not a 404: the socket is
+ * destroyed the moment it is accepted, which is what a process that has gone
+ * away looks like to a client, and it is the only shape that makes
+ * setupProofRequest's null-result path run at all.
+ *
+ * `onDeath` fires at the instant of death, so a test can read the failover state
+ * as it was WHEN the outage began — the ordering fact the whole reproduction
+ * turns on. Every response carries `connection: close`, so one request is one
+ * TCP connection and the refusal count is a per-reader count rather than an
+ * artefact of the global agent's keep-alive pool.
+ */
+function startDyingRouter(opts: {
+  serveBeforeDying: number;
+  onDeath: () => void;
+}): Promise<DyingRouter> {
+  const requests: StubRequest[] = [];
+  let served = 0;
+  let dead = false;
+  let refusedCount = 0;
+
+  const server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk: Buffer) => {
+      raw += chunk.toString("utf8");
+    });
+    req.on("end", () => {
+      if (dead) {
+        // A connection that predates the death still has to be refused.
+        refusedCount += 1;
+        req.socket.destroy();
+        return;
+      }
+      let body: Record<string, unknown> = {};
+      if (raw.length > 0) {
+        try {
+          body = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          body = { unparseable: raw };
+        }
+      }
+      const url = req.url ?? "";
+      requests.push({ method: req.method ?? "", url, body });
+      served += 1;
+      const payload = url.startsWith("/v1/models")
+        ? { object: "list", data: [{ id: SERVED_MODEL, object: "model" }] }
+        : {
+            id: "chatcmpl-dying-router",
+            object: "chat.completion",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: PROBE_CONFORMING },
+                finish_reason: "stop",
+              },
+            ],
+          };
+      const dyingNow = served >= opts.serveBeforeDying;
+      res.writeHead(200, { "content-type": "application/json", connection: "close" });
+      res.end(JSON.stringify(payload), () => {
+        if (dyingNow && !dead) {
+          dead = true;
+          opts.onDeath();
+        }
+      });
+    });
+  });
+
+  server.on("connection", (socket) => {
+    if (!dead) return;
+    refusedCount += 1;
+    socket.destroy();
+  });
+
+  return new Promise<DyingRouter>((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      resolve({
+        host: "127.0.0.1",
+        port,
+        requests,
+        refused: () => refusedCount,
+        close: () =>
+          new Promise<void>((done) => {
+            server.closeAllConnections();
+            server.close(() => done());
+          }),
+      });
+    });
+  });
+}
+
+/** The trivial completions the slot fan-out issues (no response_format). */
+function slotProbesOf(stub: StubHandle): StubRequest[] {
+  return stub.requests.filter(
+    (request) =>
+      request.method === "POST" &&
+      request.url.includes("chat/completions") &&
+      !("response_format" in request.body),
+  );
+}
+
+interface OutageScenario {
+  result: SetupResult;
+  bench: Harness;
+  upstream: StubHandle;
+  router: DyingRouter;
+  /** failoverState.useUpstream AT the instant the router died. */
+  latchedAtDeath: boolean | null;
+  readers: number;
+  root: string;
+}
+
+/**
+ * The measured reproduction: a healthy llama-server upstream with maxReaders
+ * slots, and a router that answers GET /v1/models and the schema probe and then
+ * refuses everything. Runs the real handleSetup and hands back what BOTH origins
+ * saw.
+ */
+async function routerDiesMidFanout(tag: string): Promise<OutageScenario> {
+  const readers = DEFAULT_CONFIG.parallel.maxReaders;
+  const root = nodeFixture(tag, PKG_NODE_TEST);
+  const upstream = await startStub({ totalSlots: readers });
+  let failoverRef: FailoverState | null = null;
+  let latchedAtDeath: boolean | null = null;
+  // The two SEQUENTIAL proofs (§2.1:629 GET /v1/models, §2.1:630 the schema
+  // probe) are served; death lands between the second and the fan-out.
+  const router = await startDyingRouter({
+    serveBeforeDying: 2,
+    onDeath: () => {
+      latchedAtDeath = failoverRef === null ? null : failoverRef.useUpstream;
+    },
+  });
+  try {
+    const bench = harness(root, upstream, { routerPort: router.port });
+    failoverRef = bench.failover;
+    const result = await setup({ ...bench.input, answers: answers() });
+    return { result, bench, upstream, router, latchedAtDeath, readers, root };
+  } finally {
+    await router.close();
+    await upstream.close();
+  }
+}
+
+test("[p12b-router-outage-mid-fanout-is-not-a-setup-failure] a router that dies DURING the concurrent slot fan-out is not a setup failure: every reader reaches the healthy upstream, and setup writes its config", async () => {
+  const scenario = await routerDiesMidFanout("p12b-outage-headline");
+  const { result, upstream, readers, root } = scenario;
+
+  // THE fact the defect destroyed. Measured at HEAD: the upstream saw ONE
+  // completion — the first continuation to resume latched useUpstream and
+  // retried, and the other five returned null at tools.ts:8564 without ever
+  // touching a server that was healthy the whole time. Asserted on the UPSTREAM's
+  // own request log rather than on `ok`, because a fix that got lucky about the
+  // verdict while still dropping readers would satisfy `ok` alone.
+  const probes = slotProbesOf(upstream);
+  assert.equal(
+    probes.length,
+    readers,
+    `the healthy upstream must serve ALL ${String(readers)} concurrent readers; it saw ` +
+      `${String(probes.length)}: ${JSON.stringify(upstream.requests.map((r) => `${r.method} ${r.url}`))}`,
+  );
+
+  // ...and only THEN the verdict, with the measured misdiagnosis named so a
+  // regression cannot come back wearing the same words.
+  const text = failureText(result);
+  assert.equal(
+    result.ok,
+    true,
+    `a DOWN router is never itself a setup failure (row 12.2-proofs-origin-fail-soft): ${text}`,
+  );
+  assert.equal(result.written, true, "setup must write the config it proved");
+  assert.equal(existsSync(configPathOf(root)), true, "the config reaches disk");
+  assert.equal(loadConfig(root).repoConfigured, true, "the operator is left CONFIGURED");
+  assert.equal(
+    /--parallel/.test(text),
+    false,
+    `a router outage must never be reported as a llama-server slot shortage: ${text}`,
+  );
+  assert.equal(
+    /concurrent readers/.test(text),
+    false,
+    `the measured wrong remedy ("of 6 concurrent readers the served origin held only 1 open") ` +
+      `must not be reachable from a healthy server: ${text}`,
+  );
+});
+
+test("[p12b-concurrent-leg-not-just-the-control] the outage lands on the CONCURRENT leg, not the control the committed test already covers: the router answers both sequential proofs, the failover has NOT latched when it dies, and the control (dead from the first proof) is green at HEAD either way", async () => {
+  const scenario = await routerDiesMidFanout("p12b-outage-ordering");
+  const { result, bench, router, latchedAtDeath, readers } = scenario;
+
+  // (a) THE ORDERING. The router survived long enough to answer both sequential
+  //     proofs, so nothing had failed yet and the latch could not have been set
+  //     before the fan-out. A test that skipped this would be re-running the
+  //     control below under a new name.
+  const answered = router.requests.map((request) => `${request.method} ${request.url.split("?")[0]}`);
+  assert.deepEqual(
+    answered,
+    ["GET /v1/models", "POST /v1/chat/completions"],
+    "the router must answer BOTH sequential proofs and die only afterwards",
+  );
+  assert.ok(
+    router.requests[1].body !== undefined && "response_format" in router.requests[1].body,
+    "the second answered request is the §2.1:630 schema probe (it carries response_format)",
+  );
+  assert.equal(
+    latchedAtDeath,
+    false,
+    "the failover must NOT be latched at the instant of death — a latch set before the " +
+      "fan-out is the control, and the control passes at HEAD",
+  );
+  assert.ok(router.refused() >= 1, "the fan-out really did meet a refusing router");
+
+  // (b) the outage leg's verdict.
+  assert.equal(result.ok, true, `the concurrent leg: ${failureText(result)}`);
+  assert.equal(bench.failover.useUpstream, true, "the outage still latches the session onto the upstream");
+  assert.ok(bench.failover.failovers >= 1, "the failed request records a failover");
+
+  // (c) THE CONTROL, run here so the blind spot is visible in one place: a router
+  //     that is dead from the very first proof latches useUpstream BEFORE the
+  //     fan-out, so every reader resolves to the upstream and setup succeeds —
+  //     with or without the defect. This half cannot fail at HEAD; it is the
+  //     reason (b) had to be written at all.
+  const controlRoot = nodeFixture("p12b-outage-control", PKG_NODE_TEST);
+  const deadPort = await closedPort();
+  await withStub({ totalSlots: readers }, async (stub) => {
+    const controlBench = harness(controlRoot, stub, { routerPort: deadPort });
+    const controlResult = await setup({ ...controlBench.input, answers: answers() });
+    assert.equal(controlResult.ok, true, `the control: ${failureText(controlResult)}`);
+    assert.equal(
+      slotProbesOf(stub).length,
+      readers,
+      "the control's readers all reach the upstream because the latch predates the fan-out",
+    );
+  });
+});
+
+test("[p12b-failover-latch-still-prevents-a-herd] the outage fix does not resurrect the thundering herd the latch exists to prevent: across the whole run the DEAD router is probed at most once per reader, and nothing probes it again once the latch is set", async () => {
+  const scenario = await routerDiesMidFanout("p12b-outage-herd");
+  const { result, bench, router, readers } = scenario;
+
+  assert.equal(result.ok, true, `the outage leg must succeed first: ${failureText(result)}`);
+
+  // P12B-SG-1. Every reader's FIRST attempt is issued before any of them has
+  // resumed, so the dead router legitimately sees up to one connection per
+  // reader. What it must never see is a SECOND round of them, nor the /props
+  // read that follows the fan-out: once useUpstream is latched, a request goes
+  // STRAIGHT to the upstream. A fix that simply stopped honouring the latch
+  // satisfies the headline row and fails here, because the post-fan-out
+  // setupServedSlotCount would probe the dead origin too.
+  const refused = router.refused();
+  assert.ok(
+    refused >= 1,
+    "the reproduction is vacuous unless the dead router was actually reached",
+  );
+  assert.ok(
+    refused <= readers,
+    `once the failover has latched, nothing re-probes the dead router: it was hit ` +
+      `${String(refused)} times for ${String(readers)} readers`,
+  );
+  assert.equal(
+    bench.failover.useUpstream,
+    true,
+    "the latch is still SET at the end — the herd guard is not removed, only stopped from " +
+      "swallowing the requests that resume behind it",
+  );
+
+  // ...and the upstream, the origin the latch points at, absorbed the whole
+  // fan-out exactly once per reader: no reader was retried twice there either.
+  assert.equal(
+    slotProbesOf(scenario.upstream).length,
+    readers,
+    "each reader lands on the upstream exactly once",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// fix-phase12-setup — MAJOR 6: requiredScopes coverage
+// ---------------------------------------------------------------------------
+
+/** A git repo with no ecosystem marker setup knows: the measured zero case. */
+function uncharacterizableFixture(tag: string): string {
+  return fixture(tag, {
+    "README.md": "# fixture\n\nA repo with nothing setup can characterise.\n",
+    Makefile: "all:\n\t@true\n",
+  });
+}
+
+/**
+ * The measured multi-ecosystem repo, plus the paths the two emitted globs left
+ * uncovered — the repo's own build files, its docs and its scripts.
+ */
+function multiDocsFixture(tag: string): string {
+  return fixture(tag, {
+    "package.json": PKG_NODE_TEST,
+    "CMakeLists.txt": CMAKELISTS,
+    "src/app.ts": "export const x = 1;\n",
+    "src/main.cpp": "int main(){return 0;}\n",
+    "tests/a.test.js": "// fixture test\n",
+    "README.md": "# fixture\n",
+    "docs/guide.md": "# guide\n\nplaceholder.\n",
+    "scripts/build.sh": "#!/bin/sh\ntrue\n",
+  });
+}
+
+// The exact paths the adjudicator measured as covered by NEITHER emitted glob.
+const P12B_UNCOVERED = [
+  "README.md",
+  "docs/guide.md",
+  "CMakeLists.txt",
+  "package.json",
+  "scripts/build.sh",
+];
+
+function coveringScopes(
+  entries: Array<{ pattern: string; scopes: string[] }>,
+  filePath: string,
+): string[] {
+  return entries
+    .filter((row) => globMatch(row.pattern, filePath))
+    .flatMap((row) => row.scopes)
+    .sort();
+}
+
+test("[p12b-zero-ecosystem-never-writes-empty-coverage] a repo setup cannot characterise is REFUSED or given coverage an operator can complete — never ok:true with `requiredScopes: []`, which validates cleanly and then wedges every item", async () => {
+  const root = uncharacterizableFixture("p12b-zero-eco");
+
+  await withStub({}, async (stub) => {
+    const result = await setup({ ...harness(root, stub).input, answers: answers() });
+
+    // C-081: this is a repo the subject must REFUSE to characterise, or say out
+    // loud what it could not detect. Both honest outcomes are admitted here
+    // (P12B-SG-2 leaves the choice free); the measured one — ok:true with an
+    // empty array — is admitted by neither.
+    assert.equal(
+      result.proposals.requiredScopes.length > 0 || !result.written,
+      true,
+      "setup proposed NO coverage at all and wrote anyway: " +
+        JSON.stringify(result.proposals.requiredScopes),
+    );
+
+    if (!result.ok || !result.written) {
+      // The refusal arm. Nothing on disk, so the repo stays unconfigured and
+      // conductor_setup is legal to run again without reconfigure:true — which is
+      // the whole difference between a refusal and a wedge.
+      assert.equal(result.written, false, "a refusal writes nothing");
+      assert.equal(existsSync(configPathOf(root)), false, "a refusal leaves no config.json");
+      assert.equal(
+        loadConfig(root).repoConfigured,
+        false,
+        "an unconfigured repo can be set up again; a wedged one cannot",
+      );
+      const text = failureText(result);
+      assert.ok(text.length > 0, "a refusal must say something");
+      assert.ok(
+        /ecosystem|detect|scope|verify|characteri/i.test(text),
+        `the refusal must name what setup could not detect: ${text}`,
+      );
+      return;
+    }
+
+    // The written arm: coverage an operator is told to complete. It may not be
+    // empty, its entries may not be empty, every scope it names must exist, and
+    // the repo's own files must be covered — otherwise the config validates and
+    // still throws at every submit_test, vet_test, mark_green and item_review.
+    const written = loadConfig(root).config;
+    assert.equal(
+      validate("Config", written).ok,
+      true,
+      "the written config must still be schema-valid",
+    );
+    assert.ok(
+      written.verify.requiredScopes.length > 0,
+      "core/types.ts declares no minItems, so `requiredScopes: []` VALIDATES — schema " +
+        "validity is not the guard here; the written file must carry real coverage",
+    );
+    for (const row of written.verify.requiredScopes) {
+      assert.ok(row.scopes.length > 0, `requiredScopes entry ${row.pattern} names no scope`);
+      for (const name of row.scopes) {
+        assert.ok(
+          written.verify.scopes[name] !== undefined,
+          `requiredScopes names scope "${name}", which verify.scopes does not define`,
+        );
+      }
+    }
+    for (const filePath of ["README.md", "Makefile"]) {
+      assert.ok(
+        coveringScopes(written.verify.requiredScopes, filePath).length > 0,
+        `nothing covers ${filePath}, so an item touching it has no test command at all`,
+      );
+    }
+  });
+});
+
+test("[p12b-multi-ecosystem-covers-every-path] with two ecosystems detected EVERY path in the repo is covered by some requiredScopes entry — asserted with the five paths measured as covered by neither emitted glob", async () => {
+  const root = multiDocsFixture("p12b-multi-cover");
+
+  await withStub({}, async (stub) => {
+    const result = await setup({ ...harness(root, stub).input, answers: answers() });
+    assert.equal(result.ok, true, failureText(result));
+    assert.equal(result.written, true);
+    assert.equal(result.proposals.scopes.length, 2, "the fixture really is multi-ecosystem");
+
+    const written = loadConfig(root).config;
+    const legs: Array<[string, Array<{ pattern: string; scopes: string[] }>]> = [
+      ["the proposal", result.proposals.requiredScopes],
+      ["the WRITTEN config", written.verify.requiredScopes],
+    ];
+
+    for (const [label, entries] of legs) {
+      // The measured hole, path by path. Each of these returned false against
+      // BOTH of the two extension globs setupRequiredScopes emits.
+      for (const filePath of P12B_UNCOVERED) {
+        assert.ok(
+          coveringScopes(entries, filePath).length > 0,
+          `${label}: no requiredScopes entry covers ${filePath} — patterns are ` +
+            `${JSON.stringify(entries.map((row) => row.pattern))}`,
+        );
+      }
+      // The sources that WERE covered still are: a catch-all must not be a
+      // replacement for the per-ecosystem routing.
+      assert.deepEqual(
+        coveringScopes(entries, "src/app.ts").includes("node"),
+        true,
+        `${label}: the node sources must still route to the node scope`,
+      );
+      assert.deepEqual(
+        coveringScopes(entries, "src/main.cpp").includes("cmake"),
+        true,
+        `${label}: the cmake sources must still route to the cmake scope`,
+      );
+      // And every file actually in the repo, so a path this test never thought of
+      // cannot be the next hole.
+      for (const filePath of walk(root, root, []).filter((rel) => !rel.startsWith(".git/") && !rel.startsWith(".conductor/"))) {
+        assert.ok(
+          coveringScopes(entries, filePath).length > 0,
+          `${label}: the repo file ${filePath} is covered by nothing`,
+        );
+      }
+      // Every named scope exists, so "coverage" cannot be faked with a pattern
+      // pointing at a scope verify.scopes never defines.
+      for (const row of entries) {
+        assert.ok(row.scopes.length > 0, `${label}: entry ${row.pattern} names no scope`);
+        for (const name of row.scopes) {
+          assert.ok(
+            written.verify.scopes[name] !== undefined,
+            `${label}: entry ${row.pattern} names scope "${name}", which does not exist`,
+          );
+        }
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The DOWNSTREAM consequence, end to end.
+// ---------------------------------------------------------------------------
+
+const P12B_FANOUT_TRIPWIRE = "p12b-fanout-reached-2f6c";
+
+interface TripwireFanout {
+  fanout: Fanout;
+  dispatched: string[];
+}
+
+/**
+ * A fan-out engine that records every job it is handed and then fails loudly.
+ * Nothing here is a mock of the subject: it exists so a handler that got PAST
+ * scope selection proves it by reaching dispatch, which is the only positive
+ * witness that "it did not throw the coverage error" is not vacuous.
+ */
+function tripwireFanout(): TripwireFanout {
+  const dispatched: string[] = [];
+  const refuse = (): Promise<never> => Promise.reject(new Error(P12B_FANOUT_TRIPWIRE));
+  const fanout: Fanout = {
+    dispatch: (job: FanoutJob): Promise<FanoutResult> => {
+      dispatched.push(job.role);
+      return refuse();
+    },
+    dispatchWave: (jobs: FanoutJob[]): Promise<FanoutResult[]> => {
+      for (const job of jobs) dispatched.push(job.role);
+      return refuse();
+    },
+  };
+  return { fanout, dispatched };
+}
+
+function p12bQueueItem(id: string): QueueItem {
+  return {
+    id,
+    title: "rewrite the docs guide",
+    rationale: "the guide describes the old flow",
+    fileScope: ["docs/guide.md"],
+    testScope: [],
+    acceptance: ["the guide describes the current flow"],
+    behavioral: false,
+    dependsOn: [],
+    ponytail: {
+      necessary: "the user asked for the guide to be rewritten",
+      reuse: "there is no other page describing this flow",
+      ladderRung: "minimal-code",
+    },
+  };
+}
+
+function p12bRuntimeItem(id: string, state: ItemState): Item {
+  return {
+    id,
+    state,
+    assignee: null,
+    worktree: null,
+    attempts: { green: 0, reviewRounds: 0, vetRounds: 0, testRepairs: 0, debugFixes: 0, overridesUsed: 0 },
+    blocked: null,
+    deferred: null,
+    debugging: null,
+    evidence: {},
+    taint: [],
+    inlineClaim: null,
+  };
+}
+
+/** A run seeded straight onto disk at EXECUTING, holding one docs-only item. */
+function seedDocsOnlyRun(store: StateStore, itemState: ItemState): { runId: string; runDir: string } {
+  const run = store.createRun({
+    prompt: "rewrite the docs guide",
+    sessionID: "ses_p12b",
+    classification: {
+      kind: "work",
+      rationale: "the prompt asks for a documentation change",
+      check: { agreed: true, note: "docs work is still work" },
+    },
+  });
+  run.state = "EXECUTING";
+  store.saveRun(run);
+  const runDir = path.join(store.root, ".conductor", "runs", run.runId);
+  const queue: Queue = { items: [p12bQueueItem("I1")] };
+  writeFileSync(path.join(runDir, "queue.json"), JSON.stringify(queue, null, 2));
+  store.saveItem(run.runId, p12bRuntimeItem("I1", itemState));
+  return { runId: run.runId, runDir };
+}
+
+function messageOfThrow(error: unknown): string {
+  if (error === null) return "";
+  return error instanceof Error ? error.message : String(error);
+}
+
+test("[p12b-docs-only-item-survives-multi-ecosystem-setup] after a multi-ecosystem setup a docs-only item is still workable end to end: conductor_item_review does not throw 'no verify.requiredScopes entry covers item' (tools.ts:2716) and conductor_report does not refuse the run (tools.ts:7542)", async () => {
+  const root = multiDocsFixture("p12b-docs-item");
+  const stateHome = newDir("p12b-statehome");
+
+  await withStub({}, async (stub) => {
+    const setupResult = await setup({ ...harness(root, stub).input, answers: answers() });
+    assert.equal(setupResult.ok, true, failureText(setupResult));
+    assert.equal(setupResult.written, true);
+  });
+
+  const config = loadConfig(root).config;
+  const scopeNames = Object.keys(config.verify.scopes);
+  assert.ok(scopeNames.length >= 2, "the fixture must really have produced two scopes");
+
+  // The CONTROL config: the same file setup wrote, with the single-ecosystem
+  // branch's own catch-all substituted for the coverage under test. It proves
+  // this harness reaches and completes both handlers in this environment, so a
+  // red below is the coverage and not the scaffolding. Nothing is computed from
+  // the subject: "**" is the literal the single-ecosystem branch already writes.
+  const widened: Config = {
+    ...config,
+    verify: { ...config.verify, requiredScopes: [{ pattern: "**", scopes: [scopeNames[0]] }] },
+  };
+
+  const records: LoggedRecord[] = [];
+  const journal = {
+    log: (
+      level: string,
+      component: string,
+      event: string,
+      data: Record<string, unknown>,
+      corr: { runId?: string; itemId?: string; sessionID?: string },
+    ): void => {
+      records.push({ level, component, event, data, corr });
+    },
+  };
+
+  const legs: Array<[string, Config]> = [
+    ["the control (a '**' catch-all)", widened],
+    ["the config SETUP wrote", config],
+  ];
+
+  for (const [label, candidate] of legs) {
+    // (a) conductor_item_review — the 2716 site, on an item at VALIDATED.
+    const reviewStore = openWorkspace({
+      root,
+      config: candidate,
+      journal,
+      version: "0.0.0-test",
+      sessionID: "ses_p12b",
+    });
+    let reviewThrow = "";
+    let dispatchedCount = 0;
+    try {
+      const seeded = seedDocsOnlyRun(reviewStore, "VALIDATED");
+      const wiring = tripwireFanout();
+      try {
+        await handleItemReview({
+          store: reviewStore,
+          fanout: wiring.fanout,
+          runId: seeded.runId,
+          itemId: "I1",
+          config: candidate,
+          journal,
+          stateHome,
+          workspaceKey: "p12b",
+          packs: {},
+        });
+      } catch (error) {
+        reviewThrow = messageOfThrow(error);
+      }
+      dispatchedCount = wiring.dispatched.length;
+    } finally {
+      reviewStore.release();
+    }
+
+    assert.equal(
+      /no verify\.requiredScopes entry covers item/.test(reviewThrow),
+      false,
+      `${label}: a docs-only item is first-class (e2e scenario 4), and conductor_item_review ` +
+        `refused it at tools.ts:2716: ${reviewThrow}`,
+    );
+    assert.ok(
+      dispatchedCount > 0,
+      `${label}: conductor_item_review never reached its review fan-out, so "it did not throw ` +
+        `the coverage error" proves nothing (it threw ${JSON.stringify(reviewThrow)} instead)`,
+    );
+    assert.ok(
+      reviewThrow.includes(P12B_FANOUT_TRIPWIRE),
+      `${label}: the only failure past scope selection should be this test's own fan-out ` +
+        `tripwire; got ${JSON.stringify(reviewThrow)}`,
+    );
+
+    // (b) conductor_report — the 7542 site, over the same run's declared paths.
+    const reportStore = openWorkspace({
+      root,
+      config: candidate,
+      journal,
+      version: "0.0.0-test",
+      sessionID: "ses_p12b",
+    });
+    let reportThrow = "";
+    let reportPath = "";
+    try {
+      const seeded = seedDocsOnlyRun(reportStore, "PUBLISHED");
+      try {
+        const report = await handleReport({
+          store: reportStore,
+          runId: seeded.runId,
+          config: candidate,
+          journal,
+          stateHome,
+          workspaceKey: "p12b",
+        });
+        reportPath = report.reportPath;
+      } catch (error) {
+        reportThrow = messageOfThrow(error);
+      }
+    } finally {
+      reportStore.release();
+    }
+
+    assert.equal(
+      /no verify\.requiredScopes entry covers this run's declared paths/.test(reportThrow),
+      false,
+      `${label}: conductor_report refused the finished run at tools.ts:7542: ${reportThrow}`,
+    );
+    assert.equal(
+      reportThrow,
+      "",
+      `${label}: the closing report must be writable at all; it threw ${JSON.stringify(reportThrow)}`,
+    );
+    assert.equal(existsSync(reportPath), true, `${label}: the report reaches disk`);
   }
 });

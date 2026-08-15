@@ -8260,6 +8260,123 @@ interface SetupDetection {
   notes: string[];
 }
 
+// The directories a coverage walk never descends into: version control, the
+// conductor state dir the config being written lives in, and the dependency and
+// build trees an ecosystem regenerates. expandScopeEntry skips the first three
+// for the same reason — nothing an item declares as its scope lives inside them.
+const SETUP_UNWALKED_DIRS = new Set([
+  ".git",
+  ".conductor",
+  "node_modules",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "target",
+  "build",
+  "dist",
+  ".cache",
+]);
+
+// The coverage walk is BOUNDED. It exists to learn which kinds of file a repo
+// holds, and a tree big enough to reach this cap named every one of them long
+// before it; an unbounded walk would be a way for one pathological checkout to
+// wedge setup on a machine conductor does not own.
+const SETUP_WALK_FILE_CAP = 20000;
+
+interface SetupDirEntry {
+  name: string;
+  isDir: boolean;
+}
+
+// One directory listing, fail-soft. Setup reads the TARGET repo, which it does
+// not own: a directory it cannot list is a repo fact, not a conductor fault, and
+// must not throw out of detection.
+function setupReadDir(dir: string): SetupDirEntry[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).map((entry) => ({
+      name: entry.name,
+      isDir: entry.isDirectory(),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Every file in the repo, repo-relative with "/" separators, minus the trees
+// above. Recursion follows Dirent.isDirectory(), which is false for a SYMLINK to
+// a directory — so a symlink cycle cannot spin the walk, and a symlinked file is
+// still counted as the file it appears to be.
+function setupWalkRepoFiles(root: string): string[] {
+  const found: string[] = [];
+  const walk = (dirRel: string): void => {
+    for (const entry of setupReadDir(dirRel.length === 0 ? root : path.join(root, dirRel))) {
+      if (found.length >= SETUP_WALK_FILE_CAP) return;
+      if (SETUP_UNWALKED_DIRS.has(entry.name)) continue;
+      const childRel = dirRel.length === 0 ? entry.name : dirRel + "/" + entry.name;
+      if (entry.isDir) walk(childRel);
+      else found.push(childRel);
+    }
+  };
+  walk("");
+  return found;
+}
+
+// The glob covering a path's KIND rather than the path itself: its extension
+// where it has one, its whole name where it does not. Keyed on the kind so the
+// written pattern still covers the next doc page or shell script the repo grows;
+// a pattern keyed on the literal paths one walk happened to see would go stale
+// the moment anything was added. A name carrying glob metacharacters would make
+// the derived pattern match something other than the file it came from, so it
+// contributes no coverage rather than wrong coverage.
+function setupCoverageGlob(relPath: string): string | null {
+  const slash = relPath.lastIndexOf("/");
+  const base = slash === -1 ? relPath : relPath.slice(slash + 1);
+  if (base.length === 0 || GLOB_META.test(base)) return null;
+  const dot = base.lastIndexOf(".");
+  if (dot > 0 && dot < base.length - 1) return "**/*" + base.slice(dot);
+  return "**/" + base;
+}
+
+// The multi-ecosystem branch's coverage guarantee. Each ecosystem's source glob
+// names the files that ecosystem OWNS, which is what routes an item's targeted
+// test to the right runner — but a repo is not only sources. Its README, its
+// docs, its build files and its scripts sit outside every ecosystem's extension
+// set, and a path no requiredScopes entry covers has no constructible test
+// command at all: the item raises at itemVerifyScope, the full verify raises at
+// handleValidate, and the closing report raises at handleReport. The
+// single-ecosystem branch has never had that hole, because "**" makes every path
+// owe the only scope.
+//
+// This is the same rule generalized: a path no detected ecosystem owns owes EVERY
+// detected scope, because setup cannot know which of them a change to a doc, a
+// build file or a script breaks. It is folded into each ecosystem's OWN glob
+// rather than added as a separate catch-all entry so the per-ecosystem routing
+// survives — an extra entry whose pattern was "**" would make every source owe
+// every scope too, and the routing would be decoration.
+function setupCoverEveryPath(root: string, scopes: ProposedScope[], notes: string[]): void {
+  // One ecosystem already writes "**" (setupRequiredScopes), which covers the
+  // tree by construction; zero is refused by handleSetup rather than papered over.
+  if (scopes.length < 2) return;
+  const owned = scopes.map((scope) => scope.sourceGlob);
+  const unowned: string[] = [];
+  for (const rel of setupWalkRepoFiles(root)) {
+    if (owned.some((glob) => globMatch(glob, rel))) continue;
+    const kind = setupCoverageGlob(rel);
+    if (kind === null || unowned.includes(kind)) continue;
+    unowned.push(kind);
+  }
+  if (unowned.length === 0) return;
+  unowned.sort();
+  for (const scope of scopes) {
+    scope.sourceGlob = "{" + scope.sourceGlob + "," + unowned.join(",") + "}";
+  }
+  notes.push(
+    `coverage: ${unowned.join(", ")} belong to no detected ecosystem, so they are added to ` +
+      "EVERY scope's requiredScopes pattern — setup cannot know which ecosystem a change to a " +
+      "doc, a build file or a script breaks, and a path no entry covers has no test command at all",
+  );
+}
+
 // The §2.1:620 detection matrix. Every proposal is an argv ARRAY (never a shell
 // string), carries the §2.1:499 itemTest default for its runner (cargo has none,
 // and none is invented), and is proposed — never written — until the human
@@ -8405,6 +8522,8 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
     });
   }
 
+  setupCoverEveryPath(root, scopes, notes);
+
   for (const scope of scopes) {
     notes.push(
       `${scope.name}: failures from this scope classify under the ` +
@@ -8416,12 +8535,39 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
 
 // One requiredScopes entry per detected scope. With exactly one ecosystem the
 // pattern is "**", which leaves no path uncovered by construction; with several,
-// each entry's pattern is that ecosystem's own source glob, and the globs are
-// keyed on the ecosystem's file extensions precisely so that between them they
-// still cover the repo's sources instead of one directory each.
+// each entry's pattern is that ecosystem's own source glob — widened by
+// setupCoverEveryPath until the globs between them cover the whole tree, because
+// extensions alone cover a repo's SOURCES and a repo is not only sources.
 function setupRequiredScopes(scopes: ProposedScope[]): Array<{ pattern: string; scopes: string[] }> {
   if (scopes.length === 1) return [{ pattern: "**", scopes: [scopes[0].name] }];
   return scopes.map((scope) => ({ pattern: scope.sourceGlob, scopes: [scope.name] }));
+}
+
+// The §2.1:620 markers setupDetect keys on, named in the refusal below so the
+// operator is told exactly what would have to exist for setup to characterise the
+// repo rather than being told only that something was missing.
+const SETUP_ECOSYSTEM_MARKERS =
+  "package.json (node), a CMakeLists.txt calling enable_testing() (cmake), pyproject.toml " +
+  "(python), go.mod (go) or Cargo.toml (cargo)";
+
+// A repo setup could not characterise. Writing what detection actually found —
+// no scopes and an EMPTY requiredScopes — is the worst available outcome: it
+// validates, so nothing downstream catches it, and then every stage that needs a
+// test command raises on it, on a repo conductor_setup is no longer legal to
+// re-run. Setup refuses instead, and invents no verify command it cannot prove.
+function setupNoCoverageFailure(root: string): string {
+  return (
+    `setup: no ecosystem could be detected in ${root} — none of ${SETUP_ECOSYSTEM_MARKERS} is ` +
+    "present, so setup has no verify scope to propose and no verify.requiredScopes coverage to " +
+    "write. It will not write an empty one: SCHEMAS.Config declares no minItems, so " +
+    "`requiredScopes: []` VALIDATES and then leaves every item without a constructible test " +
+    "command (submit_test, vet_test, mark_green and item_review all raise on it) on a repo " +
+    "conductor_setup is no longer legal to re-run without reconfigure:true. Nothing was written, " +
+    "so this repo stays unconfigured and setup may be run again. Remedy: add the manifest of the " +
+    "ecosystem this repo builds with and run conductor_setup again, or write " +
+    ".conductor/config.json by hand with a verify.scopes entry and a verify.requiredScopes entry " +
+    "whose pattern covers the paths that scope verifies"
+  );
 }
 
 function setupMergedBehavioralPaths(scopes: ProposedScope[]): string[] {
@@ -8561,21 +8707,34 @@ async function setupProofRequest(
   const timeoutMs = input.router.probeTimeoutMs;
   const first = resolveBaseUrl(input.router, input.upstream, input.failoverState);
   const result = await setupHttpJson(first, pathName, method, payload, timeoutMs);
-  if (result !== null || input.failoverState.useUpstream) return result;
+  if (result !== null) return result;
 
-  noteRouterFailure(input.failoverState);
-  input.journal.log(
-    "warn",
-    "router-client",
-    "failover",
-    {
-      failovers: input.failoverState.failovers,
-      probingDisabled: input.failoverState.probingDisabled,
-      origin: first,
-      path: pathName,
-    },
-    {},
-  );
+  // The latch is a HERD guard, not an answer. §2.1:631 issues maxReaders requests
+  // together, so when a router dies mid-fan-out every one of them fails against the
+  // router and they resume one at a time: the first to resume latches the session,
+  // and the rest find `useUpstream` already true. Treating that latch as "this
+  // request is finished" returned null for every reader but the first — the healthy
+  // upstream was never asked, and a router outage was reported as a llama-server
+  // slot shortage. A request that resumes behind the latch instead goes STRAIGHT to
+  // the upstream `resolveBaseUrl` now names: it neither re-notes the failover (the
+  // router failed once, not once per reader) nor re-probes the dead origin (the
+  // thundering herd the latch exists to prevent). `second === first` below is still
+  // the equality proof that a retry would hit the same origin twice.
+  if (!input.failoverState.useUpstream) {
+    noteRouterFailure(input.failoverState);
+    input.journal.log(
+      "warn",
+      "router-client",
+      "failover",
+      {
+        failovers: input.failoverState.failovers,
+        probingDisabled: input.failoverState.probingDisabled,
+        origin: first,
+        path: pathName,
+      },
+      {},
+    );
+  }
   const second = resolveBaseUrl(input.router, input.upstream, input.failoverState);
   if (second === first) return null;
   return await setupHttpJson(second, pathName, method, payload, timeoutMs);
@@ -8957,6 +9116,17 @@ export async function handleSetup(input: SetupInput): Promise<SetupResult> {
   if (asks.length > 0) return unconfigured({ failures: smokeFailures });
 
   if (smokeFailures.length > 0) return unconfigured({ failures: smokeFailures });
+
+  // (4b) COVERAGE, before the proofs so a repo setup cannot characterise is
+  // refused without opening a socket. verify.requiredScopes is what gives every
+  // later stage a test command to construct; with no ecosystem detected there is
+  // no honest one to write, and the empty array that detection produces is the one
+  // outcome that both validates and wedges the repo. The refusal names what could
+  // not be detected and leaves the repo unconfigured, which is the whole
+  // difference between a repo that can be set up again and one that cannot.
+  if (proposals.requiredScopes.length === 0) {
+    return unconfigured({ failures: [setupNoCoverageFailure(root)] });
+  }
 
   // (5) the candidate config, built from task-let 5.4a's single exported default
   // rather than a second literal (two defaults that drift are invisible to both
