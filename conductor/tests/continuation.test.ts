@@ -4956,3 +4956,69 @@ test("[fw-transport-failure-charges-nothing-per-pass] the per-pass accounting is
   assert.equal(wiring.sdk.prompts.length, 1, "exactly one prompt ever left this process");
   store.release();
 });
+
+// ===========================================================================
+// [fc-meta-tools-derived-not-restated]
+// ===========================================================================
+//
+// fix-cluster-and-drift (b). This engine decides which of the tools the gate
+// offers are POSITION-SPECIFIC — the fact that makes a re-prompt something other
+// than an invented next step — by subtracting the meta tools §3.2 makes legal in
+// every non-terminal state. core/gates-phase.ts legalTools OWNS that set;
+// continuation.ts restates it, and the C-085 implementer flagged the drift rather
+// than hiding it: "If gates-phase ever adds a fifth always-legal meta tool, this
+// list must follow it by hand."
+//
+// The same finding names the probe that DERIVES it: legalTools over a run with an
+// empty item list and no open question offers exactly the tools whose presence
+// says nothing about where the run is. This row asks the gate for that set over a
+// persisted run and holds continuation.ts's to it — never by naming a tool in
+// this test, which would be a third spelling rather than a guard.
+
+test("[fc-meta-tools-derived-not-restated] the universal meta-tool set adapter/continuation.ts subtracts to find the position-specific ones agrees with what core/gates-phase.ts legalTools actually legalizes for a position that says nothing about where the run is: derived here by probing the gate over a persisted EXECUTING run with an EMPTY item list and no open question, so a fifth always-legal meta tool in gates-phase turns this RED instead of leaving the engine misjudging which tools this position actually offers", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const emptyQueue: Queue = { items: [] };
+  seedExecuting(store, runId, emptyQueue);
+
+  // The probe, asked of the OWNER of the fact through the same input assembly the
+  // engine's own waveVerdict performs. An empty item list is the one position with
+  // genuinely nothing to do, so nothing the gate returns here can be about where
+  // the run is.
+  assert.equal(
+    readQuestions(runDirOf(store, runId)).filter((q) => q.answeredIso === null).length,
+    0,
+    "premise: no §2.11 question is open, so conductor_answer — legal exactly while one is — is not in play",
+  );
+  const probe = verdictOf(store, runId, emptyQueue);
+  assert.equal(probe.recommended, null, "premise: the gate recommends nothing at this position");
+  assert.deepEqual(
+    [...probe.legal.entries()].filter(([, hint]) => hint.itemIds !== undefined).map(([tool]) => tool),
+    [],
+    "premise: nothing the gate offers here targets an item, so nothing it offers is position-specific",
+  );
+  assert.ok(probe.legal.size > 0, "premise: the run is non-terminal, so the always-legal meta tools ARE offered here");
+  const derived = [...probe.legal.keys()].sort();
+
+  // What continuation.ts actually subtracts. Loaded from the module rather than
+  // typed here: a copy in this test would be a third spelling of the same fact,
+  // not a guard between the two that already exist. A zero-arg accessor is
+  // accepted as readily as a constant — the row is about the VALUE agreeing with
+  // the gate, not about how the module chooses to hold it.
+  const mod = (await import("../adapter/continuation.ts")) as unknown as Record<string, unknown>;
+  const held = mod.UNIVERSAL_META_TOOLS;
+  const exposed = typeof held === "function" ? (held as () => readonly string[])() : held;
+  assert.ok(
+    Array.isArray(exposed),
+    "adapter/continuation.ts exposes no UNIVERSAL_META_TOOLS for this row to read, so nothing holds its always-legal meta tools to the set core/gates-phase.ts legalTools returns: export it (ideally derived from that same probe) so the two spellings cannot drift apart unseen",
+  );
+  assert.deepEqual(
+    [...(exposed as string[])].sort(),
+    derived,
+    `the meta tools continuation.ts treats as universal are not the ones the gate legalizes for a position that says nothing about where the run is — a tool missing from continuation.ts's set is read as position-specific and makes the engine speak where it should stay silent; gate: ${derived.join(", ")}`,
+  );
+  store.release();
+});

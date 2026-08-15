@@ -216,15 +216,34 @@ const NON_SUBJECT_TOKENS = new Set([
   "when", "if", "given", "after", "before", "and", "or", "but", "then",
 ]);
 
+// What may appear INSIDE a subject's name: word characters, and the three
+// separators an identifier carries in the languages this build plans against —
+// the dot of `config.load`, the slash of a path, the hyphen of a kebab name.
+// A parenthesis or a quote is not one of them: they open the ARGUMENTS of a
+// call, which are no part of what the criterion is about.
+const SUBJECT_CHARS = /^[\w./-]+/;
+
 /**
  * The distinct acceptance CLUSTERS an item's criteria fall into, approximated by
  * the SUBJECT each criterion asserts about — its first token that is not a
- * determiner, punctuation stripped and case folded ("the config.load rejects an
- * unknown key…" -> `config.load`). §3.2's size row rejects "> 1 acceptance
- * cluster", and two criteria about two different subjects is exactly the "this
- * item covers two things" smell that row is aimed at. Criteria that share a
- * subject stay ONE cluster however many they are, so an item may pin several
- * observable checks on the same behaviour.
+ * determiner, reduced to that token's leading identifier and case folded ("the
+ * config.load(cfg) rejects an unknown key…" -> `config.load`). §3.2's size row
+ * rejects "> 1 acceptance cluster", and two criteria about two different
+ * subjects is exactly the "this item covers two things" smell that row is aimed
+ * at. Criteria that share a subject stay ONE cluster however many they are, so
+ * an item may pin several observable checks on the same behaviour.
+ *
+ * The token is reduced in TWO steps, and the order carries the two fixes this
+ * scan has needed. Punctuation is stripped off both ends FIRST, because the
+ * determiner test below is a lookup on a whole word and "the," is not "the" —
+ * scanning for the identifier before that step would let a comma smuggle an
+ * article back in as a subject and revive "spans 2 clusters (parser, the)".
+ * Only then is the leading identifier taken, stopping at the first character
+ * that cannot appear inside one. Stripping the ENDS alone was not enough: it
+ * left the call syntax §3.2's observable-check row actively asks for embedded
+ * in the middle, so `pad("a") === "[a]"` and `pad("") === ""` — two checks on
+ * ONE function — yielded the subjects `pad("a` and `pad` and were rejected as
+ * two clusters, with the name `pad("a` quoted back at the planner.
  */
 export function acceptanceClusters(acceptance: readonly string[]): string[] {
   const subjects: string[] = [];
@@ -234,7 +253,9 @@ export function acceptanceClusters(acceptance: readonly string[]): string[] {
       const token = raw.replace(/^[^\w./-]+/, "").replace(/[^\w./-]+$/, "").toLowerCase();
       if (token.length === 0) continue;
       if (NON_SUBJECT_TOKENS.has(token)) continue;
-      subject = token;
+      const identifier = SUBJECT_CHARS.exec(token);
+      if (identifier === null) continue;
+      subject = identifier[0];
       break;
     }
     if (subject.length > 0 && !subjects.includes(subject)) subjects.push(subject);

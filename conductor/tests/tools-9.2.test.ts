@@ -1181,3 +1181,174 @@ test("[9.2-fix-ponytail-prompt] the decompose prompt states the ponytail law at 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ===========================================================================
+// fix-cluster-and-drift (a): the acceptance-cluster SUBJECT scan
+// ===========================================================================
+//
+// acceptanceClusters takes each criterion's first whitespace token and strips
+// only the LEADING and TRAILING runs of non-[\w./-] characters, so ordinary CALL
+// SYNTAX — which §3.2's observable-check row actively asks for — reads one
+// function as two subjects: `pad("a")` keeps an internal `("` and becomes
+// `pad("a`, while `pad("")` loses `("")` because it IS a trailing run and becomes
+// `pad`. validateQueue then rejects a legitimate item and quotes the nonsense
+// cluster name back at the planner, pushing it to jam two checks onto one line to
+// get past the guard — degrading the acceptance quality the guard exists to
+// protect. The four rows below are the fix-cluster-and-drift contract; the one
+// SIZE rule itself (> 1 cluster is too large) is not in scope and is not touched.
+
+// The measured failing pair, verbatim from the spec's MEASURED CONSEQUENCE: two
+// observable checks on ONE function, written the way an assertion runs.
+const ONE_SUBJECT_CALLS = ['pad("a") === "[a]"', 'pad("") === ""'];
+// The same pair with no call syntax anywhere — the phrasing that already works,
+// which localises the defect to the punctuation rather than to the pair.
+const ONE_SUBJECT_BARE = ["pad returns [a] for a", "pad returns the empty string for empty input"];
+
+// A delimiter is unbalanced when its opener and closer counts disagree (quotes
+// count as their own pair, so an ODD number is unbalanced). Used to judge the
+// cluster names a violation quotes back at the planner.
+function unbalancedDelimiters(text: string): string[] {
+  const bad: string[] = [];
+  for (const [open, close] of [["(", ")"], ["[", "]"], ["{", "}"]]) {
+    const opens = text.split(open).length - 1;
+    const closes = text.split(close).length - 1;
+    if (opens !== closes) bad.push(`${open}${close}`);
+  }
+  for (const quote of ['"', "'", "`"]) {
+    if ((text.split(quote).length - 1) % 2 !== 0) bad.push(quote);
+  }
+  return bad;
+}
+
+// ===========================================================================
+// [fc-clusters-one-subject-many-checks]
+// ===========================================================================
+
+test("[fc-clusters-one-subject-many-checks] two acceptance criteria that assert about the SAME subject are ONE cluster however they are phrased — the docstring's own promise that an item may pin several observable checks on one behaviour — so the measured call-syntax pair yields exactly one subject and validateQueue ACCEPTS the item, and the bare-identifier phrasing of the same pair does the same", () => {
+  const config = makeConfig();
+
+  assert.deepEqual(
+    acceptanceClusters(ONE_SUBJECT_CALLS),
+    ["pad"],
+    'both criteria assert about pad(), so the item pins two observable checks on ONE subject — not "two things"',
+  );
+
+  // Through validateQueue, because the rejection the planner actually sees is
+  // the thing that was wrong.
+  const verdict = validateQueue(makeQueue([makeQueueItem("S1", { acceptance: [...ONE_SUBJECT_CALLS] })]), config);
+  assert.deepEqual(
+    verdict.violations.filter((v) => /cluster/i.test(v)),
+    [],
+    "the planner is told nothing about clusters: a legitimate two-check item is not a two-cluster item",
+  );
+  assert.equal(verdict.ok, true, "and the item is accepted");
+
+  assert.deepEqual(
+    acceptanceClusters(ONE_SUBJECT_BARE),
+    ["pad"],
+    "the same pair written without call syntax resolves to the same single subject",
+  );
+  const bare = validateQueue(makeQueue([makeQueueItem("S1", { acceptance: [...ONE_SUBJECT_BARE] })]), config);
+  assert.equal(bare.ok, true, "and is accepted too — the two phrasings of one pair cannot disagree");
+});
+
+// ===========================================================================
+// [fc-clusters-distinct-subjects-still-split]
+// ===========================================================================
+
+test("[fc-clusters-distinct-subjects-still-split] the size guard is not loosened into uselessness: two criteria about genuinely DIFFERENT subjects are still TWO clusters and are still rejected, including the near-miss pair config.load versus config — which stays distinct whether or not the call is written with arguments, so the fix cannot be 'strip everything after the first word'", () => {
+  const config = makeConfig();
+
+  const twoThings = ["parser rejects an unknown key", "router retries on 502"];
+  assert.deepEqual(
+    acceptanceClusters(twoThings),
+    ["parser", "router"],
+    "two subjects are two clusters — exactly the 'this item covers two things' smell §3.2's size row targets",
+  );
+  const split = validateQueue(makeQueue([makeQueueItem("S1", { acceptance: twoThings })]), config);
+  assert.equal(split.ok, false, "and the two-things item is still REJECTED");
+  assert.ok(
+    split.violations.some((v) => /spans 2 clusters/i.test(v)),
+    `the rejection is the one-cluster budget's; got: ${split.violations.join(" | ")}`,
+  );
+
+  // The near miss. A dot, slash or hyphen is part of an identifier; a parenthesis
+  // or a quote is not. So `config.load(cfg)` is the subject `config.load`, which
+  // is NOT the subject `config` — collapsing those two would make the size guard
+  // too permissive instead of too strict.
+  const nearMiss = ["config.load(cfg) rejects an unknown key with a named error", "config exposes the parsed table"];
+  assert.deepEqual(
+    acceptanceClusters(nearMiss),
+    ["config.load", "config"],
+    "config.load and config stay DISTINCT subjects, and the call's arguments are no part of either name",
+  );
+  const nearVerdict = validateQueue(makeQueue([makeQueueItem("S2", { acceptance: nearMiss })]), config);
+  assert.equal(nearVerdict.ok, false, "so the near-miss item is still rejected as two clusters");
+  assert.ok(
+    nearVerdict.violations.some((v) => /spans 2 clusters/i.test(v)),
+    `the near-miss rejection is the one-cluster budget's too; got: ${nearVerdict.violations.join(" | ")}`,
+  );
+});
+
+// ===========================================================================
+// [fc-clusters-determiner-behaviour-preserved]
+// ===========================================================================
+
+test("[fc-clusters-determiner-behaviour-preserved] the determiner fix core/planning.ts:205-216 records stays fixed under the new scan: a criterion opening with an article resolves to the same subject as the same criterion without one, two criteria differing only by an article stay ONE cluster and are accepted, two different subjects behind articles stay TWO — and the two fixes compose, an article in front of a CALL still resolving to the bare subject", () => {
+  const config = makeConfig();
+
+  const withAndWithout = ["the parser rejects an unknown key", "parser preserves key order"];
+  assert.deepEqual(
+    acceptanceClusters(withAndWithout),
+    ["parser"],
+    "one subject phrased with and without an article is ONE cluster, named for the subject and not for the article",
+  );
+  assert.equal(
+    validateQueue(makeQueue([makeQueueItem("S1", { acceptance: withAndWithout })]), config).ok,
+    true,
+    "so the item is accepted — the nonsense reason 'spans 2 clusters (parser, the)' cannot come back",
+  );
+
+  assert.deepEqual(
+    acceptanceClusters(["the parser rejects an unknown key", "the router retries on 502"]),
+    ["parser", "router"],
+    "and two DIFFERENT subjects behind articles do not collapse into the article",
+  );
+
+  const articleThenCall = ['the pad("a") returns "[a]"', 'pad("") === ""'];
+  assert.deepEqual(
+    acceptanceClusters(articleThenCall),
+    ["pad"],
+    "the determiner skip and the subject scan compose: an article in front of a call still resolves to the bare subject",
+  );
+});
+
+// ===========================================================================
+// [fc-clusters-violation-names-a-real-subject]
+// ===========================================================================
+
+test("[fc-clusters-violation-names-a-real-subject] when the guard DOES reject, the violation names subjects a human recognises: on two different call-syntax subjects the rejection still stands, and no cluster name it quotes back at the planner carries an unbalanced quote or parenthesis — the measured defect quoted `pad(\"a`, which is not a thing that exists in the item", () => {
+  const config = makeConfig();
+  const twoCalls = ['pad("a") === "[a]"', 'trim("b") === "b"'];
+  const verdict = validateQueue(makeQueue([makeQueueItem("S1", { acceptance: twoCalls })]), config);
+
+  assert.equal(verdict.ok, false, "premise: two DIFFERENT functions, so the one-cluster budget still rejects this item");
+  const clusterViolations = verdict.violations.filter((v) => /clusters/i.test(v));
+  assert.equal(
+    clusterViolations.length,
+    1,
+    `premise: exactly one cluster violation to read the names out of; got: ${verdict.violations.join(" | ")}`,
+  );
+
+  const named = /clusters \((.*)\), over the one-cluster/.exec(clusterViolations[0]);
+  assert.notEqual(named, null, `the violation lists the clusters it counted; got: ${clusterViolations[0]}`);
+  const names = (named === null ? "" : named[1]).split(", ");
+  assert.equal(names.length, 2, `two clusters were counted, so two names are listed; got: ${clusterViolations[0]}`);
+  for (const name of names) {
+    assert.deepEqual(
+      unbalancedDelimiters(name),
+      [],
+      `the violation quotes the cluster name "${name}" back at the planner, which is not a thing that exists in the item: ${clusterViolations[0]}`,
+    );
+  }
+});

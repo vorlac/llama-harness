@@ -14,6 +14,12 @@
 //                                     restated, imported or read from an env var.
 //   core/gates-phase.ts legalTools  — the named next action, reached through
 //     (via tools.ts waveVerdict)      the ONE committed assembly of its inputs.
+//                                     Called DIRECTLY in exactly one other place:
+//                                     UNIVERSAL_META_TOOLS probes it over a
+//                                     synthetic empty position to derive the meta
+//                                     tools that are legal everywhere. That is a
+//                                     question about the GATE, not about this run,
+//                                     so it assembles no run inputs of its own.
 //   core/gates-edit.ts decideEdit   — the inline-claim coverage adjudicator,
 //                                     including the `..` and .conductor/** denies.
 //   core/decide.ts isHumanTerritory — Task 1.5's §6.2 verdict.
@@ -61,7 +67,8 @@ import {
 import type { RegistryEntry } from "./tools.ts";
 import type { StateStore } from "./state.ts";
 import { decideEdit } from "../core/gates-edit.ts";
-import type { LegalToolsResult } from "../core/gates-phase.ts";
+import { legalTools } from "../core/gates-phase.ts";
+import type { GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { isHumanTerritory } from "../core/decide.ts";
 import { isTerminal, shouldTerminate } from "../core/stops.ts";
 import type { Config, Item, Queue, QuestionRecord, Run, StopKind } from "../core/types.ts";
@@ -619,22 +626,45 @@ function offeredMetaTools(gate: LegalToolsResult): string[] {
     .sort();
 }
 
+// The position that says nothing about where the run is: non-terminal (so the
+// §3.2 meta tools are offered at all), with NO items — the one position with
+// genuinely nothing left to do, so no stage tool and no report can be legal —
+// and, below, no open question, so conductor_answer is not in play either.
+const NOWHERE_IN_PARTICULAR: GateRun = {
+  state: "EXECUTING",
+  stop: null,
+  classification: { kind: "work" },
+};
+
 /**
- * §3.2 makes conductor_status, conductor_decide, conductor_surface and
- * conductor_defer legal in EVERY non-terminal state, so their presence says
- * nothing about where the run actually is: the gate offers exactly them, and
- * only them, on a run whose queue is empty — the one position with genuinely
- * nothing left to do. A legal tool OUTSIDE this set is the gate naming a lever
- * this position actually has (in the wedge, conductor_answer against the §2.11
- * question the blocked item minted), which is what makes a re-prompt something
- * other than an invented next step.
+ * The meta tools §3.2 makes legal in EVERY non-terminal state, so that their
+ * presence says nothing about where the run actually is. A legal tool OUTSIDE
+ * this set is the gate naming a lever this position actually has (in the wedge,
+ * conductor_answer against the §2.11 question the blocked item minted), which is
+ * what makes a re-prompt something other than an invented next step.
+ *
+ * DERIVED from core/gates-phase.ts legalTools, which owns the fact, rather than
+ * spelled out here a second time: this file once carried the four names by hand,
+ * and a fifth always-legal meta tool would have had to be copied across by hand
+ * with nothing to catch the omission but the engine quietly reading it as
+ * position-specific.
+ *
+ * `publishEnabled` is the one input this probe cannot honestly assert: it reaches
+ * only per-item stage tools, and the probe carries no items. So the probe does not
+ * pick a mode — it asks under BOTH and keeps what they agree on, which is why this
+ * call site neither inherits the parameter's default nor hardcodes a value
+ * (tests/legaltools-callsites.test.ts).
  */
-const UNIVERSAL_META_TOOLS: readonly string[] = [
-  "conductor_status",
-  "conductor_decide",
-  "conductor_surface",
-  "conductor_defer",
-];
+export const UNIVERSAL_META_TOOLS: readonly string[] = ((): readonly string[] => {
+  const modes: readonly boolean[] = [true, false];
+  let universal: string[] | null = null;
+  for (const publishEnabled of modes) {
+    const verdict = legalTools(NOWHERE_IN_PARTICULAR, [], [], true, publishEnabled);
+    const offered = [...verdict.legal.keys()];
+    universal = universal === null ? offered : universal.filter((tool) => verdict.legal.has(tool));
+  }
+  return universal === null ? [] : universal.sort();
+})();
 
 function positionSpecificTools(offered: string[]): string[] {
   return offered.filter((tool) => !UNIVERSAL_META_TOOLS.includes(tool));
