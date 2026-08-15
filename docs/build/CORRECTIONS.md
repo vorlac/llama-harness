@@ -4480,3 +4480,65 @@ and `cmp` restores, and production is byte-identical — only `scripts/test_cond
 
 **Gate.** Full gate observed by the orchestrator: **1363/1363** node, typecheck OK, bun 8, schema export
 OK, **python `Ran 80 tests`** OK (77 -> 80), GATE PASS.
+
+---
+
+## C-091 — the DEBUG loop, walked at last
+
+The one correction loop that survived every previous round, including the one that closed the vet, review
+and repair loops (C-083). No scenario in `conductor/tests/e2e.test.ts` ever took a RED VALIDATE, so
+GREEN->VALIDATED never entered the DEBUG branch: `packs["debug.md"]` was never read,
+`item.attempts.debugFixes` was never incremented, and **`debugFixCap` could be set to 0 with the whole
+1,363-test build green.**
+
+**The shape that reaches it, and why it had never occurred.** The DEBUG loop exists for a change that
+satisfies its OWN test and breaks something else. Every prior scenario's implementer either succeeded or
+failed on the item's own test, so the loop had no entrance. The new scenario ships
+
+    export function baseline(s) { return "baseline:" + s; }
+
+which satisfies the item's acceptance line (`baseline("x") === "baseline:x"`) exactly and silently drops
+the no-argument contract. The ITEM test runs only `tests/suffix.test.ts` -> green -> GREEN. The FULL verify
+runs `tests/*.test.ts` -> RED on `tests/baseline.test.ts`, **a file no queue item owns**, so §4.2
+quarantines nothing and no repair budget above validate can see it.
+
+**A fix from three rounds earlier paid for this one.** The committed baseline test seeded in C-083 to close
+MAJOR 1's zero-match glob is exactly the lever: an item whose fileScope IS `src/baseline.ts` produces a
+green item test over a red full verify with no new machinery.
+
+**The discriminator is the doctrine, not a counter.** The scripted responder gates on
+`ctx.text.includes(PACKS["debug.md"])` — the real pack read off disk. A fix dispatch arriving WITHOUT the
+doctrine is indistinguishable from the first implementation to that responder: it writes the same
+regressing module again, the re-verify stays red, and the item ends blocked at the cap instead of
+PUBLISHED.
+
+**The agent sharpened the orchestrator's mutation, and the sharpening is the point.** M-2 as specified
+(break the `packs["debug.md"]` key) turns the scenario red — but only because the product's own guard
+refuses to dispatch a debug fix without its doctrine. **That proves the guard fires, not that the doctrine
+reaches the sub-session.** So it added M-2b: `packs["debug"] ?? "some text that is not the doctrine"`,
+which satisfies the guard and lets the dispatch happen with a doctrine-free prompt. Still red. The scenario
+is therefore sensitive to the doctrine ARRIVING, not merely to the throw — which is the property the row
+claims and the orchestrator's own mutation would not have established.
+
+**What it asserts, off the persisted ledger rather than in prose:** exactly one `green` item-test record
+whose command names `tests/suffix.test.ts` and NOT the baseline; `verify[0].green === false` with a
+non-zero exit and `excluded: []`; `green.seq < verify[0].seq`, so the item really was at GREEN when the red
+verify arrived; exactly TWO implementer dispatches, the FIRST carrying no doctrine (so "carries debug.md"
+is not a property of every prompt) and the SECOND dispatched at `itemState === "GREEN"` — i.e. from
+`conductor_validate`, not from an earlier stage — matching `/Fix attempt 1 of workflow\.debugFixCap=2/` and
+`/scope unit exited [1-9]/`, the verify's OWN captured failure; `attempts.debugFixes === 1`;
+`debugging === null` (posture cleared); one journal `guard-reject` whose `evidenceSeq` names the red verify
+it was derived from; and finally `controlSuite(root)` over the PUBLISHED tree exiting 0 with the baseline
+named — the regression really gone, rather than the pipeline having stopped looking.
+
+**Mutation re-run by the orchestrator:** `debugFixCap` -> 0 turns the scenario red (it stops at
+`conductor_validate` in state GREEN); file restored byte-identical. `conductor/adapter/tools.ts` was
+mutated by the agent and restored with a matching sha256.
+
+**Gate.** Full gate observed by the orchestrator: **1364/1364** node, typecheck OK, bun 8, schema export
+OK, python `Ran 80 tests` OK, GATE PASS.
+
+**Still not exercised, and honestly out of reach here:** the §3.3 reverted-behavior probe. At review time
+the item's fileScope file is still untracked, so `git stash push -- <fileScope>` matches nothing and the
+probe SKIPS. That is the documented "where cheap" behaviour rather than a defect, and reaching it would
+have meant bending this scenario around it.
