@@ -104,6 +104,8 @@ import { childEnv } from "../adapter/evidence.ts";
 import { openWorkspace } from "../adapter/state.ts";
 import type { StateStore } from "../adapter/state.ts";
 import { readQuestions } from "../adapter/questions.ts";
+import { fetchMetricsSummary } from "../adapter/router-client.ts";
+import type { MetricsSummary, RouterClientConfig } from "../adapter/router-client.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 import { validate } from "../core/types.ts";
 import type { Config, EvidenceRecord, Item, Run } from "../core/types.ts";
@@ -282,6 +284,146 @@ function publishedFiles(dir: string, since: string): string[] {
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 }
+
+// ---------------------------------------------------------------------------
+// G5 — the router seam, and the facts the two G5 arms compare (plan 2884-2888)
+// ---------------------------------------------------------------------------
+//
+// conductor_report takes Task 7.2's fetchMetricsSummary as its `metrics` input,
+// and this suite passes the REAL one — unstubbed, over a real socket. That seam
+// is the ONLY place the pipeline touches the C++ llama-router, so it is also the
+// only thing that can make the plan's G5 pair ("run this e2e once with the router
+// in the loop, once without") two DIFFERENT runs rather than one command run
+// twice. Where the socket points is read HERE, and nowhere else:
+//
+//   CONDUCTOR_E2E_ROUTER_PORT unset  — the WITHOUT arm, and the default every
+//     plain `node --test` takes: the seam is aimed at port 1, where nothing can
+//     be listening, so fetchMetricsSummary meets a refused connection and returns
+//     null. The suite therefore needs neither the C++ router nor a model, which
+//     is what conductor/tests/router-client.test.ts:5 promises for the whole
+//     node suite and what a fresh worktree with no submodules can honour.
+//   CONDUCTOR_E2E_ROUTER_PORT=<port> — the WITH arm, driven by
+//     conductor/tools/g5-equivalence.ts against a real llama-router process.
+//
+// Nothing else in this file reads the environment for the router, which is the
+// point: the three facts plan:2884-2888 compares — terminal state, item
+// dispositions, commit set — must come out identical across the arms while the
+// metrics section legitimately differs.
+const DEAD_ROUTER_PORT = 1;
+const ROUTER_SEAM_HOST = process.env.CONDUCTOR_E2E_ROUTER_HOST ?? "127.0.0.1";
+const ROUTER_SEAM_PORT = Number.parseInt(
+  process.env.CONDUCTOR_E2E_ROUTER_PORT ?? String(DEAD_ROUTER_PORT),
+  10,
+);
+const ROUTER_SEAM_CFG: RouterClientConfig = {
+  listen: { host: ROUTER_SEAM_HOST, port: ROUTER_SEAM_PORT },
+  probeTimeoutMs: 2000,
+};
+
+// Every crossing of the seam, recorded as it happens: "the metrics function ran"
+// is then an OBSERVATION, not an inference from a line in a report that renders
+// the same way when the field is absent entirely.
+const seamCalls: Array<{ port: number; available: boolean }> = [];
+// The last MetricsSummary that actually reached a report through the ambient
+// seam. The equivalence driver compares it against what the router itself served,
+// which is how the WITH arm proves the router was CONTACTED rather than merely up.
+let lastSeamSummary: MetricsSummary | null = null;
+
+async function reportMetrics(): Promise<MetricsSummary | null> {
+  const summary = await fetchMetricsSummary(ROUTER_SEAM_CFG);
+  seamCalls.push({ port: ROUTER_SEAM_CFG.listen.port, available: summary !== null });
+  lastSeamSummary = summary;
+  return summary;
+}
+
+// The three facts the plan names, plus the metrics evidence that is deliberately
+// NOT part of the comparison (the metrics section is what SHOULD differ).
+interface ScenarioFacts {
+  scenario: string;
+  // Which metrics wiring the scenario's report used: the ambient seam (the arm's
+  // own port), an explicitly dead endpoint, or no `metrics` field at all.
+  seam: "ambient" | "dead-endpoint" | "omitted" | "none";
+  terminalState: string;
+  dispositions: Array<{ id: string; state: string; blocked: boolean; deferred: boolean }>;
+  commitSet: string[];
+  commitCount: number;
+  metricsAvailable: boolean | null;
+  metricsSummary: MetricsSummary | null;
+}
+
+const scenarioFacts: ScenarioFacts[] = [];
+
+// Derived from the PERSISTED run, the persisted items and real git — never from a
+// handler's return value, so a handler that reported one thing and wrote another
+// cannot make the two arms agree.
+function factsOf(
+  b: Bench,
+  scenario: string,
+  seam: ScenarioFacts["seam"],
+  report: Awaited<ReturnType<typeof handleReport>> | null,
+): ScenarioFacts {
+  const run = b.store.loadRun(b.runId);
+  const queuePath = path.join(b.runDir, "queue.json");
+  const ids = existsSync(queuePath)
+    ? (JSON.parse(readFileSync(queuePath, "utf8")) as { items: Array<{ id: string }> }).items.map(
+        (entry) => entry.id,
+      )
+    : [];
+  const dispositions = ids.map((id) => {
+    const persisted = b.store.loadItem(b.runId, id);
+    return {
+      id,
+      state: String(persisted.state),
+      blocked: persisted.blocked !== null && persisted.blocked !== undefined,
+      deferred: persisted.deferred !== null && persisted.deferred !== undefined,
+    };
+  });
+  return {
+    scenario,
+    seam,
+    terminalState: String(run.state) + "/" + String(run.stop === null ? "none" : run.stop.kind),
+    dispositions,
+    commitSet: [...new Set(publishedFiles(b.root, b.baseCommit))].sort(),
+    commitCount: Number.parseInt(
+      git(b.root, ["rev-list", "--count", `${b.baseCommit}..HEAD`]).trim(),
+      10,
+    ),
+    metricsAvailable: report === null ? null : report.metricsAvailable,
+    metricsSummary: seam === "ambient" ? lastSeamSummary : null,
+  };
+}
+
+function recordFacts(
+  b: Bench,
+  scenario: string,
+  seam: ScenarioFacts["seam"],
+  report: Awaited<ReturnType<typeof handleReport>> | null,
+): ScenarioFacts {
+  const facts = factsOf(b, scenario, seam, report);
+  scenarioFacts.push(facts);
+  return facts;
+}
+
+// The equivalence driver reads this file back; a plain `node --test` writes
+// nothing at all.
+after(() => {
+  const dest = process.env.CONDUCTOR_E2E_FACTS;
+  if (dest === undefined || dest.length === 0) return;
+  writeFileSync(
+    dest,
+    JSON.stringify(
+      {
+        seamPortFromEnv: process.env.CONDUCTOR_E2E_ROUTER_PORT ?? null,
+        seamHost: ROUTER_SEAM_HOST,
+        seamPort: ROUTER_SEAM_PORT,
+        seamCalls,
+        scenarios: scenarioFacts,
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Config
@@ -942,8 +1084,16 @@ function waveArgs(b: Bench): Parameters<typeof handleDispatchWave>[0] {
   } as unknown as Parameters<typeof handleDispatchWave>[0];
 }
 
-function reportArgs(b: Bench): Parameters<typeof handleReport>[0] {
-  return {
+// `metrics` defaults to the AMBIENT G5 seam (reportMetrics, the real
+// fetchMetricsSummary aimed at whatever port this arm was given), so every report
+// this suite writes really crosses adapter/router-client.ts. Pass `null` for the
+// pre-G5 shape — the field omitted entirely, which handleReport short-circuits —
+// and a function to aim the seam somewhere specific.
+function reportArgs(
+  b: Bench,
+  metrics?: (() => Promise<MetricsSummary | null>) | null,
+): Parameters<typeof handleReport>[0] {
+  const base = {
     store: b.store,
     fanout: b.wiring.fanout,
     runId: b.runId,
@@ -951,6 +1101,11 @@ function reportArgs(b: Bench): Parameters<typeof handleReport>[0] {
     journal: b.journal.sink,
     stateHome: b.stateHome,
     workspaceKey: "e2e",
+  };
+  if (metrics === null) return base as unknown as Parameters<typeof handleReport>[0];
+  return {
+    ...base,
+    metrics: metrics ?? reportMetrics,
   } as unknown as Parameters<typeof handleReport>[0];
 }
 
@@ -1539,6 +1694,7 @@ test(
     );
 
     // --- report -------------------------------------------------------------
+    const seamBefore = seamCalls.length;
     const report = await handleReport(reportArgs(bench));
     assert.equal(report.runState, "REPORTED", "conductor_report closed the run");
     const reportPath = path.join(bench.runDir, "report.md");
@@ -1548,8 +1704,21 @@ test(
     assert.match(md, /I2/, "the report names the second item");
     assert.match(md, /override/i, "the spent override is visible in the report rather than buried in a ledger");
 
+    // G5's touchpoint, asserted as an OBSERVED CALL: the report's metrics section
+    // is there because adapter/router-client.ts really ran over a real socket, not
+    // because the `metrics` field was absent and handleReport rendered the same
+    // line for free. Whether the summary came back is the arm's business; that the
+    // seam was crossed is this file's.
+    assert.equal(
+      seamCalls.length,
+      seamBefore + 1,
+      "conductor_report must CALL the injected metrics seam exactly once — a report that never reaches router-client.ts makes the two G5 arms indistinguishable",
+    );
+    assert.match(md, /## Metrics/, "the report carries the §4.4 metrics section the seam feeds");
+
     const finalRun = bench.store.loadRun(bench.runId);
     assert.equal(finalRun.stop?.kind, "done", "the run's recorded stop is `done`");
+    recordFacts(bench, "full-pipeline", "ambient", report);
   },
 );
 
@@ -2141,11 +2310,18 @@ test(
       `the trivial item must reach PUBLISHED; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
     );
 
+    const seamBefore = seamCalls.length;
     const report = await handleReport(reportArgs(bench));
     assert.equal(report.runState, "TRIVIAL_DONE", "a trivial run closes report-lite to TRIVIAL_DONE, not REPORTED");
     const md = readFileSync(path.join(bench.runDir, "report.md"), "utf8");
     assert.match(md, new RegExp(itemId), "the lite report still names the item it published");
     assert.equal(bench.store.loadRun(bench.runId).stop?.kind, "done", "the trivial run stopped done");
+    assert.equal(
+      seamCalls.length,
+      seamBefore + 1,
+      "the lite report crosses the same G5 metrics seam the full report does",
+    );
+    recordFacts(bench, "trivial", "ambient", report);
   },
 );
 
@@ -2344,6 +2520,7 @@ test(
       gitOk(bench.root, ["cat-file", "-e", `${integrated.W2.head}:src/lower.ts`]),
       "W2's own module was merged into the tree its integrated re-validate measured",
     );
+    recordFacts(bench, "worktree", "none", null);
   },
 );
 
@@ -2450,6 +2627,7 @@ test(
 
     const shipped = publishedFiles(bench.root, bench.baseCommit);
     assert.ok(shipped.includes("docs/guide.md"), "the docs change really shipped");
+    recordFacts(bench, "non-behavioral", "none", null);
   },
 );
 
@@ -2805,6 +2983,8 @@ test(
       `the green verify DISCLOSES the exclusion it rests on (§2.11): ${JSON.stringify(greenVerify)}`,
     );
 
+    recordFacts(bench, "bad-ending-run1", "none", null);
+    recordFacts(bench2, "bad-ending-run2", "none", null);
   },
 );
 
@@ -3380,5 +3560,162 @@ test(
       errors.some((r) => TRANSPORT_WORDS.test(JSON.stringify(r.data ?? {}))),
       `at least one error record names the failing re-prompt; got: ${JSON.stringify(errors.slice(0, 3))}`,
     );
+  },
+);
+
+// ===========================================================================
+// G5 / row 13.1-router-absent-fail-soft — the WITHOUT arm, in the node suite
+// ===========================================================================
+//
+// The plan's G5 step (2884-2888) runs this same e2e twice, once with the C++
+// llama-router in the loop and once without, and asserts the same terminal
+// state, the same item dispositions and the same commit set. Only ONE of those
+// arms can live here: spawning llama-router from a test would make the default
+// suite depend on a built C++ binary a fresh worktree does not have, and
+// conductor/tests/router-client.test.ts:5 promises the opposite. So the WITH arm
+// lives in conductor/tools/g5-equivalence.ts, which starts a real router and
+// compares the two arms' facts, and the WITHOUT arm — which needs no binary and
+// no model — is this test.
+//
+// It is the fail-soft property stated as a measurement rather than a hope: the
+// REAL fetchMetricsSummary, UNSTUBBED, is pointed at an endpoint where nothing
+// can be listening, and the run must come out exactly as it does with the seam
+// omitted entirely. Same scripted flow, same fixture shape, two benches, three
+// compared facts.
+test(
+  "[13.1-router-absent-fail-soft] with NO router listening the REAL fetchMetricsSummary — unstubbed, over a real socket to a dead endpoint — returns null instead of throwing, the report renders its metrics section unavailable rather than crashing or blocking, and the run's terminal state, item dispositions and commit set are identical to the same scripted run with the metrics seam omitted entirely",
+  { timeout: 300_000 },
+  async () => {
+    // Port 1 is the dead endpoint: an unprivileged process cannot bind it, so a
+    // connection there is refused rather than answered, and it is refused fast.
+    const deadCfg: RouterClientConfig = {
+      listen: { host: "127.0.0.1", port: DEAD_ROUTER_PORT },
+      probeTimeoutMs: 2000,
+    };
+
+    // 1. The adapter itself, called directly, on a real socket. This is the
+    //    contract row 13.1 rests on: null, never a rejection.
+    const direct = await fetchMetricsSummary(deadCfg);
+    assert.equal(
+      direct,
+      null,
+      "fetchMetricsSummary is fail-soft by contract: a refused connection resolves null, it does not throw",
+    );
+
+    // 2. The same scripted trivial flow, twice: once with the seam omitted (the
+    //    shape conductor_report short-circuits) and once with it wired to the
+    //    dead endpoint. Everything else is held fixed.
+    const TEST_REL = "tests/failsoft.test.ts";
+    const FILE = "src/failsoft.ts";
+    const script: Script = (ctx) => {
+      if (ctx.role === "mechanical") {
+        return {
+          body: {
+            kind: "trivial",
+            rationale: "a single pure helper with one acceptance line",
+            confidence: "high",
+            trivialItem: {
+              title: "failsoft",
+              rationale: "the caller needs a trimmed label",
+              fileScope: [FILE],
+              testScope: [TEST_REL],
+              acceptance: ['fn(" a ") === "a"'],
+              behavioral: true,
+              ponytail: {
+                necessary: "the prompt asks for it",
+                reuse: "checked src/; nothing trims",
+                ladderRung: "one-liner",
+              },
+            },
+          },
+        };
+      }
+      if (ctx.role === "skeptic") {
+        return { body: { agreed: true, correctedKind: null, note: "one file, one function" } };
+      }
+      if (ctx.role === "testWriter") {
+        return {
+          body: done("wrote the test"),
+          write: [{ rel: TEST_REL, text: itemTestSource(FILE, '" a "', '"a"') }],
+        };
+      }
+      if (ctx.role === "implementer") {
+        return {
+          body: done("wrote the module"),
+          write: [{ rel: FILE, text: "export function fn(s) { return s.trim(); }\n" }],
+        };
+      }
+      if (ctx.role === "reviewer") {
+        if (ctx.itemState === "RED") return { body: testVet() };
+        return { body: noFindings() };
+      }
+      return { body: done("nothing to do") };
+    };
+
+    let deadSeamCalls = 0;
+    const arm = async (
+      tag: string,
+      seam: "omitted" | "dead-endpoint",
+    ): Promise<{ facts: ScenarioFacts; md: string; report: Awaited<ReturnType<typeof handleReport>> }> => {
+      const bench = await makeBench({ tag, prompt: "trim the label", script });
+      const classified = await handleClassify({ ...stageBase(bench) });
+      assert.equal(classified.kind, "trivial", `${tag}: the classifier and its skeptic agreed on \`trivial\``);
+      const wave = await drainWaves(bench);
+      const disposition = wave.items.find((d) => d.itemId === classified.itemId);
+      assert.equal(
+        disposition?.state,
+        "PUBLISHED",
+        `${tag}: the item must reach PUBLISHED; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+      );
+      const report = await handleReport(
+        reportArgs(
+          bench,
+          seam === "omitted"
+            ? null
+            : async () => {
+                deadSeamCalls += 1;
+                return fetchMetricsSummary(deadCfg);
+              },
+        ),
+      );
+      const md = readFileSync(path.join(bench.runDir, "report.md"), "utf8");
+      return { facts: recordFacts(bench, `router-absent-${seam}`, seam, report), md, report };
+    };
+
+    const omitted = await arm("g5-seam-omitted", "omitted");
+    const dead = await arm("g5-seam-dead", "dead-endpoint");
+
+    // The seam really was crossed in the second arm — the run went through
+    // adapter/router-client.ts and came back empty-handed, which is a different
+    // event from never having gone.
+    assert.equal(deadSeamCalls, 1, "conductor_report called the metrics seam exactly once in the dead-endpoint arm");
+    assert.equal(dead.report.metricsAvailable, false, "no summary came back from an endpoint nothing serves");
+    assert.equal(omitted.report.metricsAvailable, false, "and none comes back when the field is omitted either");
+
+    // The report renders the unavailable line rather than crashing or blocking.
+    for (const [tag, md] of [["omitted", omitted.md] as const, ["dead-endpoint", dead.md] as const]) {
+      assert.match(md, /^## Metrics$/m, `${tag}: the report carries its §4.4 metrics section`);
+      assert.match(
+        md,
+        /^## Metrics\n\n\(unavailable\)$/m,
+        `${tag}: with no router the metrics section says so — the report is written, not withheld`,
+      );
+    }
+
+    // 3. And the three facts plan:2884-2888 names are IDENTICAL across the two,
+    //    which is what "the identical process runs without the router" means at
+    //    this end of the seam.
+    assert.equal(
+      dead.facts.terminalState,
+      omitted.facts.terminalState,
+      "same terminal state with the seam live against a dead endpoint as with the seam absent",
+    );
+    assert.deepEqual(
+      dead.facts.dispositions,
+      omitted.facts.dispositions,
+      "same item dispositions",
+    );
+    assert.deepEqual(dead.facts.commitSet, omitted.facts.commitSet, "same commit set");
+    assert.equal(dead.facts.commitCount, omitted.facts.commitCount, "same number of commits");
   },
 );
