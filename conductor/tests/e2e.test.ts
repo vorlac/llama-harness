@@ -67,7 +67,7 @@
 //     drop back to re-validation is left to the orchestrator. Scenario 1 asserts
 //     the refusal, and `drainWaves` performs the documented recovery.
 
-import { test, after } from "node:test";
+import { test, after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -1327,398 +1327,747 @@ test(
 // Scenario 1 — full-pipeline
 // ===========================================================================
 
-test(
-  "[13.1-full-pipeline] the whole §3.2/§3.3 pipeline on a real fixture repo: the real chat.message hook creates the run, classify/decompose/plan/plan-review run through the real fan-out engine (a major refuted, a major upheld and revised to a clean round), the wave drives TWO items through the entire item FSM to REAL git commits whose contents are asserted, an override is spent and surfaces in the report, every gate denial the plan names really denies, and conductor_report closes the run done",
-  { timeout: 120_000 },
-  async () => {
-    // The two items: disjoint scopes, so the scheduler runs them in one wave.
-    const QUEUE = {
-      items: [
-        queueItem({
-          id: "I1",
-          title: "slugify",
-          fileScope: ["src/slug.ts"],
-          testScope: ["tests/slug.test.ts"],
-          acceptance: ['slugify("A B") === "a-b"'],
-        }),
-        queueItem({
-          id: "I2",
-          title: "titlecase",
-          fileScope: ["src/title.ts"],
-          testScope: ["tests/title.test.ts"],
-          acceptance: ['titlecase("a b") === "A B"'],
-        }),
-      ],
-    };
+// ===========================================================================
+// Scenario 1 — the whole pipeline, run ONCE and then read ROW BY ROW
+//
+// M7 traceability: every row of docs/build/specs/task-13.1.assertions.json has
+// to name the test that proves it, and one 400-line `test()` can name nothing.
+// The expensive part still happens exactly once — `before()` walks the entire
+// pipeline and CAPTURES what the rows read (the persisted run and items, the
+// evidence and anomaly ledgers, plan.md, the fan-out call log, real git,
+// report.md, the G5 seam counter) and ASSERTS NOTHING ITSELF. Each row below is
+// its own `it()` carrying its own row id, so a red names the row that broke and
+// a deleted test names the row that just lost its proof.
+//
+// Several rows are named here by a test that proves LESS than the row's full
+// text. Every one of those carries a "NOT proven here" comment naming exactly
+// which clauses are unasserted, because the alternative — a title that claims a
+// row it does not prove — is worse than a gap somebody can read.
+//
+// The setup deliberately does not throw. A `before()` that throws leaves node
+// reporting its subtests as CANCELLED; stashing the failure and rethrowing it
+// from `caps()` makes EVERY row in this describe fail with the setup's own
+// stack, which cannot be misread as a skip or a pass.
+// ===========================================================================
 
-    const SUBJECT: Record<string, { file: string; testRel: string; call: string; expected: string; impl: string }> = {
-      I1: {
-        file: "src/slug.ts",
-        testRel: "tests/slug.test.ts",
-        call: '"A B"',
-        expected: '"a-b"',
-        impl: 'export function fn(s) { return s.toLowerCase().split(" ").join("-"); }\n',
-      },
-      I2: {
-        file: "src/title.ts",
-        testRel: "tests/title.test.ts",
-        call: '"a b"',
-        expected: '"A B"',
-        impl:
-          'export function fn(s) { return s.split(" ").map((w) => w.slice(0, 1).toUpperCase() + w.slice(1)).join(" "); }\n',
-      },
-    };
+// What a call that was supposed to be DENIED actually did, without judging it:
+// the judgement belongs to the row that owns the gate, so a gate that stopped
+// denying reddens THAT row rather than a shared setup every row fails behind.
+interface Attempt {
+  threw: boolean;
+  error: Error | null;
+}
 
-    // The plan-review round trip, driven by the DOCUMENT and never by a counter.
-    // Each lens judges the plan.md text it was actually handed and stops raising
-    // a finding only once the revision it demanded is really in that text; the
-    // scripted planner resolves exactly the findings its own re-prompt carries
-    // and keeps what it has already written. So a clean round is reachable ONLY
-    // if the handler really re-wrote plan.md and really re-reviewed the REVISED
-    // document — a loop that re-read the old text would raise the same finding
-    // every round and leave at the cap with questions, which is what this
-    // scenario used to do while asserting nothing that could tell the difference.
-    const PLAN_BASE = "# plan\n\nBuild slugify, then titlecase.\n";
-    const PLAN_INDEPENDENCE = "The two functions share no state, so either build order works.";
-    const PLAN_VERIFICATION =
-      "Each item is verified by its own test file under tests/, run by the repo's verify command.";
-    let plannerDraft = PLAN_BASE;
+async function attempt(fn: () => Promise<unknown>): Promise<Attempt> {
+  try {
+    await fn();
+    return { threw: false, error: null };
+  } catch (err) {
+    return { threw: true, error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
 
-    // Round 1 raises PF1 (refuted by its skeptic, so it buys no revision) and PF2
-    // (upheld). Round 2, over the revised plan, raises PF3 (upheld). Round 3 is
-    // clean. Two revisions are spent, so `run.planReviewRounds` is 2.
-    const PF1 = {
-      id: "PF1",
-      severity: "major",
-      lens: "scope",
-      claim: "the two items share a helper and cannot parallelize",
-      evidence: "both titles mention string handling",
-      suggestedFix: "serialize them",
-    };
-    const PF2 = {
-      id: "PF2",
-      severity: "major",
-      lens: "plan-completeness",
-      claim: "the plan never says the two functions are independent",
-      evidence: "the markdown lists them without stating their relationship",
-      suggestedFix: "state that they share no state",
-    };
-    const PF3 = {
-      id: "PF3",
-      severity: "major",
-      lens: "plan-completeness",
-      claim: "the plan never says how either item is verified",
-      evidence: "the markdown names no test file and no verify command",
-      suggestedFix: "state that each item is verified by its own test file",
-    };
+type WaveResult = Awaited<ReturnType<typeof handleDispatchWave>>;
+type WaveItem = WaveResult["items"][number];
 
-    const script: Script = (ctx) => {
-      if (ctx.role === "mechanical") {
+interface FullPipeline {
+  bench: Bench;
+  gateHookPresent: boolean;
+  strayWrite: Attempt;
+  spawnFromOrchestrator: Attempt;
+  orchestratorEdit: Attempt;
+  planBeforeClassify: Attempt;
+  classified: Awaited<ReturnType<typeof handleClassify>>;
+  decomposed: Awaited<ReturnType<typeof handleDecompose>>;
+  planned: Awaited<ReturnType<typeof handlePlan>>;
+  planExists: boolean;
+  finalPlan: string;
+  planIndependence: string;
+  planVerification: string;
+  reviewed: Awaited<ReturnType<typeof handlePlanReview>>;
+  questionCount: number;
+  planners: RespondCtx[];
+  skeptics: RespondCtx[];
+  firstWave: WaveResult;
+  laggard: WaveItem | undefined;
+  staleDenial: Awaited<ReturnType<typeof handlePublish>> | null;
+  wave: WaveResult;
+  evidence: EvidenceRecord[];
+  if1Panel: RespondCtx[];
+  if1Fixers: RespondCtx[];
+  subjects: string[];
+  publishedPaths: string[];
+  override: Awaited<ReturnType<typeof handleOverride>>;
+  anomalies: Array<Record<string, unknown>>;
+  seamCallsBefore: number;
+  seamCallsAfterReport: number;
+  report: Awaited<ReturnType<typeof handleReport>>;
+  reportExists: boolean;
+  reportMd: string;
+  finalRun: Run;
+}
+
+async function runFullPipeline(): Promise<FullPipeline> {
+  // The two items: disjoint scopes, so the scheduler runs them in one wave.
+  const QUEUE = {
+    items: [
+      queueItem({
+        id: "I1",
+        title: "slugify",
+        fileScope: ["src/slug.ts"],
+        testScope: ["tests/slug.test.ts"],
+        acceptance: ['slugify("A B") === "a-b"'],
+      }),
+      queueItem({
+        id: "I2",
+        title: "titlecase",
+        fileScope: ["src/title.ts"],
+        testScope: ["tests/title.test.ts"],
+        acceptance: ['titlecase("a b") === "A B"'],
+      }),
+    ],
+  };
+
+  const SUBJECT: Record<string, { file: string; testRel: string; call: string; expected: string; impl: string }> = {
+    I1: {
+      file: "src/slug.ts",
+      testRel: "tests/slug.test.ts",
+      call: '"A B"',
+      expected: '"a-b"',
+      impl: 'export function fn(s) { return s.toLowerCase().split(" ").join("-"); }\n',
+    },
+    I2: {
+      file: "src/title.ts",
+      testRel: "tests/title.test.ts",
+      call: '"a b"',
+      expected: '"A B"',
+      impl:
+        'export function fn(s) { return s.split(" ").map((w) => w.slice(0, 1).toUpperCase() + w.slice(1)).join(" "); }\n',
+    },
+  };
+
+  // The plan-review round trip, driven by the DOCUMENT and never by a counter.
+  // Each lens judges the plan.md text it was actually handed and stops raising
+  // a finding only once the revision it demanded is really in that text; the
+  // scripted planner resolves exactly the findings its own re-prompt carries
+  // and keeps what it has already written. So a clean round is reachable ONLY
+  // if the handler really re-wrote plan.md and really re-reviewed the REVISED
+  // document — a loop that re-read the old text would raise the same finding
+  // every round and leave at the cap with questions, which is what this
+  // scenario used to do while asserting nothing that could tell the difference.
+  const PLAN_BASE = "# plan\n\nBuild slugify, then titlecase.\n";
+  const PLAN_INDEPENDENCE = "The two functions share no state, so either build order works.";
+  const PLAN_VERIFICATION =
+    "Each item is verified by its own test file under tests/, run by the repo's verify command.";
+  let plannerDraft = PLAN_BASE;
+
+  // Round 1 raises PF1 (refuted by its skeptic, so it buys no revision) and PF2
+  // (upheld). Round 2, over the revised plan, raises PF3 (upheld). Round 3 is
+  // clean. Two revisions are spent, so `run.planReviewRounds` is 2.
+  const PF1 = {
+    id: "PF1",
+    severity: "major",
+    lens: "scope",
+    claim: "the two items share a helper and cannot parallelize",
+    evidence: "both titles mention string handling",
+    suggestedFix: "serialize them",
+  };
+  const PF2 = {
+    id: "PF2",
+    severity: "major",
+    lens: "plan-completeness",
+    claim: "the plan never says the two functions are independent",
+    evidence: "the markdown lists them without stating their relationship",
+    suggestedFix: "state that they share no state",
+  };
+  const PF3 = {
+    id: "PF3",
+    severity: "major",
+    lens: "plan-completeness",
+    claim: "the plan never says how either item is verified",
+    evidence: "the markdown names no test file and no verify command",
+    suggestedFix: "state that each item is verified by its own test file",
+  };
+
+  const script: Script = (ctx) => {
+    if (ctx.role === "mechanical") {
+      return {
+        body: {
+          kind: "work",
+          rationale: "two behavioural additions with tests",
+          confidence: "high",
+          trivialItem: null,
+        },
+      };
+    }
+    if (ctx.role === "planner") {
+      // The first planner prompt is decompose (schema Queue); every later one
+      // is plan or plan revision (schema Plan). A revision carries the findings
+      // that survived their skeptics, and this planner answers EXACTLY those —
+      // nothing else moves the document, so a finding that never reached the
+      // planner is a finding the next review round raises again.
+      if (ctx.nth === 0) return { body: QUEUE };
+      if (ctx.text.includes("PF2")) plannerDraft += PLAN_INDEPENDENCE + "\n";
+      if (ctx.text.includes("PF3")) plannerDraft += PLAN_VERIFICATION + "\n";
+      return { body: { markdown: plannerDraft, decisions: [] } };
+    }
+    if (ctx.role === "reviewer" && ctx.itemId === "") {
+      // Plan review, judged against the plan THIS lens was handed.
+      if (!ctx.text.includes(PLAN_INDEPENDENCE)) return { body: { findings: [PF1, PF2] } };
+      if (!ctx.text.includes(PLAN_VERIFICATION)) return { body: { findings: [PF3] } };
+      return { body: noFindings() };
+    }
+    if (ctx.role === "skeptic") {
+      // The classification check is the only skeptic before any finding exists.
+      if (ctx.text.includes("PF1")) {
+        return { body: { findingId: "PF1", upheld: false, reasoning: "the scopes are disjoint; the claim reads titles, not scopes" } };
+      }
+      if (ctx.text.includes("PF2")) {
+        return { body: { findingId: "PF2", upheld: true, reasoning: "the plan really is silent on independence" } };
+      }
+      if (ctx.text.includes("PF3")) {
+        return { body: { findingId: "PF3", upheld: true, reasoning: "the plan really names no test file and no verify command" } };
+      }
+      if (ctx.text.includes("IF1")) {
+        return { body: { findingId: "IF1", upheld: false, reasoning: "the module already handles the case the finding claims is missing" } };
+      }
+      return { body: { agreed: true, correctedKind: null, note: "a behavioural change with tests" } };
+    }
+    const subject = SUBJECT[ctx.itemId];
+    if (ctx.role === "testWriter" && subject !== undefined) {
+      return {
+        body: done(`wrote ${subject.testRel}`),
+        write: [
+          {
+            rel: subject.testRel,
+            text: itemTestSource(subject.file, subject.call, subject.expected),
+          },
+        ],
+      };
+    }
+    if (ctx.role === "implementer" && subject !== undefined) {
+      return { body: done(`wrote ${subject.file}`), write: [{ rel: subject.file, text: subject.impl }] };
+    }
+    if (ctx.role === "reviewer" && subject !== undefined) {
+      // One role, two stages: a RED item is being test-vetted, a VALIDATED one
+      // is being reviewed. The item's own persisted FSM position decides.
+      if (ctx.itemState === "RED") return { body: testVet() };
+      if (ctx.itemId === "I1" && ctx.nth === 1) {
         return {
           body: {
-            kind: "work",
-            rationale: "two behavioural additions with tests",
-            confidence: "high",
-            trivialItem: null,
+            findings: [
+              {
+                id: "IF1",
+                severity: "major",
+                lens: "correctness",
+                claim: "the function drops interior whitespace",
+                evidence: "no test covers a double space",
+                suggestedFix: "collapse runs of whitespace",
+              },
+            ],
           },
         };
       }
-      if (ctx.role === "planner") {
-        // The first planner prompt is decompose (schema Queue); every later one
-        // is plan or plan revision (schema Plan). A revision carries the findings
-        // that survived their skeptics, and this planner answers EXACTLY those —
-        // nothing else moves the document, so a finding that never reached the
-        // planner is a finding the next review round raises again.
-        if (ctx.nth === 0) return { body: QUEUE };
-        if (ctx.text.includes("PF2")) plannerDraft += PLAN_INDEPENDENCE + "\n";
-        if (ctx.text.includes("PF3")) plannerDraft += PLAN_VERIFICATION + "\n";
-        return { body: { markdown: plannerDraft, decisions: [] } };
-      }
-      if (ctx.role === "reviewer" && ctx.itemId === "") {
-        // Plan review, judged against the plan THIS lens was handed.
-        if (!ctx.text.includes(PLAN_INDEPENDENCE)) return { body: { findings: [PF1, PF2] } };
-        if (!ctx.text.includes(PLAN_VERIFICATION)) return { body: { findings: [PF3] } };
-        return { body: noFindings() };
-      }
-      if (ctx.role === "skeptic") {
-        // The classification check is the only skeptic before any finding exists.
-        if (ctx.text.includes("PF1")) {
-          return { body: { findingId: "PF1", upheld: false, reasoning: "the scopes are disjoint; the claim reads titles, not scopes" } };
-        }
-        if (ctx.text.includes("PF2")) {
-          return { body: { findingId: "PF2", upheld: true, reasoning: "the plan really is silent on independence" } };
-        }
-        if (ctx.text.includes("PF3")) {
-          return { body: { findingId: "PF3", upheld: true, reasoning: "the plan really names no test file and no verify command" } };
-        }
-        if (ctx.text.includes("IF1")) {
-          return { body: { findingId: "IF1", upheld: false, reasoning: "the module already handles the case the finding claims is missing" } };
-        }
-        return { body: { agreed: true, correctedKind: null, note: "a behavioural change with tests" } };
-      }
-      const subject = SUBJECT[ctx.itemId];
-      if (ctx.role === "testWriter" && subject !== undefined) {
-        return {
-          body: done(`wrote ${subject.testRel}`),
-          write: [
-            {
-              rel: subject.testRel,
-              text: itemTestSource(subject.file, subject.call, subject.expected),
-            },
-          ],
-        };
-      }
-      if (ctx.role === "implementer" && subject !== undefined) {
-        return { body: done(`wrote ${subject.file}`), write: [{ rel: subject.file, text: subject.impl }] };
-      }
-      if (ctx.role === "reviewer" && subject !== undefined) {
-        // One role, two stages: a RED item is being test-vetted, a VALIDATED one
-        // is being reviewed. The item's own persisted FSM position decides.
-        if (ctx.itemState === "RED") return { body: testVet() };
-        if (ctx.itemId === "I1" && ctx.nth === 1) {
-          return {
-            body: {
-              findings: [
-                {
-                  id: "IF1",
-                  severity: "major",
-                  lens: "correctness",
-                  claim: "the function drops interior whitespace",
-                  evidence: "no test covers a double space",
-                  suggestedFix: "collapse runs of whitespace",
-                },
-              ],
-            },
-          };
-        }
-        return { body: noFindings() };
-      }
-      return { body: done("no work required") };
-    };
+      return { body: noFindings() };
+    }
+    return { body: done("no work required") };
+  };
 
-    const bench = await makeBench({
-      tag: "full",
-      prompt: "add slugify and titlecase utilities with tests",
-      script,
+  const bench = await makeBench({
+    tag: "full",
+    prompt: "add slugify and titlecase utilities with tests",
+    script,
+  });
+
+  // --- the gate hook really gates -----------------------------------------
+  // An UNREGISTERED session's write, a sub-agent spawn and the ORCHESTRATOR's
+  // own edit, all through the REAL tool.execute.before hook. Each outcome is
+  // captured rather than judged; the three §3.5 rows below judge them.
+  const gateHookPresent = typeof bench.hooks["tool.execute.before"] === "function";
+  const strayWrite = await attempt(() =>
+    callGate(bench.hooks, { tool: "write", sessionID: STRAY, args: { filePath: path.join(bench.root, "src/slug.ts"), content: "x" } }),
+  );
+  const spawnFromOrchestrator = await attempt(() =>
+    callGate(bench.hooks, { tool: "task", sessionID: ORCH, args: { description: "spawn a helper" } }),
+  );
+  const orchestratorEdit = await attempt(() =>
+    callGate(bench.hooks, { tool: "edit", sessionID: ORCH, args: { filePath: path.join(bench.root, "src/slug.ts"), content: "x" } }),
+  );
+
+  // --- an out-of-order stage tool is put to the phase gate -----------------
+  const planBeforeClassify = await attempt(() => handlePlan({ ...stageBase(bench) }));
+
+  // --- intake ------------------------------------------------------------
+  const classified = await handleClassify({ ...stageBase(bench) });
+  const decomposed = await handleDecompose({ ...stageBase(bench) });
+  const planned = await handlePlan({ ...stageBase(bench) });
+  const reviewed = await handlePlanReview({ ...stageBase(bench) });
+  const questionCount = readQuestions(bench.runDir).length;
+  const planners = bench.wiring.byRole("planner");
+  const skeptics = bench.wiring.byRole("skeptic");
+  const planExists = existsSync(planned.planPath);
+  const finalPlan = planExists ? readFileSync(planned.planPath, "utf8") : "";
+
+  // --- the wave ----------------------------------------------------------
+  const firstWave = await handleDispatchWave(waveArgs(bench));
+
+  // §2.6 condition 2, end to end and measured: the first member of the wave
+  // commits, HEAD moves, and the sibling's green — which really was green, on
+  // the tree that existed when it ran — is refused. This is the condition a
+  // `git switch` between validate and publish also produces, and the reason
+  // the freshness rule carries a head term at all.
+  const laggard = firstWave.items.find((d) => d.state !== "PUBLISHED");
+  const staleDenial =
+    laggard === undefined
+      ? null
+      : await handlePublish({
+          store: bench.store,
+          fanout: bench.wiring.fanout,
+          runId: bench.runId,
+          itemId: laggard.itemId,
+          config: bench.config,
+          journal: bench.journal.sink,
+          stateHome: bench.stateHome,
+          workspaceKey: "e2e",
+        } as unknown as Parameters<typeof handlePublish>[0]);
+
+  const wave = await drainWaves(bench);
+
+  // --- the ledgers and the tree, as they stand once the wave is done -------
+  const evidence = readEvidence(bench.runDir);
+  // IF1 is the one item-level finding this scenario raises, and its skeptic
+  // REFUTES it. Both halves are load-bearing: a finding that never reached a
+  // skeptic panel would have been routed as a fix, and a refuted finding that
+  // still dispatched one would mean the verdict changed nothing.
+  const if1Panel = bench.wiring.prompted.filter((p) => p.role === "skeptic" && p.text.includes("IF1"));
+  const if1Fixers = bench.wiring.prompted.filter(
+    (p) => (p.role === "implementer" || p.role === "testWriter") && p.text.includes("IF1"),
+  );
+  const subjects = commitSubjects(bench.root);
+  const publishedPaths = publishedFiles(bench.root, bench.baseCommit);
+
+  // --- an override is spent, tainted and reported -------------------------
+  const grants = new Map<string, OverrideGrant>();
+  const override = await handleOverride({
+    store: bench.store,
+    runId: bench.runId,
+    config: bench.config,
+    journal: bench.journal.sink,
+    sessionID: ORCH,
+    itemId: "I1",
+    gate: "publish-freshness",
+    reason: "the operator accepts the stale window for this e2e",
+    grantedAction: "conductor_publish I1",
+    overrideGrants: grants,
+    stateHome: bench.stateHome,
+    workspaceKey: "e2e",
+  } as unknown as Parameters<typeof handleOverride>[0]);
+  const anomalies = readAnomalies(bench.runDir);
+
+  // --- report -------------------------------------------------------------
+  const seamCallsBefore = seamCalls.length;
+  const report = await handleReport(reportArgs(bench));
+  const seamCallsAfterReport = seamCalls.length;
+  const reportPath = path.join(bench.runDir, "report.md");
+  const reportExists = existsSync(reportPath);
+  const reportMd = reportExists ? readFileSync(reportPath, "utf8") : "";
+  const finalRun = bench.store.loadRun(bench.runId);
+
+  recordFacts(bench, "full-pipeline", "ambient", report);
+
+  return {
+    bench,
+    gateHookPresent,
+    strayWrite,
+    spawnFromOrchestrator,
+    orchestratorEdit,
+    planBeforeClassify,
+    classified,
+    decomposed,
+    planned,
+    planExists,
+    finalPlan,
+    planIndependence: PLAN_INDEPENDENCE,
+    planVerification: PLAN_VERIFICATION,
+    reviewed,
+    questionCount,
+    planners,
+    skeptics,
+    firstWave,
+    laggard,
+    staleDenial,
+    wave,
+    evidence,
+    if1Panel,
+    if1Fixers,
+    subjects,
+    publishedPaths,
+    override,
+    anomalies,
+    seamCallsBefore,
+    seamCallsAfterReport,
+    report,
+    reportExists,
+    reportMd,
+    finalRun,
+  };
+}
+
+describe(
+  "[13.1-full-pipeline] the whole §3.2/§3.3 pipeline on a real fixture repo: the real chat.message hook creates the run, classify/decompose/plan/plan-review run through the real fan-out engine (a major refuted, a major upheld and revised to a clean round), the wave drives TWO items through the entire item FSM to REAL git commits whose contents are asserted, an override is spent and surfaces in the report, every gate denial the plan names really denies, and conductor_report closes the run done",
+  { timeout: 240_000 },
+  () => {
+    let captured: FullPipeline | null = null;
+    let setupError: unknown = null;
+
+    before(
+      async () => {
+        try {
+          captured = await runFullPipeline();
+        } catch (err) {
+          setupError = err;
+        }
+      },
+      { timeout: 180_000 },
+    );
+
+    // Never returns a half-built capture and never lets a broken setup read as
+    // a green: if the pipeline threw, every row below fails carrying the
+    // setup's own stack.
+    function caps(): FullPipeline {
+      if (setupError !== null) {
+        const detail =
+          setupError instanceof Error ? (setupError.stack ?? setupError.message) : String(setupError);
+        throw new Error(`[13.1-full-pipeline] the shared pipeline setup FAILED, so this row proved nothing: ${detail}`);
+      }
+      if (captured === null) {
+        throw new Error("[13.1-full-pipeline] the shared pipeline setup produced no captures");
+      }
+      return captured;
+    }
+
+    // ---- §3.2 intake ----------------------------------------------------
+
+    it("[13.1-s1-classify-work-stays-intake] conductor_classify's mechanical classifier and its skeptic agree on `work`", () => {
+      const c = caps();
+      assert.equal(c.classified.kind, "work", "the scripted classifier and its skeptic agreed on `work`");
+      // NOT proven here, and reported as an M7 gap rather than implied by this
+      // title: that run.json READ BACK carries state INTAKE with
+      // run.classification recorded, that EXACTLY ONE skeptic seat was spent on
+      // the check, and that legalTools then names conductor_decompose as the
+      // recommended next tool. The stays-at-INTAKE half survives only
+      // indirectly, in that the decompose below is what advanced the run.
     });
 
-    // --- the gate hook really gates -----------------------------------------
-    // An UNREGISTERED session's write is denied: the registry is the plugin's
-    // own, and nothing has registered the stray session.
-    const strayDenial = await expectDeny(
-      () => callGate(bench.hooks, { tool: "write", sessionID: STRAY, args: { filePath: path.join(bench.root, "src/slug.ts"), content: "x" } }),
-      "an unregistered session's write",
-    );
-    assert.match(strayDenial.message, /regist/i, "the refusal must name the registry rule it enforced");
+    it("[13.1-s1-decompose-two-disjoint-items] conductor_decompose validates the canned queue and yields EXACTLY the two items I1 and I2", () => {
+      const c = caps();
+      assert.deepEqual([...c.decomposed.itemIds].sort(), ["I1", "I2"], "both items entered the queue");
+      // NOT proven here: the INTAKE->DECOMPOSED edge itself, pairwise glob
+      // disjointness of the two fileScopes, behavioral:true with a non-empty
+      // testScope on both, the acyclic dependsOn, and queue.json's presence on
+      // disk as the thing later stages read.
+    });
 
-    // A sub-agent spawn is denied outright: conductor owns dispatch (§3.5).
-    const spawnDenial = await expectDeny(
-      () => callGate(bench.hooks, { tool: "task", sessionID: ORCH, args: { description: "spawn a helper" } }),
-      "an orchestrator sub-agent spawn",
-    );
-    assert.ok(spawnDenial.message.length > 0, "the spawn refusal must carry a reason");
+    it("[13.1-s1-plan-writes-plan-md-and-decisions] conductor_plan writes runs/<runId>/plan.md, read back off disk", () => {
+      const c = caps();
+      assert.ok(c.planExists, "plan.md was really written to the run dir");
+      assert.ok(c.finalPlan.length > 0, "and it is not an empty file");
+      // NOT proven here: the PLANNED transition, that plan.md carries the
+      // per-item TEST STRATEGY, and the entire decisions.jsonl half of this row
+      // — the canned planner returns `decisions: []`, so this scenario cannot
+      // show the plan's design alternatives being extracted at all.
+    });
 
-    // The ORCHESTRATOR's own edit is denied while it holds no inline claim.
-    const orchDenial = await expectDeny(
-      () => callGate(bench.hooks, { tool: "edit", sessionID: ORCH, args: { filePath: path.join(bench.root, "src/slug.ts"), content: "x" } }),
-      "an orchestrator edit with no inline claim",
-    );
-    assert.ok(orchDenial.message.length > 0, "the orchestrator-edit refusal must carry a reason");
+    it(
+      "[13.1-s1-plan-review-refute-revise-clean] the plan review round-trips as §3.2:1132-1140: round 1's REFUTED major buys no revision, its UPHELD sibling re-prompts the planner, round 2's upheld major revises again, round 3 is CLEAN — two rounds spent, no cap question, no blocked item, and plan.md on disk carrying both revisions",
+      () => {
+        const c = caps();
+        assert.equal(c.reviewed.runState, "PLAN_REVIEWED", "the plan review reached a clean round and advanced the run");
+        // PLAN_REVIEWED is reached on BOTH exits — a clean round and the round cap —
+        // so the run state alone cannot tell them apart. These three can: the cap
+        // exit spends every configured round, mints one question per surviving
+        // finding and blocks the items those findings name.
+        assert.equal(
+          c.reviewed.rounds,
+          2,
+          "the review spent exactly two REVISION rounds and then found a clean one; a different count means the loop exited at the cap",
+        );
+        assert.deepEqual(
+          c.reviewed.questionIds,
+          [],
+          "a CLEAN round mints no plan-review-cap question: an unanswered question carried to REPORTED is the cap exit wearing a clean round's face",
+        );
+        assert.deepEqual(c.reviewed.blockedItemIds, [], "and it blocks no item");
+        assert.equal(c.questionCount, 0, "the §2.11 ledger is empty: nothing was escalated to a human");
 
-    // --- an out-of-order stage tool is refused by the phase gate ------------
-    await assert.rejects(
-      async () => handlePlan({ ...stageBase(bench) }),
-      /legal|INTAKE|classif/i,
-      "conductor_plan before classify must be refused by the §3.2 phase gate",
-    );
+        // The revisions really happened, to plan.md, in the order the findings
+        // arrived — and the planner was re-prompted with the UPHELD finding only.
+        assert.equal(c.planners.length, 4, "decompose + the first plan + exactly two revision re-prompts");
+        assert.ok(c.planners[2].text.includes("PF2"), "the first revision re-prompt carried the UPHELD finding");
+        assert.equal(
+          c.planners[2].text.includes("PF1"),
+          false,
+          "the REFUTED finding was never sent back to the planner — a refutation that still costs a revision is not a refutation",
+        );
+        assert.ok(
+          c.planners[2].text.includes("Build slugify, then titlecase."),
+          "the revision re-prompt carried the plan AS IT STANDS, so the planner revises rather than restarts",
+        );
+        assert.ok(c.planners[3].text.includes("PF3"), "the second revision re-prompt carried the SECOND round's upheld finding");
+        assert.ok(
+          c.finalPlan.includes(c.planIndependence) && c.finalPlan.includes(c.planVerification),
+          `plan.md on disk carries BOTH revisions the review demanded: ${JSON.stringify(c.finalPlan)}`,
+        );
 
-    // --- intake ------------------------------------------------------------
-    const classified = await handleClassify({ ...stageBase(bench) });
-    assert.equal(classified.kind, "work", "the scripted classifier and its skeptic agreed on `work`");
-
-    const decomposed = await handleDecompose({ ...stageBase(bench) });
-    assert.deepEqual([...decomposed.itemIds].sort(), ["I1", "I2"], "both items entered the queue");
-
-    const planned = await handlePlan({ ...stageBase(bench) });
-    assert.ok(existsSync(planned.planPath), "plan.md was really written to the run dir");
-
-    const reviewed = await handlePlanReview({ ...stageBase(bench) });
-    assert.equal(reviewed.runState, "PLAN_REVIEWED", "the plan review reached a clean round and advanced the run");
-    // PLAN_REVIEWED is reached on BOTH exits — a clean round and the round cap —
-    // so the run state alone cannot tell them apart. These three can: the cap
-    // exit spends every configured round, mints one question per surviving
-    // finding and blocks the items those findings name.
-    assert.equal(
-      reviewed.rounds,
-      2,
-      "the review spent exactly two REVISION rounds and then found a clean one; a different count means the loop exited at the cap",
-    );
-    assert.deepEqual(
-      reviewed.questionIds,
-      [],
-      "a CLEAN round mints no plan-review-cap question: an unanswered question carried to REPORTED is the cap exit wearing a clean round's face",
-    );
-    assert.deepEqual(reviewed.blockedItemIds, [], "and it blocks no item");
-    assert.equal(readQuestions(bench.runDir).length, 0, "the §2.11 ledger is empty: nothing was escalated to a human");
-
-    // The revisions really happened, to plan.md, in the order the findings
-    // arrived — and the planner was re-prompted with the UPHELD finding only.
-    const planners = bench.wiring.byRole("planner");
-    assert.equal(planners.length, 4, "decompose + the first plan + exactly two revision re-prompts");
-    assert.ok(planners[2].text.includes("PF2"), "the first revision re-prompt carried the UPHELD finding");
-    assert.equal(
-      planners[2].text.includes("PF1"),
-      false,
-      "the REFUTED finding was never sent back to the planner — a refutation that still costs a revision is not a refutation",
-    );
-    assert.ok(
-      planners[2].text.includes("Build slugify, then titlecase."),
-      "the revision re-prompt carried the plan AS IT STANDS, so the planner revises rather than restarts",
-    );
-    assert.ok(planners[3].text.includes("PF3"), "the second revision re-prompt carried the SECOND round's upheld finding");
-    const finalPlan = readFileSync(planned.planPath, "utf8");
-    assert.ok(
-      finalPlan.includes(PLAN_INDEPENDENCE) && finalPlan.includes(PLAN_VERIFICATION),
-      `plan.md on disk carries BOTH revisions the review demanded: ${JSON.stringify(finalPlan)}`,
+        // The refuted finding cost no revision and the upheld ones did: every verdict
+        // was really consulted.
+        assert.ok(
+          c.skeptics.some((s) => s.text.includes("PF1")) &&
+            c.skeptics.some((s) => s.text.includes("PF2")) &&
+            c.skeptics.some((s) => s.text.includes("PF3")),
+          "every plan-review major went to a skeptic before it could change the plan",
+        );
+        // NOT proven here: that `run.planReviewRounds` is the PERSISTED 2 — the
+        // count read is the handler's returned `rounds`, not run.json's field.
+      },
     );
 
-    // The refuted finding cost no revision and the upheld ones did: every verdict
-    // was really consulted.
-    const skeptics = bench.wiring.byRole("skeptic");
-    assert.ok(
-      skeptics.some((s) => s.text.includes("PF1")) &&
-        skeptics.some((s) => s.text.includes("PF2")) &&
-        skeptics.some((s) => s.text.includes("PF3")),
-      "every plan-review major went to a skeptic before it could change the plan",
-    );
+    // ---- §3.3 the wave and the item FSM ----------------------------------
 
-    // --- the wave ----------------------------------------------------------
-    const firstWave = await handleDispatchWave(waveArgs(bench));
-    assert.equal(firstWave.runState, "EXECUTING", "the first dispatch performed PLAN_REVIEWED -> EXECUTING");
-
-    // §2.6 condition 2, end to end and measured: the first member of the wave
-    // commits, HEAD moves, and the sibling's green — which really was green, on
-    // the tree that existed when it ran — is refused. This is the condition a
-    // `git switch` between validate and publish also produces, and the reason
-    // the freshness rule carries a head term at all.
-    const laggard = firstWave.items.find((d) => d.state !== "PUBLISHED");
-    assert.ok(laggard !== undefined, "one member of a two-item wave publishes first and strands the other on a stale green");
-    const staleDenial = await handlePublish({
-      store: bench.store,
-      fanout: bench.wiring.fanout,
-      runId: bench.runId,
-      itemId: (laggard as { itemId: string }).itemId,
-      config: bench.config,
-      journal: bench.journal.sink,
-      stateHome: bench.stateHome,
-      workspaceKey: "e2e",
-    } as unknown as Parameters<typeof handlePublish>[0]);
-    assert.equal(staleDenial.ok, false, "publishing on a verify measured before a sibling's commit must be REFUSED");
-    assert.match(
-      String(staleDenial.denial),
-      /HEAD is now/,
-      "the refusal must name the head mismatch, not merely say `stale` — an operator has to know to re-validate",
-    );
-
-    const wave = await drainWaves(bench);
-    for (const d of wave.items) {
-      assert.equal(
-        d.state,
-        "PUBLISHED",
-        `${d.itemId} must reach PUBLISHED; it stopped at ${String(d.stoppedAt)} (${String(d.envError)})`,
+    it("[13.1-s1-wave-dispatch-enters-executing] the first conductor_dispatch_wave performs PLAN_REVIEWED -> EXECUTING and then drives both items' pipelines itself", () => {
+      const c = caps();
+      assert.equal(c.firstWave.runState, "EXECUTING", "the first dispatch performed PLAN_REVIEWED -> EXECUTING");
+      assert.equal(c.firstWave.items.length, 2, "and it drove BOTH items of the wave, not one");
+      // The driver — not an orchestrator tool call — walked the pipelines: no
+      // stage handler between dispatch and the assertions below is called by
+      // this file, yet the items moved off PENDING.
+      assert.ok(
+        c.firstWave.items.some((d) => d.state === "PUBLISHED"),
+        "at least one item was walked all the way to PUBLISHED inside the dispatch call itself",
       );
-    }
+      // NOT proven here: that the transition went through core legalRunTransition
+      // specifically, that no `executors` override was passed (waveArgs simply
+      // omits the field), and the `wave.parallel` nextWave the row names.
+    });
 
-    // --- the evidence is measured, not claimed ------------------------------
-    const evidence = readEvidence(bench.runDir);
-    const reds = evidence.filter((r) => r.kind === "red");
-    const greens = evidence.filter((r) => r.kind === "green");
-    assert.ok(reds.length >= 2, "each behavioral item recorded a real red before any implementation existed");
-    assert.ok(greens.length >= 2, "each behavioral item recorded a real green from a real spawn");
-    assert.ok(
-      reds.some((r) => (r as { failureClass?: string }).failureClass === "missing-subject"),
-      "the greenfield first red is classified missing-subject (§2.6.1) — the legal red that makes greenfield TDD possible",
-    );
+    it("[13.1-s1-greenfield-missing-subject-legal-red] a REAL child test process that cannot resolve the not-yet-written module is persisted to evidence.jsonl with failureClass exactly 'missing-subject' and accepted as a legal red", () => {
+      const c = caps();
+      const reds = evidenceOf(c.evidence, "red");
+      assert.ok(reds.length >= 2, "each behavioral item recorded a real red before any implementation existed");
+      assert.ok(
+        reds.some((r) => r.failureClass === "missing-subject"),
+        "the greenfield first red is classified missing-subject (§2.6.1) — the legal red that makes greenfield TDD possible",
+      );
+      // NOT proven here: that the missing-subject red is I1's FIRST red
+      // specifically (the assertion is an existential over the ledger), and that
+      // the test-writer never created the missing module.
+    });
 
-    // --- the item-review finding was really adjudicated ---------------------
-    // IF1 is the one item-level finding this scenario raises, and its skeptic
-    // REFUTES it. Both halves are load-bearing: a finding that never reached a
-    // skeptic panel would have been routed as a fix, and a refuted finding that
-    // still dispatched one would mean the verdict changed nothing.
-    const if1Panel = bench.wiring.prompted.filter((p) => p.role === "skeptic" && p.text.includes("IF1"));
-    assert.equal(
-      if1Panel.length,
-      1,
-      "the item-review finding was adjudicated by exactly one skeptic seat (workflow.skepticsPerFinding=1)",
-    );
-    assert.equal(
-      bench.wiring.prompted.filter(
-        (p) => (p.role === "implementer" || p.role === "testWriter") && p.text.includes("IF1"),
-      ).length,
-      0,
-      "a REFUTED item-review finding dispatches no fix to anybody",
-    );
+    it("[13.1-s1-i2-compressed-published] I2 walks the SAME item FSM as I1 all the way to PUBLISHED on canned outputs that are clean on the first round of every loop", () => {
+      const c = caps();
+      for (const d of c.wave.items) {
+        assert.equal(
+          d.state,
+          "PUBLISHED",
+          `${d.itemId} must reach PUBLISHED; it stopped at ${String(d.stoppedAt)} (${String(d.envError)})`,
+        );
+      }
+      assert.ok(
+        c.wave.items.some((d) => d.itemId === "I2"),
+        "I2 is one of the items the assertion above just held to PUBLISHED",
+      );
+      const greens = evidenceOf(c.evidence, "green");
+      assert.ok(greens.length >= 2, "each behavioral item recorded a real green from a real spawn");
+      // NOT proven here: that EXACTLY two new commits exist, that I1's commit
+      // precedes I2's, and that I2's own verify record's head was re-established
+      // after I1's commit. What stands in for the last of those is the §2.6
+      // condition 2 refusal asserted below — the machine refuses a green
+      // measured before a sibling's commit — not a reading of I2's record.
+    });
 
-    // --- the commits are real and carry the right contents ------------------
-    const subjects = commitSubjects(bench.root);
-    assert.ok(subjects.length >= 4, `two publishes on top of the two fixture commits (saw ${subjects.length})`);
-    for (const s of subjects) {
-      assert.equal(/Co-Authored-By|Generated with/i.test(s), false, `commit subject must be trailer-free: ${s}`);
-    }
-    const published = publishedFiles(bench.root, bench.baseCommit);
-    assert.ok(published.includes("src/slug.ts") && published.includes("tests/slug.test.ts"), "I1's module and test both shipped");
-    assert.ok(published.includes("src/title.ts") && published.includes("tests/title.test.ts"), "I2's module and test both shipped");
-    assert.equal(published.includes("README.md"), false, "nothing outside the items' scopes was swept into a publish");
+    it("§2.6 condition 2 (no row of its own): a wave member's publish moves HEAD and its sibling's earlier green is REFUSED by name", () => {
+      const c = caps();
+      assert.ok(c.laggard !== undefined, "one member of a two-item wave publishes first and strands the other on a stale green");
+      assert.ok(c.staleDenial !== null, "the stranded item's publish was really attempted");
+      const denial = c.staleDenial as Awaited<ReturnType<typeof handlePublish>>;
+      assert.equal(denial.ok, false, "publishing on a verify measured before a sibling's commit must be REFUSED");
+      assert.match(
+        String(denial.denial),
+        /HEAD is now/,
+        "the refusal must name the head mismatch, not merely say `stale` — an operator has to know to re-validate",
+      );
+    });
 
-    // --- an override is spent, tainted and reported -------------------------
-    const grants = new Map<string, OverrideGrant>();
-    const override = await handleOverride({
-      store: bench.store,
-      runId: bench.runId,
-      config: bench.config,
-      journal: bench.journal.sink,
-      sessionID: ORCH,
-      itemId: "I1",
-      gate: "publish-freshness",
-      reason: "the operator accepts the stale window for this e2e",
-      grantedAction: "conductor_publish I1",
-      overrideGrants: grants,
-      stateHome: bench.stateHome,
-      workspaceKey: "e2e",
-    } as unknown as Parameters<typeof handleOverride>[0]);
-    assert.ok(override !== null, "the override handler returned a grant record");
-    const anomalies = readAnomalies(bench.runDir);
-    assert.ok(
-      anomalies.some((a) => a.kind === "override"),
-      "the override is recorded on the §2.8 anomaly ledger — the model's only fabrication path is a loud one",
-    );
+    it("the item-review finding IF1 was adjudicated (no row of its own): one skeptic seat, and a REFUTED finding dispatches no fix", () => {
+      const c = caps();
+      assert.equal(
+        c.if1Panel.length,
+        1,
+        "the item-review finding was adjudicated by exactly one skeptic seat (workflow.skepticsPerFinding=1)",
+      );
+      assert.equal(c.if1Fixers.length, 0, "a REFUTED item-review finding dispatches no fix to anybody");
+    });
 
-    // --- report -------------------------------------------------------------
-    const seamBefore = seamCalls.length;
-    const report = await handleReport(reportArgs(bench));
-    assert.equal(report.runState, "REPORTED", "conductor_report closed the run");
-    const reportPath = path.join(bench.runDir, "report.md");
-    assert.ok(existsSync(reportPath), "report.md was written");
-    const md = readFileSync(reportPath, "utf8");
-    assert.match(md, /I1/, "the report names the first item");
-    assert.match(md, /I2/, "the report names the second item");
-    assert.match(md, /override/i, "the spent override is visible in the report rather than buried in a ledger");
+    // ---- §3.3 publish ----------------------------------------------------
 
-    // G5's touchpoint, asserted as an OBSERVED CALL: the report's metrics section
-    // is there because adapter/router-client.ts really ran over a real socket, not
-    // because the `metrics` field was absent and handleReport rendered the same
-    // line for free. Whether the summary came back is the arm's business; that the
-    // seam was crossed is this file's.
-    assert.equal(
-      seamCalls.length,
-      seamBefore + 1,
-      "conductor_report must CALL the injected metrics seam exactly once — a report that never reaches router-client.ts makes the two G5 arms indistinguishable",
-    );
-    assert.match(md, /## Metrics/, "the report carries the §4.4 metrics section the seam feeds");
+    it("[13.1-s1-publish-real-commit-content] conductor_publish creates REAL commits whose name-status is read back with git: each item's module AND its test file shipped together, and nothing outside the items' scopes was swept in", () => {
+      const c = caps();
+      assert.ok(c.subjects.length >= 4, `two publishes on top of the two fixture commits (saw ${c.subjects.length})`);
+      assert.ok(
+        c.publishedPaths.includes("src/slug.ts") && c.publishedPaths.includes("tests/slug.test.ts"),
+        "I1's module and test both shipped",
+      );
+      assert.ok(
+        c.publishedPaths.includes("src/title.ts") && c.publishedPaths.includes("tests/title.test.ts"),
+        "I2's module and test both shipped",
+      );
+      assert.equal(c.publishedPaths.includes("README.md"), false, "nothing outside the items' scopes was swept into a publish");
+      // NOT proven here, and NOT EXERCISED anywhere in this scenario: the
+      // run.startDirty half of the row — a file already dirty inside I1's scope
+      // BEFORE the run started, excluded from the commit under
+      // git.preexistingDirty 'exclude', left byte-identical in the worktree, and
+      // its skipped path carried to the report. This scenario seeds no such file.
+    });
 
-    const finalRun = bench.store.loadRun(bench.runId);
-    assert.equal(finalRun.stop?.kind, "done", "the run's recorded stop is `done`");
-    recordFacts(bench, "full-pipeline", "ambient", report);
+    it("[13.1-s1-publish-message-trailer-free] every commit subject the pipeline created is read back off the real commit objects and carries no Co-Authored-By and no 'Generated with', case-insensitively", () => {
+      const c = caps();
+      assert.ok(c.subjects.length > 0, "there are real commit subjects to read");
+      for (const s of c.subjects) {
+        assert.equal(/Co-Authored-By|Generated with/i.test(s), false, `commit subject must be trailer-free: ${s}`);
+      }
+      // NOT proven here: the rest of the §3.3:1295 denylist (Signed-off-by,
+      // U+1F916), that the message BODY is trailer-free — trailers live in the
+      // body, and this reads `git log --pretty=%s`, subjects only — that the
+      // message names the item and its red proof, and that ZERO model
+      // sub-sessions were dispatched during the publish call.
+    });
+
+    // ---- §3.4 report and stop -------------------------------------------
+
+    it("[13.1-s1-stop-done-reported] run.json READ BACK FROM DISK carries stop {kind:'done'} and conductor_report reports the run at REPORTED", () => {
+      const c = caps();
+      assert.equal(c.report.runState, "REPORTED", "conductor_report closed the run");
+      assert.equal(c.finalRun.stop?.kind, "done", "the run's recorded stop is `done`");
+      // NOT proven here: that run.json's own `state` field is REPORTED (the
+      // REPORTED reading is the handler's return value, while only the stop is
+      // read back off disk), the stop's reasonDisplay/tsMs, the journaled
+      // fsm:transition for the EXECUTING->REPORTED edge, and that a subsequent
+      // conductor tool call against the terminal run is refused.
+    });
+
+    it("the report crosses the G5 metrics seam exactly once (no row of its own)", () => {
+      const c = caps();
+      // G5's touchpoint, asserted as an OBSERVED CALL: the report's metrics section
+      // is there because adapter/router-client.ts really ran over a real socket, not
+      // because the `metrics` field was absent and handleReport rendered the same
+      // line for free. Whether the summary came back is the arm's business; that the
+      // seam was crossed is this file's.
+      assert.equal(
+        c.seamCallsAfterReport,
+        c.seamCallsBefore + 1,
+        "conductor_report must CALL the injected metrics seam exactly once — a report that never reaches router-client.ts makes the two G5 arms indistinguishable",
+      );
+    });
+
+    // ---- §3.5 the gates --------------------------------------------------
+
+    it("[13.1-s1-out-of-order-tool-denied] an out-of-order conductor stage tool is REFUSED by the §3.2 phase gate with a legality-naming message", () => {
+      const c = caps();
+      assert.equal(
+        c.planBeforeClassify.threw,
+        true,
+        "conductor_plan before classify must be refused by the §3.2 phase gate; a gate that never denies is not a gate",
+      );
+      const err = c.planBeforeClassify.error as Error;
+      assert.ok(err instanceof Error, "the refusal must be a thrown Error");
+      assert.match(err.message, /legal|INTAKE|classif/i, "the refusal must name the legality it enforced");
+      // NOT proven here: the row's own case — conductor_publish named at an item
+      // still at PENDING, called through the PLUGIN'S TOOL MAP rather than the
+      // handler directly — and the whole SG-2 half, that the item file, run.json,
+      // the evidence ledger and git HEAD are byte-identical after the throw.
+    });
+
+    it("[13.1-s1-orchestrator-edit-denied] an ORCHESTRATOR edit to a source file is denied through the REAL tool.execute.before hook", () => {
+      const c = caps();
+      assert.ok(c.gateHookPresent, "the plugin must keep its tool.execute.before gate hook");
+      assert.equal(c.orchestratorEdit.threw, true, "an orchestrator edit with no inline claim was ALLOWED; a gate that never denies is not a gate");
+      const err = c.orchestratorEdit.error as Error;
+      assert.ok(err instanceof Error, "denial must be a thrown Error (opencode reads its message back to the model)");
+      assert.ok(err.message.length > 0, "the orchestrator-edit refusal must carry a reason");
+      // NOT proven here: that the message names the RULE and the legal
+      // alternative (the assertion above only requires a non-empty reason), that
+      // the file is byte-identical afterwards, and that the deny is journaled at
+      // warn level as gates/deny with the §7.4 snapshot.
+    });
+
+    it("[13.1-s1-spawn-denied-everywhere] a sub-agent spawn through the real hook is DENIED for the orchestrator session", () => {
+      const c = caps();
+      assert.ok(c.gateHookPresent, "the plugin must keep its tool.execute.before gate hook");
+      assert.equal(c.spawnFromOrchestrator.threw, true, "an orchestrator sub-agent spawn was ALLOWED; conductor owns dispatch (§3.5)");
+      const err = c.spawnFromOrchestrator.error as Error;
+      assert.ok(err instanceof Error, "denial must be a thrown Error");
+      assert.ok(err.message.length > 0, "the spawn refusal must carry a reason");
+      // NOT proven here, and it is the row's entire point: "everywhere". The
+      // spawn is attempted from ONE session — the orchestrator — while the row
+      // demands it from a REGISTERED IMPLEMENTER and from an UNREGISTERED session
+      // both, because a registry-based gate whose registry can be bypassed by a
+      // tool call is not a gate.
+    });
+
+    it("[13.1-s1-unregistered-write-denied] a session with NO registry entry has its write denied through the real hook, and the refusal names the registry rule", () => {
+      const c = caps();
+      assert.ok(c.gateHookPresent, "the plugin must keep its tool.execute.before gate hook");
+      assert.equal(c.strayWrite.threw, true, "an unregistered session's write was ALLOWED; a gate that never denies is not a gate");
+      const err = c.strayWrite.error as Error;
+      assert.ok(err instanceof Error, "denial must be a thrown Error (opencode reads its message back to the model)");
+      assert.match(err.message, /regist/i, "the refusal must name the registry rule it enforced");
+      // NOT proven here: the write-shaped BASH half of the disposition table,
+      // and — the half the row calls load-bearing — that the same unregistered
+      // session's READ is ALLOWED, without which this proves only that something
+      // was denied, not that the right thing was.
+    });
+
+    // ---- §3.6 the override ----------------------------------------------
+
+    it("[13.1-s1-override-once-taint-in-report] conductor_override is spent ONCE, records an `override` anomaly on the §2.8 ledger, and the taint reaches report.md", () => {
+      const c = caps();
+      assert.ok(c.override !== null, "the override handler returned a grant record");
+      assert.ok(
+        c.anomalies.some((a) => a.kind === "override"),
+        "the override is recorded on the §2.8 anomaly ledger — the model's only fabrication path is a loud one",
+      );
+      assert.equal(
+        c.anomalies.filter((a) => a.kind === "override").length,
+        1,
+        "exactly one override was spent in this run (SG-9 bounds it at one)",
+      );
+      assert.match(c.reportMd, /override/i, "the spent override is visible in the report rather than buried in a ledger");
+      // NOT proven here: the override this scenario spends names the
+      // `publish-freshness` gate, NOT the EDIT-SCOPE gate the row (SG-9) names —
+      // so the one-shot edit mechanics the row is about are untouched: that the
+      // next orchestrator edit inside the item's fileScope is ALLOWED and lands
+      // on disk, that the SECOND identical edit is re-DENIED, that the entry is
+      // appended to the item's taint[], and that run.counters.overridesUsed is 1.
+    });
+
+    // ---- §4.4 the report document ---------------------------------------
+
+    it("[13.1-s1-report-content] runs/<runId>/report.md is written and names both items, the spent override's taint, and a §4.4 metrics section", () => {
+      const c = caps();
+      assert.ok(c.reportExists, "report.md was written");
+      assert.match(c.reportMd, /I1/, "the report names the first item");
+      assert.match(c.reportMd, /I2/, "the report names the second item");
+      assert.match(c.reportMd, /override/i, "the spent override is visible in the report");
+      assert.match(c.reportMd, /## Metrics/, "the report carries the §4.4 metrics section the seam feeds");
+      // NOT proven here — most of the row: per-item WHAT-SHIPPED with each
+      // item's red proof and review rounds (naming "I1" is not naming what
+      // shipped), the EXCLUSIONS the closing verify applied, the publish-skipped
+      // pre-existing dirty path (never seeded in this scenario), the
+      // decision-ledger summary (the canned planner emits no decisions), and the
+      // deferred section stating none (SG-5). The row's "OPEN QUESTION with its
+      // exact Q-id" clause is not merely unasserted but UNREACHABLE here: this
+      // scenario mints zero questions, as the plan-review row asserts.
+    });
   },
 );
 
