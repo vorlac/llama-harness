@@ -69,7 +69,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -99,6 +99,7 @@ import {
 import type { OverrideGrant } from "../adapter/tools.ts";
 import { createFanout } from "../adapter/fanout.ts";
 import type { Fanout } from "../adapter/fanout.ts";
+import { childEnv } from "../adapter/evidence.ts";
 import { openWorkspace } from "../adapter/state.ts";
 import type { StateStore } from "../adapter/state.ts";
 import { readQuestions } from "../adapter/questions.ts";
@@ -141,12 +142,17 @@ interface PluginHooks {
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const doctrineDir = path.resolve(testsDir, "..", "doctrine");
 
-// The REAL doctrine packs, read off disk. handleValidate refuses to dispatch a
-// DEBUG fix without debug.md, so a scenario that hands over an empty pack set is
-// testing a configuration nobody ships.
+// The REAL doctrine packs, read off disk, keyed the way the SHIPPED loader keys
+// them — by FILE NAME, extension included (adapter/inject.ts loadPacks writes
+// `packs[file]`, and the handlers read `packs["debug.md"]` /
+// `packs["receive-review.md"]`). Keyed any other way this map is a set of packs
+// no handler can find: handleValidate refuses to dispatch a DEBUG fix without
+// debug.md and conductor_item_review refuses to dispatch a review fix without
+// receive-review.md, so a scenario that hands over a map the handlers cannot
+// read is testing a configuration nobody ships.
 const PACKS: Record<string, string> = {};
 for (const name of readdirSync(doctrineDir)) {
-  if (name.endsWith(".md")) PACKS[name.slice(0, -3)] = readFileSync(path.join(doctrineDir, name), "utf8");
+  if (name.endsWith(".md")) PACKS[name] = readFileSync(path.join(doctrineDir, name), "utf8");
 }
 
 const ORCH = "ses_e2e_orchestrator";
@@ -184,11 +190,55 @@ function git(dir: string, args: string[]): string {
   });
 }
 
+// A git QUESTION, whose answer may legitimately be "no": `git cat-file -e
+// <commit>:<path>` exits non-zero when that commit's tree does not carry the
+// path, which is the whole point of asking.
+function gitOk(dir: string, args: string[]): boolean {
+  return (
+    spawnSync("git", args, { cwd: dir, env: GIT_ENV, encoding: "utf8", stdio: "ignore" }).status === 0
+  );
+}
+
+// The fixture's own BASELINE test and the subject module it measures. It exists so
+// the scope glob below matches at least one file from the very first verify onward:
+// `tests/` was created EMPTY, and on node 26.7.0 a glob matching zero files exits 0
+// having run nothing, so every verify taken before the pipeline wrote its first test
+// file was a vacuous green — an item could reach VALIDATED on a process structurally
+// incapable of going red. This file makes the suite non-empty and, because it really
+// imports a real subject, makes it DISCRIMINATE.
+//
+// It is committed in the fixture's OWN seed commit, so it can never be mistaken for
+// pipeline output; it is in no item's fileScope and no item's testScope, so it is
+// never quarantined, never excluded, and never part of any item's foreign-red set.
+const BASELINE_TEST_REL = "tests/baseline.test.ts";
+const BASELINE_SUBJECT_REL = "src/baseline.ts";
+const BASELINE_SUBJECT = "export function baseline() {\n  return 'baseline';\n}\n";
+const BASELINE_TEST_NAME = "the fixture baseline subject is importable and behaves";
+
+// The execution WITNESS is written FIRST and only when the environment asks for one
+// (the control below asks; a pipeline verify never does), so the baseline can prove
+// it RAN — even on the run where importing its subject fails — without ever writing
+// a byte into the fixture repo and dirtying a tree the publish assertions measure.
+const BASELINE_TEST_SOURCE =
+  'import { writeFileSync } from "node:fs";\n' +
+  'import test from "node:test";\n' +
+  'import assert from "node:assert/strict";\n' +
+  "\n" +
+  "const witness = process.env.CONDUCTOR_E2E_BASELINE_WITNESS;\n" +
+  'if (witness !== undefined && witness.length > 0) writeFileSync(witness, "ran");\n' +
+  "\n" +
+  `const mod = await import("../${BASELINE_SUBJECT_REL}");\n` +
+  "\n" +
+  `test(${JSON.stringify(BASELINE_TEST_NAME)}, () => {\n` +
+  '  assert.equal(mod.baseline(), "baseline");\n' +
+  "});\n";
+
 // A committed fixture repo with the layout the scenarios script against: src/ for
 // behavioral code, tests/ for the item tests the pipeline writes, docs/ for the
-// non-behavioral path. The author identity goes into the repo's OWN config too,
-// because the handlers' commits run under adapter/gitio.ts's environment rather
-// than under this file's GIT_ENV.
+// non-behavioral path, and the committed baseline test above so `tests/` is never
+// empty. The author identity goes into the repo's OWN config too, because the
+// handlers' commits run under adapter/gitio.ts's environment rather than under this
+// file's GIT_ENV.
 function fixtureRepo(tag: string): string {
   const dir = scratch(tag);
   git(dir, ["init", "-b", "main"]);
@@ -199,6 +249,8 @@ function fixtureRepo(tag: string): string {
   mkdirSync(path.join(dir, "docs"), { recursive: true });
   writeFileSync(path.join(dir, "README.md"), "# fixture\n");
   writeFileSync(path.join(dir, "docs", "guide.md"), "# guide\n\nplaceholder.\n");
+  writeFileSync(path.join(dir, BASELINE_SUBJECT_REL), BASELINE_SUBJECT);
+  writeFileSync(path.join(dir, BASELINE_TEST_REL), BASELINE_TEST_SOURCE);
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-m", "seed"]);
   return dir;
@@ -226,8 +278,31 @@ function publishedFiles(dir: string, since: string): string[] {
 
 // The fixture repo's own verify command. A GLOB positional, never a bare
 // directory: `node --test tests/` reports a bogus failing test on node 26.x, and
-// a suite that is red for a reason the pipeline did not cause proves nothing.
+// a suite that is red for a reason the pipeline did not cause proves nothing. The
+// other half of that trap is the glob that matches NOTHING, which exits 0 — which
+// is why the fixture ships a committed baseline test the glob always matches, and
+// why the control below runs THIS command and proves it goes both ways.
 const VERIFY_CMD = [process.execPath, "--test", "tests/*.test.ts"];
+
+// A CONTROL run of the fixture's OWN suite, through the exact argv the scope config
+// hands the pipeline, spawned without a shell (node expands the glob) and under
+// evidence.ts's childEnv. Stripping NODE_TEST_CONTEXT is load-bearing: inherited, a
+// `node --test` child mistakes itself for a test child of THIS run and reports exit
+// 0 for a suite that actually failed — which would make the control itself vacuous.
+// The verify/item-test runs go through evidence.ts, which strips it for the same
+// reason; the control must match. (Committed idiom: tools-9.4b.test.ts's
+// controlSuite; this one runs the CONFIGURED command, because the command is what
+// is on trial.)
+function controlSuite(repo: string, witness?: string): { status: number | null; output: string } {
+  const env = childEnv();
+  if (witness !== undefined) env.CONDUCTOR_E2E_BASELINE_WITNESS = witness;
+  const r = spawnSync(VERIFY_CMD[0], VERIFY_CMD.slice(1), {
+    cwd: repo,
+    env,
+    encoding: "utf8",
+  });
+  return { status: r.status, output: (r.stdout ?? "") + (r.stderr ?? "") };
+}
 
 interface ConfigOpts {
   writes?: Config["parallel"]["writes"];
@@ -339,6 +414,13 @@ function makeJournal(): JournalCapture {
 interface Reply {
   body: unknown;
   write?: Array<{ rel: string; text: string }>;
+  // PARK this sub-session instead of answering it. The prompt stays IN FLIGHT
+  // until the scenario releases it, which is the only way to read the DRIVER's
+  // interleaving off the fan-out layer: how many sub-sessions the engine had
+  // open at one instant is a fact about the driver, whereas how long a wave took
+  // is a fact about the machine. The `write` side effects still happen at park
+  // time — a real sub-session edits its tree before it replies.
+  park?: boolean;
 }
 
 interface RespondCtx {
@@ -378,12 +460,25 @@ function noFindings(): unknown {
   return { findings: [] };
 }
 
+// One sub-session the fan-out engine has OPEN right now: the fake SDK's own
+// pending list, joined to the role/item/tree the engine registered for it.
+interface InFlight {
+  sessionID: string;
+  role: string;
+  itemId: string;
+  tree: string;
+}
+
 interface Wiring {
   fanout: Fanout;
   sdk: ReturnType<typeof makeFakeSdk>;
   prompted: RespondCtx[];
   treeState: { isFrozen: (t: string) => boolean; onClear: (f: (t: string) => void) => () => void; notifyClear: (t: string) => void };
   byRole: (role: string) => RespondCtx[];
+  // The parked sub-sessions, in the fake SDK's own order, and the release that
+  // lets them all answer at once.
+  inFlight: () => InFlight[];
+  releaseParked: () => number;
 }
 
 // Build the fan-out engine over the fake SDK with a scripted responder. Every
@@ -402,6 +497,8 @@ function makeWiring(
   const sdk = makeFakeSdk({ registry });
   const prompted: RespondCtx[] = [];
   const counts = new Map<string, number>();
+  // sessionID -> the answer a parked sub-session will give when released.
+  const parked = new Map<string, { ctx: RespondCtx; text: string }>();
   sdk.setResponder((req) => {
     const role = req.entry?.role ?? "";
     const itemId = req.entry?.itemId ?? "";
@@ -426,7 +523,12 @@ function makeWiring(
       mkdirSync(path.dirname(abs), { recursive: true });
       writeFileSync(abs, w.text);
     }
-    return { kind: "reply", text: JSON.stringify(reply.body) };
+    const text = JSON.stringify(reply.body);
+    if (reply.park === true) {
+      parked.set(req.sessionID, { ctx, text });
+      return { kind: "pending" };
+    }
+    return { kind: "reply", text };
   });
 
   const listeners: Array<(t: string) => void> = [];
@@ -452,7 +554,110 @@ function makeWiring(
     treeState,
     runId,
   );
-  return { fanout, sdk, prompted, treeState, byRole: (r) => prompted.filter((p) => p.role === r) };
+  // The engine's OPEN sub-sessions, read out of the fake's own pending list so
+  // the count is the SDK's, not a tally this file keeps.
+  const inFlight = (): InFlight[] =>
+    sdk.pending.map((p) => {
+      const rec = parked.get(p.sessionID);
+      return {
+        sessionID: p.sessionID,
+        role: rec === undefined ? "" : rec.ctx.role,
+        itemId: rec === undefined ? "" : rec.ctx.itemId,
+        tree: rec === undefined ? "" : rec.ctx.tree,
+      };
+    });
+
+  const releaseParked = (): number => {
+    const ids = sdk.pending.map((p) => p.sessionID);
+    for (const id of ids) {
+      const rec = parked.get(id);
+      parked.delete(id);
+      sdk.resolvePending(id, { kind: "reply", text: rec === undefined ? "{}" : rec.text });
+    }
+    return ids.length;
+  };
+
+  return {
+    fanout,
+    sdk,
+    prompted,
+    treeState,
+    byRole: (r) => prompted.filter((p) => p.role === r),
+    inFlight,
+    releaseParked,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reading the DRIVER's interleaving off the fan-out layer
+// ---------------------------------------------------------------------------
+
+// Poll the parked sub-sessions while a wave runs and keep the LARGEST set that
+// was open at one instant, then let them answer so the wave proceeds.
+//
+// Deliberately NOT a wall-clock proof. "Two stages overlapped for N ms" is a
+// statement about the machine and goes flaky the moment the machine is busy;
+// "the engine had two sub-sessions open at the same instant" is a statement
+// about the DRIVER, and a strictly serial driver cannot make it true however
+// fast or slow the machine is — its second job does not exist until the first
+// one's promise settles.
+//
+// The release rule is what keeps that honest in both directions: the watcher
+// lets a parked set go as soon as it reaches `expect` (so a concurrent driver is
+// never made to wait), and otherwise only after the set has stood UNCHANGED for
+// the whole settle window (so a concurrent driver that was a few turns from
+// opening its second session is never cut short and mis-read as serial).
+interface Watcher {
+  peak: () => InFlight[];
+  stop: () => Promise<void>;
+}
+
+// `expectItems` is the number of DISTINCT items whose sub-sessions must be open
+// together before the watcher stops waiting; the peak it keeps is the parked set
+// that spanned the most items, which is the quantity the concurrency claim is
+// about (two sessions of the SAME item overlapping says nothing about whether
+// the driver interleaves ITEMS).
+function watchInterleaving(wiring: Wiring, expectItems: number): Watcher {
+  const POLL_MS = 4;
+  const SETTLE_POLLS = 12; // ~50ms of an UNCHANGING parked set before releasing
+  const spread = (live: InFlight[]): number => new Set(live.map((p) => p.itemId)).size;
+  let peak: InFlight[] = [];
+  let running = true;
+  const loop = (async (): Promise<void> => {
+    let lastKey = "";
+    let stable = 0;
+    while (running) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      const live = wiring.inFlight();
+      if (live.length === 0) {
+        lastKey = "";
+        stable = 0;
+        continue;
+      }
+      if (spread(live) > spread(peak) || (spread(live) === spread(peak) && live.length > peak.length)) {
+        peak = live;
+      }
+      const key = live
+        .map((p) => `${p.role}:${p.itemId}:${p.sessionID}`)
+        .sort()
+        .join(",");
+      stable = key === lastKey ? stable + 1 : 0;
+      lastKey = key;
+      if (spread(live) >= expectItems || stable >= SETTLE_POLLS) {
+        wiring.releaseParked();
+        lastKey = "";
+        stable = 0;
+      }
+    }
+  })();
+  return {
+    peak: () => peak,
+    stop: async (): Promise<void> => {
+      running = false;
+      await loop;
+      wiring.releaseParked();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +912,20 @@ function readEvidence(runDir: string): EvidenceRecord[] {
     .map((l) => JSON.parse(l) as EvidenceRecord);
 }
 
+// The §2.6 ledger, narrowed to one record kind (and optionally one item) with the
+// union discriminated rather than cast away — an assertion that reads
+// `failureClass` off a `verify` record is an assertion about nothing.
+function evidenceOf<K extends EvidenceRecord["kind"]>(
+  records: readonly EvidenceRecord[],
+  kind: K,
+  itemId?: string,
+): Array<Extract<EvidenceRecord, { kind: K }>> {
+  return records.filter(
+    (record): record is Extract<EvidenceRecord, { kind: K }> =>
+      record.kind === kind && (itemId === undefined || record.itemId === itemId),
+  );
+}
+
 function readAnomalies(runDir: string): Array<Record<string, unknown>> {
   const file = path.join(runDir, "anomalies.jsonl");
   if (!existsSync(file)) return [];
@@ -765,6 +984,93 @@ function itemTestSource(subject: string, call: string, expected: string): string
 }
 
 // ===========================================================================
+// Control — the fixture suite itself, before any scenario leans on it
+// ===========================================================================
+
+test(
+  "[13.1-fixture-suite-discriminates] the fixture repo's configured verify command is ONE glob positional that really matches, and the suite it runs DISCRIMINATES: with the baseline subject present the suite exits 0 having executed the fixture's own committed test, and with that subject removed the same command exits non-zero naming that same test file — so no later `the verify was green` assertion in this file can be resting on a command that ran nothing",
+  { timeout: 120_000 },
+  () => {
+    // (a) The SHAPE of the command every scenario's verify runs. Both node 26.7.0
+    // traps look exactly like a working command: a directory positional
+    // (`tests/`) is resolved as a module and reports a bogus failing test, and a
+    // glob matching zero files exits 0 having run nothing.
+    const positionals = VERIFY_CMD.slice(1).filter((arg) => !arg.startsWith("-"));
+    assert.equal(
+      positionals.length,
+      1,
+      `the scope command must carry exactly ONE positional (saw ${JSON.stringify(VERIFY_CMD)})`,
+    );
+    const scope = positionals[0];
+    assert.ok(scope.includes("*"), `the positional must be a GLOB, never a directory positional: ${scope}`);
+    assert.equal(scope.endsWith("/"), false, `a trailing slash is a directory positional in disguise: ${scope}`);
+
+    const root = fixtureRepo("control");
+    const subjectAbs = path.join(root, BASELINE_SUBJECT_REL);
+    const witness = path.join(scratch("control-witness"), "ran.txt");
+
+    // The baseline is SEED, not pipeline output: both files are in the fixture's
+    // own first commit and the tree is clean before a run ever starts. An
+    // uncommitted baseline would show up as run-start dirt and could be mistaken
+    // for something a sub-session wrote.
+    const seeded = git(root, ["show", "--pretty=format:", "--name-only", "HEAD"]);
+    assert.ok(seeded.includes(BASELINE_TEST_REL), `${BASELINE_TEST_REL} is in the fixture's seed commit:\n${seeded}`);
+    assert.ok(seeded.includes(BASELINE_SUBJECT_REL), `${BASELINE_SUBJECT_REL} is in the fixture's seed commit:\n${seeded}`);
+    assert.equal(git(root, ["status", "--porcelain"]).trim(), "", "the seeded baseline leaves the fixture tree CLEAN");
+
+    // (b) SUBJECT PRESENT: the committed suite is green, and the witness proves it
+    // was green because a real test file RAN — not because the glob matched
+    // nothing. This is the assertion a zero-match glob cannot survive.
+    const present = controlSuite(root, witness);
+    assert.equal(
+      present.status,
+      0,
+      `control: with ${BASELINE_SUBJECT_REL} present the fixture suite must exit 0\n${present.output}`,
+    );
+    assert.equal(
+      existsSync(witness),
+      true,
+      `control: the suite EXECUTED ${BASELINE_TEST_REL}; an exit 0 with no execution witness is the zero-match vacuous green this fixture exists to rule out\n${present.output}`,
+    );
+    assert.equal(readFileSync(witness, "utf8"), "ran", "control: the witness is the baseline test's own byte");
+    // Reporter-agnostic second witness: both node reporters print the NAME of
+    // every test they ran, and a zero-match glob prints no name at all. (The file
+    // PATH is printed only on failure, which is why the red half below can assert
+    // on it and this half cannot.)
+    assert.ok(
+      present.output.includes(BASELINE_TEST_NAME),
+      `control: the green run must report the baseline test by name; a run that names no test ran no test\n${present.output}`,
+    );
+
+    // (c) SUBJECT REMOVED: the very same command now FAILS, and the failure names
+    // the fixture's own test file. A suite that cannot be made to fail measures
+    // nothing, and every later scenario's green rests on this half.
+    rmSync(witness, { force: true });
+    rmSync(subjectAbs, { force: true });
+    const removed = controlSuite(root, witness);
+    assert.notEqual(
+      removed.status,
+      0,
+      `control: with ${BASELINE_SUBJECT_REL} removed the fixture suite must exit NON-ZERO\n${removed.output}`,
+    );
+    assert.ok(
+      removed.output.includes("baseline.test.ts"),
+      `control: the failure must name the fixture's own test file, not some unrelated error\n${removed.output}`,
+    );
+    assert.equal(
+      existsSync(witness),
+      true,
+      `control: the failing run still EXECUTED the test file — the red is the subject's absence, not a glob that matched nothing\n${removed.output}`,
+    );
+
+    // And the fixture hands every scenario the PRESENT state, not this mutilated
+    // one: the removal above happened in a repo of this test's own.
+    writeFileSync(subjectAbs, BASELINE_SUBJECT);
+    assert.equal(controlSuite(root).status, 0, "control: restoring the subject restores the green — the suite tracks the subject, both ways");
+  },
+);
+
+// ===========================================================================
 // Scenario 1 — full-pipeline
 // ===========================================================================
 
@@ -810,11 +1116,48 @@ test(
       },
     };
 
-    // The plan-review round trip: round 1 raises two majors, the skeptic refutes
-    // the first and upholds the second; the revision answers it and round 2 is
-    // clean. `planRound` counts reviewer waves so the script is a real sequence
-    // rather than a constant.
-    let planRound = 0;
+    // The plan-review round trip, driven by the DOCUMENT and never by a counter.
+    // Each lens judges the plan.md text it was actually handed and stops raising
+    // a finding only once the revision it demanded is really in that text; the
+    // scripted planner resolves exactly the findings its own re-prompt carries
+    // and keeps what it has already written. So a clean round is reachable ONLY
+    // if the handler really re-wrote plan.md and really re-reviewed the REVISED
+    // document — a loop that re-read the old text would raise the same finding
+    // every round and leave at the cap with questions, which is what this
+    // scenario used to do while asserting nothing that could tell the difference.
+    const PLAN_BASE = "# plan\n\nBuild slugify, then titlecase.\n";
+    const PLAN_INDEPENDENCE = "The two functions share no state, so either build order works.";
+    const PLAN_VERIFICATION =
+      "Each item is verified by its own test file under tests/, run by the repo's verify command.";
+    let plannerDraft = PLAN_BASE;
+
+    // Round 1 raises PF1 (refuted by its skeptic, so it buys no revision) and PF2
+    // (upheld). Round 2, over the revised plan, raises PF3 (upheld). Round 3 is
+    // clean. Two revisions are spent, so `run.planReviewRounds` is 2.
+    const PF1 = {
+      id: "PF1",
+      severity: "major",
+      lens: "scope",
+      claim: "the two items share a helper and cannot parallelize",
+      evidence: "both titles mention string handling",
+      suggestedFix: "serialize them",
+    };
+    const PF2 = {
+      id: "PF2",
+      severity: "major",
+      lens: "plan-completeness",
+      claim: "the plan never says the two functions are independent",
+      evidence: "the markdown lists them without stating their relationship",
+      suggestedFix: "state that they share no state",
+    };
+    const PF3 = {
+      id: "PF3",
+      severity: "major",
+      lens: "plan-completeness",
+      claim: "the plan never says how either item is verified",
+      evidence: "the markdown names no test file and no verify command",
+      suggestedFix: "state that each item is verified by its own test file",
+    };
 
     const script: Script = (ctx) => {
       if (ctx.role === "mechanical") {
@@ -829,44 +1172,19 @@ test(
       }
       if (ctx.role === "planner") {
         // The first planner prompt is decompose (schema Queue); every later one
-        // is plan or plan revision (schema Plan).
+        // is plan or plan revision (schema Plan). A revision carries the findings
+        // that survived their skeptics, and this planner answers EXACTLY those —
+        // nothing else moves the document, so a finding that never reached the
+        // planner is a finding the next review round raises again.
         if (ctx.nth === 0) return { body: QUEUE };
-        return {
-          body: {
-            markdown:
-              planRound === 0
-                ? "# plan\n\nBuild slugify, then titlecase.\n"
-                : "# plan\n\nBuild slugify, then titlecase. Both are pure functions with no shared state, which is the revision the upheld finding asked for.\n",
-            decisions: [],
-          },
-        };
+        if (ctx.text.includes("PF2")) plannerDraft += PLAN_INDEPENDENCE + "\n";
+        if (ctx.text.includes("PF3")) plannerDraft += PLAN_VERIFICATION + "\n";
+        return { body: { markdown: plannerDraft, decisions: [] } };
       }
       if (ctx.role === "reviewer" && ctx.itemId === "") {
-        // Plan review. Round 1: two majors. Round 2 (after the revision): clean.
-        if (planRound === 0) {
-          return {
-            body: {
-              findings: [
-                {
-                  id: "PF1",
-                  severity: "major",
-                  lens: "scope",
-                  claim: "the two items share a helper and cannot parallelize",
-                  evidence: "both titles mention string handling",
-                  suggestedFix: "serialize them",
-                },
-                {
-                  id: "PF2",
-                  severity: "major",
-                  lens: "plan-completeness",
-                  claim: "the plan never says the two functions are independent",
-                  evidence: "the markdown lists them without stating their relationship",
-                  suggestedFix: "state that they share no state",
-                },
-              ],
-            },
-          };
-        }
+        // Plan review, judged against the plan THIS lens was handed.
+        if (!ctx.text.includes(PLAN_INDEPENDENCE)) return { body: { findings: [PF1, PF2] } };
+        if (!ctx.text.includes(PLAN_VERIFICATION)) return { body: { findings: [PF3] } };
         return { body: noFindings() };
       }
       if (ctx.role === "skeptic") {
@@ -876,6 +1194,9 @@ test(
         }
         if (ctx.text.includes("PF2")) {
           return { body: { findingId: "PF2", upheld: true, reasoning: "the plan really is silent on independence" } };
+        }
+        if (ctx.text.includes("PF3")) {
+          return { body: { findingId: "PF3", upheld: true, reasoning: "the plan really names no test file and no verify command" } };
         }
         if (ctx.text.includes("IF1")) {
           return { body: { findingId: "IF1", upheld: false, reasoning: "the module already handles the case the finding claims is missing" } };
@@ -970,18 +1291,55 @@ test(
 
     const reviewed = await handlePlanReview({ ...stageBase(bench) });
     assert.equal(reviewed.runState, "PLAN_REVIEWED", "the plan review reached a clean round and advanced the run");
-    assert.ok(reviewed.rounds >= 1, "the review really ran a revision round rather than passing on round 1");
+    // PLAN_REVIEWED is reached on BOTH exits — a clean round and the round cap —
+    // so the run state alone cannot tell them apart. These three can: the cap
+    // exit spends every configured round, mints one question per surviving
+    // finding and blocks the items those findings name.
+    assert.equal(
+      reviewed.rounds,
+      2,
+      "the review spent exactly two REVISION rounds and then found a clean one; a different count means the loop exited at the cap",
+    );
+    assert.deepEqual(
+      reviewed.questionIds,
+      [],
+      "a CLEAN round mints no plan-review-cap question: an unanswered question carried to REPORTED is the cap exit wearing a clean round's face",
+    );
+    assert.deepEqual(reviewed.blockedItemIds, [], "and it blocks no item");
+    assert.equal(readQuestions(bench.runDir).length, 0, "the §2.11 ledger is empty: nothing was escalated to a human");
 
-    // The refuted finding cost no revision and the upheld one did: both verdicts
-    // were really consulted.
+    // The revisions really happened, to plan.md, in the order the findings
+    // arrived — and the planner was re-prompted with the UPHELD finding only.
+    const planners = bench.wiring.byRole("planner");
+    assert.equal(planners.length, 4, "decompose + the first plan + exactly two revision re-prompts");
+    assert.ok(planners[2].text.includes("PF2"), "the first revision re-prompt carried the UPHELD finding");
+    assert.equal(
+      planners[2].text.includes("PF1"),
+      false,
+      "the REFUTED finding was never sent back to the planner — a refutation that still costs a revision is not a refutation",
+    );
+    assert.ok(
+      planners[2].text.includes("Build slugify, then titlecase."),
+      "the revision re-prompt carried the plan AS IT STANDS, so the planner revises rather than restarts",
+    );
+    assert.ok(planners[3].text.includes("PF3"), "the second revision re-prompt carried the SECOND round's upheld finding");
+    const finalPlan = readFileSync(planned.planPath, "utf8");
+    assert.ok(
+      finalPlan.includes(PLAN_INDEPENDENCE) && finalPlan.includes(PLAN_VERIFICATION),
+      `plan.md on disk carries BOTH revisions the review demanded: ${JSON.stringify(finalPlan)}`,
+    );
+
+    // The refuted finding cost no revision and the upheld ones did: every verdict
+    // was really consulted.
     const skeptics = bench.wiring.byRole("skeptic");
     assert.ok(
-      skeptics.some((s) => s.text.includes("PF1")) && skeptics.some((s) => s.text.includes("PF2")),
-      "both plan-review majors went to a skeptic before either changed the plan",
+      skeptics.some((s) => s.text.includes("PF1")) &&
+        skeptics.some((s) => s.text.includes("PF2")) &&
+        skeptics.some((s) => s.text.includes("PF3")),
+      "every plan-review major went to a skeptic before it could change the plan",
     );
 
     // --- the wave ----------------------------------------------------------
-    planRound = 1;
     const firstWave = await handleDispatchWave(waveArgs(bench));
     assert.equal(firstWave.runState, "EXECUTING", "the first dispatch performed PLAN_REVIEWED -> EXECUTING");
 
@@ -1027,6 +1385,25 @@ test(
     assert.ok(
       reds.some((r) => (r as { failureClass?: string }).failureClass === "missing-subject"),
       "the greenfield first red is classified missing-subject (§2.6.1) — the legal red that makes greenfield TDD possible",
+    );
+
+    // --- the item-review finding was really adjudicated ---------------------
+    // IF1 is the one item-level finding this scenario raises, and its skeptic
+    // REFUTES it. Both halves are load-bearing: a finding that never reached a
+    // skeptic panel would have been routed as a fix, and a refuted finding that
+    // still dispatched one would mean the verdict changed nothing.
+    const if1Panel = bench.wiring.prompted.filter((p) => p.role === "skeptic" && p.text.includes("IF1"));
+    assert.equal(
+      if1Panel.length,
+      1,
+      "the item-review finding was adjudicated by exactly one skeptic seat (workflow.skepticsPerFinding=1)",
+    );
+    assert.equal(
+      bench.wiring.prompted.filter(
+        (p) => (p.role === "implementer" || p.role === "testWriter") && p.text.includes("IF1"),
+      ).length,
+      0,
+      "a REFUTED item-review finding dispatches no fix to anybody",
     );
 
     // --- the commits are real and carry the right contents ------------------
@@ -1075,6 +1452,528 @@ test(
 
     const finalRun = bench.store.loadRun(bench.runId);
     assert.equal(finalRun.stop?.kind, "done", "the run's recorded stop is `done`");
+  },
+);
+
+// ===========================================================================
+// Scenario 1's CORRECTION LOOPS, each walked end to end
+//
+// The scenario above rides the happy path: every critic approves, every review
+// lens is silent, and the one item-level finding is refuted. That leaves the
+// §3.3 correction loops — the loops the whole design exists for — untravelled,
+// which is exactly how a suite stays green while the budgets that bound those
+// loops are set to zero. Each test below drives ONE loop, and each of them feeds
+// the machine something it MUST refuse: a test that does not pin its acceptance,
+// an implementation that ignores an acceptance line, a test that does not pin
+// the behaviour once the implementation exists, and a test that cannot be parsed
+// at all. Every scripted reply is derived from the text the handler actually
+// sent — the critics judge the test they were shown, the reviewers judge the
+// tree as it stands, and the fixers act on the finding they were handed — so a
+// loop that stopped re-reading, stopped re-dispatching or stopped re-running
+// cannot reach the end of any of these tests.
+// ===========================================================================
+
+test(
+  "[13.1-s1-vet-mustfix-then-vetted] the RED->TEST_VETTED vet loop really turns: round 1's critics return ONE mustFix over a test that does not pin its acceptance, the handler routes it BACK TO THE TEST-WRITER (never the implementer) carrying the union, the repaired test is re-run and must still be a §2.6.1-legal red, round 2 is clean — and the item's persisted §2.6 red pointer names the POST-repair failure rather than the pre-repair one (C-032)",
+  { timeout: 120_000 },
+  async () => {
+    const FILE = "src/shout.ts";
+    const TEST_REL = "tests/shout.test.ts";
+    const ACCEPTANCE = 'shout("hi") === "HI!"';
+    // The must-fix the critics raise, and the assertion that answers it. The
+    // scripted critic looks for the ASSERTION in the test it is shown, and the
+    // scripted writer looks for the MUST-FIX in the prompt it is given: neither
+    // side counts rounds, so a handler that stopped delivering the union, or
+    // stopped re-reading the repaired test, never reaches a clean round.
+    const MUST_FIX = 'assert the acceptance line ' + ACCEPTANCE + ", not merely the subject's type";
+    const STRONG_ASSERT = 'assert.equal(shout("hi"), "HI!");';
+    const IMPORTS =
+      'import test from "node:test";\nimport assert from "node:assert/strict";\nimport { shout } from "../' +
+      FILE +
+      '";\n\n';
+    // A tautology dressed as a test: it imports the subject (so its failure is a
+    // legal missing-subject red) and asserts nothing a wrong implementation
+    // would fail. This is the input the vet exists to REFUSE.
+    const WEAK_TEST = IMPORTS + 'test("shout exists", () => {\n  assert.equal(typeof shout, "function");\n});\n';
+    const STRONG_TEST = IMPORTS + 'test("shout shouts", () => {\n  ' + STRONG_ASSERT + "\n});\n";
+    const IMPL = 'export function shout(s) { return s.toUpperCase() + "!"; }\n';
+
+    const QUEUE = {
+      items: [
+        queueItem({
+          id: "V1",
+          title: "shout",
+          fileScope: [FILE],
+          testScope: [TEST_REL],
+          acceptance: [ACCEPTANCE],
+        }),
+      ],
+    };
+
+    const script: Script = (ctx) => {
+      if (ctx.role === "mechanical") {
+        return { body: { kind: "work", rationale: "a behavioural helper", confidence: "high", trivialItem: null } };
+      }
+      if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+      if (ctx.role === "planner") {
+        if (ctx.nth === 0) return { body: QUEUE };
+        return { body: { markdown: "# plan\n\nBuild shout, verified by its own test file.\n", decisions: [] } };
+      }
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "testWriter") {
+        // The repair dispatch is recognised by the critics' OWN must-fix line,
+        // never by a call counter: a union that never reached the writer leaves
+        // this responder writing the weak test again, and the vet caps out.
+        if (ctx.text.includes(MUST_FIX)) {
+          return { body: done("rewrote the test around the acceptance line"), write: [{ rel: TEST_REL, text: STRONG_TEST }] };
+        }
+        return { body: done("wrote the test"), write: [{ rel: TEST_REL, text: WEAK_TEST }] };
+      }
+      if (ctx.role === "implementer") {
+        return { body: done("wrote the module"), write: [{ rel: FILE, text: IMPL }] };
+      }
+      if (ctx.role === "reviewer") {
+        // The critics judge the test they were SHOWN — that is the whole loop.
+        if (ctx.itemState === "RED") {
+          return { body: ctx.text.includes(STRONG_ASSERT) ? testVet() : testVet([MUST_FIX]) };
+        }
+        return { body: noFindings() };
+      }
+      return { body: done("nothing to do") };
+    };
+
+    const bench = await makeBench({ tag: "vetloop", prompt: "add a shout helper with tests", script });
+    await handleClassify({ ...stageBase(bench) });
+    await handleDecompose({ ...stageBase(bench) });
+    await handlePlan({ ...stageBase(bench) });
+    await handlePlanReview({ ...stageBase(bench) });
+    const wave = await drainWaves(bench);
+    const disposition = wave.items.find((d) => d.itemId === "V1");
+    assert.equal(
+      disposition?.state,
+      "PUBLISHED",
+      `the item must clear the vet loop and publish; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+    );
+
+    const item = itemOf(bench, "V1");
+    assert.equal(item.attempts.vetRounds, 2, "the vet really ran a SECOND round, over the repaired test");
+    assert.equal(item.blocked, null, "the loop settled the item itself rather than blocking it");
+    assert.equal(
+      readQuestions(bench.runDir).length,
+      0,
+      "no §2.11 question: a loop that closed inside its budget asks nobody anything",
+    );
+
+    // The re-dispatch went BACK TO THE TEST-WRITER, carrying the critics' union —
+    // and no implementer was ever asked to fix a test.
+    const redWriters = bench.wiring.prompted.filter((p) => p.role === "testWriter" && p.itemState === "RED");
+    assert.equal(redWriters.length, 1, "exactly one must-fix repair dispatch, and it went to the test-writer");
+    assert.ok(
+      redWriters[0].text.includes(MUST_FIX),
+      "the repair prompt carried the critics' own must-fix line: a re-dispatch that does not say what to fix is a re-roll",
+    );
+    assert.equal(
+      bench.wiring.prompted.filter((p) => p.role === "implementer" && p.itemState === "RED").length,
+      0,
+      "a test defect is never routed to the implementer — it is gated to fileScope, so that dispatch is a guaranteed denial",
+    );
+
+    // C-032, end to end: the repaired test was RE-RUN and the item's §2.6 pointer
+    // names THAT failure. Pointing at the pre-repair red would vet one test and
+    // ship another.
+    const reds = evidenceOf(readEvidence(bench.runDir), "red", "V1");
+    assert.equal(reds.length, 2, "both the pre-repair red and the post-repair re-run are on the ledger");
+    assert.equal(
+      item.evidence.red?.seq,
+      reds[1].seq,
+      "the item's persisted red pointer names the POST-repair failure (C-032)",
+    );
+    assert.notEqual(item.evidence.red?.seq, reds[0].seq, "and not the pre-repair one the critics rejected");
+
+    const shipped = publishedFiles(bench.root, bench.baseCommit);
+    assert.ok(shipped.includes(TEST_REL), "the vetted test is what shipped");
+    assert.equal(
+      readFileSync(path.join(bench.root, TEST_REL), "utf8"),
+      STRONG_TEST,
+      "and it is the REPAIRED test, not the tautology the critics refused",
+    );
+  },
+);
+
+test(
+  "[13.1-s1-review-spec-finding-routed-to-implementer] a surviving spec/contract finding whose suggested fix touches fileScope ONLY dispatches an implementer and ZERO test-writers, the fixed tree is re-validated and then re-reviewed by fresh lenses that see the fix, and the item advances on that clean second round with the FIXED module in the commit",
+  { timeout: 120_000 },
+  async () => {
+    const FILE = "src/pad.ts";
+    const TEST_REL = "tests/pad.test.ts";
+    // The SECOND half of the acceptance line is the one the first implementation
+    // ignores and the item's test never pins — a spec/contract defect that a
+    // green verify cannot see, which is why the lens exists. (One line, not two:
+    // §3.2's one-cluster item budget rejects a queue item whose acceptance
+    // spans two clusters, so the second check rides the same criterion.)
+    const ACCEPTANCE = ['pad("a") === "[a]", and pad("") === ""'];
+    const SPEC_FIX_MARKER = 'if (s.length === 0) return "";';
+    const IMPL_BEFORE = 'export function pad(s) { return "[" + s + "]"; }\n';
+    const IMPL_AFTER = "export function pad(s) { " + SPEC_FIX_MARKER + ' return "[" + s + "]"; }\n';
+    const ITEM_TEST =
+      'import test from "node:test";\nimport assert from "node:assert/strict";\nimport { pad } from "../' +
+      FILE +
+      '";\n\ntest("pad wraps", () => {\n  assert.equal(pad("a"), "[a]");\n});\n';
+
+    const SF1 = {
+      id: "SF1",
+      severity: "major",
+      lens: "spec/contract",
+      claim: 'the implementation ignores the second half of the item\'s acceptance line: pad("") must return the empty string',
+      evidence: "the module wraps every input, the empty one included",
+      suggestedFix: "return the empty string for an empty input in " + FILE,
+    };
+
+    const QUEUE = {
+      items: [
+        queueItem({ id: "S1", title: "pad", fileScope: [FILE], testScope: [TEST_REL], acceptance: ACCEPTANCE }),
+      ],
+    };
+
+    const script: Script = (ctx) => {
+      if (ctx.role === "mechanical") {
+        return { body: { kind: "work", rationale: "a behavioural helper", confidence: "high", trivialItem: null } };
+      }
+      if (ctx.role === "skeptic") {
+        if (ctx.text.includes("SF1")) {
+          return {
+            body: { findingId: "SF1", upheld: true, reasoning: "the acceptance line really is unimplemented in the module as it stands" },
+          };
+        }
+        return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+      }
+      if (ctx.role === "planner") {
+        if (ctx.nth === 0) return { body: QUEUE };
+        return { body: { markdown: "# plan\n\nBuild pad, verified by its own test file.\n", decisions: [] } };
+      }
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "testWriter") {
+        return { body: done("wrote the test"), write: [{ rel: TEST_REL, text: ITEM_TEST }] };
+      }
+      if (ctx.role === "implementer") {
+        // The FIX dispatch is recognised by the finding it carries. An
+        // implementer that was never handed SF1 writes the unfixed module again,
+        // the next round raises it again, and the review caps out blocked.
+        if (ctx.text.includes("SF1")) {
+          return { body: done("handled the empty input"), write: [{ rel: FILE, text: IMPL_AFTER }] };
+        }
+        return { body: done("wrote the module"), write: [{ rel: FILE, text: IMPL_BEFORE }] };
+      }
+      if (ctx.role === "reviewer") {
+        // One role, three stages: a RED item is being test-vetted; a review LENS
+        // session is the one whose prompt carries the LENSES line; anything else
+        // asking a reviewer about this item is the §3.3 changed-test re-vet.
+        if (ctx.itemState === "RED") return { body: testVet() };
+        if (!ctx.text.includes("LENSES:")) return { body: testVet() };
+        if (!ctx.text.includes("LENSES: spec/contract")) return { body: noFindings() };
+        // The spec lens judges the fileScope AS IT STANDS, which the handler's
+        // own diff block carries into this prompt.
+        if (ctx.text.includes(SPEC_FIX_MARKER)) return { body: noFindings() };
+        return { body: { findings: [SF1] } };
+      }
+      return { body: done("nothing to do") };
+    };
+
+    const bench = await makeBench({ tag: "specroute", prompt: "add a pad helper with tests", script });
+    await handleClassify({ ...stageBase(bench) });
+    await handleDecompose({ ...stageBase(bench) });
+    await handlePlan({ ...stageBase(bench) });
+    await handlePlanReview({ ...stageBase(bench) });
+    const wave = await drainWaves(bench);
+    const disposition = wave.items.find((d) => d.itemId === "S1");
+    assert.equal(
+      disposition?.state,
+      "PUBLISHED",
+      `the item must clear the review loop and publish; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+    );
+
+    const item = itemOf(bench, "S1");
+    assert.equal(item.attempts.reviewRounds, 2, "the review really ran a SECOND round, over the fixed tree");
+    assert.equal(item.blocked, null, "the finding was fixed rather than escalated");
+    assert.equal(readQuestions(bench.runDir).length, 0, "no §2.11 question: the machine had a move and made it");
+
+    // §3.3 routing by path: fileScope only means the implementer, and ONLY the
+    // implementer.
+    const carried = bench.wiring.prompted.filter((p) => p.text.includes("SF1"));
+    assert.equal(
+      carried.filter((p) => p.role === "implementer").length,
+      1,
+      "the surviving spec finding dispatched exactly one implementer fix",
+    );
+    assert.equal(
+      carried.filter((p) => p.role === "testWriter").length,
+      0,
+      "a fix that touches only fileScope NEVER reaches the test-writer",
+    );
+    assert.equal(
+      bench.wiring.byRole("testWriter").length,
+      1,
+      "the only test-writer dispatch in this item's whole life was the original RED-stage write",
+    );
+
+    // fix => re-validate => re-review, in that order and with fresh lenses that
+    // really see the fixed tree.
+    const lenses = bench.wiring.prompted.filter((p) => p.role === "reviewer" && p.text.includes("LENSES:"));
+    assert.equal(lenses.length, 6, "two review rounds of three lens sessions each (the §3.3 three-session floor)");
+    assert.equal(
+      lenses.slice(0, 3).some((p) => p.text.includes(SPEC_FIX_MARKER)),
+      false,
+      "the first round's lenses reviewed the UNFIXED module",
+    );
+    assert.ok(
+      lenses.slice(3).every((p) => p.text.includes(SPEC_FIX_MARKER)),
+      "the second round's lenses reviewed the FIXED module — the re-review is over the tree the fix produced",
+    );
+    const verifies = evidenceOf(readEvidence(bench.runDir), "verify");
+    assert.ok(verifies.length >= 2, `the fix round was followed by a real re-validate (saw ${verifies.length} verify record(s))`);
+    assert.ok(
+      verifies.every((r) => r.green),
+      "every verify in this run was green: the routed fix never regressed the suite",
+    );
+
+    assert.equal(
+      git(bench.root, ["show", "HEAD:" + FILE]),
+      IMPL_AFTER,
+      "what SHIPPED is the module the routed fix wrote, not the one the review refused",
+    );
+  },
+);
+
+test(
+  "[13.1-s1-review-test-adequacy-routed-to-testwriter-revetted] the §3.3:1250-1258 rule: a surviving TEST-ADEQUACY finding dispatches the TEST-WRITER and NEVER the implementer, and the changed test RE-ENTERS the test discipline — re-run through evidence, then re-vetted by fresh critics — BEFORE the item is re-validated and re-reviewed",
+  { timeout: 120_000 },
+  async () => {
+    const FILE = "src/clip.ts";
+    const TEST_REL = "tests/clip.test.ts";
+    const ACCEPTANCE = 'clip("  a  ") === "a"';
+    const TA_ASSERT = 'assert.equal(clip("a"), "a");';
+    const IMPORTS =
+      'import test from "node:test";\nimport assert from "node:assert/strict";\nimport { clip } from "../' +
+      FILE +
+      '";\n\n';
+    const THIN_TEST = IMPORTS + 'test("clip trims", () => {\n  assert.equal(clip("  a  "), "a");\n});\n';
+    const FULL_TEST =
+      THIN_TEST + '\ntest("clip leaves a trimmed string alone", () => {\n  ' + TA_ASSERT + "\n});\n";
+    const IMPL = "export function clip(s) { return s.trim(); }\n";
+
+    const TA1 = {
+      id: "TA1",
+      severity: "major",
+      lens: "test-adequacy",
+      claim: "the test never pins that an already-trimmed string comes back unchanged",
+      evidence: "the only assertion feeds a padded string, so a trim-everything implementation still passes",
+      suggestedFix: "add the already-trimmed case to " + TEST_REL,
+    };
+
+    const QUEUE = {
+      items: [
+        queueItem({ id: "A1", title: "clip", fileScope: [FILE], testScope: [TEST_REL], acceptance: [ACCEPTANCE] }),
+      ],
+    };
+
+    const script: Script = (ctx) => {
+      if (ctx.role === "mechanical") {
+        return { body: { kind: "work", rationale: "a behavioural helper", confidence: "high", trivialItem: null } };
+      }
+      if (ctx.role === "skeptic") {
+        if (ctx.text.includes("TA1")) {
+          return { body: { findingId: "TA1", upheld: true, reasoning: "the untouched case really is unasserted" } };
+        }
+        return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+      }
+      if (ctx.role === "planner") {
+        if (ctx.nth === 0) return { body: QUEUE };
+        return { body: { markdown: "# plan\n\nBuild clip, verified by its own test file.\n", decisions: [] } };
+      }
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "testWriter") {
+        // The review-fix dispatch is recognised by the finding it carries.
+        if (ctx.text.includes("TA1")) {
+          return { body: done("added the already-trimmed case"), write: [{ rel: TEST_REL, text: FULL_TEST }] };
+        }
+        return { body: done("wrote the test"), write: [{ rel: TEST_REL, text: THIN_TEST }] };
+      }
+      if (ctx.role === "implementer") {
+        return { body: done("wrote the module"), write: [{ rel: FILE, text: IMPL }] };
+      }
+      if (ctx.role === "reviewer") {
+        if (ctx.itemState === "RED") return { body: testVet() };
+        if (!ctx.text.includes("LENSES:")) return { body: testVet() };
+        if (!ctx.text.includes("LENSES: test-adequacy")) return { body: noFindings() };
+        // The adequacy lens judges the test AS IT STANDS, which the handler
+        // carries into this prompt.
+        if (ctx.text.includes(TA_ASSERT)) return { body: noFindings() };
+        return { body: { findings: [TA1] } };
+      }
+      return { body: done("nothing to do") };
+    };
+
+    const bench = await makeBench({ tag: "adequacy", prompt: "add a clip helper with tests", script });
+    await handleClassify({ ...stageBase(bench) });
+    await handleDecompose({ ...stageBase(bench) });
+    await handlePlan({ ...stageBase(bench) });
+    await handlePlanReview({ ...stageBase(bench) });
+    const wave = await drainWaves(bench);
+    const disposition = wave.items.find((d) => d.itemId === "A1");
+    assert.equal(
+      disposition?.state,
+      "PUBLISHED",
+      `the item must clear the review loop and publish; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+    );
+
+    const item = itemOf(bench, "A1");
+    assert.equal(item.attempts.reviewRounds, 2, "the review really ran a SECOND round, over the changed test");
+    assert.equal(item.blocked, null, "the finding was fixed rather than escalated");
+    assert.equal(readQuestions(bench.runDir).length, 0, "no §2.11 question was raised");
+
+    const carried = bench.wiring.prompted.filter((p) => p.text.includes("TA1"));
+    assert.equal(
+      carried.filter((p) => p.role === "testWriter").length,
+      1,
+      "the surviving test-adequacy finding dispatched exactly one test-writer fix",
+    );
+    assert.equal(
+      carried.filter((p) => p.role === "implementer").length,
+      0,
+      "and ZERO implementer dispatches carried it — the implementer is gated to fileScope (§3.3:1250-1258)",
+    );
+
+    // The changed test RE-ENTERED the test discipline: a fresh critic judged it,
+    // and that critic was shown the CHANGED text.
+    const revets = bench.wiring.prompted.filter(
+      (p) => p.role === "reviewer" && p.itemId === "A1" && p.itemState === "VALIDATED" && !p.text.includes("LENSES:"),
+    );
+    assert.equal(revets.length, 1, "the changed test was re-vetted by exactly one fresh critic (readFanout('vet') = 1)");
+    assert.ok(revets[0].text.includes(TA_ASSERT), "the re-vet judged the CHANGED test, not the one the finding condemned");
+
+    // And the ORDER §3.3 demands: re-run, then re-vet, then re-validate. The
+    // §2.6 ledger's own sequence numbers are the witness — the changed test's
+    // re-run lands AFTER the first validate and BEFORE the re-validate.
+    const records = readEvidence(bench.runDir);
+    const greens = evidenceOf(records, "green", "A1");
+    const verifies = evidenceOf(records, "verify");
+    assert.ok(greens.length >= 2, `the changed test was really re-run (saw ${greens.length} green record(s))`);
+    assert.ok(verifies.length >= 2, `and a re-validate really followed it (saw ${verifies.length} verify record(s))`);
+    assert.ok(
+      greens[1].seq > verifies[0].seq,
+      "the changed test's re-run came after the item's first validate",
+    );
+    assert.ok(
+      verifies[1].seq > greens[1].seq,
+      "and the re-validate came after that re-run: the test discipline runs BEFORE the item is re-validated",
+    );
+
+    assert.equal(
+      git(bench.root, ["show", "HEAD:" + TEST_REL]),
+      FULL_TEST,
+      "what SHIPPED is the strengthened test the routed fix wrote",
+    );
+  },
+);
+
+test(
+  "[13.1-s1-syntax-error-is-not-red-and-is-repaired] a first test attempt with a genuine SYNTAX error is classified `error`, REFUSED as a red, and handed back to the test-writer with the handler's own classification; the repaired attempt goes legally red, the item advances on THAT red and is never blocked — the repair budget bounds the loop rather than ending it",
+  { timeout: 120_000 },
+  async () => {
+    const FILE = "src/dash.ts";
+    const TEST_REL = "tests/dash.test.ts";
+    // Unparseable: it cannot be evaluated at all, so §2.6.1 classifies it
+    // `error` and the stage refuses it as a red however plausible it looks.
+    const BROKEN_TEST = 'import test from "node:test";\ntest("broken", () => {\n  assert.equal(((;\n});\n';
+    const GOOD_TEST = itemTestSource(FILE, '"a b"', '"a-b"');
+    const IMPL = 'export function fn(s) { return s.split(" ").join("-"); }\n';
+
+    const QUEUE = {
+      items: [
+        queueItem({
+          id: "Y1",
+          title: "dash",
+          fileScope: [FILE],
+          testScope: [TEST_REL],
+          acceptance: ['dash("a b") === "a-b"'],
+        }),
+      ],
+    };
+
+    const script: Script = (ctx) => {
+      if (ctx.role === "mechanical") {
+        return { body: { kind: "work", rationale: "a behavioural helper", confidence: "high", trivialItem: null } };
+      }
+      if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+      if (ctx.role === "planner") {
+        if (ctx.nth === 0) return { body: QUEUE };
+        return { body: { markdown: "# plan\n\nBuild dash, verified by its own test file.\n", decisions: [] } };
+      }
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "testWriter") {
+        // The repair dispatch is recognised by the handler's OWN refusal — the
+        // captured failure and its class, handed back. A stage that swallowed
+        // the classification would leave this responder writing the unparseable
+        // file again until the budget ran out.
+        if (ctx.text.includes("YOUR TEST IS NOT A LEGAL RED")) {
+          return { body: done("repaired the test"), write: [{ rel: TEST_REL, text: GOOD_TEST }] };
+        }
+        return { body: done("wrote the test"), write: [{ rel: TEST_REL, text: BROKEN_TEST }] };
+      }
+      if (ctx.role === "implementer") {
+        return { body: done("wrote the module"), write: [{ rel: FILE, text: IMPL }] };
+      }
+      if (ctx.role === "reviewer") {
+        if (ctx.itemState === "RED") return { body: testVet() };
+        return { body: noFindings() };
+      }
+      return { body: done("nothing to do") };
+    };
+
+    const bench = await makeBench({ tag: "syntaxrepair", prompt: "add a dash helper with tests", script });
+    await handleClassify({ ...stageBase(bench) });
+    await handleDecompose({ ...stageBase(bench) });
+    await handlePlan({ ...stageBase(bench) });
+    await handlePlanReview({ ...stageBase(bench) });
+    const wave = await drainWaves(bench);
+    const disposition = wave.items.find((d) => d.itemId === "Y1");
+    assert.equal(
+      disposition?.state,
+      "PUBLISHED",
+      `the repaired item must advance all the way; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+    );
+
+    const item = itemOf(bench, "Y1");
+    assert.equal(item.blocked, null, "the item was NEVER blocked: the repair budget bounded the loop, it did not end it");
+    assert.equal(item.attempts.testRepairs, 1, "exactly one repair was spent of the configured workflow.testRepairAttempts");
+    assert.equal(readQuestions(bench.runDir).length, 0, "no §2.11 question: nothing needed a human");
+
+    const reds = evidenceOf(readEvidence(bench.runDir), "red", "Y1");
+    assert.equal(reds.length, 2, "the refused attempt and the legal one are both on the §2.6 ledger");
+    assert.equal(reds[0].failureClass, "error", "a test that cannot be PARSED is §2.6.1 class `error`");
+    assert.equal(
+      reds[1].failureClass,
+      "missing-subject",
+      "and the repaired attempt fails for a legal reason: the subject this item builds does not exist yet",
+    );
+    assert.equal(
+      item.evidence.red?.seq,
+      reds[1].seq,
+      "the item advanced on the REPAIRED red; a run that advanced on the syntax error would have proved nothing about the behaviour",
+    );
+
+    const writers = bench.wiring.byRole("testWriter");
+    assert.equal(writers.length, 2, "one initial write plus exactly one repair dispatch");
+    assert.ok(
+      writers[1].text.includes('classified as "error"'),
+      "the repair prompt handed back the handler's own §2.6.1 classification, so the writer is told WHY it was refused",
+    );
+
+    assert.equal(
+      git(bench.root, ["show", "HEAD:" + TEST_REL]),
+      GOOD_TEST,
+      "what SHIPPED is the repaired test, not the unparseable one",
+    );
   },
 );
 
@@ -1201,14 +2100,15 @@ test(
         return {
           body: done(`wrote ${subject.testRel}`),
           write: [{ rel: subject.testRel, text: itemTestSource(subject.file, subject.call, subject.expected) }],
+          park: true,
         };
       }
       if (ctx.role === "implementer" && subject !== undefined) {
-        return { body: done(`wrote ${subject.file}`), write: [{ rel: subject.file, text: subject.impl }] };
+        return { body: done(`wrote ${subject.file}`), write: [{ rel: subject.file, text: subject.impl }], park: true };
       }
       if (ctx.role === "reviewer") {
-        if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        if (ctx.itemState === "RED") return { body: testVet(), park: subject !== undefined };
+        return { body: noFindings(), park: subject !== undefined };
       }
       return { body: done("no work required") };
     };
@@ -1225,7 +2125,43 @@ test(
     await handlePlan({ ...stageBase(bench) });
     await handlePlanReview({ ...stageBase(bench) });
 
+    // THE DRIVER'S INTERLEAVING, not the planner's schedule. `wave.parallel`
+    // below is the plan the scheduler computed BEFORE anything ran; a strictly
+    // serial driver satisfies it exactly. The claim that discriminates is about
+    // the fan-out layer at RUNTIME: at some instant the engine held sub-sessions
+    // open for BOTH items at once. Every item-scoped sub-session parks, so the
+    // watcher below reads that off the fake SDK's own pending list instead of
+    // inferring it from how long anything took.
+    const watcher = watchInterleaving(bench.wiring, 2);
     const wave = await drainWaves(bench);
+    await watcher.stop();
+
+    const overlap = watcher.peak();
+    const overlapItems = [...new Set(overlap.map((p) => p.itemId))];
+    const overlapTrees = [...new Set(overlap.map((p) => p.tree))];
+    const overlapSessions = [...new Set(overlap.map((p) => p.sessionID))];
+    assert.ok(
+      overlapItems.length >= 2,
+      "at some instant the fan-out engine had sub-sessions for BOTH items simultaneously in flight — " +
+        "the claim a strictly serial driver cannot satisfy. Peak simultaneous set was " +
+        JSON.stringify(overlap.map((p) => ({ role: p.role, itemId: p.itemId }))),
+    );
+    assert.equal(
+      overlapSessions.length,
+      overlap.length,
+      `each concurrently-open sub-session is its own session: ${JSON.stringify(overlapSessions)}`,
+    );
+    assert.ok(
+      overlapTrees.length >= 2,
+      `the concurrent sub-sessions were bound to DISTINCT trees, not one shared tree: ${JSON.stringify(overlapTrees)}`,
+    );
+    for (const tree of overlapTrees) {
+      assert.ok(
+        tree !== bench.root && !tree.startsWith(bench.root),
+        `a concurrent sub-session's tree is OUT of the repo (${tree})`,
+      );
+    }
+
     for (const p of bench.wiring.prompted) treesSeen.add(p.tree);
     assert.equal(wave.wave.parallel.length, 2, "both disjoint items were scheduled into ONE wave");
     assert.ok(
@@ -1252,10 +2188,64 @@ test(
     assert.ok(published.includes("src/upper.ts"), "W1's module reached the repo through the merge-back");
     assert.ok(published.includes("src/lower.ts"), "W2's module reached the repo through the merge-back");
 
-    // The post-merge re-validation is what makes serial merge-back safe: each
-    // item has a green recorded at or after its merge.
-    const greens = readEvidence(bench.runDir).filter((r) => r.kind === "green");
-    assert.ok(greens.length >= 2, "each merged item was re-validated against the merged tree");
+    // ---- serial merge-back + post-merge re-validation, off the LEDGER --------
+    // Read from `verify` records, which are the only kind that carries a tree and
+    // a start time (§2.6): a `green` record has neither, so counting greens asks
+    // the wrong question of the wrong record and cannot tell an integrated
+    // re-validate from an in-worktree one.
+    //
+    // In worktree mode a verify taken INSIDE an item's worktree records that
+    // item's own tree slug, and the integrated re-validate publish runs after the
+    // merge records tree "main" (adapter/tools.ts:2400, :7202). So the two are
+    // distinguishable on the record itself.
+    const verifies = evidenceOf(readEvidence(bench.runDir), "verify");
+    const integrated: Record<string, Extract<EvidenceRecord, { kind: "verify" }>> = {};
+    for (const id of ["W1", "W2"]) {
+      const own = verifies.filter((r) => r.itemId === id && r.tree === id);
+      const main = verifies.filter((r) => r.itemId === id && r.tree === "main");
+      assert.ok(own.length > 0, `${id} was verified INSIDE its own worktree at least once (tree "${id}")`);
+      assert.ok(
+        main.length > 0,
+        `${id} was RE-verified against the integrated tree after its merge (a verify record with tree "main")`,
+      );
+      const first = main[0];
+      assert.equal(first.green, true, `${id}'s integrated-tree re-validate was green`);
+      assert.ok(
+        first.startedMs >= own[0].startedMs,
+        `${id}'s integrated re-validate started AFTER its in-worktree verify — it did not publish on the ` +
+          "strength of its in-worktree green alone",
+      );
+      integrated[id] = first;
+    }
+
+    // Serial, and in wave order: W1's merge completed before W2's began. The
+    // proof is the HEAD each integrated re-validate recorded — at the instant W1
+    // re-validated the integrated tree, W1's module was in it and W2's was NOT,
+    // which is exactly "A's merge completed before B's began" and is impossible
+    // if the two merges overlapped.
+    assert.ok(
+      integrated.W1.seq < integrated.W2.seq && integrated.W1.startedMs <= integrated.W2.startedMs,
+      `the merge-backs re-validated in item order: W1 seq ${integrated.W1.seq} then W2 seq ${integrated.W2.seq}`,
+    );
+    assert.notEqual(integrated.W1.head, bench.baseCommit, "W1's merge had landed before its integrated re-validate ran");
+    assert.notEqual(integrated.W2.head, integrated.W1.head, "W2's merge landed after W1's integrated re-validate ran");
+    assert.ok(
+      gitOk(bench.root, ["merge-base", "--is-ancestor", integrated.W1.head, integrated.W2.head]),
+      "the two integrated re-validates ran on ONE serially-advancing workspace history",
+    );
+    assert.ok(
+      gitOk(bench.root, ["cat-file", "-e", `${integrated.W1.head}:src/upper.ts`]),
+      "W1's own module was already merged into the tree its integrated re-validate measured",
+    );
+    assert.equal(
+      gitOk(bench.root, ["cat-file", "-e", `${integrated.W1.head}:src/lower.ts`]),
+      false,
+      "W2 had NOT yet merged when W1's integrated re-validate ran: the merge-backs are serial, not concurrent",
+    );
+    assert.ok(
+      gitOk(bench.root, ["cat-file", "-e", `${integrated.W2.head}:src/lower.ts`]),
+      "W2's own module was merged into the tree its integrated re-validate measured",
+    );
   },
 );
 
