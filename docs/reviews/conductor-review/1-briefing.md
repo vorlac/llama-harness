@@ -279,9 +279,9 @@ Run **sequentially**. Each consumes the previous outputs.
 
 | # | Prompt | Lens | Method | Produces |
 |---|---|---|---|---|
-| 1 | `conductor-review-1-enforcement.md` | micro — does enforcement hold? | mutation testing, enumeration | `ISSUE-NNN` |
-| 2 | `conductor-review-2-macro.md` | macro — is the shape right? | measurement, clustering, breadth | `MACRO-NNN` |
-| 3 | `conductor-review-3-capability.md` | absent — what would raise the floor? | synthesis over 1 and 2 | `GAP-NNN` + the consolidated plan |
+| 1 | `2-enforcement.md` | micro — does enforcement hold? | mutation testing, enumeration | `ISSUE-NNN` |
+| 2 | `3-macro.md` | macro — is the shape right? | measurement, clustering, breadth | `MACRO-NNN` |
+| 3 | `4-capability.md` | absent — what would raise the floor? | synthesis over 1 and 2 | `GAP-NNN` + the consolidated plan |
 
 **Why this order.** Enforcement produces the factual substrate (the enumerations, the mutation table,
 the reproduced defects). Macro argues from that evidence rather than from taste. Capability grounds
@@ -291,7 +291,7 @@ wish list.
 **Seam findings — the one real risk of splitting.** The wedge (C-085) was found *because* enforcement
 work surfaced a composition problem. Findings that fall between lenses must not be lost. So: **when
 you notice something outside your lens, do not chase it and do not drop it — file a one-line pointer
-in your register's `CROSS-LENS POINTERS` section**, naming which review owns it. Review 2 and 3 each
+in your register's `CROSS-LENS POINTERS` section**, naming which review owns it. The macro review and 3 each
 begin by reading the previous registers' pointers and treating them as leads.
 
 **One ID space.** `ISSUE-`, `MACRO-`, `GAP-` and `IDEA-` prefixes never collide, so all registers
@@ -349,14 +349,14 @@ Relates to: ISSUE/MACRO/GAP ids if any, else "standalone"
 ```
 
 Do not agonise over whether something is an `IDEA` or an `ISSUE`. **File it somewhere rather than
-nowhere**; the consolidation pass in review 3 reclassifies. The failure mode to avoid is a good
+nowhere**; the consolidation pass in the capability review reclassifies. The failure mode to avoid is a good
 observation discarded because it did not fit a category.
 
 **Output files** (each review writes exactly one; these are the only files you may create outside
 scratch):
-- `docs/reviews/findings-1-enforcement.md`
-- `docs/reviews/findings-2-macro.md`
-- `docs/reviews/findings-3-capability.md`
+- `docs/reviews/conductor-review/findings-enforcement.md`
+- `docs/reviews/conductor-review/findings-macro.md`
+- `docs/reviews/conductor-review/findings-capability.md`
 
 ---
 

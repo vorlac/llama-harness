@@ -1,14 +1,13 @@
-# Review 1 of 3 — Enforcement & Correctness
+# Step 2 — Enforcement & Correctness Review
 
-**Read `docs/reviews/conductor-review-briefing.md` in full first.** It carries the orientation, the
+**Read `docs/reviews/conductor-review/1-briefing.md` in full first.** It carries the orientation, the
 environment and its traps, the rules of engagement, the P1–P13 defect taxonomy, the method, the
 exhaustiveness doctrine, and what is already known. This prompt does not repeat any of it.
 
-You are the **first** of three sequential reviews. You produce the factual substrate the other two
-consume: the enumerations, the mutation table, and the reproduced defects. Reviews 2 (macro) and 3
-(capability) will read your register and argue from it — so its completeness determines theirs.
+You are **step 2**, the first of three sequential reviews. You produce the factual substrate the other two
+consume: the enumerations, the mutation table, and the reproduced defects. The macro review (step 3) and the capability review (step 4) will read your register and argue from it — so its completeness determines theirs.
 
-**Output:** `docs/reviews/findings-1-enforcement.md` — the only file you may create outside scratch.
+**Output:** `docs/reviews/conductor-review/findings-enforcement.md` — the only file you may create outside scratch.
 
 ---
 
@@ -91,7 +90,7 @@ security tests and confirm they fail when you weaken the gate. A `revertAssertio
 produce the claimed red is a serious finding — it means the recorded evidence is wrong.
 
 Produce a **mutation table**: every mutation applied, the file, what you expected, what happened,
-and whether the check binds. This table is a required deliverable; reviews 2 and 3 use it.
+and whether the check binds. This table is a required deliverable; the macro and capability reviews use it.
 
 ---
 
@@ -199,7 +198,7 @@ examined" is permitted and is far better than silent omission — it marks where
 
 ## Output
 
-Write `docs/reviews/findings-1-enforcement.md`, structured per briefing §10 conventions:
+Write `docs/reviews/conductor-review/findings-enforcement.md`, structured per briefing §10 conventions:
 
 1. **Executive verdict** (≤1 page) — does enforcement hold; where does the harness believe rather
    than know; is its evidence strong enough for someone else to rely on; your confidence and what
@@ -207,9 +206,9 @@ Write `docs/reviews/findings-1-enforcement.md`, structured per briefing §10 con
 2. **The ISSUE register** — every defect, full record per the briefing's field list, written
    explanatorily. This is the primary deliverable.
 3. **The IDEA register** — every improvement thought, however small.
-4. **CROSS-LENS POINTERS** — one line each for anything you noticed that belongs to review 2 (shape,
-   organisation, design coherence) or review 3 (missing mechanisms). Do not chase them; do not drop
-   them. Reviews 2 and 3 begin by reading these.
+4. **CROSS-LENS POINTERS** — one line each for anything you noticed that belongs to the macro review (shape,
+   organisation, design coherence) or the capability review (missing mechanisms). Do not chase them; do not drop
+   them. The macro and capability reviews begin by reading these.
 5. **The enforcement table** (Part A) and **the mutation table** (Part B) in full.
 6. **All nine enumerations** (Part G) with per-item verdicts.
 7. **The adversary log** (Part F).

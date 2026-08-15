@@ -1,13 +1,13 @@
-# Review 3 of 3 — Missing Capability, and the Consolidated Plan
+# Step 4 — Capability Review, and the Consolidated Plan
 
-**Read `docs/reviews/conductor-review-briefing.md` in full first.** It carries the orientation, the
+**Read `docs/reviews/conductor-review/1-briefing.md` in full first.** It carries the orientation, the
 environment, the rules, the P1–P13 taxonomy, the method and the exhaustiveness doctrine.
 
-**Read `docs/reviews/findings-1-enforcement.md` and `findings-2-macro.md` in full before you begin.**
-They are your evidence base and your raw material. Reviews 1 and 2 each left you `CROSS-LENS
+**Read `docs/reviews/conductor-review/findings-enforcement.md` and `findings-macro.md` in full before you begin.**
+They are your evidence base and your raw material. Steps 2 and 3 each left you `CROSS-LENS
 POINTERS`; those are leads you are expected to work, not optional reading.
 
-**Output:** `docs/reviews/findings-3-capability.md` — the only file you may create outside scratch.
+**Output:** `docs/reviews/conductor-review/findings-capability.md` — the only file you may create outside scratch.
 
 You have two jobs. The first is a review; the second is to assemble everything into something the
 repo owner can plan from.
@@ -16,7 +16,7 @@ repo owner can plan from.
 
 # JOB 1 — What is MISSING
 
-Reviews 1 and 2 examined what exists. **You examine what is absent**, which no amount of attacking
+Steps 2 and 3 examined what exists. **You examine what is absent**, which no amount of attacking
 existing code reveals.
 
 > **What mechanism does not exist, that would materially raise the floor on what a small, lazy,
@@ -40,11 +40,11 @@ The form that does not:
 > *"It would be good if the system also did Y."*
 
 Anything without grounding is marked `SPECULATIVE` and ranks below every grounded entry. Keep those
-few. Reviews 1 and 2 exist precisely so that this review can argue from evidence.
+few. The enforcement and macro reviews exist precisely so that this review can argue from evidence.
 
 ## Where to look
 
-- **Every ACCEPTED-ON-TRUST row in review 1's enforcement table.** For each, ask whether re-derivation
+- **Every ACCEPTED-ON-TRUST row in the enforcement review's enforcement table.** For each, ask whether re-derivation
   is absent because it is *impossible* or because *nobody built it*. Only the second is a GAP, and
   these are the highest-value entries in this review.
 - **Detection that could become prevention.** G7 is "detection over prevention", honestly disclosed.
@@ -53,7 +53,7 @@ few. Reviews 1 and 2 exist precisely so that this review can argue from evidence
   things trivial that were expensive in the original design.
 - **Failures a human never sees.** Any failure whose only trace is an `error`-level journal line is a
   failure nobody will notice. Every terminal state should hand a human an artifact. One such wedge
-  was found and fixed (C-085); review 1's composition work (its Part D) should have found more.
+  was found and fixed (C-085); the enforcement review's composition work (its Part D) should have found more.
 - **Dumb mechanical cross-checks.** The highest-value additions in this build's history were not
   clever — a control suite proving the fixture discriminates, an execution witness proving a test
   really ran, a two-way field-set comparison proving two spellings agree, a counter on the router's
@@ -83,7 +83,7 @@ making the decisions that are not yours to make.**
 
 - **Dedupe.** The same defect may appear in two registers under different lenses. Merge, keep the
   strongest evidence, and note both origins.
-- **Resolve cross-references.** Every `CROSS-LENS POINTER` from reviews 1 and 2 must be
+- **Resolve cross-references.** Every `CROSS-LENS POINTER` from the enforcement and macro reviews must be
   dispositioned: became ISSUE-NNN / became GAP-NNN / investigated and cleared / still open, and why.
 - **Reclassify freely.** An `IDEA` that turns out to be a defect becomes an `ISSUE`; a `MACRO` that
   is really one local bug becomes an `ISSUE`. The briefing told the earlier reviews to file
@@ -94,8 +94,8 @@ making the decisions that are not yours to make.**
 ## 2b. Structure
 
 - **Systemic clusters.** Groups sharing ONE root cause, where a single structural change closes
-  several. These are the highest-value items in the entire output. Review 1's `WHY NOTHING CAUGHT IT`
-  fields and review 2's correction clustering are where you find them.
+  several. These are the highest-value items in the entire output. The enforcement review's `WHY NOTHING CAUGHT IT`
+  fields and the macro review's correction clustering are where you find them.
 - **Dependency graph.** What must land before what. Identify the independent clusters that could run
   in parallel, and the chains that cannot.
 - **Requires-a-live-model**, separated — it cannot be scheduled freely.
@@ -133,20 +133,20 @@ that session's outcome will re-order your provisional plan. Your job is to make 
 
 ## Output
 
-Write `docs/reviews/findings-3-capability.md`:
+Write `docs/reviews/conductor-review/findings-capability.md`:
 
 1. **Executive verdict** (≤1 page) — what is missing that most limits this system; would the
    "process quality from a small model" thesis hold as built; your confidence.
 2. **The GAP register** — full records, explanatory, every entry grounded or marked SPECULATIVE.
 3. **The doctrine assessment** — all nine packs, individually judged for a 32k weak-instruction
    model.
-4. **The IDEA register** — yours, plus anything reclassified from reviews 1 and 2.
+4. **The IDEA register** — yours, plus anything reclassified from the enforcement and macro reviews.
 5. **The unified register** (2a) — every id from all three reviews, one table.
 6. **Systemic clusters** (2b) — the highest-value section in the document.
 7. **The dependency graph** and the parallel/serial split.
 8. **The PROVISIONAL ordered plan** (2c), with reasoning.
 9. **The open decisions** (2d) — framed, not answered.
-10. **Pointer disposition** — every cross-lens pointer from reviews 1 and 2, resolved.
+10. **Pointer disposition** — every cross-lens pointer from the enforcement and macro reviews, resolved.
 11. **Coverage ledger** and **cleared areas**.
 
 No length limit and no token budget. Write incrementally so work survives context exhaustion. **This

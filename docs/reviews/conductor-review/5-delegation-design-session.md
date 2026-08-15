@@ -1,4 +1,4 @@
-# Session Brief — Delegation Design & Fix Prioritization
+# Step 5 — Delegation Design & Fix Prioritization (INTERACTIVE)
 
 **This is an agenda for an INTERACTIVE session, not a batch prompt.** It is deliberately short. The
 work happens in conversation; a long prompt would front-load the decisions the conversation exists to
@@ -16,7 +16,7 @@ verification the owner is willing to do, which failures are tolerable, what a lo
 trusted with on a bad day.
 
 It runs **after** the reviews and **before** the fix plan is committed to, because the delegation aim
-re-orders the findings. If review 1 shows the evidence is weak somewhere the owner would never
+re-orders the findings. If the enforcement review shows the evidence is weak somewhere the owner would never
 delegate anyway, those fixes drop down the list. Deciding priority first would lock in the wrong
 order.
 
@@ -26,11 +26,11 @@ The lens is expected to move as the discussion goes. That is the point.
 
 ## Read first
 
-- `docs/reviews/findings-3-capability.md` — especially its **provisional ordered plan** and its
+- `docs/reviews/conductor-review/findings-capability.md` — especially its **provisional ordered plan** and its
   **open decisions** section, which is written to be argued with.
-- `findings-1-enforcement.md` — the executive verdict and the enforcement table (which claims the
+- `findings-enforcement.md` — the executive verdict and the enforcement table (which claims the
   harness re-derives vs accepts on trust).
-- `findings-2-macro.md` — the executive verdict and the correction clustering.
+- `findings-macro.md` — the executive verdict and the correction clustering.
 
 ---
 
@@ -83,14 +83,14 @@ Roughly in order; expect to move between them.
 1. **The delegation primitive.** What is the unit of work handed to a local model? Is the red-test
    shape right, or too narrow?
 2. **The trust boundary.** Which of conductor's evidence would the owner accept without re-deriving?
-   Review 1's enforcement table is the input. This is a risk-tolerance call, not a technical one.
+   The enforcement review's enforcement table is the input. This is a risk-tolerance call, not a technical one.
 3. **Triage.** How is "is this within the local model's competence" decided, and by whom? Before
    dispatch, or detected after?
 4. **Failure economics.** What happens when a delegated task returns wrong work? What is the cost,
    and what would make it cheap to detect?
 5. **What briefing the harness could supply itself** — scope, relevant files, prohibitions, traps.
    Every item the harness provides structurally is orchestrator tokens saved on every task.
-6. **Therefore: the fix order.** Re-rank review 3's provisional plan against all of the above. Which
+6. **Therefore: the fix order.** Re-rank the capability review's provisional plan against all of the above. Which
    findings matter for the delegation aim, which are correctness debt to pay anyway, and which can
    be left.
 7. **Scope.** How much of this to actually do.

@@ -1,29 +1,29 @@
-# Review 2 of 3 — Macro: Shape, Organisation, Design Coherence
+# Step 3 — Macro Review: Shape, Organisation, Design Coherence
 
-**Read `docs/reviews/conductor-review-briefing.md` in full first.** It carries the orientation, the
+**Read `docs/reviews/conductor-review/1-briefing.md` in full first.** It carries the orientation, the
 environment, the rules, the P1–P13 taxonomy, the method and the exhaustiveness doctrine. This prompt
 does not repeat any of it.
 
-**Read `docs/reviews/findings-1-enforcement.md` before you begin.** Review 1 has already produced the
+**Read `docs/reviews/conductor-review/findings-enforcement.md` before you begin.** Step 2 has already produced the
 enumerations, the mutation table, the reproduced defects and a set of `CROSS-LENS POINTERS` addressed
 to you. That is your evidence base — this review argues *from measurement*, not from taste.
 
-**Output:** `docs/reviews/findings-2-macro.md` — the only file you may create outside scratch.
+**Output:** `docs/reviews/conductor-review/findings-macro.md` — the only file you may create outside scratch.
 
 ---
 
 ## Your question
 
-> Review 1 asked whether the individual parts work. **You ask whether the SHAPE is right** — whether
+> The enforcement review asked whether the individual parts work. **You ask whether the SHAPE is right** — whether
 > a system that passes every local check is nonetheless organised, layered and decomposed in a way
-> that will keep producing the defects review 1 found.
+> that will keep producing the defects the enforcement review found.
 
-Shape defects are invisible from inside a single file, which is exactly where review 1 spent its
+Shape defects are invisible from inside a single file, which is exactly where the enforcement review spent its
 time. Nothing else in this process will see them.
 
 **The evidence burden here is the highest of the three reviews**, precisely because structural
 opinions are the easiest to write persuasively without proof. Every finding needs a measurement, a
-cited pattern across at least three corrections, or a defect from review 1 whose *cause* is
+cited pattern across at least three corrections, or a defect from the enforcement review whose *cause* is
 structural. A finding with none of those is an OPINION and must be labelled one.
 
 ---
@@ -49,7 +49,7 @@ Now answer, with numbers:
   "more than its context", that is a first-order design finding about a system whose entire purpose
   is to be worked on by such models.
 - **What does the current decomposition cost?** In tokens per task, in error rate, in how much
-  orchestrator hand-holding each delegated task needed. Review 1's mutation table and the build's
+  orchestrator hand-holding each delegated task needed. The enforcement review's mutation table and the build's
   corrections are evidence here — how many defects trace to someone not having read enough?
 - **Is there a discoverable path from "I need to change X" to the file that owns X?** Or does it
   require the kind of repo-wide grep that a context-limited model cannot afford?
@@ -77,7 +77,7 @@ Now answer, with numbers:
 - Do the parts share one philosophy, or are there competing ones? Detection-over-prevention in some
   places and prevention in others — principled, or accidental?
 - Are there concepts existing twice under different names **at the design level** rather than the
-  string level (which is review 1's P3)? Two mechanisms doing one job.
+  string level (which is the enforcement review's P3)? Two mechanisms doing one job.
 - **Is the role decomposition right?** Seven roles, nine doctrine packs. Would a small model do better
   with fewer, sharper roles — or does it need more? What evidence exists either way in the build
   record?
@@ -91,7 +91,7 @@ Now answer, with numbers:
 ## Part D — The build process is part of the design
 
 The task gates (M1–M9), phase gates, blind lens fan-out and skeptic ladder are machinery that
-produced this codebase. Review 1 audited whether they *work*. You ask whether they are **well
+produced this codebase. The enforcement review audited whether they *work*. You ask whether they are **well
 designed**.
 
 - Given that machinery produced a confirmed false negative and then sealed it (P10), what would you
@@ -134,7 +134,7 @@ designed**.
 
 ## Output
 
-Write `docs/reviews/findings-2-macro.md`:
+Write `docs/reviews/conductor-review/findings-macro.md`:
 
 1. **Executive verdict** (≤1 page) — is the shape right; what will keep producing defects if
    unchanged; your confidence and what most affects it.
@@ -145,12 +145,12 @@ Write `docs/reviews/findings-2-macro.md`:
 3. **The correction clustering** (Part D) — all 92 by root cause, with what each cluster implies.
 4. **The navigability measurement** (Part A) — the representative tasks, token counts, verdicts.
 5. **The IDEA register** — every improvement thought, however small.
-6. **CROSS-LENS POINTERS** — anything belonging to review 3 (missing mechanisms), and anything you
-   believe review 1 under-covered and should be re-run against. Review 3 reads these.
-7. **Disposition of review 1's pointers to you** — every pointer it left, and what you concluded.
+6. **CROSS-LENS POINTERS** — anything belonging to the capability review (missing mechanisms), and anything you
+   believe the enforcement review under-covered and should be re-run against. The capability review reads these.
+7. **Disposition of the enforcement review's pointers to you** — every pointer it left, and what you concluded.
 8. **The coverage ledger** — what you examined, how much, what you concluded.
 9. **Cleared areas** — structural concerns you investigated and found sound, with what you checked.
 
 No length limit and no token budget. Write incrementally so work survives context exhaustion. **The
 review is complete when every correction has been clustered, every representative task measured, and
-every pointer from review 1 dispositioned** — not when you have enough to say.
+every pointer from the enforcement review dispositioned** — not when you have enough to say.
