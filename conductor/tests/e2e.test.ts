@@ -2245,6 +2245,253 @@ test(
 );
 
 // ===========================================================================
+// Scenario 1's LAST unwalked loop — §3.3 DEBUG (GREEN -> VALIDATED)
+//
+// Every loop above corrects work the pipeline can see going wrong at the stage
+// that produced it: a test that does not pin its acceptance, a test that cannot
+// be parsed, a module a review lens can read the defect out of. The DEBUG loop
+// exists for the one shape all of them are blind to — an implementation that
+// PASSES ITS OWN ITEM TEST and REGRESSES SOMETHING ELSE. Only the FULL verify at
+// GREEN->VALIDATED can see that, so it is the only stage that can enter the
+// branch, and until this scenario no test in this file ever took a red there:
+// `packs["debug.md"]` was never read, `attempts.debugFixes` never moved, and
+// `workflow.debugFixCap` could be set to 0 with the whole suite still green.
+//
+// The lever is the fixture's OWN committed baseline. The item's fileScope IS
+// `src/baseline.ts` — the module `tests/baseline.test.ts` measures — and the
+// item asks for a new behaviour on it. The implementer delivers that behaviour
+// in the shape that satisfies the new test and breaks the old contract:
+//
+//   the ITEM test runs `tests/suffix.test.ts` and NOTHING else  -> green -> GREEN
+//   the FULL verify runs `tests/*.test.ts`                      -> red on baseline
+//
+// and the red lands on a test file no queue item owns, so §4.2 never quarantines
+// it, no repair budget above ever sees it, and the only machinery left that can
+// answer it is the DEBUG protocol.
+// ===========================================================================
+
+test(
+  "[13.1-s1-debug-loop-regression] the §3.3 DEBUG loop really turns: an implementer ships a module that PASSES the item test and REGRESSES the fixture's committed baseline, conductor_validate takes a RED FULL VERIFY, sets the debug posture off the verify's OWN failure, dispatches a fix sub-session whose prompt carries doctrine debug.md VERBATIM plus that captured failure, and the repaired module re-verifies green — the item reaching VALIDATED with attempts.debugFixes moved, no §2.11 question, and a published tree whose whole suite passes",
+  { timeout: 120_000 },
+  async () => {
+    // The item's fileScope is the COMMITTED baseline subject: that is the whole
+    // lever. An item whose fileScope file is greenfield cannot regress anything,
+    // which is exactly why every earlier scenario's full verify was green the
+    // first time it ran.
+    const FILE = BASELINE_SUBJECT_REL;
+    const TEST_REL = "tests/suffix.test.ts";
+    const ACCEPTANCE = 'baseline("x") === "baseline:x"';
+
+    // The doctrine the DEBUG dispatch is contracted to carry, read off disk and
+    // keyed the way the SHIPPED loader keys it. The responder below gates on this
+    // TEXT and not on a call counter, so a dispatch that arrives without the
+    // doctrine gets the SAME regressing module again and the loop caps out.
+    const DEBUG_DOCTRINE = PACKS["debug.md"];
+    assert.ok(
+      typeof DEBUG_DOCTRINE === "string" && DEBUG_DOCTRINE.trim().length > 0,
+      "the real doctrine/debug.md must have been read off disk; a scenario gating on an empty string gates on nothing",
+    );
+
+    const ITEM_TEST =
+      'import test from "node:test";\n' +
+      'import assert from "node:assert/strict";\n' +
+      'import { baseline } from "../' +
+      FILE +
+      '";\n\n' +
+      'test("baseline appends the suffix it is given", () => {\n' +
+      '  assert.equal(baseline("x"), "baseline:x");\n' +
+      "});\n";
+
+    // The regression, in the shape a real implementer produces: it satisfies the
+    // acceptance line exactly and quietly drops the no-argument contract the
+    // committed baseline test pins (`baseline()` becomes "baseline:undefined").
+    const REGRESSING = 'export function baseline(s) { return "baseline:" + s; }\n';
+    // The root-cause fix: the new behaviour, WITHOUT breaking the old one.
+    const REPAIRED =
+      'export function baseline(s) { return s === undefined ? "baseline" : "baseline:" + s; }\n';
+
+    const QUEUE = {
+      items: [
+        queueItem({
+          id: "G1",
+          title: "baseline takes an optional suffix",
+          fileScope: [FILE],
+          testScope: [TEST_REL],
+          acceptance: [ACCEPTANCE],
+        }),
+      ],
+    };
+
+    const script: Script = (ctx) => {
+      if (ctx.role === "mechanical") {
+        return { body: { kind: "work", rationale: "a behavioural change to an existing module", confidence: "high", trivialItem: null } };
+      }
+      if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "behavioural" } };
+      if (ctx.role === "planner") {
+        if (ctx.nth === 0) return { body: QUEUE };
+        return { body: { markdown: "# plan\n\nExtend baseline with an optional suffix, verified by its own test file.\n", decisions: [] } };
+      }
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "testWriter") {
+        return { body: done("wrote the item test"), write: [{ rel: TEST_REL, text: ITEM_TEST }] };
+      }
+      if (ctx.role === "implementer") {
+        // THE DISCRIMINATOR, and it is the doctrine itself. A fix dispatch that
+        // did not carry debug.md is indistinguishable from the first
+        // implementation as far as this responder is concerned — it writes the
+        // regressing module again, the re-verify stays red, and the item ends at
+        // the cap blocked on a `debug-architecture` question instead of PUBLISHED.
+        if (ctx.text.includes(DEBUG_DOCTRINE)) {
+          return {
+            body: done("root cause: the suffix parameter dropped the no-argument contract; restored it"),
+            write: [{ rel: FILE, text: REPAIRED }],
+          };
+        }
+        return { body: done("wrote the module"), write: [{ rel: FILE, text: REGRESSING }] };
+      }
+      if (ctx.role === "reviewer") {
+        if (ctx.itemState === "RED") return { body: testVet() };
+        return { body: noFindings() };
+      }
+      return { body: done("nothing to do") };
+    };
+
+    const bench = await makeBench({
+      tag: "debugloop",
+      prompt: "let baseline take an optional suffix",
+      script,
+    });
+    await handleClassify({ ...stageBase(bench) });
+    await handleDecompose({ ...stageBase(bench) });
+    await handlePlan({ ...stageBase(bench) });
+    await handlePlanReview({ ...stageBase(bench) });
+    const wave = await drainWaves(bench);
+    const disposition = wave.items.find((d) => d.itemId === "G1");
+    assert.equal(
+      disposition?.state,
+      "PUBLISHED",
+      `the item must clear the DEBUG loop and publish; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+    );
+
+    // --- the shape the DEBUG loop exists for, MEASURED --------------------------
+    // A green item test and a red full verify, in that order, off the §2.6 ledger.
+    // If these two ever agreed, this scenario would be walking some other branch.
+    const records = readEvidence(bench.runDir);
+    const greens = evidenceOf(records, "green", "G1");
+    const verifies = evidenceOf(records, "verify", "G1");
+    assert.equal(greens.length, 1, "the item test went green exactly once, at mark_green");
+    assert.ok(
+      greens[0].command.some((arg) => arg.includes(TEST_REL)),
+      `the item test ran the item's OWN test file: ${JSON.stringify(greens[0].command)}`,
+    );
+    assert.equal(
+      greens[0].command.some((arg) => arg.includes(BASELINE_TEST_REL)),
+      false,
+      "and it never ran the baseline test — an item test that already covered the whole suite could not produce this shape",
+    );
+    assert.ok(verifies.length >= 2, `the full verify ran at least twice (red, then post-fix): saw ${verifies.length}`);
+    assert.equal(
+      verifies[0].green,
+      false,
+      "the FIRST full verify is RED: the module that passed its own test regressed the committed baseline",
+    );
+    assert.ok(
+      greens[0].seq < verifies[0].seq,
+      "and the green item test came FIRST — the item really was at GREEN when the red verify arrived",
+    );
+    assert.equal(verifies[0].scopes.unit?.green, false, "the red is the `unit` scope's, named on the record");
+    assert.notEqual(verifies[0].scopes.unit?.exitCode, 0, "with a real non-zero exit code behind it");
+    assert.deepEqual(
+      verifies[0].excluded,
+      [],
+      "nothing was quarantined: the regressed test belongs to no queue item, so §4.2 could not hide it",
+    );
+    assert.equal(verifies[1].green, true, "the SECOND full verify — the one after the debug fix — is green");
+    assert.equal(
+      itemOf(bench, "G1").evidence.validated?.seq,
+      verifies[1].seq,
+      "and VALIDATED rests on THAT verify, not on the red one that preceded it",
+    );
+
+    // --- the DEBUG dispatch, and the doctrine it carried ------------------------
+    const impls = bench.wiring.prompted.filter((p) => p.role === "implementer" && p.itemId === "G1");
+    assert.equal(impls.length, 2, "two implementer dispatches: the first implementation, then ONE debug fix");
+    assert.equal(
+      impls[0].text.includes(DEBUG_DOCTRINE),
+      false,
+      "the FIRST implementer dispatch carries no debug doctrine — otherwise `carries debug.md` would be a property of every prompt and prove nothing",
+    );
+    const fix = impls[1];
+    assert.equal(fix.itemState, "GREEN", "the fix was dispatched while the item sat at GREEN — i.e. from conductor_validate, not from any earlier stage");
+    assert.ok(
+      fix.text.includes(DEBUG_DOCTRINE),
+      "the DEBUG dispatch carries doctrine debug.md VERBATIM: the protocol that governs the fix must reach the sub-session performing it",
+    );
+    assert.match(
+      fix.text,
+      /Fix attempt 1 of workflow\.debugFixCap=2/,
+      "and it says which attempt of which budget it is, so the sub-session knows how much rope is left",
+    );
+    assert.match(
+      fix.text,
+      /scope unit exited [1-9]/,
+      "and it carries the VERIFY'S OWN captured failure — a paraphrase would send the fixer after a bug nobody measured",
+    );
+    assert.ok(fix.text.includes(ACCEPTANCE), "the fix prompt still carries the item's acceptance line");
+
+    // --- the budget really moved, and the loop closed inside it -----------------
+    const item = itemOf(bench, "G1");
+    assert.equal(item.attempts.debugFixes, 1, "the item's DEBUG fix budget was really spent once");
+    assert.equal(item.debugging, null, "the debug posture is CLEARED once the verify goes green");
+    assert.equal(item.blocked, null, "the loop settled the item itself rather than blocking it");
+    assert.equal(
+      readQuestions(bench.runDir).length,
+      0,
+      "no §2.11 question: a debug loop that closed inside workflow.debugFixCap asks nobody anything",
+    );
+
+    // The posture was persisted BEFORE the fixer spoke, and the journal says so.
+    const debugPosture = bench.journal.records.filter(
+      (r) => r.event === "guard-reject" && r.data.itemId === "G1" && r.data.debugging === true,
+    );
+    assert.equal(debugPosture.length, 1, "the red verify logged the DEBUG posture exactly once, on the first red round");
+    assert.equal(
+      debugPosture[0].data.evidenceSeq,
+      verifies[0].seq,
+      "and it names the red verify record it was derived from",
+    );
+
+    // --- what shipped is the FIXED module, and the tree is really whole ---------
+    const shipped = publishedFiles(bench.root, bench.baseCommit);
+    assert.ok(shipped.includes(FILE) && shipped.includes(TEST_REL), "the modified module and its new test both shipped");
+    assert.equal(
+      git(bench.root, ["show", "HEAD:" + FILE]),
+      REPAIRED,
+      "what SHIPPED is the root-cause fix, not the regressing module the first implementer wrote",
+    );
+    assert.notEqual(
+      git(bench.root, ["show", "HEAD:" + FILE]),
+      REGRESSING,
+      "and emphatically not the version whose own test passed",
+    );
+    // The closing control: the fixture's OWN configured suite, run against the
+    // published tree. This is the same command the pipeline's verify runs, and it
+    // is the one thing the regression broke — a green here is the regression
+    // really being gone rather than the pipeline having stopped looking.
+    const afterPublish = controlSuite(bench.root);
+    assert.equal(
+      afterPublish.status,
+      0,
+      `the published tree's whole suite passes — baseline and the new item test together:\n${afterPublish.output}`,
+    );
+    assert.ok(
+      afterPublish.output.includes(BASELINE_TEST_NAME),
+      "and that green really executed the baseline test the regression broke",
+    );
+  },
+);
+
+// ===========================================================================
 // Scenario 2 — trivial
 // ===========================================================================
 
