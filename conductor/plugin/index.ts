@@ -65,6 +65,7 @@ import {
 } from "../adapter/continuation.ts";
 import type { ContinuationClient } from "../adapter/continuation.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../adapter/config-io.ts";
+import { createMonotonicClock } from "../adapter/clock.ts";
 import { liveVerifyTrees } from "../adapter/evidence.ts";
 import { createFanout } from "../adapter/fanout.ts";
 import type {
@@ -649,6 +650,15 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   // call would forget that the router already failed.
   const failoverState: FailoverState = createFailoverState();
 
+  // GAP-035: ONE monotonic time source per plugin process, handed to every handler
+  // through the dependency bundle below. Minted once for the same reason the
+  // failover latch is: stamps only order events against each other if they come out
+  // of the same source. The §2.6 freshness rule and §3.3's stale-red rule are
+  // COMPARISONS between stamps, and a truncated wall-clock read leaves two events
+  // inside one millisecond indistinguishable — which decides those verdicts by
+  // machine load rather than by what happened (P14).
+  const monotonicNow = createMonotonicClock();
+
   // §6.4/§3.8: the doctrine packs, loaded ONCE PER DIRECTORY through the committed
   // loader and FAIL-CLOSED. loadPacks names the offending pack in its own message;
   // the failure is reported at error level on the §7.1 sink and re-thrown, so the
@@ -896,6 +906,10 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     packs: Record<string, string>;
     overrideGrants: Map<string, OverrideGrant>;
     sessionID: string;
+    // The process's ONE monotonic clock (GAP-035). Every handler that stamps a
+    // record or compares one takes its time from here, so the freshness and
+    // stale-red seams order two events inside a millisecond instead of tying.
+    now: () => number;
   }
 
   interface Assembled {
@@ -977,6 +991,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         packs: loadedPacks,
         overrideGrants,
         sessionID,
+        now: monotonicNow,
       },
       entry: registry.get(sessionID),
       release: () => {
@@ -1420,7 +1435,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         journal,
         stateHome: coords.stateHome,
         workspaceKey: coords.workspaceKey,
-        now: Date.now,
+        now: monotonicNow,
       });
     },
   };

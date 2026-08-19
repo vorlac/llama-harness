@@ -169,7 +169,13 @@ function makeConfig(over: {
       writes: "off",
       maxImplementers: 2,
       maxReaders: 6,
-      subSessionTimeoutMs: 900_000,
+      // Small on purpose (ISSUE-032): this default arms a REAL timer on every job a
+      // test dispatches, so a suite-wide 900s budget kept the runner alive for a
+      // quarter of an hour whenever a red left a job unfinished. A minute is longer
+      // than any fake-SDK dispatch here and shorter than the gate's --test-timeout,
+      // so a wedge fails as a red instead of stalling the gate. The watchdog rows
+      // set their own budget explicitly.
+      subSessionTimeoutMs: 60_000,
       ...over.parallel,
     },
     models: over.models ?? { default: "model-A", roles: {} },

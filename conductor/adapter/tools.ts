@@ -76,6 +76,7 @@ import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import type { NewQuestion } from "./questions.ts";
 import { headSha, indexMtimeMs, initRepo, isRepo, worktreeMtimes } from "./gitio.ts";
 import { createWorktree, mergeBack } from "./worktrees.ts";
+import { stampResolutionMsOf } from "./clock.ts";
 import { verifyFreshFor } from "../core/freshness.ts";
 import { isTerminal } from "../core/stops.ts";
 import { noteRouterFailure, resolveBaseUrl } from "./router-client.ts";
@@ -3445,42 +3446,59 @@ export interface VetTestResult {
 // critics would be shown — i.e. the test on disk has been re-run since, so the red no
 // longer describes what it produces. The caller re-establishes the red before vetting
 // rather than pairing an old failure with a new test.
-function capturedRedOf(
+//
+// Recency is the ledger's own APPEND ORDER, never the seq value (GAP-035). `seq` is
+// minted by reading the ledger and adding one, so two writers that read it in the
+// same instant mint the same number; comparing seq values would then read a later
+// run as "the same run" and hand the critics a red the test on disk no longer
+// produces. Position cannot collide. For the same reason a line that does not parse
+// forces `stale`: a record we could not read is never evidence that nothing newer
+// ran — it is skipped for CHOOSING the red (a torn crash artifact must not wedge the
+// vet) and counted for JUDGING recency.
+export function capturedRedOf(
   runDir: string,
   item: Item,
   itemId: string,
 ): { red: RedEvidence; stale: boolean; resolvedByFallback: boolean } {
   const ledger = path.join(runDir, "evidence.jsonl");
-  const reds: RedEvidence[] = [];
-  let latestSeq = -1;
+  const reds: Array<{ record: RedEvidence; position: number }> = [];
+  let latestPosition = -1;
+  let unreadableLine = false;
   if (existsSync(ledger)) {
     let raw = readFileSync(ledger, "utf8");
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    let position = -1;
     for (const line of raw.split("\n")) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
+      position += 1;
       let parsed: EvidenceRecord;
       try {
         parsed = JSON.parse(trimmed) as EvidenceRecord;
       } catch {
-        continue; // a torn crash artifact is skipped, never allowed to wedge the vet
+        unreadableLine = true; // skipped for the choice, counted for the recency judgment
+        continue;
       }
       if (parsed.itemId !== itemId) continue;
       // Every run for this item counts toward "what ran last", red or green.
-      if (parsed.seq > latestSeq) latestSeq = parsed.seq;
+      latestPosition = position;
       // Only a §2.6.1-LEGAL red is a red. A class-"error" record is one the submit
       // side refuses outright ("that is not a red"), so handing it to the critics as
       // THE CAPTURED RED would vet a test against its own brokenness.
       if (parsed.kind === "red" && (parsed.failureClass === "assertion" || parsed.failureClass === "missing-subject")) {
-        reds.push(parsed);
+        reds.push({ record: parsed, position });
       }
     }
   }
   const pointer = item.evidence.red;
   let resolvedByFallback = true;
-  let chosen: RedEvidence | undefined;
+  let chosen: { record: RedEvidence; position: number } | undefined;
   if (pointer !== undefined) {
-    chosen = reds.find((record) => record.seq === pointer.seq);
+    // The LAST record carrying the pointed-at seq: if two writers minted the same
+    // number, the newer of them is the one the pointer was written for.
+    for (const entry of reds) {
+      if (entry.record.seq === pointer.seq) chosen = entry;
+    }
     if (chosen !== undefined) resolvedByFallback = false;
   }
   if (chosen === undefined) chosen = reds[reds.length - 1];
@@ -3493,7 +3511,11 @@ function capturedRedOf(
         "record is not a red); there is nothing for the critics to judge the test against (§2.6)",
     );
   }
-  return { red: chosen, stale: chosen.seq !== latestSeq, resolvedByFallback };
+  return {
+    red: chosen.record,
+    stale: unreadableLine || chosen.position !== latestPosition,
+    resolvedByFallback,
+  };
 }
 
 /**
@@ -7013,6 +7035,12 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
       hasStagedDeletion: false,
       currentHead,
       noGit: false,
+      // What the record's OWN stamp can order (GAP-035): a verify started under the
+      // composition root's monotonic clock carries a sub-millisecond stamp that
+      // decides the tie against a filesystem mtime, and a record written by a
+      // whole-millisecond wall read does not. Read off the record, because that is
+      // all a record written by an earlier process still carries.
+      stampResolutionMs: stampResolutionMsOf(record.startedMs),
     },
   );
 

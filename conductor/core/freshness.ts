@@ -30,6 +30,14 @@ export interface FreshnessInputs {
   currentHead: string;
   /** §3.9 no-git mode: there is no HEAD, so condition 2 is skipped. */
   noGit: boolean;
+  /**
+   * The resolution, in milliseconds, of the clock that produced `record.startedMs` —
+   * DATA, gathered by the caller like every other input here (this module reads no
+   * clock). 0 says the stamp came from a monotonic source that orders two events
+   * inside one millisecond; 1 (the default when absent) says it is a truncated
+   * wall-clock read that cannot. It decides ONLY the tie below, never any other term.
+   */
+  stampResolutionMs?: number;
 }
 
 export interface FreshnessVerdict {
@@ -42,8 +50,9 @@ export interface FreshnessVerdict {
  * A verify record is fresh for a commit iff BOTH (§2.6, plan lines 838-850):
  *  1. startedMs >= max(worktree mtimes of the staged behavioral files that
  *     exist, index mtime when any staged behavioral entry is a
- *     deletion/rename) — equality counts fresh: an edit stamped AT the start
- *     instant was visible to the verify;
+ *     deletion/rename) — equality counts fresh while the start stamp is a whole
+ *     millisecond that cannot order two events inside its own tick; a stamp that
+ *     CAN (inputs.stampResolutionMs 0) reads the tie as stale instead;
  *  2. record.head === currentHead — a green produced on one branch is not a
  *     green on another (`git switch` between validate and publish changes the
  *     tree without necessarily touching any staged file's mtime). Skipped
@@ -74,9 +83,18 @@ export function verifyFreshFor(
   if (inputs.hasStagedDeletion) refs.push(inputs.indexMtimeMs);
   if (refs.length > 0) {
     const maxRef = Math.max(...refs);
-    if (record.startedMs < maxRef) {
+    // The tie (startedMs === maxRef) is the one comparison a coarse stamp cannot
+    // decide, and deciding it by machine speed is what makes this rule hold only on
+    // an idle machine. A stamp that resolves finer than the tick DOES decide it, and
+    // an edit stamped at the identical instant is not a proof of having preceded the
+    // verify — so it reads stale. A whole-millisecond stamp keeps §2.6's
+    // equality-counts-fresh reading: calling every same-millisecond edit unverified
+    // would make a coarse-timestamp volume unpublishable.
+    const tieDecidable = inputs.stampResolutionMs !== undefined && inputs.stampResolutionMs <= 0;
+    const landedAfter = tieDecidable ? record.startedMs <= maxRef : record.startedMs < maxRef;
+    if (landedAfter) {
       reasons.push(
-        `an edit landed after the verify started (startedMs ${record.startedMs} < staged reference mtime ${maxRef}) and was never verified`,
+        `an edit landed ${tieDecidable ? "at or after" : "after"} the verify started (startedMs ${record.startedMs} ${tieDecidable ? "<=" : "<"} staged reference mtime ${maxRef}) and was never verified`,
       );
     }
   }
