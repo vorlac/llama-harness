@@ -116,11 +116,16 @@ demoted to an illegal one by nothing more than a version bump in the target's te
 
 The bash edit gate extracts write targets from an **enumerated** set of shapes: output
 redirects, `tee`, `sed -i`, `perl -i`, `gawk -i inplace`, `ex`/`ed`, `dd of=`, the
-destination of `mv`/`cp`, the operands of `rm`, and a bounded unwrap of `sh -c "…"` so a
-wrapper cannot hide one. It matches shapes, not intent. A write performed by a shape
-outside that set is not seen as a write, and adding a shape means adding it to the set —
-which is exactly the maintenance burden the enumeration buys in exchange for never
-guessing.
+destination of `mv`/`cp`, the operands of `rm`, and a bounded unwrap of leading command
+wrappers — `env`, `command`, `sudo`, `builtin`, `exec`, `nice`, `nohup`, `time`,
+`timeout`, `xargs`, `stdbuf`, `ionice`, plus a shell's `-c "…"` string — so a wrapped write
+is analysed as the write it wraps. That unwrap **narrows the wrapper route without closing
+it**: three residuals still escape — `eval`'s string argument is never re-analysed
+(ISSUE-014), an `LD_PRELOAD`-injected write never appears in the command at all, and a
+`cp -t DIR` whose `-t` operand the parser mis-reads slips through (ISSUE-018). It matches
+shapes, not intent. A write performed by a shape outside that set is not seen as a write,
+and adding a shape means adding it to the set — which is exactly the maintenance burden the
+enumeration buys in exchange for never guessing.
 
 ### The M5 stub scan covers production sources only
 

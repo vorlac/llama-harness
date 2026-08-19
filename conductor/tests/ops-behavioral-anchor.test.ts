@@ -81,9 +81,10 @@ function bannerClaimMarked(doc: string): boolean {
 // The registered dishonest claims: asserted flat in the doc while the code
 // contradicts them and no marker hedges them. Each is a sentence the orchestrator
 // must correct in the (off-limits) doc — either wire the mechanism, or add the
-// "(not yet wired)" marker. `banner` is bound and verified here; the other nine are
-// REPORTED (see deviations) and are not yet mechanically bound in this file.
-const KNOWN_DISHONEST_CLAIMS: ReadonlySet<string> = new Set(["banner"]);
+// "(not yet wired)" marker. `banner` was the exemplar; OPERATIONS.md now hedges it as
+// not-yet-wired and elevates the liveness beacon as the working signal, so the claim
+// is honest by MARKER and has been discharged from this register.
+const KNOWN_DISHONEST_CLAIMS: ReadonlySet<string> = new Set([]);
 
 function claimHonesty(): { bound: boolean; marked: boolean; teaches: boolean } {
   const doc = readFileSync(OPS, "utf8");
@@ -95,22 +96,22 @@ function claimHonesty(): { bound: boolean; marked: boolean; teaches: boolean } {
   };
 }
 
-test("[macro021-banner-claim-is-dishonest-and-registered] OPERATIONS.md teaches diagnosing a dead plugin by the absent §3.8 banner, no production module emits a banner, and the doc carries no not-yet marker — so the claim is a flat falsehood and must be on KNOWN_DISHONEST_CLAIMS as a reported doc obligation", () => {
+test("[macro021-banner-claim-is-dishonest-and-registered] OPERATIONS.md still teaches the §3.8 banner diagnosis and no production module emits a banner, but the doc now hedges the claim as not-yet-wired — so it is honest by MARKER and must be OFF KNOWN_DISHONEST_CLAIMS", () => {
   const h = claimHonesty();
   assert.equal(h.teaches, true, "the banner diagnosis must still be the doc's teaching for this anchor to be measuring the real claim");
 
+  // The claim is not BOUND by code — nothing emits a §3.8 banner at HEAD — so its
+  // honesty rests entirely on the doc's not-yet-wired MARKER.
+  assert.equal(h.bound, false, "no production module emits a §3.8 banner at HEAD; if one now does, the claim is bound by code instead");
+  assert.equal(h.marked, true, "OPERATIONS.md must hedge the banner claim as not-yet-wired — the marker is what makes the taught-but-unemitted claim honest");
+
   const honest = h.bound || h.marked;
-  if (!honest) {
-    assert.ok(
-      KNOWN_DISHONEST_CLAIMS.has("banner"),
-      "the banner claim is dishonest (taught, but nothing emits a banner and the doc does not hedge it) yet is not registered — " +
-        "register it and REPORT the doc correction.",
-    );
-  }
-  // The recorded reason the claim is dishonest, pinned so a change in ANY input
-  // trips [self-cleaning] below rather than passing silently.
-  assert.equal(h.bound, false, "no production module emits a §3.8 banner at HEAD — if one now does, the claim is bound and must leave the register");
-  assert.equal(h.marked, false, "OPERATIONS.md carries no not-yet marker on the banner claim at HEAD — if one is added, the claim is honest and must leave the register");
+  assert.ok(honest, "a taught banner claim is honest only when bound by code or marked in the doc");
+  assert.equal(
+    KNOWN_DISHONEST_CLAIMS.has("banner"),
+    false,
+    "the banner claim is discharged (marked not-yet-wired) and must not linger on KNOWN_DISHONEST_CLAIMS",
+  );
 });
 
 test("[macro021-register-self-cleaning] a registered dishonest claim that has since become honest (bound by code or marked in the doc) must be removed from KNOWN_DISHONEST_CLAIMS — the register cannot outlive the falsehood it names", () => {

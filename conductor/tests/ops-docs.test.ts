@@ -1217,7 +1217,7 @@ test("[15.1-ts-run-disengaged] the disengaged entry states the futility cap, the
 // 15.1-degraded-modes
 // ===========================================================================
 
-test("[15.1-degraded-modes] OPERATIONS.md documents no-git mode and the advisory run.lock second-session behaviour", () => {
+test("[15.1-degraded-modes] OPERATIONS.md documents no-git mode and the OS-level run.lock second-session refusal", () => {
   const text = ops();
 
   // --- §3.9 no-git mode ---------------------------------------------------
@@ -1247,9 +1247,22 @@ test("[15.1-degraded-modes] OPERATIONS.md documents no-git mode and the advisory
     text.includes(".conductor/state/" + (lockFile as RegExpExecArray)[1]),
     "OPERATIONS.md must name .conductor/state/" + (lockFile as RegExpExecArray)[1] + " as the advisory single-writer lock",
   );
-  requireMatch(text, /advisory/i, "the second-session description must call run.lock ADVISORY");
   requireMatch(text, /single-writer/i, "the second-session description must call run.lock a single-writer lock");
-  requireMatch(text, /second[^.]{0,60}session/i, "the second-session description must say the second conductor session gets read-only conductor");
+  requireMatch(text, /OS-level|linkSync/i, "the second-session description must call run.lock an OS-level lock, not merely advisory");
+  requireMatch(text, /refus/i, "the second-session description must state a second conductor session is REFUSED, not downgraded");
+  requireMatch(text, /second[^.]{0,60}session/i, "the second-session description must describe what happens to the second conductor session");
+  requireMatch(
+    text,
+    /WorkspaceLockedError|lock\.contended/i,
+    "the second-session description must name the loud refusal (WorkspaceLockedError / the lock.contended record)",
+  );
+  requireMatch(text, /\*\*error\*\* level|error-level/i, "the second-session description must state the refusal is journalled at ERROR level");
+  requireMatch(text, /naming the holder|holder/i, "the loud refusal must name the holder");
+  requireMatch(
+    text,
+    /null workspace|no conductor-side/i,
+    "the second-session description must state the plugin returns a null workspace and does no conductor-side work",
+  );
 
   const staleLock = /DEFAULT_STALE_LOCK_MS\s*=\s*([0-9*\s]+);/.exec(stateSrc);
   assert.ok(staleLock !== null, "state.ts must define DEFAULT_STALE_LOCK_MS");
@@ -1263,9 +1276,7 @@ test("[15.1-degraded-modes] OPERATIONS.md documents no-git mode and the advisory
     new RegExp("(?<![\\w.])" + String(hours) + "\\s*h", "i"),
     "the second-session description must state the " + String(hours) + "h default lock staleness (state.ts DEFAULT_STALE_LOCK_MS)",
   );
-  requireMatch(text, /broken automatically|automatically broken/i, "the second-session description must state a dead holder's lock is broken automatically");
-  requireMatch(text, /never delete/i, "the second-session description must state a read-only instance never deletes the lock it observed");
-  requireMatch(text, /lies to both/i, "the second-session description must state a human deleting the lock lies to both sessions");
+  requireMatch(text, /broken automatically|automatically broken/i, "the second-session description must state a stale lock is broken automatically on the next open");
 });
 
 // ===========================================================================

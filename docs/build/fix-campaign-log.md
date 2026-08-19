@@ -65,6 +65,33 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## MACRO-021 — operator-doc honesty pass
+- **Verified at HEAD (read-only agent), then corrected:** of the ten flagged behavioral
+  claims, four were stale and are now fixed against the post-campaign code; two flipped to
+  TRUE during the campaign (doctrine injection now wired; the fabrication routes closed) and
+  were left; two were already accurate.
+- **Corrected in OPERATIONS.md/HONEST-LIMITS.md:** (1) the "no banner, no conductor" first
+  rule — no module emits a §3.8 banner, so the real gated-vs-ungated signal is the liveness
+  beacon `.conductor/state/alive.json`; the banner is marked not-yet-wired. (5) the
+  second-session paragraph — no read-only mode: a second session is REFUSED
+  (WorkspaceLockedError, OS-level linkSync lock, error-level lock.contended naming the holder,
+  null workspace, no conductor-side work); removed advisory/read-only/writes-nothing/never-
+  delete/lies-to-both. (9) the wrapper-closure overclaim — states the real enumerated unwrap
+  set and that it narrows-but-does-not-close, naming eval/LD_PRELOAD/cp-t residuals. (10) the
+  stop-kind recorder division — re-attributed to the total closer stopKindOf: noop/blocked/
+  surfaced/env each have two recorders (continuation engine on idle re-entry or conductor_report
+  on settle), only interrupt (continuation) and done (report) are exclusive.
+- **Test sync:** ops-behavioral-anchor.test.ts banner claim discharged from KNOWN_DISHONEST
+  (honest by marker); ops-docs.test.ts [15.1-degraded-modes] rewritten to pin the refusal text.
+  Gate 1811/1811; verifier PARTIAL → the one residual ("noop alone" overclaim) fixed and
+  re-gated by the orchestrator against disposition.ts:345.
+- **Owner decisions surfaced (plan immutability collision):** HONEST-LIMITS limit 8 (read-only
+  second session) and limit 11 (banner) are BOTH verbatim-pinned to the IMMUTABLE plan §9 —
+  correcting them collides with plan immutability. Left verbatim; the owner decides whether the
+  plan-faithful text carries a superseded-marker or the immutability rule yields to the D6/
+  MACRO-021 honesty withdrawal. OPERATIONS.md (not plan-pinned) now points at limit 11 while
+  stating the beacon rule — a deliberate, documented cross-doc seam pending that decision.
+
 ## Phase VII-B — mutation suite + record pass + dashboard read
 - **Landed (VII.3):** GAP-018 standing mutation suite as an on-demand tool
   `conductor/tools/audit-mutation-suite.ts` (NOT wired into the gate wrapper) — applies a

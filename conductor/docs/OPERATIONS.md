@@ -4,12 +4,16 @@ How to serve it, how to read what it produced, how to stop it, what every exit c
 error envelope means, and what to do when one of the four failures an operator actually
 meets shows up.
 
-**First rule: no banner, no conductor.** The §3.8 session banner is the only thing that
-distinguishes a gated session from an ungated one. opencode loads a plugin by iterating
-the module's exports; a plugin that throws at construction is skipped whole and the
-session comes up looking completely normal, with every gate in this repository silently
-absent. If the banner is not there, stop and fix the load before trusting anything the
-session does. See [HONEST-LIMITS.md](./HONEST-LIMITS.md), limit 11.
+**First rule: no beacon, no conductor.** The liveness beacon at
+`.conductor/state/alive.json`, rewritten at plugin init by the init sequence, is what
+actually distinguishes a gated session from an ungated one: it exists only when the plugin
+loaded. The visible §3.8 session banner ("no banner, no conductor" — not yet wired) is the
+intended at-a-glance version of that check, but until it ships the beacon is the signal
+that works. opencode loads a plugin by iterating the module's exports; a plugin that throws
+at construction is skipped whole and the session comes up looking completely normal, with
+every gate in this repository silently absent. If the beacon is missing — or names a `pid`
+that is not running — stop and fix the load before trusting anything the session does. See
+[HONEST-LIMITS.md](./HONEST-LIMITS.md), limit 11.
 
 **Contents**
 
@@ -320,19 +324,26 @@ exit code, because a run ends inside a live opencode session that keeps running.
 |---|---|---|
 | `done` | the report tool ran and the run completed | `conductor_report` |
 | `noop` | the run made no observable progress across consecutive re-prompts | the continuation engine |
-| `blocked` | no open item remains and blocked items remain | `conductor_report` |
-| `surfaced` | no open and no blocked item remains, and human-territory questions are pending | `conductor_report` |
-| `env` | the override budget is exhausted: over budget is a stop, not another override | `conductor_override` |
+| `blocked` | no open item remains and blocked items remain, or a closing verify came back red | the continuation engine on idle re-entry, or `conductor_report` on settle |
+| `surfaced` | no open and no blocked item remains, and human-territory questions are pending | the continuation engine on idle re-entry, or `conductor_report` on settle |
+| `env` | a closing verify's runner could not run, or the override budget is exhausted | `conductor_report`, or the override hatch |
 | `interrupt` | the halt file was present at an idle re-entry | the continuation engine |
 
 **Every stop kind writes `report.md`** — the same single writer, selecting stop-report
-content for the five non-`done` kinds and full-report content for `done`. The recorders
-divide as the table says: the continuation engine records `noop` and `interrupt`, the
-report tool records `done`, `blocked` and `surfaced`, and the override hatch records `env`
-when a budget runs out. The **fan-out engine** never records a run stop at all — what it
-produces on a failed sub-session is a per-job error of kind `env` on that job's result
-(see [Error envelopes](#8-error-envelopes)), which the caller reads; the run-level `env`
-stop is the override-budget one above.
+content for the five non-`done` kinds and full-report content for `done`. Two engines reach
+that writer through one total stop-closer (`stopKindOf`): the **continuation engine** runs
+it on an idle re-entry, and the **report tool** (`conductor_report`) runs it when a run
+settles. `interrupt` is the continuation engine's alone — only an idle re-entry sees the
+halt file — and `done` is `conductor_report`'s alone. The other four are written by
+**whichever** reaches the closer first: `blocked` and `surfaced` when an idle re-entry
+finds the run out of moves or when the model settles it over blocked or question-bearing
+work; `noop` from the continuation engine on the futile re-prompt limit and from
+`conductor_report` on a settle that advanced no item (the defer-everything-with-a-green-verify
+case); and `env` from `conductor_report` on a closing verify that came back red because its
+runner could not run, and from the override hatch when the override budget is spent. The **fan-out engine** never
+records a run stop at all — what it produces on a failed sub-session is a per-job error of
+kind `env` on that job's result (see [Error envelopes](#8-error-envelopes)), which the
+caller reads; the run-level `env` stop is one of the two above.
 
 **What a process returns.** These are the things an operator runs by hand.
 
@@ -453,11 +464,12 @@ $ node --input-type=module -e 'import("./conductor/plugin/index.ts").then(m => c
 
 The second command must print exactly `[ 'ConductorPlugin' ]`.
 
-The corroborating check is the §3.8 liveness beacon at `.conductor/state/alive.json`, which
-the plugin rewrites at init. It holds four fields — `pid`, `startMs`, `version` and
-`sessionID`. A beacon whose `pid` is not running, or whose `sessionID` is not the session
-you are sitting in, means the conductor you are reading about is not the one in front of
-you. No beacon at all means the plugin has never initialised in this workspace.
+The heading is a mnemonic: the §3.8 visible banner is not yet wired, so the check that
+actually works is the liveness beacon at `.conductor/state/alive.json`, which the plugin
+rewrites at init. It holds four fields — `pid`, `startMs`, `version` and `sessionID`. A
+beacon whose `pid` is not running, or whose `sessionID` is not the session you are sitting
+in, means the conductor you are reading about is not the one in front of you. No beacon at
+all means the plugin has never initialised in this workspace.
 
 ### "publish denied stale"
 
@@ -565,21 +577,23 @@ sets `git.mode` to `read-only`, turns parallel writes off, and changes four thin
 Everything else — the FSM, the gates, the evidence ledger, the review layer — is
 **unchanged**. No-git is a narrower conductor, not a weaker one.
 
-**A second session in the same workspace.** `.conductor/state/run.lock` is an **advisory
-single-writer** lock holding `{pid, startMs}`. The first conductor session claims it; a
-**second** conductor session in the same workspace finds it held and drops to read-only
-conductor — it can read state and answer, and it writes nothing. A held lock is
-**broken automatically** in exactly two situations: the holder's pid is no longer alive, or
-the lock is older than 24h (`DEFAULT_STALE_LOCK_MS`). Breaking one journals a `lock.stale-break`
-record at `warn` naming the pid it displaced, so a mystery second writer is greppable.
+**A second session in the same workspace.** `.conductor/state/run.lock` is an **OS-level
+single-writer** lock — claimed with `linkSync`, which the kernel refuses to let a second
+caller overwrite — holding the holder's `pid`, `startMs` and `sessionID`. The first
+conductor session claims it; a **second** conductor session in the same workspace is
+**refused**, not downgraded. `openWorkspace` throws `WorkspaceLockedError`, the plugin
+catches it and returns a **null workspace**, and that session does **no conductor-side
+work at all** — it takes no lock, mints no evidence, writes no state. The refusal is loud:
+it journals a `lock.contended` record at **error** level naming the holder (its `pid`,
+`startMs` and `sessionID`), which the console sink surfaces to stderr, so a blocked second
+session is never silent.
 
-Two rules follow from "advisory", and both matter at 2am. A read-only instance
-**never deletes** the lock it observed — only a writer releases its own — so finding the
-lock still there after a read-only session exits is correct, not a leak. A human deleting it
-by hand **lies to both sessions**: the read-only one may claim it on its next open while
-the original writer still believes it holds it, and nothing downstream will notice two
-writers. If a stale lock is genuinely in your way, let the staleness rule break it, or stop
-the holding process and let the next open break it on the dead pid.
+A held lock is **broken automatically** on the next open in exactly two situations: the
+holder's `pid` is no longer alive, or the lock is older than 24h
+(`DEFAULT_STALE_LOCK_MS`). Both are the ordinary path back in — a crashed session leaves a
+lock its own dead pid invalidates, and an abandoned one ages out — so there is nothing to
+delete by hand. If a stale lock is genuinely in your way, let the staleness rule break it,
+or stop the holding process and let the next open break it on the dead pid.
 
 Neither of these is a guarantee about a *second, plain* opencode session — one started
 without the harness. That one takes no lock at all and is invisible to conductor. Read
