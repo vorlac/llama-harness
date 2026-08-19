@@ -1,4 +1,16 @@
 # HANDOFF — read this first on every start
+
+## Position — 2026-08-18: the review is complete; the next action is step 5, which re-orders THIS document
+Review steps 2–4 (enforcement, macro, capability) are complete and committed (`cfa929d`): three merged
+registers under `docs/reviews/conductor-review/` — ISSUE-001…-142, MACRO-001…-034, GAP-001…-048 — plus
+`step5-preflight-review.md`, whose pre-step-5 corrections are applied in place (marked at each edit site).
+**Next action: step 5**, the INTERACTIVE delegation-design session with the repo owner — agenda:
+`docs/reviews/conductor-review/5-delegation-design-session.md` (it names its own read-first list).
+The "Do these in this order" list below is the **pre-review** plan; re-ordering it against the capability
+register's §8 provisional plan and §9 open decisions is exactly what step 5 exists to do. **Do not start
+CR-2, 13.2, 14.2, or any register fix before the step-5 session concludes.** Everything below this block
+is kept unchanged as the 2026-08-14 build-state record, which is still accurate about the build itself.
+
 ## Position — 2026-08-14, after the non-live closeout pass. Full history: **`docs/build/COMPLETION-REPORT.md`**
 **The build is NOT complete, and everything still missing needs a live model.** In a fresh detached
 worktree of HEAD (plus `npm install` in `conductor/`), `bash scripts/verify-acceptance.sh` exits 1 —
@@ -14,8 +26,8 @@ lists both missing commit messages, and detector E is their union. **Both are li
 authoring either is fabrication** (`verify-acceptance.sh:143-147`). The repo owner is holding both
 back to be scheduled deliberately — do not start either without saying so first.
 
-**The tree matches HEAD.** The only untracked files are `docs/plans/` and `docs/reviews/` work the
-repo owner owns. `STATE.json` is machine truth; `NOW.md` is the human view.
+**The tree matches HEAD.** (The `docs/plans/` and `docs/reviews/` work this line once named as
+untracked is committed as of 2026-08-18.) `STATE.json` is machine truth; `NOW.md` is the human view.
 
 ## Do these in this order
 1. **The 22 tools are BOUND — this step is DONE** (C-081, spec
