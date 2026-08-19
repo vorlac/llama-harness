@@ -83,5 +83,17 @@ the failure handling, and the safe-by-default behavior as concrete steps.
 - [ ] Every non-obvious step carries complete code, not a sketch.
 - [ ] No step defers its content, hand-waves error handling, or points at
       another step instead of stating what to do.
+- [ ] No placeholder, by name: no "TBD", nothing left "to be determined", no
+      `TODO:` marker, no bare "add error handling", no "similar to task N", no
+      `<placeholder>` standing in for real content, no "and so on". Each of these
+      is rejected on sight and each one marks a decision you have not made yet.
 - [ ] Consequential forks record ≥ 2 options and a reasoned choice.
 - [ ] Security, validation, data-loss, and accessibility are handled explicitly.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

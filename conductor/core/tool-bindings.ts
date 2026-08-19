@@ -55,19 +55,19 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
   conductor_decompose: {
     handler: "handleDecompose",
     input: "DecomposeInput",
-    infrastructure: ["store", "fanout", "runId", "config", "journal"],
+    infrastructure: ["store", "fanout", "runId", "config", "journal", "packs"],
     fixed: NO_FIXED,
   },
   conductor_plan: {
     handler: "handlePlan",
     input: "PlanInput",
-    infrastructure: ["store", "fanout", "runId", "config", "journal"],
+    infrastructure: ["store", "fanout", "runId", "config", "journal", "packs"],
     fixed: NO_FIXED,
   },
   conductor_plan_review: {
     handler: "handlePlanReview",
     input: "PlanReviewInput",
-    infrastructure: ["store", "fanout", "runId", "config", "journal"],
+    infrastructure: ["store", "fanout", "runId", "config", "journal", "packs"],
     fixed: NO_FIXED,
   },
   conductor_dispatch_wave: {

@@ -56,7 +56,7 @@ import { tool } from "@opencode-ai/plugin";
 import type { Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
 
 import { handleChatMessage } from "../adapter/chat-message.ts";
-import type { SessionRegistry } from "../adapter/chat-message.ts";
+import type { SessionRegistry, SessionRegistryEntry } from "../adapter/chat-message.ts";
 import {
   activeInlineClaimScope,
   createContinuationState,
@@ -73,9 +73,12 @@ import type {
   FanoutClient,
   SessionRegistry as FanoutRegistry,
 } from "../adapter/fanout.ts";
-import { loadPacks } from "../adapter/inject.ts";
+import { composeDelivery, loadPacks } from "../adapter/inject.ts";
+import type { Delivery, DeliveryState } from "../adapter/inject.ts";
 import { createJournal } from "../adapter/journal.ts";
 import type { Journal } from "../adapter/journal.ts";
+import { isRepo } from "../adapter/gitio.ts";
+import { readQuestions } from "../adapter/questions.ts";
 import { createFailoverState } from "../adapter/router-client.ts";
 import type { FailoverState } from "../adapter/router-client.ts";
 import { openWorkspace } from "../adapter/state.ts";
@@ -118,9 +121,10 @@ import type {
   StatusResult,
   WaveTreeState,
 } from "../adapter/tools.ts";
+import type { GateItem, GateQuestion } from "../core/gates-phase.ts";
 import { AMEND_OP_KINDS, parseAmendOps } from "../core/queue-amend.ts";
 import { NO_TREE } from "../core/types.ts";
-import type { Config, LogLevel, TreePath, TreeSlug } from "../core/types.ts";
+import type { Config, Item, LogLevel, TreePath, TreeSlug } from "../core/types.ts";
 
 // The harness version stamped into the §3.8 liveness beacon openWorkspace writes,
 // so a `conductor doctor` reading alive.json can tell which harness left it.
@@ -420,6 +424,22 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   let workspace: Workspace | null = null;
   function ensureWorkspace(sessionID: string, hook: string): Workspace | null {
     if (workspace !== null) return workspace;
+    // §6.4/§3.8 ORDERING, before anything is opened: the doctrine packs load
+    // FIRST, so openWorkspace's §3.8 liveness beacon is written only for a
+    // workspace whose doctrine can actually be delivered. Written the other way
+    // round the beacon appeared, a run was created and edits were gated — work had
+    // begun — while the pack failure waited for the first stage tool, which made
+    // the ONE observability contract §3.8 offers against conductor's own absence
+    // weaker than it reads (ISSUE-004). ensurePacks has already reported the
+    // failure at error level on the §7.1 sink and NAMED the pack, so this returns
+    // null the same way an unopenable root does: the callers that must adjudicate
+    // anyway (the gate hook) fall back to their strictest defaults, and the ones
+    // that would start work (chat.message, the stage tools) do not.
+    try {
+      ensurePacks(hook, sessionID);
+    } catch {
+      return null;
+    }
     let root = input.directory;
     try {
       root = realpathSync(input.directory);
@@ -892,6 +912,149 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     return null;
   }
 
+  // =========================================================================
+  // §6.4 THE INJECTION LAYER — the three hooks below are the ONLY way doctrine,
+  // the live state block, the §4.1 sampling and the §4.4 router tags reach a
+  // session. adapter/inject.ts composes them; this is where they are registered.
+  // =========================================================================
+
+  // §3.9 publish availability, RE-DERIVED on every delivery, from the same
+  // gitio.isRepo(root) predicate the stage gate and the report call at their own
+  // call sites. It is a property of the workspace as it stands, not of the process:
+  // conductor_setup's `initialize a repo here` answer runs git init from the
+  // handler mid-process, and a value cached before it would keep every later state
+  // block reporting a run that cannot publish while the gate, reading fresh, keeps
+  // offering conductor_publish on the same item. One question, one derivation.
+  //
+  // The cost is one `git rev-parse` per delivery, on a path that already reads
+  // run.json, queue.json, every item file and questions.jsonl off disk to describe
+  // the run at all.
+  function publishEnabledFor(ws: Workspace): boolean {
+    try {
+      return isRepo(ws.root);
+    } catch {
+      // Fail closed on the state block's terms: a workspace whose git status
+      // cannot be read must not have conductor_publish recommended into it (C-054).
+      return false;
+    }
+  }
+
+  // The persisted snapshot the live state block reports, read through the SAME
+  // committed readers every other consumer uses (readQueueJson for §2.4 scopes,
+  // store.loadItem for the FSM position, readQuestions for the §2.11 ledger) — a
+  // second reader here would let the block describe a run the gates do not see.
+  // Returns null when there is no live run: §3.2 creates one on the orchestrator's
+  // first prompt, and until then there is nothing to describe.
+  function deliveryStateFor(ws: Workspace): DeliveryState | null {
+    let run: Awaited<ReturnType<StateStore["currentRun"]>> = null;
+    try {
+      run = ws.store.currentRun();
+    } catch {
+      return null;
+    }
+    if (run === null) return null;
+    const runDir = runDirOf(ws.store.root, run.runId);
+
+    // A run before conductor_decompose has no queue.json at all, and a torn one is
+    // a repair job for the stage tools — not a reason to strip a session of its
+    // doctrine. Either way the block reports the run with no items rather than
+    // nothing at all.
+    const items: GateItem[] = [];
+    let taintCount = 0;
+    try {
+      const queue = readQueueJson(runDir, "the §6.4 injection layer");
+      for (const entry of queue.items) {
+        let item: Item;
+        try {
+          item = ws.store.loadItem(run.runId, entry.id);
+        } catch {
+          continue;
+        }
+        taintCount += item.taint.length;
+        items.push({
+          id: entry.id,
+          state: item.state,
+          behavioral: entry.behavioral,
+          dependsOn: [...entry.dependsOn],
+          fileScope: [...entry.fileScope],
+          blocked: item.blocked === null ? null : { reason: item.blocked.reason },
+          deferred: item.deferred === null ? null : { reason: item.deferred.reason },
+          debugging: item.debugging !== null,
+        });
+      }
+    } catch {
+      // no queue yet, or an unreadable one: the run is still real
+    }
+
+    let questions: GateQuestion[] = [];
+    try {
+      questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
+    } catch {
+      questions = [];
+    }
+
+    const overridesRemaining = Math.max(
+      0,
+      ws.config.workflow.maxOverridesPerRun - run.counters.overridesUsed,
+    );
+
+    return {
+      run: {
+        state: run.state,
+        stop: run.stop === null ? null : { kind: run.stop.kind },
+        classification: run.classification === null ? null : { kind: run.classification.kind },
+      },
+      items,
+      questions,
+      ctx: {
+        repoConfigured: ws.repoConfigured,
+        publishEnabled: publishEnabledFor(ws),
+        taintCount,
+        overridesRemaining,
+      },
+    };
+  }
+
+  // The ONE delivery every §6.4 hook reads. Composed per request (never cached):
+  // G9's whole point is that the state block describes the run as it is NOW, and a
+  // memoized delivery would re-state a position the run has already left.
+  //
+  // G5 fail-soft: conductor failing must not take the user's session down. A
+  // delivery that cannot be composed is journaled once under the §7.4 name for a
+  // hook that could not do its conductor-side work, and the hook then appends
+  // nothing — the session runs undelivered, which the §3.8 beacon ordering above
+  // has already made impossible for a doctrine failure specifically.
+  function deliveryFor(sessionID: string, hook: string): Delivery | null {
+    try {
+      const ws = ensureWorkspace(sessionID, hook);
+      if (ws === null) return null;
+      const packs = ensurePacks(hook, sessionID);
+      // The registry entry the gates read is the entry the doctrine is chosen
+      // from — never a second copy (SG-9). seedOrchestratorEntry reconstructs the
+      // orchestrator's from persisted state when this process inherited a live run.
+      seedOrchestratorEntry(ws);
+      const entry = registry.get(sessionID) as SessionRegistryEntry | undefined;
+      // A session with no entry is not conductor's; §6.4's documented fallback
+      // still grounds it (an unknown role receives core.md), and the role is
+      // reported as what it is rather than promoted to one of §4.1's.
+      const registryEntry: SessionRegistryEntry = entry ?? { role: "unregistered" };
+      return composeDelivery({
+        registryEntry,
+        packs,
+        state: deliveryStateFor(ws),
+      });
+    } catch (err) {
+      journal.log(
+        "error",
+        "state",
+        "hook.failed",
+        { hook, error: err instanceof Error ? err.message : String(err) },
+        { sessionID },
+      );
+      return null;
+    }
+  }
+
   // THE dependency bundle. adapter/tools.ts:7304-7311 says in its own words why
   // the handler inputs are uniform — "so the composition root can call every
   // handler alike" — so this is assembled ONCE per invocation and SPREAD into
@@ -940,6 +1103,13 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
 
   function assemble(name: string, sessionID: string, needsRun: boolean): Assembled {
     const hook = `tool:${name}`;
+    // BEFORE the workspace, and the order is load-bearing: ensureWorkspace fails
+    // closed on a doctrine failure too (§3.8 beacon ordering), and its refusal
+    // names the workspace rather than the absent pack. Loading here first
+    // keeps loadPacks's own message — which NAMES the pack file — as the refusal
+    // the caller reads, so an operator whose doctrine override is missing a pack is
+    // told which one (§6.4 fail-closed).
+    const loadedPacks = ensurePacks(hook, sessionID);
     const ws = ensureWorkspace(sessionID, hook);
     if (ws === null) {
       throw refuse(
@@ -966,7 +1136,6 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     if (run === null && needsRun) throw noRunRefusal(name);
 
     const runId = run === null ? "" : run.runId;
-    const loadedPacks = ensurePacks(hook, sessionID);
     const coords = stateCoordinates(ws.root);
     const treeState = createTreeState(ws.store, runId);
     // The REAL engine over the opencode SDK client, built with the plugin's ONE
@@ -1189,6 +1358,10 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
           classification: null,
           items: [],
           openQuestions: [],
+          // The §6.4 delivery receipts live in the run's own journal, so a
+          // workspace with no run has none to report — an empty list, never an
+          // absent field, so the answer is "nothing delivered" rather than silence.
+          deliveries: [],
         };
         return runless;
       }
@@ -1277,6 +1450,64 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
 
   return {
     tool: toolMap,
+
+    // §6.4 (a): the doctrine pack(s) and the live state block, appended to EVERY
+    // request's system array. Re-stated every request and never remembered (G9):
+    // "process re-stated every turn" is the mechanism the whole design rests on,
+    // and it reaches a session through this hook and no other.
+    //
+    // The §7.4 receipt is written here rather than by the caller, because this is
+    // the only place that knows delivery actually happened: C-028's "loaded is not
+    // delivered" has no mechanical form without a record made at the moment the
+    // text is handed to the request. It rides the LISTED `inject`/`system-append`
+    // name (core/journal-events.ts:52 — "the system-prompt append the plugin
+    // performs"), which states exactly what happened, so the closed vocabulary is
+    // not widened for it.
+    "experimental.chat.system.transform": async (hook, output) => {
+      const sessionID = typeof hook.sessionID === "string" ? hook.sessionID : "";
+      const delivery = deliveryFor(sessionID, "experimental.chat.system.transform");
+      if (delivery === null) return;
+      for (const entry of delivery.system) output.system.push(entry);
+      journal.log(
+        "info",
+        "inject",
+        "system-append",
+        {
+          role: delivery.role,
+          packs: delivery.packFiles,
+          packDigest: delivery.packDigest,
+          // The half a doctrine-only delivery would silently drop: a run that
+          // received its packs and no live state block is visible as `false` here
+          // rather than as a record that merely does not mention it.
+          stateBlock: delivery.stateBlock.length > 0,
+          stateBlockLines: delivery.stateBlock.split("\n").length,
+          entries: delivery.system.length,
+        },
+        { sessionID },
+      );
+    },
+
+    // §6.4 (b): the §4.1 per-role sampling. Only the parameters §4.1 actually
+    // names are set — a hook that overwrote topP/topK/maxOutputTokens as well
+    // would be substituting its own defaults for the model's under cover of a
+    // table that says nothing about them.
+    "chat.params": async (hook, output) => {
+      const delivery = deliveryFor(hook.sessionID, "chat.params");
+      if (delivery === null) return;
+      output.temperature = delivery.params.temperature;
+      if (delivery.params.topP !== undefined) output.topP = delivery.params.topP;
+    },
+
+    // §6.4 (c): the §4.4 router tags. ADDED to whatever opencode already carries,
+    // never a replacement of the header map — the provider's own auth headers live
+    // in it too.
+    "chat.headers": async (hook, output) => {
+      const delivery = deliveryFor(hook.sessionID, "chat.headers");
+      if (delivery === null) return;
+      for (const [name, value] of Object.entries(delivery.headers)) {
+        output.headers[name] = value;
+      }
+    },
 
     // Thin lifecycle hook: assemble the prompt, then delegate the whole decision
     // to the ONE adapter function. It returns void to opencode, so every effect

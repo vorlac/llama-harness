@@ -100,3 +100,11 @@ correct and complete, not skipped.
 - [ ] acceptance criteria are observable checks, not moods.
 - [ ] each item ≤ ~5 files and one acceptance cluster.
 - [ ] each item carries its ladder rung plus `necessary` and `reuse` notes.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

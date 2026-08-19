@@ -65,6 +65,43 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase I.4 — ISSUE-001 (CRITICAL) + GAP-001 + GAP-003 + GAP-005 + GAP-039
+- **Landed (wiring):** plugin registers `experimental.chat.system.transform` / `chat.params` /
+  `chat.headers` (names verified against the SDK's own d.ts); one pure `composeDelivery`
+  entry point in `adapter/inject.ts` so system text, temperature, and headers are three
+  fields of one decision; every dispatched session receives its role's packs verbatim + the
+  live state block (recommended next tool) + §4.1 temperature + §4.4 router tags. ISSUE-004
+  ordering fixed: packs load fail-closed BEFORE the beacon writes, so beacon presence means
+  doctrine deliverable. ISSUE-003 folded: doctrine dir resolvable, override channel honest.
+- **Landed (witness, GAP-001):** three layers — wire (`live-inject.test.ts` drives a real
+  `opencode serve` against a stub provider and asserts doctrine/state-block/params/headers
+  in the outbound request, with an anti-vacuity leg), runtime (one journal receipt per
+  delivery under the listed `inject`/`system-append` event: role, packs, packDigest),
+  status (`conductor_status` renders last delivery per session). Multi-role witnessed at
+  the unit layer (a parked in-flight sub-session gets tdd.md, its own temperature, its own
+  role headers — NOT the orchestrator fallback); live leg stays single-role (gate cost).
+- **Landed (GAP-003):** the live-ish leg rides the main suite via the wire-contract spawn
+  idiom — real opencode, stub provider, every full gate run.
+- **Landed (GAP-005):** `core/mechanics.ts` derives pack MECHANICS from `legalTools` itself
+  (~14 synthetic FSM positions; meta list = TOOL_BINDINGS minus stage tools, so a new tool
+  can never go unnamed); all nine packs carry the generated block; `tools/generate-mechanics.ts`
+  splices under a marker law, CLI round-trip tested; guard test compares each pack against a
+  FRESH derivation with an independent re-derivation anti-vacuity leg. Seven dispatch prompts
+  stopped hand-spelling doctrine — they compose through fail-closed `doctrineSlice` (both
+  failure arms separately load-bearing). `PLAN_PLACEHOLDER_LABELS` derives from the real
+  rejector; plan.md names every rejected shape, guard goes red if a rule is added unnamed.
+- **Landed (GAP-039):** tdd.md's cycle ends in a gate-legal action.
+- **Evidence:** TDD reds per subject; fix round closed all 8 findings of the round-1 PARTIAL
+  verdict (two false mutation claims, single-role witness, isRepo memo divergence, plan.md
+  token regression, hygiene) — fresh verifier CONFIRMED all 8 with mutation re-runs; gate
+  1440/1440 ×2 (recheck) + orchestrator (below). Orchestrator re-ran THE mutation
+  (system-transform hook unregistered): 8/16 witness tests red; restore hash-identical.
+- **Residuals routed:** beacon `doctrineLoaded` digest field (Beacon interface pinned by
+  ops-docs at 4 fields; docs are orchestrator-territory) → Phase VII.5 record pass.
+  GAP-002 wiring manifest → Phase VII.1 as planned. Live leg single-role → acceptable,
+  noted. No repo guard exists for prohibited comment words (two 'now's slipped through
+  agents twice) → candidate small guard, Phase VII basket.
+
 ## Phase I.2 — ISSUE-002 (CRITICAL) + GAP-004 + CR-2
 - **Landed:** `sessionTreeOf(store, item)` returns `item.worktree ?? store.root` — always a
   PATH — with `itemTreeOf` deriving the marker SLUG independently; the shipped default

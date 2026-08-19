@@ -110,6 +110,19 @@ import { acceptanceClusters, scanPlaceholders, vagueAcceptance, validateQueue } 
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 
+// GAP-005: the plan-level dispatch prompts compose their doctrine slice out of the
+// loaded pack map, so every handler call here carries the REAL packs, keyed by file
+// name exactly as adapter/inject.ts loadPacks keys them.
+const DOCTRINE_PACKS: Record<string, string> = {};
+{
+  const doctrineDir = new URL("../doctrine/", import.meta.url);
+  for (const name of readdirSync(doctrineDir)) {
+    if (name.endsWith(".md")) {
+      DOCTRINE_PACKS[name] = readFileSync(new URL(name, doctrineDir), "utf8");
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures + helpers (the same shape as tools-9.1.test.ts's harness).
 // ---------------------------------------------------------------------------
@@ -460,7 +473,7 @@ test("[9.2-decompose-dag] a valid acyclic queue is accepted + persisted + items 
       makeQueueItem("I2", { fileScope: ["src/b.ts"], testScope: ["tests/b.test.ts"], dependsOn: ["I1"] }),
     ]);
     const w1 = makePlannerFanout(runId, config, journal.sink, [good]);
-    const res = await handleDecompose({ store, fanout: w1.fanout, runId, config, journal: journal.sink });
+    const res = await handleDecompose({ store, fanout: w1.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS });
 
     assert.equal(res.runState, "DECOMPOSED", "a valid decomposition advances INTAKE→DECOMPOSED");
     assert.deepEqual([...res.itemIds].sort(), ["I1", "I2"], "the result names every created item id");
@@ -501,7 +514,7 @@ test("[9.2-decompose-dag] a valid acyclic queue is accepted + persisted + items 
       makeQueueItem("I2", { fileScope: ["src/b.ts"], testScope: ["tests/b.test.ts"], dependsOn: ["I1"] }),
     ]);
     const w2 = makePlannerFanout(runId2, config, journal.sink, [cyclic, fixed]);
-    const res2 = await handleDecompose({ store, fanout: w2.fanout, runId: runId2, config, journal: journal.sink });
+    const res2 = await handleDecompose({ store, fanout: w2.fanout, runId: runId2, config, journal: journal.sink, packs: DOCTRINE_PACKS });
 
     assert.equal(w2.sdk.prompts.length, 2, "the cycle triggers exactly one bounded re-prompt (two planner prompts)");
     assert.ok(/cycl|acyclic|\bdag\b|depend/i.test(w2.sdk.prompts[1].text), "the re-prompt names the DAG/cycle reason");
@@ -543,7 +556,7 @@ test("[9.2-decompose-size] an oversized item is rejected with one bounded re-spl
       makeQueueItem("I2", { fileScope: ["src/b.ts"], testScope: ["tests/b.test.ts"], dependsOn: ["I1"] }),
     ]);
     const w = makePlannerFanout(runId, config, journal.sink, [oversized, resplit]);
-    const res = await handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink });
+    const res = await handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS });
 
     assert.equal(w.sdk.prompts.length, 2, "the oversized item triggers exactly one bounded re-split re-prompt");
     assert.ok(/siz|split|file|too (?:big|large|many)/i.test(w.sdk.prompts[1].text), "the re-prompt names the size/split reason");
@@ -577,7 +590,7 @@ test("[9.2-decompose-behavioral-false-reject] a behavioral:false item whose file
     const w = makePlannerFanout(runId, config, journal.sink, [bad]);
 
     const err = await expectReject(
-      () => handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink }),
+      () => handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS }),
       "behavioral:false ∩ behavioralPaths",
     );
     assert.ok(/lib\/runtime/.test(err.message), "the rejection NAMES the intersecting glob");
@@ -612,7 +625,7 @@ test("[9.2-decompose-behavioral-false-docs-ok] the same behavioral:false item wi
       }),
     ]);
     const w = makePlannerFanout(runId, config, journal.sink, [good]);
-    const res = await handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink });
+    const res = await handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS });
 
     assert.equal(res.runState, "DECOMPOSED", "a behavioral:false docs-only item is accepted → DECOMPOSED");
     assert.deepEqual(res.itemIds, ["I1"], "the docs-only item is created");
@@ -643,7 +656,7 @@ test("[9.2-decompose-behavioral-testscope] a behavioral:true item with an empty 
     const w = makePlannerFanout(runId, config, journal.sink, [bad]);
 
     const err = await expectReject(
-      () => handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink }),
+      () => handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS }),
       "behavioral+empty-testScope",
     );
     assert.ok(/test\s*scope|test path/i.test(err.message), "the rejection names the missing test scope");
@@ -675,7 +688,7 @@ test("[9.2-decompose-ponytail] ponytail full mode rejects an item whose ladderRu
     const w = makePlannerFanout(runId, config, journal.sink, [bad]);
 
     const err = await expectReject(
-      () => handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink }),
+      () => handleDecompose({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS }),
       "ponytail full: minimal-code + empty reuse",
     );
     assert.ok(/reuse|minimal-code|ponytail|looked/i.test(err.message), "the rejection names the ponytail reuse-evidence rule");
@@ -701,7 +714,7 @@ test("[9.2-plan-writes] conductor_plan writes plan.md at the run dir, advances D
 
     const reply = planJson(CLEAN_PLAN_MD, []);
     const w = makePlannerFanout(runId, config, journal.sink, [reply]);
-    const res = await handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, now: () => START_MS });
+    const res = await handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS });
 
     assert.equal(res.runState, "PLANNED", "conductor_plan advances DECOMPOSED→PLANNED");
     assert.ok(res.planPath.endsWith("plan.md"), "the result names plan.md");
@@ -741,7 +754,7 @@ test("[9.2-plan-decisions] conductor_plan extracts ≥2-option decisions into de
     const d1 = makeDecisionProposal({ question: "HTTP client: cpp-httplib vs raw sockets?", appliedWhere: "src/router" });
     const d2 = makeDecisionProposal({ question: "JSON parser: stdlib vs vendored?", choice: "stdlib", appliedWhere: "src/parse" });
     const wA = makePlannerFanout(runId, config, journal.sink, [planJson(CLEAN_PLAN_MD, [d1, d2])]);
-    const resA = await handlePlan({ store, fanout: wA.fanout, runId, config, journal: journal.sink, now: () => START_MS });
+    const resA = await handlePlan({ store, fanout: wA.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS });
 
     assert.equal(resA.runState, "PLANNED", "a plan carrying valid decisions still reaches PLANNED");
     const ledger = readDecisions(runDirOf(store, runId));
@@ -762,7 +775,7 @@ test("[9.2-plan-decisions] conductor_plan extracts ≥2-option decisions into de
     const wB = makePlannerFanout(runId2, config, journal.sink, [planJson(CLEAN_PLAN_MD, [oneOption])]);
 
     const err = await expectReject(
-      () => handlePlan({ store, fanout: wB.fanout, runId: runId2, config, journal: journal.sink, now: () => START_MS }),
+      () => handlePlan({ store, fanout: wB.fanout, runId: runId2, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS }),
       "plan <2-option derived decision",
     );
     assert.match(err.message, /2|two|option/i, "the rejection names the ≥2-scored-options rule");
@@ -791,7 +804,7 @@ test("[9.2-plan-placeholder] a placeholder-laden plan output is rejected with on
       planJson(PLACEHOLDER_PLAN_MD, []),
       planJson(CLEAN_PLAN_MD, []),
     ]);
-    const res = await handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, now: () => START_MS });
+    const res = await handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS });
 
     assert.equal(w.sdk.prompts.length, 2, "the placeholder-laden plan triggers exactly one bounded re-prompt");
     assert.ok(
@@ -1010,7 +1023,7 @@ test("[9.2-fix-decision-placeholders] placeholders in a decision proposal reject
     const dirty = makeDecisionProposal({ why: "TBD" });
     const w = makePlannerFanout(runId, config, journal.sink, [planJson(CLEAN_PLAN_MD, [dirty])]);
     const err = await expectReject(
-      () => handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, now: () => START_MS }),
+      () => handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS }),
       "plan decision carrying a placeholder",
     );
     assert.match(err.message, /TBD|placeholder/i, "the rejection names the placeholder defect");
@@ -1040,7 +1053,7 @@ test("[9.2-fix-reprompt-all-defects] the single re-prompt names placeholder AND 
       planJson(PLACEHOLDER_PLAN_MD, [oneOption]),
       planJson(CLEAN_PLAN_MD, [makeDecisionProposal()]),
     ]);
-    const res = await handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, now: () => START_MS });
+    const res = await handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS });
 
     assert.equal(w.sdk.prompts.length, 2, "exactly one bounded re-prompt");
     const reprompt = w.sdk.prompts[1].text;
@@ -1066,7 +1079,7 @@ test("[9.2-fix-journal-decision-reject] a rejected plan decision emits a guard-r
     const oneOption = makeDecisionProposal({ options: [{ name: "only", score: FULL_SCORE }] });
     const w = makePlannerFanout(runId, config, journal.sink, [planJson(CLEAN_PLAN_MD, [oneOption])]);
     await expectReject(
-      () => handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, now: () => START_MS }),
+      () => handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS }),
       "plan <2-option derived decision",
     );
     assert.ok(
@@ -1092,7 +1105,7 @@ test("[9.2-fix-queue-read] a corrupt queue.json is named, and a BOM-prefixed que
     writeFileSync(path.join(runDirOf(store, runId), "queue.json"), "{not json");
     const w = makePlannerFanout(runId, config, journal.sink, [planJson(CLEAN_PLAN_MD, [])]);
     const err = await expectReject(
-      () => handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, now: () => START_MS }),
+      () => handlePlan({ store, fanout: w.fanout, runId, config, journal: journal.sink, packs: DOCTRINE_PACKS, now: () => START_MS }),
       "corrupt queue.json",
     );
     assert.match(err.message, /conductor_plan/, "the error names the tool");
@@ -1111,6 +1124,7 @@ test("[9.2-fix-queue-read] a corrupt queue.json is named, and a BOM-prefixed que
       runId: runId2,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
     assert.equal(res.runState, "PLANNED", "a BOM-prefixed queue.json is read, not rejected (§2 BOM tolerance)");
@@ -1154,7 +1168,7 @@ test("[9.2-fix-ponytail-prompt] the decompose prompt states the ponytail law at 
     const liteStore = openStore(root, journal.sink, liteConfig);
     const liteRun = createIntakeRun(liteStore);
     const wl = makePlannerFanout(liteRun, liteConfig, journal.sink, [good]);
-    await handleDecompose({ store: liteStore, fanout: wl.fanout, runId: liteRun, config: liteConfig, journal: journal.sink });
+    await handleDecompose({ store: liteStore, fanout: wl.fanout, runId: liteRun, config: liteConfig, journal: journal.sink, packs: DOCTRINE_PACKS });
     assert.equal(
       /empty reuse note is rejected|is rejected/i.test(wl.sdk.prompts[0].text.split("ponytail")[1] ?? ""),
       false,
@@ -1172,6 +1186,7 @@ test("[9.2-fix-ponytail-prompt] the decompose prompt states the ponytail law at 
       runId: ultraRun,
       config: ultraConfig,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
     });
     assert.ok(
       /challenge/i.test(wu.sdk.prompts[0].text),

@@ -64,3 +64,12 @@ survives and how real defects get buried.
 For the one finding: its id, `upheld` (true only if you could not refute it),
 and reasoning naming the line and the reproduction — or the failed reproduction
 that refutes it. Terse, concrete, checkable.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

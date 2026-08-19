@@ -71,3 +71,11 @@ at all.
 Mocks are tools to isolate, not things to test. If vetting shows a test is
 checking mock behavior, the test went wrong — test real behavior, or question
 why the mock exists.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

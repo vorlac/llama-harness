@@ -6,10 +6,16 @@
 //     never remembered (G9). A pure function of its inputs.
 //   - paramsForRole:     the `chat.params` sampling table (§4.1).
 //   - headersFor:        the `chat.headers` §4.4 router tags.
+//   - composeDelivery:   the ONE call the composition root makes per request — the
+//     three above answered together, plus the receipt fields (which packs, their
+//     digest) the §7.4 journal record carries. It exists so the plugin's three
+//     hooks cannot each compose a DIFFERENT delivery for the same session: the
+//     headers a request is tagged with and the doctrine it carries are two halves
+//     of one decision, and the router's affinity is a lie the moment they diverge.
 //   - loadPacks/initPlugin: the §6.4 fail-closed init — a missing pack is a startup
 //     error surfaced BEFORE the §3.8 beacon is written, so the beacon's ABSENCE
 //     proves init failed. loadPacks/initPlugin are the ONLY filesystem-touching
-//     functions here; the three transform helpers are pure (no I/O, no clock, no
+//     functions here; the transform helpers are pure (no I/O, no clock, no
 //     randomness), so identical inputs yield byte-identical output (G9).
 //
 // ADAPTER (G14): the pure helpers borrow only the core `legalTools` derivation
@@ -18,6 +24,7 @@
 // tag, no top-level await — so this runs under BOTH Node type-stripping and the
 // alternate opencode plugin runtime.
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -161,18 +168,28 @@ function renderStateBlock(
   return lines.join("\n");
 }
 
-// The `experimental.chat.system.transform` body: [ primaryPack, ...secondaryPacks,
-// stateBlock ]. append[0] is the role's primary doctrine pack VERBATIM from the
-// cached map; the LAST entry is the live state block. An unknown role falls back to
-// core.md (the orchestrator/mechanical lite doctrine) so an unregistered session
-// still receives grounding rather than an empty system append.
-export function buildSystemAppend(
+// The state block for a workspace that has no live run: the §3.2 fact that a run
+// is created when the orchestrator receives a prompt. It is a SEPARATE rendering
+// rather than renderStateBlock over a fabricated run, because every field that
+// block reports (state, recommendation, counts) would be an invention here, and a
+// state block that invents the run state is worse than one that says there is none.
+export function renderNoRunStateBlock(): string {
+  return [
+    "Conductor live state — re-stated every request (§6.4), never remembered.",
+    "Run state: none — this workspace has no live conductor run.",
+    "Recommended next tool: none. A run is created when the orchestrator receives a prompt (§3.2); " +
+      "conductor_status reports what this workspace already holds.",
+  ].join("\n");
+}
+
+// The §4.1 pack files this session's delivery carries, in order: the role's
+// primary pack first, then the posture-conditional secondaries. Exported so a
+// caller can NAME what was delivered (the §7.4 receipt) without re-deriving the
+// selection rule — two spellings of "which pack does this role get" is the
+// ISSUE-003 shape, one directory over.
+export function packFilesFor(
   registryEntry: SessionRegistryEntry,
-  run: GateRun,
   items: GateItem[],
-  questions: GateQuestion[],
-  packs: Record<string, string>,
-  ctx: InjectCtx,
 ): string[] {
   const packFiles = [...(ROLE_PACKS[registryEntry.role] ?? ["core.md"])];
   // §4.1: an implementer whose ACTIVE item is in DEBUG posture also receives
@@ -193,14 +210,37 @@ export function buildSystemAppend(
   if (registryEntry.receivingReview === true && !packFiles.includes("receive-review.md")) {
     packFiles.push("receive-review.md");
   }
-  const append: string[] = [];
+  return packFiles;
+}
+
+// The pack CONTENTS for a selection, verbatim from the cached map. A pack the map
+// does not carry contributes nothing rather than an "undefined" string; the empty
+// fallback guarantees append[0] is always a string and the state block is always
+// the last entry, whatever the cache holds.
+function packTextsFor(packFiles: string[], packs: Record<string, string>): string[] {
+  const texts: string[] = [];
   for (const file of packFiles) {
     const content = packs[file];
-    if (content !== undefined) append.push(content);
+    if (content !== undefined) texts.push(content);
   }
-  // Guarantee a non-empty append even if the primary pack is somehow absent from the
-  // cache, so append[0] is always a string and the block is always the last entry.
-  if (append.length === 0) append.push("");
+  if (texts.length === 0) texts.push("");
+  return texts;
+}
+
+// The `experimental.chat.system.transform` body: [ primaryPack, ...secondaryPacks,
+// stateBlock ]. append[0] is the role's primary doctrine pack VERBATIM from the
+// cached map; the LAST entry is the live state block. An unknown role falls back to
+// core.md (the orchestrator/mechanical lite doctrine) so an unregistered session
+// still receives grounding rather than an empty system append.
+export function buildSystemAppend(
+  registryEntry: SessionRegistryEntry,
+  run: GateRun,
+  items: GateItem[],
+  questions: GateQuestion[],
+  packs: Record<string, string>,
+  ctx: InjectCtx,
+): string[] {
+  const append = packTextsFor(packFilesFor(registryEntry, items), packs);
   append.push(renderStateBlock(registryEntry, run, items, questions, ctx));
   return append;
 }
@@ -244,6 +284,85 @@ export function headersFor(
   // §4.4: X-Conductor-Schema: required ONLY when the job flags structured output.
   if (job?.schema === true) headers["X-Conductor-Schema"] = "required";
   return headers;
+}
+
+// ---------------------------------------------------------------------------
+// (d) composeDelivery — the three above, answered together, plus the receipt.
+// ---------------------------------------------------------------------------
+
+// The persisted facts the live state block reports. Assembled by the composition
+// root from the store (the ONE place that reads the run directory) and handed here
+// as data, which is what keeps this function pure and testable without a workspace.
+export interface DeliveryState {
+  run: GateRun;
+  items: GateItem[];
+  questions: GateQuestion[];
+  ctx: InjectCtx;
+}
+
+// Everything one dispatched request must carry, plus what the §7.4 receipt names.
+// `packDigest` is over the delivered pack CONTENT, so a doctrine directory swapped
+// under a live run changes the trail even when the file names do not (C-028: a
+// receipt that names only file names cannot tell two doctrines apart).
+export interface Delivery {
+  role: string;
+  packFiles: string[];
+  packDigest: string;
+  // The live state block, named separately from `system` so a caller can RECORD
+  // that it went (and how big it was) without re-deriving which entry it is. A
+  // delivery whose doctrine arrives and whose block does not is the §6.4 half-miss
+  // that leaves a 32k model with no runtime navigation at all.
+  stateBlock: string;
+  system: string[];
+  params: { temperature: number; topP?: number };
+  headers: Record<string, string>;
+}
+
+// A stable short digest of the delivered doctrine: each pack's NAME and its bytes,
+// order included, so neither a reordering nor a same-length edit is invisible.
+// LENGTH-PREFIXED rather than separator-delimited: the framing is then unambiguous
+// without a delimiter byte, and no separator can collide with pack content (the
+// obvious separator, a control byte, would also make this file binary to grep —
+// conductor/tests/source-hygiene.test.ts).
+function packDigestOf(packFiles: string[], packs: Record<string, string>): string {
+  const hash = createHash("sha256");
+  for (const file of packFiles) {
+    const content = packs[file] ?? "";
+    hash.update(String(file.length) + ":" + file);
+    hash.update(String(content.length) + ":" + content);
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
+// The ONE composition the plugin's three §6.4 hooks share. `state` is null for a
+// workspace with no live run: the doctrine still goes (a session with no run is
+// still governed by its role's pack), and the state block reports the absence
+// rather than inventing a run to describe.
+export function composeDelivery(input: {
+  registryEntry: SessionRegistryEntry;
+  packs: Record<string, string>;
+  state: DeliveryState | null;
+  job?: { schema?: boolean };
+}): Delivery {
+  const { registryEntry, packs, state } = input;
+  const items = state === null ? [] : state.items;
+  const packFiles = packFilesFor(registryEntry, items);
+  // buildSystemAppend stays the ONE assembler for the live-run case (it is what
+  // the §6.4 ledger names and what the injection suite pins); the no-run case is
+  // the same shape with the block that reports the absence.
+  const system =
+    state === null
+      ? [...packTextsFor(packFiles, packs), renderNoRunStateBlock()]
+      : buildSystemAppend(registryEntry, state.run, state.items, state.questions, packs, state.ctx);
+  return {
+    role: registryEntry.role,
+    packFiles,
+    packDigest: packDigestOf(packFiles, packs),
+    stateBlock: system[system.length - 1] ?? "",
+    system,
+    params: paramsForRole(registryEntry.role),
+    headers: headersFor(registryEntry, input.job),
+  };
 }
 
 // ---------------------------------------------------------------------------

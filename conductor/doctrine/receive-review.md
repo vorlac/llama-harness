@@ -54,3 +54,11 @@ that covers it."
 - Never accept a finding silently to end the discussion. Silent agreement on a
   wrong claim ships the bug the finding pointed at.
 - Never treat volume of feedback as volume of truth. Verify each one on its own.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

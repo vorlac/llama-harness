@@ -12,7 +12,7 @@ NO PRODUCTION CODE WITHOUT A FAILING TEST
 No new behavior, bug fix, or refactor ships without a test that failed first.
 Violating the letter of this rule is violating its spirit.
 
-## The cycle: red → green → commit
+## The cycle: red → green → hand back
 
 1. **RED** — write one minimal test for one behavior. Clear name, real code, one
    assertion of intent. Run it. It MUST fail.
@@ -25,8 +25,10 @@ Violating the letter of this rule is violating its spirit.
    speculative abstraction, no "while I'm here" edits. Just enough to go green.
 4. **Verify green** — the new test passes AND every other test still passes AND
    the output is clean (no warnings, no stray errors).
-5. **Commit** — one behavior, tested, at green. Refactor only after green, and
-   only while staying green.
+5. **Hand back** — one behavior, tested, at green. Refactor only after green,
+   and only while staying green; then return your receipt and stop. The harness
+   advances the item through `conductor_mark_green` and `conductor_publish`
+   commits; you never run `git commit` — a self-publish is denied by design.
 
 ## delete means delete
 
@@ -73,3 +75,11 @@ happened; the ledger already knows.
 - [ ] No stubs, no placeholder bodies, no test-only shortcuts in the code.
 
 Cannot check every box? You skipped TDD. Start over.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

@@ -307,18 +307,39 @@ test("8.1-anchors-receive: receive-review.md says 'verify before implementing' a
   );
 });
 
+// A line that names a placeholder marker as a shape the pack FORBIDS: the marker
+// is quoted (a token being talked about, never a field left unfilled) and the line
+// says "no". doctrine/plan.md's self-check has to name the tokens core/planning.ts
+// rejects — a planner told "do not defer" and then rejected for the literal token
+// was never told the law it was judged by — so the rule is "the marker appears only
+// where the pack forbids it", the same shape doctrine-mechanics.test.ts I4B-3D
+// applies to the git invocation tdd.md names. A pack that leaves an actual
+// placeholder behind ("details: <marker>") carries no quote and no "no", and still
+// fails.
+function forbidsTheMarker(line: string, marker: string): boolean {
+  const quoted = new RegExp('["`“]' + marker + '\\b', "i");
+  return quoted.test(line) && /\bno\b/i.test(line);
+}
+
 // ===========================================================================
-// 8.1-no-todo — no pack carries a placeholder marker; no pack names a client.
-// Asserted over ALL nine files (model-facing text is client-agnostic).
+// 8.1-no-todo — a pack carries a placeholder marker only in the sentence that
+// forbids it; no pack names a client. Asserted over ALL nine files (model-facing
+// text is client-agnostic).
 // ===========================================================================
-test("8.1-no-todo: no pack contains a placeholder marker or names opencode/Claude/Cursor", () => {
+test("8.1-no-todo: a placeholder marker appears only where the pack forbids it, and no pack names opencode/Claude/Cursor", () => {
   for (const name of PACKS) {
-    const lower = readPack(name).toLowerCase();
+    const text = readPack(name);
+    const lower = text.toLowerCase();
     for (const marker of PLACEHOLDER_MARKERS) {
-      assert.ok(
-        !lower.includes(marker.toLowerCase()),
-        `${name} must not contain the placeholder marker ${JSON.stringify(marker)}`,
-      );
+      for (const line of text.split("\n")) {
+        if (!line.toLowerCase().includes(marker.toLowerCase())) continue;
+        assert.ok(
+          forbidsTheMarker(line, marker),
+          `${name} carries the placeholder marker ${JSON.stringify(marker)} outside the sentence ` +
+            `that forbids it — a pack may NAME the token as a rejected shape (quoted, in a "no …" ` +
+            `clause) and may never leave one standing. Line: ${JSON.stringify(line.trim())}`,
+        );
+      }
     }
     for (const client of CLIENT_NAMES) {
       assert.ok(

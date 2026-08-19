@@ -193,6 +193,20 @@ import { fileURLToPath } from "node:url";
 
 // THE SUBJECTS — absent at red time.
 import { handleSetup, SETUP_PROBE_SCHEMA_NAME } from "../adapter/tools.ts";
+
+// GAP-005: the item-review dispatch composes its doctrine slice out of the loaded
+// pack map and REFUSES without it, so this suite hands the handlers the real packs
+// keyed exactly as adapter/inject.ts loadPacks keys them (by file name).
+const DOCTRINE_PACKS: Record<string, string> = {};
+{
+  const doctrineDir = new URL("../doctrine/", import.meta.url);
+  for (const name of readdirSync(doctrineDir)) {
+    if (name.endsWith(".md")) {
+      DOCTRINE_PACKS[name] = readFileSync(new URL(name, doctrineDir), "utf8");
+    }
+  }
+}
+
 // The DOWNSTREAM victims of a config setup wrote: the two handlers that refuse an
 // item (2716) and a run (7542) no verify.requiredScopes entry covers.
 import { handleItemReview, handleReport } from "../adapter/tools.ts";
@@ -3079,7 +3093,7 @@ test("[p12b-docs-only-item-survives-multi-ecosystem-setup] after a multi-ecosyst
           journal,
           stateHome,
           workspaceKey: "p12b",
-          packs: {},
+          packs: DOCTRINE_PACKS,
         });
       } catch (error) {
         reviewThrow = messageOfThrow(error);

@@ -90,3 +90,13 @@ never converted into another override. A gate that needs overriding twice in one
 run is a defect in the system, and stopping is the correct response: the trail
 stays short enough for a human to read, and the run halts before it gets longer.
 Do not route around a spent budget — surface it and stop.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+Meta tools, outside the stage order: conductor_answer, conductor_decide, conductor_defer, conductor_inline_claim, conductor_override, conductor_queue_amend, conductor_setup, conductor_status, conductor_surface.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

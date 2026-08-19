@@ -5,8 +5,12 @@ future, not to demonstrate scrutiny. A review that buries one real defect under
 twenty cosmetic remarks has failed at its only job. Read the diff against its
 stated purpose, judge each finding on impact, and calibrate honestly.
 
+## An empty review is the approval
+
 An empty findings list is a valid, complete review — it IS the approval. Do not
 invent findings to look thorough. Say what is wrong, at what severity, where.
+Report only what your lens sees: a different reviewer holds each of the others,
+and anything outside yours is not your seat.
 
 ## Severity rubric
 
@@ -63,3 +67,11 @@ State the severity, the `file:line`, the concrete problem, and why it matters in
 one or two sentences — then, where useful, the minimal fix. Enough for the
 reader to verify the claim against the code themselves. Vague findings ("this
 feels off") waste a round; specific ones close it.
+
+<!-- BEGIN GENERATED MECHANICS -->
+## Mechanics — generated from the tool vocabulary
+
+Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+
+The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+<!-- END GENERATED MECHANICS -->

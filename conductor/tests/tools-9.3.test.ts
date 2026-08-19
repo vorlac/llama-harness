@@ -94,7 +94,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
@@ -125,6 +125,19 @@ import { nextWave, readFanout } from "../core/schedule.ts";
 import { scopesIntersect } from "../core/shell-parse.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
+
+// GAP-005: the plan-level dispatch prompts compose their doctrine slice out of the
+// loaded pack map, so every handler call here carries the REAL packs, keyed by file
+// name exactly as adapter/inject.ts loadPacks keys them.
+const DOCTRINE_PACKS: Record<string, string> = {};
+{
+  const doctrineDir = new URL("../doctrine/", import.meta.url);
+  for (const name of readdirSync(doctrineDir)) {
+    if (name.endsWith(".md")) {
+      DOCTRINE_PACKS[name] = readFileSync(new URL(name, doctrineDir), "utf8");
+    }
+  }
+}
 
 // The pinned compact-return shape (the header's contract, restated structurally so the
 // call sites type-check the green implementation against it).
@@ -593,6 +606,7 @@ test("[9.3-four-lenses] fans out the four §3.2 lenses as fresh reviewer sub-ses
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -674,6 +688,7 @@ test("[9.3-skeptics-per-major] every major gets exactly config.workflow.skeptics
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -733,6 +748,7 @@ test("[9.3-refuted-major-dies] a major refuted below the findingSurvives thresho
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -791,6 +807,7 @@ test("[9.3-surviving-major-reprompts] a surviving major re-prompts the planner w
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -872,6 +889,7 @@ test("[9.3-zero-majors-planned] a round with zero surviving majors (minors/nits 
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -956,6 +974,7 @@ async function driveRoundCap(root: string): Promise<CapDrive> {
     runId,
     config,
     journal: journal.sink,
+    packs: DOCTRINE_PACKS,
     now: () => START_MS,
   });
 
@@ -1126,6 +1145,7 @@ test("[9.3-fix-lens-coverage] all four §3.2 lenses are dispatched even when the
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -1229,6 +1249,7 @@ test("[9.3-fix-overlapping-blocks] a question's blocksItems names exactly the it
       runId,
       config,
       journal: journal.sink,
+      packs: DOCTRINE_PACKS,
       now: () => START_MS,
     });
 
@@ -1303,6 +1324,7 @@ test("[9.3-fix-zero-skeptics] a zero-skeptic panel refuses to adjudicate instead
         runId,
         config,
         journal: journal.sink,
+        packs: DOCTRINE_PACKS,
         now: () => START_MS,
       });
     } catch (error) {

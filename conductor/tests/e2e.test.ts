@@ -1058,6 +1058,7 @@ function stageBase(b: Bench): {
   runId: string;
   config: Config;
   journal: JournalCapture["sink"];
+  packs: Record<string, string>;
   sessionID: string;
 } {
   return {
@@ -1066,6 +1067,9 @@ function stageBase(b: Bench): {
     runId: b.runId,
     config: b.config,
     journal: b.journal.sink,
+    // GAP-005: the plan-level dispatch prompts compose their doctrine slice out of
+    // this map, so the e2e stages carry the REAL packs exactly as the root does.
+    packs: PACKS,
     sessionID: ORCH,
   };
 }

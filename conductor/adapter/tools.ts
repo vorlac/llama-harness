@@ -38,6 +38,7 @@ import { legalRunTransition } from "../core/fsm-run.ts";
 import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
 import { legalTools, settledForReport } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
+import { packSection } from "../core/mechanics.ts";
 import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
 import { applyAmendOps } from "../core/queue-amend.ts";
 import type { QueueAmendOp } from "../core/queue-amend.ts";
@@ -813,16 +814,90 @@ export interface StatusItem {
   deferred: unknown;
 }
 
+// The §7.4 name the injection layer's delivery record rides, spelled ONCE for the
+// writer (plugin/index.ts's transform hook) and this reader. `inject` /
+// `system-append` is already the listed vocabulary entry for "the system-prompt
+// append the plugin performs" (core/journal-events.ts), so reading it back adds no
+// name to the closed set.
+const DELIVERY_COMPONENT = "inject";
+const DELIVERY_EVENT = "system-append";
+
+// What ONE session was last handed by the §6.4 injection layer: its §4.1 role, the
+// doctrine packs that role received, and the digest of their bytes. Read back from
+// the delivery record the transform hook already writes — §7.4's `inject` /
+// `system-append` — so the surface reports what WAS delivered rather than what a
+// fresh composition would produce at read time, and the closed journal vocabulary
+// is not widened for it.
+export interface StatusDelivery {
+  sessionID: string;
+  role: string;
+  packs: string[];
+  packDigest: string;
+}
+
 export interface StatusResult {
   runId: string;
   state: RunState;
   classification: { kind: ClassificationKind } | null;
   items: StatusItem[];
   openQuestions: Array<{ id: string; question: string }>;
+  // One row per session that has received doctrine in this run, its LAST delivery
+  // (G9: the delivery is re-composed every request, so only the most recent one
+  // describes the session as it stands). Empty when nothing has been delivered —
+  // an absent field and an empty list would otherwise say the same thing.
+  deliveries: StatusDelivery[];
+}
+
+// The last §6.4 delivery per session, read off the run's journal. Cheap by
+// construction: the file is scanned line by line and only the lines that carry the
+// delivery event name are parsed, so a run whose journal is mostly FSM traffic
+// costs a substring test per line. A journal that cannot be read yields no rows —
+// status is a read surface and must not fail because a record is torn.
+function deliveriesOf(runDir: string): StatusDelivery[] {
+  const file = path.join(runDir, "journal.jsonl");
+  if (!existsSync(file)) return [];
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const bySession = new Map<string, StatusDelivery>();
+  for (const line of text.split("\n")) {
+    if (!line.includes(DELIVERY_EVENT)) continue;
+    let record: {
+      component?: unknown;
+      event?: unknown;
+      sessionID?: unknown;
+      data?: Record<string, unknown>;
+    };
+    try {
+      record = JSON.parse(line) as typeof record;
+    } catch {
+      continue; // a torn trailing line is not a reason to report no deliveries at all
+    }
+    if (record.component !== DELIVERY_COMPONENT || record.event !== DELIVERY_EVENT) continue;
+    const sessionID = typeof record.sessionID === "string" ? record.sessionID : "";
+    if (sessionID.length === 0) continue;
+    const data = record.data ?? {};
+    const packs = Array.isArray(data["packs"])
+      ? (data["packs"] as unknown[]).filter((entry): entry is string => typeof entry === "string")
+      : [];
+    // Last write wins: the delivery is re-composed on every request (G9), so the
+    // final record is the one that describes the session as it stands.
+    bySession.set(sessionID, {
+      sessionID,
+      role: typeof data["role"] === "string" ? (data["role"] as string) : "",
+      packs,
+      packDigest: typeof data["packDigest"] === "string" ? (data["packDigest"] as string) : "",
+    });
+  }
+  return [...bySession.values()].sort((a, b) => (a.sessionID < b.sessionID ? -1 : 1));
 }
 
 // Render the run/item/question dispositions. READ-ONLY: it mutates no persisted
-// byte — every access is a store read (loadRun/loadItem) or a questions read.
+// byte — every access is a store read (loadRun/loadItem), a questions read or a
+// journal read.
 export function handleStatus(input: StatusInput): StatusResult {
   const { store, runId } = input;
   const runDir = handlerRunDir(store, runId);
@@ -848,7 +923,14 @@ export function handleStatus(input: StatusInput): StatusResult {
       ? { kind: run.classification.kind }
       : null;
 
-  return { runId, state: run.state, classification, items, openQuestions };
+  return {
+    runId,
+    state: run.state,
+    classification,
+    items,
+    openQuestions,
+    deliveries: deliveriesOf(runDir),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,6 +1336,56 @@ function rejectionReprompt(basePrompt: string, heading: string, reasons: string[
 }
 
 // ---------------------------------------------------------------------------
+// The ONE way a dispatch prompt states doctrine (GAP-005).
+//
+// Doctrine used to live in two unguarded spellings: the anchor-tested `.md` packs
+// and hand-written restatements inside the prompt literals below. Nothing guarded
+// either direction, so a pack edit changed nothing a session read and a prompt
+// edit changed doctrine nobody reviewed — and after §6.4 injection the two
+// spellings CONFLICT in one context window, with the model weighting the tail.
+//
+// So a prompt never re-spells a rule: it carries the pack's own section verbatim,
+// and it FAILS CLOSED (naming the pack) when the doctrine that governs the
+// dispatch is absent — the same posture debugFixPrompt has always had. An
+// operator repointing the doctrine directory governs what the sub-session actually
+// reads, in every dispatch rather than in one.
+// ---------------------------------------------------------------------------
+
+function doctrineSlice(
+  packs: Record<string, string>,
+  file: string,
+  headings: readonly string[],
+  tool: string,
+): string {
+  const pack = packs[file];
+  if (pack === undefined || pack.trim().length === 0) {
+    throw new Error(
+      tool +
+        ': this dispatch is governed by doctrine "' +
+        file +
+        '" and the loaded pack set has none; refusing to dispatch without the doctrine that ' +
+        "governs it (§6.4)",
+    );
+  }
+  const slices: string[] = [];
+  for (const heading of headings) {
+    const section = packSection(pack, heading);
+    if (section === null) {
+      throw new Error(
+        tool +
+          ': doctrine "' +
+          file +
+          '" carries no section "' +
+          heading +
+          '"; the dispatch prompt composes its rules FROM that section and will not re-spell them',
+      );
+    }
+    slices.push(section);
+  }
+  return slices.join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
 // conductor_decompose (§3.2)
 // ---------------------------------------------------------------------------
 
@@ -1263,6 +1395,7 @@ export interface DecomposeInput {
   runId: string;
   config: Config;
   journal: HandlerJournal;
+  packs: Record<string, string>;
   sessionID?: string;
   now?: () => number;
 }
@@ -1272,10 +1405,14 @@ export interface DecomposeResult {
   runState: RunState; // DECOMPOSED on acceptance (a rejection throws instead)
 }
 
-// The `decompose.md` doctrine, inlined: the queue shape plus every §3.2 rule the
-// handler will REJECT on, stated up front (and parameterised by the config the
-// handler judges with) so the planner is told the law before it guesses at it.
-function decomposePrompt(userPrompt: string, config: Config): string {
+// The queue shape the handler parses, the §3.2 rejection law taken VERBATIM from
+// doctrine decompose.md (never a second spelling of it), and the two numbers the
+// law is parameterised by from THIS workspace's config.
+export function decomposePrompt(
+  userPrompt: string,
+  config: Config,
+  packs: Record<string, string>,
+): string {
   const behavioralPaths =
     config.verify.behavioralPaths.length > 0
       ? config.verify.behavioralPaths.join(", ")
@@ -1284,16 +1421,17 @@ function decomposePrompt(userPrompt: string, config: Config): string {
     "Decompose the following work request into a queue of independently implementable items. " +
     "Reply with a single JSON object matching the Queue schema (items: id, title, rationale, " +
     "fileScope, testScope, acceptance, behavioral, dependsOn, ponytail).\n" +
-    "The handler REJECTS a decomposition that breaks any of these (§3.2):\n" +
-    "- dependsOn names other item ids and must form a DAG: no cycle, no dangling id.\n" +
-    "- every item declares a non-empty fileScope; an item that writes nothing is not an item.\n" +
-    "- testScope is non-empty IF AND ONLY IF behavioral is true.\n" +
-    "- behavioral:false is legal ONLY when every fileScope glob is DISJOINT from the " +
-    "configured behavioral paths: " +
+    "The handler REJECTS a decomposition that breaks your doctrine's own checklist (§3.2):\n\n" +
+    doctrineSlice(
+      packs,
+      "decompose.md",
+      ["Rejection checklist (self-check before you return)"],
+      "conductor_decompose",
+    ) +
+    "\n\nAs this workspace is configured, that checklist reads:\n" +
+    "- behavioralPaths (the globs that own verification): " +
     behavioralPaths +
-    ".\n" +
-    "- acceptance criteria are observable checks an assertion can run, never quality wishes.\n" +
-    "- each item stays at or under " +
+    "\n- the per-item file cap: " +
     String(config.workflow.trivialMaxFiles) +
     " files and one acceptance cluster; split anything bigger.\n" +
     ponytailLaw(config) +
@@ -1350,7 +1488,7 @@ export async function handleDecompose(input: DecomposeInput): Promise<DecomposeR
   }
 
   // (2) derive: the planner proposes, the §3.2 table disposes.
-  const basePrompt = decomposePrompt(run.prompt, config);
+  const basePrompt = decomposePrompt(run.prompt, config, input.packs);
   let promptText = basePrompt;
   let accepted: Queue | null = null;
   let violations: string[] = [];
@@ -1436,6 +1574,7 @@ export interface PlanInput {
   runId: string;
   config: Config;
   journal: HandlerJournal;
+  packs: Record<string, string>;
   sessionID?: string;
   now?: () => number;
 }
@@ -1481,7 +1620,12 @@ export function readQueueJson(runDir: string, tool: string): Queue {
 // three §3.2 defects named), the §2.7 >=2-scored-options rule, and the §6.3
 // ponytail guardrails at the configured intensity, over the decomposed queue the
 // plan must cover item by item.
-function planPrompt(userPrompt: string, queue: Queue, config: Config): string {
+export function planPrompt(
+  userPrompt: string,
+  queue: Queue,
+  config: Config,
+  packs: Record<string, string>,
+): string {
   const itemLines = queue.items
     .map(
       (item) =>
@@ -1501,20 +1645,16 @@ function planPrompt(userPrompt: string, queue: Queue, config: Config): string {
     .join("\n");
   return (
     "Write the execution plan for the decomposed queue below. Reply with a single JSON object " +
-    'matching the Plan schema (markdown, decisions).\n"markdown" IS plan.md: per-item test ' +
-    "strategy, the design alternatives considered, the risks, and the execution order proposal " +
-    "— exact paths, bite-sized steps, complete code for every non-obvious step. NO " +
-    'placeholders: "TBD", "add error handling" and "similar to task N" are plan defects BY ' +
-    'NAME and the handler rejects the whole plan for them.\n"decisions" records every ' +
-    "consequential fork: at least 2 real options, EACH scored on the five criteria " +
-    "(capability, testability, movingParts, validationEarliness, singleSource), plus the " +
-    'choice, the why, the kind ("derived" for anything derivable; "human" only for taste, ' +
-    'money, irreversible commitments or secrets) and appliedWhere. A "derived" fork carrying ' +
-    "fewer than 2 scored options is rejected.\nPonytail intensity is \"" +
+    'matching the Plan schema (markdown, decisions).\n"markdown" IS plan.md, and the handler ' +
+    "rejects it against your doctrine's own self-check:\n\n" +
+    doctrineSlice(packs, "plan.md", ["Self-check before returning"], "conductor_plan") +
+    '\n\n"decisions" records every consequential fork: at least 2 real options, EACH scored on ' +
+    "the five criteria (capability, testability, movingParts, validationEarliness, " +
+    'singleSource), plus the choice, the why, the kind ("derived" for anything derivable; ' +
+    '"human" only for taste, money, irreversible commitments or secrets) and appliedWhere. A ' +
+    '"derived" fork carrying fewer than 2 scored options is rejected.\nPonytail intensity is "' +
     config.ponytail +
-    '": plan the minimal thing that satisfies the request, and never lazy on the ' +
-    "intensity-independent guardrails — security, input validation at trust boundaries, " +
-    "data-loss handling and accessibility (§6.3).\n\nQUEUE:\n" +
+    '" (§6.3).\n\nQUEUE:\n' +
     itemLines +
     "\n\nREQUEST:\n" +
     userPrompt
@@ -1588,7 +1728,7 @@ export async function handlePlan(input: PlanInput): Promise<PlanResult> {
   const queue = readQueueJson(runDir, "conductor_plan");
 
   // (2) derive: the planner writes plan.md; the plan.md doctrine disposes.
-  const basePrompt = planPrompt(run.prompt, queue, config);
+  const basePrompt = planPrompt(run.prompt, queue, config, input.packs);
   let promptText = basePrompt;
   let accepted: Plan | null = null;
   let acceptedProposals: PlanDecision[] = [];
@@ -1760,11 +1900,16 @@ function planReviewContext(userPrompt: string, planMd: string, queue: Queue): st
   );
 }
 
-// The `review.md` doctrine, inlined at plan level: one lens per reviewer, the
-// severity rubric by real-world impact, one concern per finding, a citation in
-// `evidence` — and the rule that an empty findings list IS the approval, so a
-// reviewer never invents a finding to look thorough.
-function lensPrompt(lens: ReviewLens, userPrompt: string, planMd: string, queue: Queue): string {
+// One lens per reviewer, plus the severity rubric VERBATIM from doctrine
+// review.md — the plan-level and item-level reviewers therefore calibrate off the
+// same words the pack was reviewed and anchor-tested on.
+export function lensPrompt(
+  lens: ReviewLens,
+  userPrompt: string,
+  planMd: string,
+  queue: Queue,
+  packs: Record<string, string>,
+): string {
   return (
     "You are a plan reviewer holding ONE lens over the whole plan and its queue. Reply with a " +
     "single JSON object matching the Findings schema (findings: id, severity, lens, claim, " +
@@ -1774,15 +1919,14 @@ function lensPrompt(lens: ReviewLens, userPrompt: string, planMd: string, queue:
     '": ' +
     lens.charge +
     "\n" +
-    "Report ONLY what your lens sees — a different reviewer holds each of the other lenses, so " +
-    "anything outside yours is not your seat.\n" +
-    "An EMPTY findings list is a valid, finished review — it IS the approval. Never invent a " +
-    "finding to look thorough.\n" +
-    'Severity by real impact: "major" is a genuine defect that must be fixed before this plan ' +
-    'is executed (wrong result, a broken contract, a missing requirement); "minor" is a smaller ' +
-    'robustness issue; "nit" is cosmetic and blocks nothing. One concern per finding — never ' +
-    "bundle a defect and a quibble into one.\n" +
-    'Set `lens` to "' +
+    "\n" +
+    doctrineSlice(
+      packs,
+      "review.md",
+      ["An empty review is the approval"],
+      "conductor_plan_review",
+    ) +
+    "\n\nSet `lens` to \"" +
     lens.id +
     "\" and make `evidence` cite the plan section or the queue item id your claim rests on: a " +
     "claim naming the item id or the file path it is about is the one that can be acted on.\n" +
@@ -1796,26 +1940,29 @@ function lensPrompt(lens: ReviewLens, userPrompt: string, planMd: string, queue:
 // uphold only what you personally could not refute, and default to REFUTED when
 // undecided. The finding travels alone — a skeptic is never shown its siblings
 // (cross-contamination is how noise survives).
-function skepticRefutePrompt(
+export function skepticRefutePrompt(
   finding: Findings["findings"][number],
   lens: string,
   k: number,
   userPrompt: string,
   planMd: string,
   queue: Queue,
+  packs: Record<string, string>,
 ): string {
   return (
-    "You are a skeptic. Your job is to REFUTE the finding below — not to appreciate it, not to " +
-    "improve it, and not to wave it through. Reply with a single JSON object matching the " +
-    "Verdict schema (findingId, upheld, reasoning).\n" +
-    "Set `findingId` to exactly \"" +
+    "You are a skeptic. Reply with a single JSON object matching the Verdict schema " +
+    "(findingId, upheld, reasoning). Your doctrine governs the verdict:\n\n" +
+    doctrineSlice(
+      packs,
+      "skeptic.md",
+      ["Your verdict and how it counts", "Default toward refuted when uncertain"],
+      "conductor_plan_review",
+    ) +
+    "\n\nSet `findingId` to exactly \"" +
     finding.id +
-    '". Set `upheld` true ONLY if you personally could not refute the claim against the plan; ' +
-    "when you cannot decide, the verdict is REFUTED (upheld false) — uncertainty is not " +
-    "evidence of a defect. You are one of " +
+    '". You are one of ' +
     String(k) +
-    " independent skeptics on this ONE finding and it survives iff at least ⌈k/2⌉ of you " +
-    "uphold it, so do not uphold to be agreeable. Judge exactly this finding, in isolation; " +
+    " independent skeptics on this ONE finding. Judge exactly this finding, in isolation; " +
     "never invent a defect the reviewer did not raise. `reasoning` names the plan section you " +
     "checked and either the failing case you constructed or the reproduction you tried and " +
     "could not make fail.\n\nTHE FINDING UNDER REVIEW (id " +
@@ -1867,12 +2014,13 @@ function planRevisionPrompt(
   userPrompt: string,
   queue: Queue,
   config: Config,
+  packs: Record<string, string>,
   planMd: string,
   survivors: readonly RaisedFinding[],
   round: number,
 ): string {
   return (
-    planPrompt(userPrompt, queue, config) +
+    planPrompt(userPrompt, queue, config, packs) +
     "\n\nTHIS IS A REVISION (plan-review round " +
     String(round) +
     "). Your previous plan was reviewed by four independent lenses and these MAJOR findings " +
@@ -1914,6 +2062,7 @@ export interface PlanReviewInput {
   runId: string;
   config: Config;
   journal: HandlerJournal;
+  packs: Record<string, string>;
   sessionID?: string;
   now?: () => number;
 }
@@ -1934,6 +2083,7 @@ async function planReviewRound(
   userPrompt: string,
   planMd: string,
   queue: Queue,
+  packs: Record<string, string>,
 ): Promise<{ raised: RaisedFinding[]; survivors: RaisedFinding[]; lenses: string[] }> {
   // (a) the lens fan-out.
   // COVERAGE FIRST. §3.2 names four lenses and they are the substance of this
@@ -1956,7 +2106,7 @@ async function planReviewRound(
     itemId: "",
     tree: NO_TREE,
     writeCapable: false,
-    prompt: lensPrompt(lens, userPrompt, planMd, queue),
+    prompt: lensPrompt(lens, userPrompt, planMd, queue, packs),
     schemaName: "Findings",
     priority: "interactive",
     lens: lens.id,
@@ -2012,7 +2162,7 @@ async function planReviewRound(
         itemId: "",
         tree: NO_TREE,
         writeCapable: false,
-        prompt: skepticRefutePrompt(major.finding, major.lens, k, userPrompt, planMd, queue),
+        prompt: skepticRefutePrompt(major.finding, major.lens, k, userPrompt, planMd, queue, packs),
         schemaName: "Verdict",
         priority: "interactive",
       });
@@ -2142,7 +2292,7 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
   let lensRoster: string[] = [];
   let raisedCounts = { major: 0, minor: 0, nit: 0 };
   for (;;) {
-    const outcome = await planReviewRound(fanout, config, run.prompt, planMd, queue);
+    const outcome = await planReviewRound(fanout, config, run.prompt, planMd, queue, input.packs);
     survivors = outcome.survivors;
     lensRoster = outcome.lenses;
     raisedCounts = {
@@ -2178,7 +2328,7 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
     const nextRound = run.planReviewRounds + 1;
     const revision = await reviseAcceptedPlan(
       fanout,
-      planRevisionPrompt(run.prompt, queue, config, planMd, survivors, nextRound),
+      planRevisionPrompt(run.prompt, queue, config, input.packs, planMd, survivors, nextRound),
       journal,
       runId,
       input.sessionID,
@@ -2881,8 +3031,8 @@ function redBlock(record: RedEvidence): string {
 // the item's testScope, and a failure that fails for the RIGHT reason.
 function testWriterPrompt(queueItem: QueueItem): string {
   return (
-    "You are the TEST-WRITER for one queue item, working under the TDD doctrine: the test " +
-    "comes FIRST and must FAIL before any implementation of this item exists.\n" +
+    "You are the TEST-WRITER for one queue item. Your doctrine pack states the law this stage " +
+    "enforces; this prompt states only what the HANDLER does with your reply.\n" +
     "Write ONLY test files, and only the paths listed in testScope below — the edit-scope gate " +
     "refuses every other path (§2.4). Do NOT write, stub or sketch the production code: another " +
     "sub-session implements it against your test.\n" +
@@ -5725,12 +5875,13 @@ function renderItemFinding(entry: ItemRaisedFinding): string {
 // The review.md doctrine at item level, one merged lens group per session. The
 // machine-readable `LENSES:` line is the session's lens attribution contract: a
 // reviewer-role prompt WITHOUT it is a §2.10 TEST_VET critic, never a lens session.
-function itemLensPrompt(
+export function itemLensPrompt(
   group: readonly string[],
   queueItem: QueueItem,
   diffBlock: string,
   testText: string,
   sessions: number,
+  packs: Record<string, string>,
 ): string {
   const charges = group.map((id) => '- "' + id + '": ' + (ITEM_LENS_CHARGES[id] ?? id)).join("\n");
   return (
@@ -5744,12 +5895,14 @@ function itemLensPrompt(
     "\n" +
     "Your charge(s):\n" +
     charges +
-    "\n" +
-    "Report ONLY what your lens(es) see — a different session holds each of the others. An " +
-    "EMPTY findings list is a valid, finished review — it IS the approval; never invent a " +
-    "finding to look thorough.\n" +
-    'Severity by real impact: "major" must be fixed before this item ships; "minor" is a ' +
-    'smaller robustness issue; "nit" blocks nothing. One concern per finding. Set `lens` to ' +
+    "\n\n" +
+    doctrineSlice(
+      packs,
+      "review.md",
+      ["An empty review is the approval"],
+      "conductor_item_review",
+    ) +
+    "\n\nSet `lens` to " +
     "the single lens id (drawn from your LENSES line) the finding belongs to, and make " +
     "`evidence` cite the file or test line the claim rests on. Give each finding a short " +
     "stable `id` and a `suggestedFix` naming the smallest correct change and the path(s) it " +
@@ -5763,26 +5916,30 @@ function itemLensPrompt(
 
 // The skeptic.md doctrine over ONE item-review finding, in isolation (a skeptic is
 // never shown its siblings — cross-contamination is how noise survives).
-function itemSkepticPrompt(
+export function itemSkepticPrompt(
   entry: ItemRaisedFinding,
   k: number,
   queueItem: QueueItem,
   diffBlock: string,
   testText: string,
+  packs: Record<string, string>,
 ): string {
   const f = entry.finding;
   return (
-    "You are a skeptic. Your job is to REFUTE the review finding below — not to appreciate " +
-    "it, not to improve it, and not to wave it through. Reply with a single JSON object " +
-    "matching the Verdict schema (findingId, upheld, reasoning).\n" +
-    'Set `findingId` to exactly "' +
+    "You are a skeptic over ONE item-review finding. Reply with a single JSON object " +
+    "matching the Verdict schema (findingId, upheld, reasoning). Your doctrine governs the " +
+    "verdict:\n\n" +
+    doctrineSlice(
+      packs,
+      "skeptic.md",
+      ["Your verdict and how it counts", "Default toward refuted when uncertain"],
+      "conductor_item_review",
+    ) +
+    '\n\nSet `findingId` to exactly "' +
     f.id +
-    '". Set `upheld` true ONLY if you personally could not refute the claim against the ' +
-    "item's change; when you cannot decide, the verdict is REFUTED (upheld false) — " +
-    "uncertainty is not evidence of a defect. You are one of " +
+    '". You are one of ' +
     String(k) +
-    " independent skeptics on this ONE finding and it survives iff at least ⌈k/2⌉ of you " +
-    "uphold it, so do not uphold to be agreeable. Judge exactly this finding, in isolation; " +
+    " independent skeptics on this ONE finding. Judge exactly this finding, in isolation; " +
     "never invent a defect the reviewer did not raise.\n\nTHE FINDING UNDER REVIEW (id " +
     f.id +
     ", severity " +
@@ -5811,9 +5968,10 @@ function itemPushbackSkepticPrompt(
   queueItem: QueueItem,
   diffBlock: string,
   testText: string,
+  packs: Record<string, string>,
 ): string {
   return (
-    itemSkepticPrompt(entry, k, queueItem, diffBlock, testText) +
+    itemSkepticPrompt(entry, k, queueItem, diffBlock, testText, packs) +
     "\n\nTHE FIX DISPATCH ANSWERED THIS FINDING WITH REASONING instead of implementing it " +
     "(§3.3: pushback is adjudicated by one more skeptic round, never accepted silently). " +
     "Weigh that reasoning; uphold the finding ONLY if it still stands despite it.\n" +
@@ -6428,7 +6586,12 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       );
     }
     const lensJobs = composition.map((group) =>
-      itemLensJob(itemId, itemTree, group, itemLensPrompt(group, queueItem, diffBlock, testText, sessions)),
+      itemLensJob(
+        itemId,
+        itemTree,
+        group,
+        itemLensPrompt(group, queueItem, diffBlock, testText, sessions, packs),
+      ),
     );
     const lensResults = await fanout.dispatchWave(lensJobs);
     const raised: ItemRaisedFinding[] = [];
@@ -6454,7 +6617,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
 
     // (2b) skeptics: every finding, k seats, core survival arithmetic.
     const survivesById = await adjudicate(raised, (entry) =>
-      itemSkepticPrompt(entry, k, queueItem, diffBlock, testText),
+      itemSkepticPrompt(entry, k, queueItem, diffBlock, testText, packs),
     );
     let roundSurvivors = raised.filter((entry) => survivesById.get(entry.finding.id) === true);
 
@@ -6523,6 +6686,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
           queueItem,
           diffBlock,
           testText,
+          packs,
         ),
       );
       const upheld = pushed.filter((entry) => upheldById.get(entry.finding.id) === true);

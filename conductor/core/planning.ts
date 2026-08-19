@@ -600,6 +600,17 @@ const PLAN_PLACEHOLDERS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
   { label: "and so on / etc.", pattern: /\b(?:and\s+so\s+on\b)|,\s*etc\.?/i },
 ];
 
+// The rejected shapes BY LABEL — the same strings scanPlaceholders reports. The
+// doctrine that warns a planner about them (doctrine/plan.md's self-check, which
+// the conductor_plan dispatch prompt carries verbatim) must name every one, and
+// conductor/tests/doctrine-mechanics.test.ts checks it by running the scanner
+// above over that section: the doctrine is judged by the rejector itself rather
+// than by a second copy of this list, so a rule added here cannot drift out of the
+// doctrine that has to teach it.
+export const PLAN_PLACEHOLDER_LABELS: readonly string[] = PLAN_PLACEHOLDERS.map(
+  (rule) => rule.label,
+);
+
 // A bare "..." line is an ELISION in prose but idiomatic INSIDE a fenced code
 // block (Python stubs, YAML markers), so the elision rule is judged against the
 // document with its fenced blocks removed.
