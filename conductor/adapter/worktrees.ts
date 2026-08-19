@@ -187,7 +187,7 @@ function worktreePathOf(ctx: WorktreeContext, runId: string, itemId: string): st
  *     because the branch tip is preserved, mergeBack later integrates those
  *     commits normally.
  *
- * Only the genuinely-fresh case cuts a new branch (`-b`), which is also what keeps
+ * Only the genuinely-fresh case cuts a fresh branch (`-b`), which is also what keeps
  * the explicit branch name load-bearing (a bare add names it after the basename).
  */
 export function createWorktree(

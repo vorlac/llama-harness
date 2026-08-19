@@ -7,7 +7,8 @@
 // three consumers — they can never disagree, §3.2).
 //
 // The verdict has three parts:
-//   legal        — Map<toolName, {itemIds?}>: every tool callable right now. A
+//   legal        — Map<toolName, {itemIds?}>: every tool callable at this
+//                  position. A
 //                  per-item stage tool carries the ids it may target, aggregated
 //                  across the items at that stage; a meta tool carries {}.
 //   recommended  — the single next tool to run, or null. In EXECUTING it is the
@@ -16,6 +17,7 @@
 //                  it is invariant under item-array reordering).
 //   why          — a non-empty rationale.
 
+import { dispositionsOf } from "./disposition.ts";
 import { nextWave } from "./schedule.ts";
 
 // ---------------------------------------------------------------------------
@@ -68,7 +70,9 @@ export interface GateItem {
   behavioral: boolean;
   dependsOn: string[];
   fileScope: string[];
-  blocked: { reason: string } | null;
+  // The §2.11 question id is carried so the ONE disposition derivation can tell a
+  // block a human can release from one no answer would move.
+  blocked: { reason: string; questionId?: string } | null;
   deferred: { reason: string } | null;
   // §3.3 DEBUG-posture annotation (gate-subset view). Optional and ignored by
   // legalTools — it does not veto or select any stage tool; it is read only by the
@@ -84,7 +88,7 @@ export interface GateQuestion {
   answeredIso: string | null;
 }
 
-// The Map value: for a per-item stage tool, the ids it may target right now;
+// The Map value: for a per-item stage tool, the ids it may target at this position;
 // meta tools carry no ids.
 export interface ArgsHint {
   itemIds?: string[];
@@ -167,47 +171,6 @@ function depsReady(item: GateItem, publishedIds: Set<string>): boolean {
   return true;
 }
 
-// §3.4 conductor_report precondition: every item is PUBLISHED, blocked, or
-// deferred — the dispositions a report can close on.
-function isSettled(item: GateItem): boolean {
-  return item.state === "PUBLISHED" || item.blocked !== null || item.deferred !== null;
-}
-
-// The items that can NEVER reach PUBLISHED in this run. `isSettled` names three
-// dispositions, but the depsReady binding above creates a fourth the original rule
-// had no word for: an item whose dependency chain is permanently stuck contributes no
-// stage tool AND is not settled, so a single deferred dependency would leave the run
-// with no legal exit at all — no stage tool for the dependents, no report,
-// `recommended` null, forever.
-//
-// PERMANENTLY stuck means DEFERRED (a judgment this run does not revisit) or a
-// dependency id no item in this run carries. A BLOCKED dependency is deliberately NOT
-// included: a question can be answered and the item resumes, so a run stalled behind
-// one is waiting rather than finished, conductor_answer is the way out, and
-// legalizing the report there would offer an exit over work that is still live.
-//
-// Computed as a FIXPOINT (seed, then propagate) rather than a recursive walk: a queue
-// whose dependsOn edges form a cycle — which core validateQueue rejects, but which
-// the gate must not assume — terminates here instead of recursing forever.
-function cannotEverPublish(items: GateItem[]): Set<string> {
-  const known = new Set(items.map((item) => item.id));
-  const stuck = new Set<string>();
-  for (const item of items) {
-    if (item.state !== "PUBLISHED" && item.deferred !== null) stuck.add(item.id);
-  }
-  for (;;) {
-    let added = false;
-    for (const item of items) {
-      if (item.state === "PUBLISHED" || stuck.has(item.id)) continue;
-      if (item.dependsOn.some((dep) => !known.has(dep) || stuck.has(dep))) {
-        stuck.add(item.id);
-        added = true;
-      }
-    }
-    if (!added) return stuck;
-  }
-}
-
 /**
  * The §3.2:1142 report precondition, as ONE derivation with TWO consumers
  * (C-037 ruling 1): every item is either settled outright — PUBLISHED, blocked
@@ -230,18 +193,29 @@ function cannotEverPublish(items: GateItem[]): Set<string> {
  */
 export function settledForReport(
   items: GateItem[],
-  opts?: { publishEnabled?: boolean },
+  opts?: { publishEnabled?: boolean; openQuestionIds?: readonly string[] },
 ): { allSettled: boolean; unsettled: string[] } {
-  // §3.9: with publish disabled, REVIEWED is where an item ENDS — the plan says
-  // items "terminate at REVIEWED with their diff recorded in the report". So it
-  // is a settled disposition in that mode and only that mode; under normal git
-  // a REVIEWED item still owes a publish and the run is not finished.
-  const publishEnabled = opts?.publishEnabled ?? true;
-  const settled = (item: GateItem): boolean =>
-    isSettled(item) || (!publishEnabled && item.state === "REVIEWED");
-
-  const stuck = cannotEverPublish(items);
-  const unsettled = items.filter((item) => !settled(item) && !stuck.has(item.id)).map((item) => item.id);
+  // GAP-022: the three dispositions this predicate used to spell for itself
+  // (PUBLISHED/blocked/deferred), the fourth it had to invent (permanently
+  // stuck), and §3.9's REVIEWED-terminates rule are ONE derivation in
+  // core/disposition.ts. What blocks a report is exactly what that derivation
+  // calls ACTIONABLE: work this run can still advance by itself.
+  const dispositions = dispositionsOf(
+    items.map((item) => ({
+      id: item.id,
+      state: item.state,
+      dependsOn: item.dependsOn,
+      blocked: item.blocked,
+      deferred: item.deferred,
+    })),
+    {
+      publishEnabled: opts?.publishEnabled ?? true,
+      ...(opts?.openQuestionIds === undefined ? {} : { openQuestionIds: opts.openQuestionIds }),
+    },
+  );
+  const unsettled = items
+    .filter((item) => dispositions.get(item.id) === "actionable")
+    .map((item) => item.id);
   return { allSettled: items.length > 0 && unsettled.length === 0, unsettled };
 }
 

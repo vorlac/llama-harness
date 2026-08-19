@@ -7,7 +7,7 @@
 // An ADAPTER (G14): it spawns child processes (node:child_process spawnSync,
 // shell:false) and does filesystem I/O (node:fs) with node:path — no single-runtime
 // global, no shell tag, no single-runtime import (the purity guard scans it). It may read the clock; every
-// stamped time flows through an injected `now` defaulting to Date.now.
+// stamped time flows through an injected `now` defaulting to `Date.now`.
 //
 // It is the SOLE legitimate importer of state.appendLedgerLineRaw (G6): every other
 // component reads the ledger through state.ts, and only this writer appends to it.
@@ -741,7 +741,7 @@ function pidAlive(checkPid: number): boolean {
   }
 }
 
-// The scopes selected for the changed path(s): every requiredScopes entry whose glob
+// The scopes selected for the touched path(s): every requiredScopes entry whose glob
 // pattern matches ANY of them contributes its scope names (deduped). A caller may pass
 // one representative path or the item's whole path set — an item spanning two path
 // families owes the UNION of what §2.1 requires of each, and no single element of a
@@ -792,7 +792,7 @@ function runScopes(
  * run each required scope (build-before-test, timeout kills); then, on completion —
  * including on a timeout — remove the marker and restore the quarantine.
  *
- * `scopePattern` is the changed path the required scopes are selected against, or the
+ * `scopePattern` is the touched path the required scopes are selected against, or the
  * item's whole path set when its paths select different scopes and the run owes their
  * union.
  */

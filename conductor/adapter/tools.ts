@@ -31,7 +31,12 @@ import { request as httpRequest } from "node:http";
 import * as path from "node:path";
 
 import { decideGit } from "../core/gates-git.ts";
-import { decideEdit, decideSession, writeShapedPaths } from "../core/gates-edit.ts";
+import {
+  decideEdit,
+  decideSession,
+  interpreterStateAreaScript,
+  writeShapedPaths,
+} from "../core/gates-edit.ts";
 import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
 import {
   globMatch,
@@ -44,6 +49,13 @@ import {
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
 import { advanceRun, legalRunTransition } from "../core/fsm-run.ts";
 import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
+import {
+  closingVerifyFailure,
+  dispositionsOf,
+  isResumableStop,
+  runDispositionOf,
+  stopKindOf,
+} from "../core/disposition.ts";
 import { legalTools, settledForReport } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import {
@@ -71,9 +83,14 @@ import { applyAmendOps } from "../core/queue-amend.ts";
 import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { nextWave, readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
+import { checkReadWitness, createdFileDiff, diffContact, witnessNonce } from "../core/review-witness.ts";
+import type { CreatedFile } from "../core/review-witness.ts";
+import { findingSubjects, receiptFloor } from "../core/receipt-floor.ts";
+import { concernNamesFinding } from "../core/reply-protocol.ts";
 import { MAIN_TREE, NO_TREE, SCHEMAS, treePath, treeSlug, validate } from "../core/types.ts";
 import type {
   AnomalyRecord,
+  AnswerChannel,
   Classification,
   ClassificationCheck,
   ClassificationKind,
@@ -93,6 +110,7 @@ import type {
   QuestionRecord,
   Run,
   RunState,
+  StopKind,
   TestVet,
   TreePath,
   TreeSlug,
@@ -104,6 +122,14 @@ import type { StateStore } from "./state.ts";
 import { DEFAULT_CONFIG, configPath, loadConfig } from "./config-io.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
 import type { NewQuestion } from "./questions.ts";
+import { answerFileAbsPath, pendingAnswers } from "./answer-file.ts";
+import {
+  answerDropPath,
+  awaitsOperatorConfirmation,
+  deferDecisionKind,
+  isHumanProvenance,
+  provenanceLabel,
+} from "../core/provenance.ts";
 import { headSha, indexMtimeMs, initRepo, isRepo, worktreeMtimes } from "./gitio.ts";
 import { createWorktree, mergeBack } from "./worktrees.ts";
 import { stampResolutionMsOf } from "./clock.ts";
@@ -171,7 +197,13 @@ export function classifyTool(toolName: string, command?: string): ToolClass {
   if (toolName.startsWith("conductor_")) return "conductor";
   if (WRITE_TOOLS.includes(toolName)) return "write";
   if (toolName === "bash") {
-    return writeShapedPaths(command ?? "").length > 0 ? "write" : "read";
+    const text = command ?? "";
+    // An interpreter program naming the state area counts as a write even when no
+    // literal path operand can be read out of it: it is refused downstream, and a
+    // call refused as a write must not have been classified as a harmless read on
+    // the way in (the crash-posture flag reads this classification).
+    if (writeShapedPaths(text).length > 0) return "write";
+    return interpreterStateAreaScript(text) !== null ? "write" : "read";
   }
   return "read";
 }
@@ -444,6 +476,24 @@ export function gateBeforeToolCall(input: GateHookInput): void {
     );
     if (gitDecision.action === "deny" && !consumeOverrideGrant(input, "git")) {
       denyThrow(input, reasonOf(gitDecision, "the git gate denied this command"));
+    }
+
+    // The state area, ahead of every path-shaped decision. An interpreter program
+    // that names `.conductor` is refused whether or not its path operand is a
+    // literal this file can read: the state area's whole value is that a gated
+    // session cannot write it, and a rule that holds only for the spellings the
+    // extractor parses would leave the provenance channel resting on the model's
+    // choice of syntax. Grant-consumable on the same terms as every other edit
+    // deny — §3.6 is a budgeted, taint-recording hatch, not an exemption.
+    const stateAreaScript = interpreterStateAreaScript(command);
+    if (stateAreaScript !== null && !consumeOverrideGrant(input, "edit")) {
+      denyThrow(
+        input,
+        "an interpreter one-liner naming the .conductor state area is denied outright: the state " +
+          "area is handler-written only, and a program text can build the path it writes to, so " +
+          "the mention itself is the refusal. The offending program was: " +
+          (stateAreaScript.length > 200 ? stateAreaScript.slice(0, 200) + "…" : stateAreaScript),
+      );
     }
 
     for (const target of writeTargets) {
@@ -907,7 +957,10 @@ export interface StatusResult {
   state: RunState;
   classification: { kind: ClassificationKind } | null;
   items: StatusItem[];
-  openQuestions: Array<{ id: string; question: string }>;
+  // GAP-013: each open question carries the repo-relative path the OPERATOR drops
+  // an answer at. A channel nobody is told about is a channel nobody uses, and the
+  // model's own relay is then the only route a human's judgment has.
+  openQuestions: Array<{ id: string; question: string; answerPath: string }>;
   // One row per session that has received doctrine in this run, its LAST delivery
   // (G9: the delivery is re-composed every request, so only the most recent one
   // describes the session as it stands). Empty when nothing has been delivered —
@@ -980,9 +1033,11 @@ export function handleStatus(input: StatusInput): StatusResult {
     }
   }
 
-  const openQuestions: Array<{ id: string; question: string }> = [];
+  const openQuestions: StatusResult["openQuestions"] = [];
   for (const q of readQuestions(runDir)) {
-    if (q.answeredIso === null) openQuestions.push({ id: q.id, question: q.question });
+    if (q.answeredIso === null) {
+      openQuestions.push({ id: q.id, question: q.question, answerPath: answerDropPath(runId, q.id) });
+    }
   }
 
   const classification =
@@ -1118,6 +1173,9 @@ export interface SurfaceInput {
 export interface SurfaceResult {
   questionId: string;
   blockedItemIds: string[];
+  // GAP-013: where the human writes the answer. Returned by the surfacing call
+  // itself so the path travels with the question that needs it.
+  answerPath: string;
 }
 
 // Append the §2.11 question (origin surface-tool), set blocked:{questionId} on every
@@ -1141,6 +1199,15 @@ export function handleSurface(input: SurfaceInput): SurfaceResult {
     }
     if (existing.blocked !== null && existing.blocked !== undefined) alreadyBlocked.add(itemId);
   }
+
+  // (1b) the drop directory. GAP-013 prints an answer path with every surfaced
+  //      question, and nothing created the directory it sits in — so the operator's
+  //      first `echo > <path>` failed ENOENT on a channel advertised as "one echo
+  //      is the whole protocol". It is made HERE, before anything is persisted, so
+  //      a run dir that cannot hold the channel aborts the surface with zero writes
+  //      rather than surfacing a question nobody can answer. Derived through the
+  //      same answer-file path function the reader uses, never a second join.
+  mkdirSync(path.dirname(answerFileAbsPath(runDir, "Q-0001")), { recursive: true });
 
   // §2.11 makes humanTerritory the core isHumanTerritory VERDICT, not a caller flag: a
   // caller may FORCE true, but cannot force a human-territory question down to false.
@@ -1187,7 +1254,11 @@ export function handleSurface(input: SurfaceInput): SurfaceResult {
     );
   }
 
-  return { questionId: question.id, blockedItemIds };
+  return {
+    questionId: question.id,
+    blockedItemIds,
+    answerPath: answerDropPath(runId, question.id),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1201,11 +1272,22 @@ export interface AnswerInput {
   now?: () => number;
   questionId: string;
   answer: string;
+  // GAP-013: the CHANNEL this answer arrived through, supplied by the caller that
+  // OBSERVED it — never by the model. The tool binding fixes it to "tool" (the
+  // same construction C-044 uses to keep conductor_decide derived), so the only
+  // caller that can pass "human-file" is ingestAnswerFiles, which passes it
+  // because it just read a file out of the state area no session may write.
+  via: AnswerChannel;
 }
 
 export interface AnswerHandlerResult {
   questionId: string;
   clearedItemIds: string[];
+  // ISSUE-066's resume path: true when this answer revived a run that had stopped
+  // waiting for it. Reported rather than left implicit so the caller — and the
+  // §3.7 continuation engine reading the same run — is not left guessing whether
+  // there is still a run to advance.
+  resumed: boolean;
 }
 
 // Clear blocked on EXACTLY the items bound to the question and mark it answered —
@@ -1216,7 +1298,24 @@ export function handleAnswer(input: AnswerInput): AnswerHandlerResult {
   const now = input.now ?? Date.now;
   const runDir = handlerRunDir(store, runId);
 
-  const result = answerQuestion(runDir, input.questionId, input.answer, now());
+  const result = answerQuestion(runDir, input.questionId, input.answer, input.via, now());
+
+  // The provenance record, filed under its own §7.4 name: a replay filter looking
+  // for "what did a human actually decide in this run?" reads this event and its
+  // `human` field. item.updated describes the items an answer released and would
+  // make that question unanswerable.
+  journal.log(
+    "info",
+    "state",
+    "question.answered",
+    {
+      questionId: input.questionId,
+      via: input.via,
+      human: isHumanProvenance(input.via),
+      clearedItemIds: result.clearedItemIds,
+    },
+    { runId },
+  );
 
   // C-056's residual. handleSurface applies FIRST-BLOCK-WINS: a later question
   // that names an already-blocked item is still appended, and still records that
@@ -1282,7 +1381,182 @@ export function handleAnswer(input: AnswerInput): AnswerHandlerResult {
     );
   }
 
-  return { questionId: input.questionId, clearedItemIds };
+  return {
+    questionId: input.questionId,
+    clearedItemIds,
+    resumed: reviveIfWaiting(store, runId, journal, result.question),
+  };
+}
+
+// ISSUE-066's lost work, closed. A run that stopped honestly — `blocked`,
+// `surfaced`, or the `noop` the futile detector fires on a run stalled behind an
+// unanswered question — was terminal the instant the stop was recorded, and the
+// idle engine then archived it and cleared the current-run pointer. Answering the
+// question afterwards released the item and left the dependent PENDING forever:
+// the documented resume path was dead, and the honest waiting model lost committed
+// work while the model that deferred the same item closed clean.
+//
+// The revival is deliberately narrow. It clears ONLY the stop record, and only on
+// a run whose FSM position is still non-terminal — a run terminal by STATE has
+// been closed by conductor_report and has its §2.9 artifact, and reviving it would
+// mean inventing a backwards FSM edge. So no transition is taken, no state is
+// rewritten, and nothing but the stop and the pointer moves.
+//
+// It is narrow in a second way (the Phase III fix round). The revival ran for
+// EVERY answer channel, and conductor_answer's channel is PINNED to `tool` — so an
+// orchestrator that stopped its run on a §6.2 human question could answer that
+// question itself and un-stop the run in the next call. The escalation a `blocked`
+// stop exists to force was a two-call formality performed entirely by the model.
+// A human-territory question is released by the operator's artifact and nothing
+// else (core/provenance.ts awaitsOperatorConfirmation); the answer is still
+// RECORDED either way, and the report names a question that is answered but still
+// standing, so the tool answer is preserved rather than discarded.
+function reviveIfWaiting(
+  store: StateStore,
+  runId: string,
+  journal: HandlerJournal,
+  question: QuestionRecord,
+): boolean {
+  if (awaitsOperatorConfirmation(question)) return false;
+  let run: Run;
+  try {
+    run = store.loadRun(runId);
+  } catch {
+    return false;
+  }
+  const stop = run.stop;
+  if (stop === null) return false;
+  if (!isResumableStop(stop.kind)) return false;
+  // §2.3 terminality has two sources; only the stop-record source is revivable.
+  if (isTerminal({ state: run.state, stop: null })) return false;
+
+  run.stop = null;
+  store.saveRun(run);
+  store.resumeRun(runId);
+  journal.log(
+    "info",
+    "state",
+    "run.resumed",
+    { resumedFromStop: stop.kind, questionId: question.id, reasonDisplay: stop.reasonDisplay },
+    { runId },
+  );
+  return true;
+}
+
+// The §2.11 question a deferral cites as its human authority, or null when it
+// cites none. A citation that names an unknown question, an unanswered one, or one
+// answered through the tool is REFUSED by name: those are the three ways a caller
+// can point at something that does not carry a human's judgment, and each one gets
+// its own message so the refusal is diagnosable rather than mysterious.
+function requireDeferAuthority(
+  runDir: string,
+  questionId: string | undefined,
+): { answeredVia: AnswerChannel | null } | null {
+  if (questionId === undefined) return null;
+  let ledger: QuestionRecord[];
+  try {
+    ledger = readQuestions(runDir);
+  } catch (error) {
+    throw new Error(
+      'conductor_defer: cannot read questions.jsonl to adjudicate the cited question "' +
+        questionId +
+        '": ' +
+        String(error),
+    );
+  }
+  const cited = ledger.find((question) => question.id === questionId);
+  if (cited === undefined) {
+    throw new Error(
+      'conductor_defer: the cited question "' + questionId + '" is not in this run\'s §2.11 ledger; refusing to defer',
+    );
+  }
+  if (cited.answeredIso === null) {
+    throw new Error(
+      'conductor_defer: the cited question "' +
+        questionId +
+        '" is still OPEN, so nothing was decided; refusing to record human provenance',
+    );
+  }
+  if (!isHumanProvenance(cited.answeredVia)) {
+    throw new Error(
+      'conductor_defer: the cited question "' +
+        questionId +
+        '" was answered via ' +
+        String(cited.answeredVia) +
+        ", not the human-file channel; only an answer the model could not write mints human provenance",
+    );
+  }
+  return { answeredVia: cited.answeredVia };
+}
+
+// ---------------------------------------------------------------------------
+// GAP-013: the answer-file ingest — the HARNESS's half of the out-of-band channel
+// ---------------------------------------------------------------------------
+
+export interface IngestAnswersInput {
+  store: StateStore;
+  runId: string;
+  journal: HandlerJournal;
+  now?: () => number;
+}
+
+export interface IngestedAnswer {
+  questionId: string;
+  clearedItemIds: string[];
+  resumed: boolean;
+}
+
+/**
+ * Ingest every answer the operator has dropped for an OPEN question of this run,
+ * recording each as `human-file` provenance.
+ *
+ * This is the only caller that may pass "human-file", and it may because of what
+ * it read: a file under `.conductor/runs/<runId>/answers/`, an area
+ * core/gates-edit.ts denies to every session. Nothing here trusts a caller's
+ * claim — the claim IS the file's existence.
+ *
+ * It routes through handleAnswer rather than answerQuestion so an out-of-band
+ * answer takes exactly the same path a typed one does: the C-056 successor
+ * re-block, the journal record, and ISSUE-066's revival of a run that stopped
+ * waiting for precisely this answer. The one difference is the provenance.
+ *
+ * Read-tolerant by design: a torn questions.jsonl yields no open questions and no
+ * ingest, because a pass that cannot see the ledger must not invent answers for
+ * it.
+ */
+export function ingestAnswerFiles(input: IngestAnswersInput): IngestedAnswer[] {
+  const { store, runId, journal } = input;
+  const now = input.now ?? Date.now;
+  const runDir = handlerRunDir(store, runId);
+
+  let openIds: string[];
+  try {
+    openIds = readQuestions(runDir)
+      .filter((question) => question.answeredIso === null)
+      .map((question) => question.id);
+  } catch {
+    return [];
+  }
+  if (openIds.length === 0) return [];
+
+  const ingested: IngestedAnswer[] = [];
+  for (const pending of pendingAnswers(runDir, openIds)) {
+    const result = handleAnswer({
+      store,
+      runId,
+      journal,
+      now,
+      questionId: pending.questionId,
+      answer: pending.answer,
+      via: "human-file",
+    });
+    ingested.push({
+      questionId: pending.questionId,
+      clearedItemIds: result.clearedItemIds,
+      resumed: result.resumed,
+    });
+  }
+  return ingested;
 }
 
 // ---------------------------------------------------------------------------
@@ -1296,6 +1570,11 @@ export interface DeferInput {
   now?: () => number;
   itemId: string;
   reason: string;
+  // ISSUE-052: the §2.11 question whose HUMAN-FILE answer authorizes this
+  // deferral, when one does. Not a declared tool argument — the model surface
+  // carries no way to name one, so a model-initiated deferral always arrives
+  // without it and always records `derived`.
+  humanQuestionId?: string;
 }
 
 export interface DeferResult {
@@ -1303,10 +1582,23 @@ export interface DeferResult {
   decisionId: string;
 }
 
-// Append a §2.7 decision record explaining the deferral (kind:"human" — exempt from
-// requireTwoOptions; a deferral is a judgment, not a scored pick, so it fabricates no
-// options), then set deferred:{reason,decisionId} on the item (legalTools treats a
-// deferred item as settled). Journal, return.
+// Append a §2.7 decision record explaining the deferral, then set
+// deferred:{reason,decisionId} on the item (legalTools treats a deferred item as
+// settled). Journal, return.
+//
+// ISSUE-052: an unconditional kind:"human" stamp on this record sat one file over
+// from the C-044 ruling that a tool-call decision "was not asked of a human, so
+// kind is always derived" — so every model deferral fabricated a human-authority
+// record, and a run that deferred the hard items closed clean with a ledger full of
+// forged human judgments. The kind is DERIVED FROM THE AUTHORIZING ARTIFACT
+// (core/provenance.ts): the ordinary deferral records "derived", and only a
+// deferral resting on an answer that came through the file channel records "human".
+//
+// Deferral itself stays FREE (decision D3-partial): nothing here prices it, taints
+// the item, or refuses it. What this closes is the lie, not the hatch.
+//
+// Both kinds are exempt from requireTwoOptions — a deferral is a judgment, not a
+// scored pick, so it fabricates no options.
 export function handleDefer(input: DeferInput): DeferResult {
   const { store, runId, journal } = input;
   const now = input.now ?? Date.now;
@@ -1320,6 +1612,13 @@ export function handleDefer(input: DeferInput): DeferResult {
     throw new Error('conductor_defer: item "' + input.itemId + '" does not exist; refusing to defer');
   }
 
+  // The citation is adjudicated BEFORE anything is written, and it fails closed: a
+  // citation that does not resolve to a human-file answer is REFUSED rather than
+  // quietly downgraded, so a caller that believes it is recording human authority
+  // never gets a record that says something else.
+  const authorizing = requireDeferAuthority(runDir, input.humanQuestionId);
+  const kind = deferDecisionKind(authorizing);
+
   const decisionId = mintDecisionId(runDir);
   const record: DecisionRecord = {
     id: decisionId,
@@ -1327,8 +1626,11 @@ export function handleDefer(input: DeferInput): DeferResult {
     question: "Defer item " + input.itemId + " out of this run?",
     options: [{ name: "defer" }],
     choice: "defer",
-    why: input.reason,
-    kind: "human",
+    why:
+      authorizing === null
+        ? input.reason
+        : input.reason + " (authorized by the human-file answer to " + String(input.humanQuestionId) + ")",
+    kind,
     appliedWhere: "item " + input.itemId,
   };
   appendDecision(runDir, record);
@@ -2017,11 +2319,11 @@ export function skepticRefutePrompt(
 ): string {
   return (
     "You are a skeptic. Reply with a single JSON object matching the Verdict schema " +
-    "(findingId, upheld, reasoning). Your doctrine governs the verdict:\n\n" +
+    "(findingId, upheld, reasoning, refutationEvidence). Your doctrine governs the verdict:\n\n" +
     doctrineSlice(
       packs,
       "skeptic.md",
-      ["Your verdict and how it counts", "Default toward refuted when uncertain"],
+      ["Your verdict and how it counts", "Refutation carries evidence; abstention upholds"],
       "conductor_plan_review",
     ) +
     "\n\nSet `findingId` to exactly \"" +
@@ -2031,7 +2333,11 @@ export function skepticRefutePrompt(
     " independent skeptics on this ONE finding. Judge exactly this finding, in isolation; " +
     "never invent a defect the reviewer did not raise. `reasoning` names the plan section you " +
     "checked and either the failing case you constructed or the reproduction you tried and " +
-    "could not make fail.\n\nTHE FINDING UNDER REVIEW (id " +
+    "could not make fail.\n" +
+    "A REFUTATION CARRIES EVIDENCE: set `refutationEvidence` to the discriminating input, what " +
+    "you ran or read, and the reading under which the finding fails. `upheld:false` WITHOUT all " +
+    "three is recorded as an ABSTENTION, and an abstention upholds the finding.\n\n" +
+    "THE FINDING UNDER REVIEW (id " +
     finding.id +
     ", severity " +
     finding.severity +
@@ -6177,6 +6483,49 @@ const ITEM_LENS_CHARGES: Record<string, string> = {
 // overrides are stripped so an inherited GIT_DIR can never redirect the probe away
 // from the run's own tree. A non-zero exit is a RESULT here, not an error: the §3.3
 // probe's cheapness rule reads it as "skip".
+// GAP-012's measuring instrument: the tree's per-file change signature over the
+// item's declared paths — each tracked file's own diff body, plus the content of
+// each untracked file the scope matches. Two of these, taken around a fix
+// dispatch, name exactly the files that dispatch changed. A name-only listing
+// would not: the item is ALREADY changing its fileScope, so a file's presence in
+// the diff says nothing about whether this dispatch touched it.
+function treeTouchSignature(root: string, queueItem: QueueItem): Map<string, string> {
+  const signature = new Map<string, string>();
+  const paths = itemScopePaths(queueItem);
+  if (paths.length === 0) return signature;
+  const diff = runReviewGit(root, ["diff", "--", ...paths]).stdout;
+  for (const part of diff.split(/^diff --git /m)) {
+    if (part.trim().length === 0) continue;
+    const newline = part.indexOf("\n");
+    const header = newline < 0 ? part : part.slice(0, newline);
+    const match = /b\/(.+)$/.exec(header.trim());
+    signature.set(match === null ? header.trim() : match[1].trim(), part);
+  }
+  const others = runReviewGit(root, ["ls-files", "--others", "--exclude-standard", "--", ...paths]).stdout;
+  for (const line of others.split("\n")) {
+    const rel = line.trim();
+    if (rel.length === 0) continue;
+    const abs = path.join(root, rel);
+    signature.set(rel, existsSync(abs) ? "untracked\n" + readFileSync(abs, "utf8") : "untracked\n(absent)");
+  }
+  return signature;
+}
+
+// The files whose signature changed between two readings, sorted.
+function touchedBetween(
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>,
+): string[] {
+  const touched: string[] = [];
+  for (const [file, body] of after) {
+    if (before.get(file) !== body) touched.push(file);
+  }
+  for (const file of before.keys()) {
+    if (!after.has(file) && !touched.includes(file)) touched.push(file);
+  }
+  return touched.sort();
+}
+
 function runReviewGit(cwd: string, args: string[]): { status: number; stdout: string } {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env["GIT_DIR"];
@@ -6192,13 +6541,47 @@ function runReviewGit(cwd: string, args: string[]): { status: number; stdout: st
   return { status: out.status === null ? 1 : out.status, stdout: out.stdout ?? "" };
 }
 
-// §3.3 "fresh reviewers over the item's diff + spec + test": the diff half. The
-// tracked diff comes from git over the item's declared paths; the fileScope files
-// also ride along as they stand, because an UNTRACKED fileScope file has no diff
-// hunk and the reviewers must still see the change itself.
-function itemDiffBlock(root: string, queueItem: QueueItem): string {
+// §3.3 "fresh reviewers over the item's diff + spec + test": the diff half.
+//
+// The UNTRACKED files the item's declared scope matches, each with the content it
+// holds in this tree. The same `ls-files --others` probe treeTouchSignature runs,
+// read here for the reviewers' benefit rather than the fixer's.
+function itemCreatedFiles(root: string, queueItem: QueueItem): CreatedFile[] {
   const paths = itemScopePaths(queueItem);
-  const diff = paths.length > 0 ? runReviewGit(root, ["diff", "--", ...paths]).stdout : "";
+  if (paths.length === 0) return [];
+  const others = runReviewGit(root, ["ls-files", "--others", "--exclude-standard", "--", ...paths]).stdout;
+  const created: CreatedFile[] = [];
+  for (const line of others.split("\n")) {
+    const rel = line.trim();
+    if (rel.length === 0) continue;
+    const abs = path.join(root, rel);
+    if (!existsSync(abs)) continue;
+    created.push({ path: rel, content: readFileSync(abs, "utf8") });
+  }
+  return created;
+}
+
+// The item's diff over its declared paths, as one string: git's own diff for the
+// files it tracks, plus a creation hunk per file the item brought into existence.
+// Split out from the prompt block because GAP-011's witness check re-derives the
+// touched-file and hunk set from EXACTLY the diff the reviewers were shown — a
+// second `git diff` call could disagree with the first if the tree moved between
+// them.
+//
+// The created half is load-bearing, not cosmetic. `git diff` says nothing about an
+// untracked file, so a creation-shaped item used to reach checkReadWitness with an
+// EMPTY contact map: no file to cite, no span to land in, and a witness that had
+// only to echo the nonce printed in its own prompt. The item's created files are
+// the item's whole change, and a reviewer who has not read them has read nothing.
+function itemDiff(root: string, queueItem: QueueItem): string {
+  const paths = itemScopePaths(queueItem);
+  const tracked = paths.length > 0 ? runReviewGit(root, ["diff", "--", ...paths]).stdout : "";
+  const created = createdFileDiff(itemCreatedFiles(root, queueItem));
+  if (created.length === 0) return tracked;
+  return tracked.length === 0 ? created : tracked + (tracked.endsWith("\n") ? "" : "\n") + created;
+}
+
+function itemDiffBlock(root: string, queueItem: QueueItem, diff: string): string {
   const parts: string[] = [
     "\n\nTHE ITEM'S DIFF (working tree):\n" + (diff.trim().length > 0 ? diff : "(no tracked diff)"),
     "\nTHE ITEM'S fileScope AS IT STANDS:",
@@ -6218,16 +6601,28 @@ function itemDiffBlock(root: string, queueItem: QueueItem): string {
 // (the finding's own `lens` field — a merged session holds two lenses, so the
 // session cannot disambiguate), and the sub-session that raised it (§2.11
 // provenance for the cap question).
+//
+// ISSUE-049: `key` is the finding's IDENTITY here, and it is namespaced by the
+// session that raised it. Six independent lens sessions numbering their findings
+// F1, F2… collide with near-certainty, and the model-authored id was both the
+// adjudication key and the token a fixer's pushback was matched against — so one
+// finding's refutation dropped its id-twin (a real security hole, reproduced), and
+// a concern about F10 was read as a pushback on F1.
 interface ItemRaisedFinding {
   finding: Findings["findings"][number];
   lens: string;
   sessionID: string;
+  key: string;
+}
+
+function raisedKey(sessionID: string, id: string): string {
+  return (sessionID.length > 0 ? sessionID : "unattributed") + ":" + id;
 }
 
 function renderItemFinding(entry: ItemRaisedFinding): string {
   return (
     "- [" +
-    entry.finding.id +
+    entry.key +
     " | " +
     entry.lens +
     " | " +
@@ -6251,16 +6646,20 @@ export function itemLensPrompt(
   testText: string,
   sessions: number,
   packs: Record<string, string>,
+  nonce: string,
 ): string {
   const charges = group.map((id) => '- "' + id + '": ' + (ITEM_LENS_CHARGES[id] ?? id)).join("\n");
   return (
     "You are an item reviewer, one of " +
     String(sessions) +
     " fresh review sub-sessions, holding the lens(es) below over ONE queue item's change — " +
-    "its diff, its spec and its test. Reply with a single JSON object matching the Findings " +
-    "schema (findings: id, severity, lens, claim, evidence, suggestedFix).\n" +
+    "its diff, its spec and its test. Reply with a single JSON object matching the ItemFindings " +
+    "schema (findings: id, severity, lens, claim, evidence, suggestedFix; plus readWitness).\n" +
     "LENSES: " +
     group.join(", ") +
+    "\n" +
+    "READ WITNESS NONCE: " +
+    nonce +
     "\n" +
     "Your charge(s):\n" +
     charges +
@@ -6268,10 +6667,16 @@ export function itemLensPrompt(
     doctrineSlice(
       packs,
       "review.md",
-      ["An empty review is the approval"],
+      ["An empty review is the approval", "The read witness"],
       "conductor_item_review",
     ) +
-    "\n\nSet `lens` to " +
+    "\n\nSet `readWitness.nonce` to the READ WITNESS NONCE above and `readWitness.citedRanges` to " +
+    "the ranges you actually read — at least one per file the diff touches, each naming the file " +
+    "and its post-image start/end line inside a hunk of that file. A file this item CREATES " +
+    "appears as a creation hunk covering its whole content and must be cited like any other. The " +
+    "harness re-derives the diff's own file and hunk set and refuses a witness that cites a file " +
+    "the diff does not touch or a span no hunk contains. An EMPTY findings list is still the " +
+    "approval; it carries the same witness.\n\nSet `lens` to " +
     "the single lens id (drawn from your LENSES line) the finding belongs to, and make " +
     "`evidence` cite the file or test line the claim rests on. Give each finding a short " +
     "stable `id` and a `suggestedFix` naming the smallest correct change and the path(s) it " +
@@ -6296,21 +6701,25 @@ export function itemSkepticPrompt(
   const f = entry.finding;
   return (
     "You are a skeptic over ONE item-review finding. Reply with a single JSON object " +
-    "matching the Verdict schema (findingId, upheld, reasoning). Your doctrine governs the " +
-    "verdict:\n\n" +
+    "matching the Verdict schema (findingId, upheld, reasoning, refutationEvidence). Your " +
+    "doctrine governs the verdict:\n\n" +
     doctrineSlice(
       packs,
       "skeptic.md",
-      ["Your verdict and how it counts", "Default toward refuted when uncertain"],
+      ["Your verdict and how it counts", "Refutation carries evidence; abstention upholds"],
       "conductor_item_review",
     ) +
     '\n\nSet `findingId` to exactly "' +
-    f.id +
+    entry.key +
     '". You are one of ' +
     String(k) +
     " independent skeptics on this ONE finding. Judge exactly this finding, in isolation; " +
-    "never invent a defect the reviewer did not raise.\n\nTHE FINDING UNDER REVIEW (id " +
-    f.id +
+    "never invent a defect the reviewer did not raise.\n" +
+    "A REFUTATION CARRIES EVIDENCE: set `refutationEvidence` to the discriminating input, what " +
+    "you ran or read, and the reading under which the finding fails. `upheld:false` WITHOUT all " +
+    "three is recorded as an ABSTENTION, and an abstention upholds the finding — so a verdict " +
+    "you cannot evidence costs the finding nothing.\n\nTHE FINDING UNDER REVIEW (id " +
+    entry.key +
     ", severity " +
     f.severity +
     ", lens " +
@@ -6368,8 +6777,11 @@ function reviewImplementerFixPrompt(
     "implementing its fix. You may edit ONLY the item's fileScope — the test files are " +
     "frozen for you (§2.4).\n" +
     "If a finding is WRONG, do not implement it: reply DONE_WITH_CONCERNS with a concerns[] " +
-    "entry that names the finding id and carries your reasoning; the handler routes that " +
-    "reasoning through one more skeptic round rather than accepting it silently.\n" +
+    "entry naming the finding as `finding:<id>` (the exact token — a concern that names no " +
+    "finding that way is read as agreement) and carrying your reasoning; the handler routes " +
+    "that reasoning through one more skeptic round rather than accepting it silently.\n" +
+    "A DONE receipt is diffed against the tree: a receipt that touched no file the finding " +
+    "names is refused and re-dispatched.\n" +
     "FINDINGS TO FIX:\n" +
     entries.map(renderItemFinding).join("\n") +
     itemSpecBlock(queueItem) +
@@ -6399,8 +6811,11 @@ function reviewTestWriterFixPrompt(
     "against a reverted-behavior tree where cheap, and re-vets it with independent critics " +
     "BEFORE the item is re-validated.\n" +
     "If a finding is WRONG, do not implement it: reply DONE_WITH_CONCERNS with a concerns[] " +
-    "entry that names the finding id and carries your reasoning; the handler routes that " +
-    "reasoning through one more skeptic round rather than accepting it silently.\n" +
+    "entry naming the finding as `finding:<id>` (the exact token — a concern that names no " +
+    "finding that way is read as agreement) and carrying your reasoning; the handler routes " +
+    "that reasoning through one more skeptic round rather than accepting it silently.\n" +
+    "A DONE receipt is diffed against the tree: a receipt that touched no file the finding " +
+    "names is refused and re-dispatched.\n" +
     "FINDINGS TO FIX:\n" +
     entries.map(renderItemFinding).join("\n") +
     itemSpecBlock(queueItem) +
@@ -6420,6 +6835,34 @@ function reviewRedemandPrompt(
     " for this item. Your pushback on the finding(s) below was adjudicated by an extra " +
     "skeptic round and UPHELD: each finding stands despite your reasoning, and its fix is " +
     "REQUIRED (§3.3 — one pushback round per finding, never more).\n" +
+    "FINDINGS TO FIX:\n" +
+    entries.map(renderItemFinding).join("\n") +
+    itemSpecBlock(queueItem) +
+    "\n\nReply with the ImplementerResult receipt."
+  );
+}
+
+// GAP-012's re-dispatch: the fix receipt claimed a fix the tree does not carry.
+// The discrepancy travels VERBATIM — the fixer is told what changed, what the
+// findings name, and that the next receipt is measured the same way — because a
+// re-dispatch that merely repeats the original demand teaches the session nothing
+// about why its first answer was refused.
+function reviewReceiptFloorPrompt(
+  role: string,
+  entries: readonly ItemRaisedFinding[],
+  queueItem: QueueItem,
+  discrepancy: string,
+): string {
+  return (
+    "You are the " +
+    role +
+    " for this item. Your previous receipt reported the fix as done, but the harness diffed the " +
+    "tree and REFUSED it: " +
+    discrepancy +
+    ".\nImplement the fix in the file(s) the finding names, or — if the finding is wrong — reply " +
+    "DONE_WITH_CONCERNS with a concerns[] entry naming the finding as `finding:<id>` and carrying " +
+    "your reasoning, which is adjudicated by one more skeptic round. A second receipt that touches " +
+    "nothing the finding names surfaces the item to the human.\n" +
     "FINDINGS TO FIX:\n" +
     entries.map(renderItemFinding).join("\n") +
     itemSpecBlock(queueItem) +
@@ -6461,7 +6904,9 @@ function itemLensJob(itemId: string, tree: TreePath, group: readonly string[], p
     tree,
     writeCapable: false,
     prompt,
-    schemaName: "Findings",
+    // GAP-011: the ITEM-level findings schema — the one that makes the read
+    // witness an obligation the receipt cannot omit.
+    schemaName: "ItemFindings",
     priority: "interactive",
     lens: group.join("+"),
   };
@@ -6732,11 +7177,16 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   // its missing seats; a verdict still missing after that counts as an UPHOLD (G6):
   // feeding the partial panel straight to findingSurvives would read every missing
   // verdict as an overturn and silently drop the finding.
+  //
+  // ISSUE-049: the outcome is keyed on the ENTRY, never on the model-authored
+  // finding id. Six independent lens sessions numbering findings F1, F2… collide
+  // with near-certainty, and an id-keyed map let one finding's refutation
+  // overwrite — and drop — a finding its OWN panel upheld.
   const adjudicate = async (
     entries: readonly ItemRaisedFinding[],
     promptOf: (entry: ItemRaisedFinding) => string,
-  ): Promise<Map<string, boolean>> => {
-    const outcome = new Map<string, boolean>();
+  ): Promise<Map<ItemRaisedFinding, boolean>> => {
+    const outcome = new Map<ItemRaisedFinding, boolean>();
     if (entries.length === 0) return outcome;
     if (k < 1) {
       throw new Error(
@@ -6775,14 +7225,15 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       const panel = panels[index];
       while (panel.length < k) {
         panel.push({
-          findingId: entry.finding.id,
+          findingId: entry.key,
           upheld: true,
           reasoning:
             "skeptic seat undelivered after one re-dispatch; the missing verdict counts as " +
             "an UPHOLD — a finding is never dropped because a skeptic session crashed (§3.3)",
+          refutationEvidence: null,
         });
       }
-      outcome.set(entry.finding.id, findingSurvives(panel, k));
+      outcome.set(entry, findingSurvives(panel, k));
     });
     return outcome;
   };
@@ -6924,7 +7375,11 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   //     by reviewMaxRounds. Every iteration either exits or consumes one round.
   for (;;) {
     rounds += 1;
-    const diffBlock = itemDiffBlock(tree.root, queueItem);
+    const diffText = itemDiff(tree.root, queueItem);
+    const diffBlock = itemDiffBlock(tree.root, queueItem, diffText);
+    // GAP-011: the changed-file/hunk set the reviewers' own witness is checked
+    // against, re-derived from the SAME diff string their prompt carries.
+    const contact = diffContact(diffText);
     const testText = testScopeContent(tree.root, queueItem);
 
     // (2a) the lens fan-out. The sub-3 clamp warning rides the FIRST review
@@ -6946,12 +7401,15 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
         { runId, itemId, sessionID: input.sessionID },
       );
     }
-    const lensJobs = composition.map((group) =>
+    const nonces = composition.map((group) =>
+      witnessNonce([runId, itemId, String(rounds), group.join("+")]),
+    );
+    const lensJobs = composition.map((group, index) =>
       itemLensJob(
         itemId,
         itemTree,
         group,
-        itemLensPrompt(group, queueItem, diffBlock, testText, sessions, packs),
+        itemLensPrompt(group, queueItem, diffBlock, testText, sessions, packs, nonces[index]),
       ),
     );
     const lensResults = await fanout.dispatchWave(lensJobs);
@@ -6971,16 +7429,40 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
             ")",
         );
       }
+      // GAP-011 (ISSUE-072): a schema-valid reply still has to show CONTACT with
+      // the diff — this dispatch's nonce, and ranges the diff really carries. An
+      // empty findings list IS the approval and stays one; what stops being free
+      // is approving a diff nobody opened. Judgement is untouched: the harness
+      // re-derives contact, never correctness.
+      const witness = checkReadWitness(findings.readWitness, {
+        nonce: nonces[index],
+        contact,
+      });
+      if (!witness.ok) {
+        throw new Error(
+          ITEM_REVIEW_TOOL +
+            ': the "' +
+            composition[index].join("+") +
+            '" lens sub-session returned a reply with no admissible read witness: ' +
+            witness.reasons.join("; ") +
+            " — a review that cannot show it read the diff is not an approval (§3.3)",
+        );
+      }
       for (const finding of findings.findings) {
-        raised.push({ finding, lens: finding.lens, sessionID: result.sessionID });
+        raised.push({
+          finding,
+          lens: finding.lens,
+          sessionID: result.sessionID,
+          key: raisedKey(result.sessionID, finding.id),
+        });
       }
     }
 
     // (2b) skeptics: every finding, k seats, core survival arithmetic.
-    const survivesById = await adjudicate(raised, (entry) =>
+    const survivesByEntry = await adjudicate(raised, (entry) =>
       itemSkepticPrompt(entry, k, queueItem, diffBlock, testText, packs),
     );
-    let roundSurvivors = raised.filter((entry) => survivesById.get(entry.finding.id) === true);
+    let roundSurvivors = raised.filter((entry) => survivesByEntry.get(entry) === true);
 
     // (2c) adjudication ordering (§3.3): a surviving spec/contract finding discards
     //      the round's quality-lens findings — they are re-derived by the NEXT
@@ -7009,7 +7491,25 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
     const routed = roundSurvivors.map((entry) => ({ entry, route: routeItemFix(entry) }));
     const writerSet = routed.filter((r) => r.route.testWriter).map((r) => r.entry);
     const implSet = routed.filter((r) => r.route.implementer).map((r) => r.entry);
-    const deadIds = new Set<string>();
+    // Findings a pushback round refuted. Keyed by ENTRY for the ISSUE-049 reason:
+    // an id-keyed set killed both of two id-twins on one adjudication.
+    const dead = new Set<ItemRaisedFinding>();
+
+    const escalate = (
+      role: string,
+      reply: ImplementerResult,
+      sessionID: string,
+    ): ItemReviewResult =>
+      blockReviewAndAsk(
+        "the " +
+          role +
+          " replied " +
+          reply.status +
+          " on the review fix dispatch: " +
+          (reply.blockReason ?? reply.neededContext ?? reply.summary),
+        role,
+        sessionID,
+      );
 
     // A DONE_WITH_CONCERNS receipt whose concerns name a routed finding id is a
     // PUSHBACK (G5): ONE extra skeptic round carrying the reasoning verbatim.
@@ -7020,29 +7520,22 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       entries: ItemRaisedFinding[],
       first: { reply: ImplementerResult; sessionID: string },
     ): Promise<{ ok: true } | { ok: false; result: ItemReviewResult }> => {
-      const escalate = (reply: ImplementerResult, sessionID: string): ItemReviewResult =>
-        blockReviewAndAsk(
-          "the " +
-            role +
-            " replied " +
-            reply.status +
-            " on the review fix dispatch: " +
-            (reply.blockReason ?? reply.neededContext ?? reply.summary),
-          role,
-          sessionID,
-        );
       if (first.reply.status === "BLOCKED" || first.reply.status === "NEEDS_CONTEXT") {
-        return { ok: false, result: escalate(first.reply, first.sessionID) };
+        return { ok: false, result: escalate(role, first.reply, first.sessionID) };
       }
       if (first.reply.status !== "DONE_WITH_CONCERNS") return { ok: true };
+      // GAP-040 (ISSUE-049): EXACT-token matching. `concern.includes(id)` read a
+      // concern about F10 as a pushback on F1 — it mis-adjudicated precisely the
+      // doctrine-following fixer who writes a careful, loosely-worded concern.
+      const names = (entry: ItemRaisedFinding): string[] => [entry.key, entry.finding.id];
       const pushed = entries.filter((entry) =>
-        first.reply.concerns.some((line) => line.includes(entry.finding.id)),
+        first.reply.concerns.some((line) => concernNamesFinding(line, names(entry))),
       );
       if (pushed.length === 0) return { ok: true };
-      const upheldById = await adjudicate(pushed, (entry) =>
+      const upheldByEntry = await adjudicate(pushed, (entry) =>
         itemPushbackSkepticPrompt(
           entry,
-          first.reply.concerns.filter((line) => line.includes(entry.finding.id)),
+          first.reply.concerns.filter((line) => concernNamesFinding(line, names(entry))),
           k,
           queueItem,
           diffBlock,
@@ -7050,25 +7543,87 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
           packs,
         ),
       );
-      const upheld = pushed.filter((entry) => upheldById.get(entry.finding.id) === true);
+      const upheld = pushed.filter((entry) => upheldByEntry.get(entry) === true);
       for (const entry of pushed) {
-        if (upheldById.get(entry.finding.id) !== true) deadIds.add(entry.finding.id);
+        if (upheldByEntry.get(entry) !== true) dead.add(entry);
       }
       if (upheld.length > 0) {
         const again = await dispatchReviewFix(role, reviewRedemandPrompt(role, upheld, queueItem));
         if (again.reply.status === "BLOCKED" || again.reply.status === "NEEDS_CONTEXT") {
-          return { ok: false, result: escalate(again.reply, again.sessionID) };
+          return { ok: false, result: escalate(role, again.reply, again.sessionID) };
         }
       }
       return { ok: true };
     };
 
+    // GAP-012, the fixer-receipt floor. One fix pass = dispatch, settle the
+    // pushbacks, then MEASURE: the tree is signed before the dispatch and after
+    // everything the dispatch was going to do, and a receipt that touched no file
+    // the still-live findings NAME is refused. The refusal re-dispatches ONCE with
+    // the discrepancy verbatim; a second empty receipt surfaces the item. Nothing
+    // here judges whether the fix is right — that is the next round's job — only
+    // whether the claimed work exists at all.
+    const runFixPass = async (
+      role: "implementer" | "testWriter",
+      entries: ItemRaisedFinding[],
+      prompt: string,
+    ): Promise<{ ok: true } | { ok: false; result: ItemReviewResult }> => {
+      const before = treeTouchSignature(tree.root, queueItem);
+      const first = await dispatchReviewFix(role, prompt);
+      const settled = await resolveFix(role, entries, first);
+      if (!settled.ok) return settled;
+      const obliged = entries.filter((entry) => !dead.has(entry));
+      if (obliged.length === 0) return { ok: true };
+      const subjects: string[] = [];
+      for (const entry of obliged) {
+        // The ROUTE is part of the question: a finding that names no path is
+        // discharged inside the half of the item this fixer may write, never the
+        // other one (core/receipt-floor.ts routeFallbackScope).
+        const named = findingSubjects(
+          entry.finding,
+          { fileScope: queueItem.fileScope, testScope: queueItem.testScope },
+          role,
+        );
+        for (const subject of named) {
+          if (!subjects.includes(subject)) subjects.push(subject);
+        }
+      }
+      const measure = (): { ok: boolean; reason: string } =>
+        receiptFloor(touchedBetween(before, treeTouchSignature(tree.root, queueItem)), subjects);
+      const firstFloor = measure();
+      if (firstFloor.ok) return { ok: true };
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "REVIEWED", itemId, round: rounds, role, reason: firstFloor.reason },
+        { runId, itemId },
+      );
+      const again = await dispatchReviewFix(
+        role,
+        reviewReceiptFloorPrompt(role, obliged, queueItem, firstFloor.reason),
+      );
+      if (again.reply.status === "BLOCKED" || again.reply.status === "NEEDS_CONTEXT") {
+        return { ok: false, result: escalate(role, again.reply, again.sessionID) };
+      }
+      const secondFloor = measure();
+      if (secondFloor.ok) return { ok: true };
+      return {
+        ok: false,
+        result: blockReviewAndAsk(
+          "the " + role + "'s fix receipt was refused twice — " + secondFloor.reason,
+          role,
+          again.sessionID,
+        ),
+      };
+    };
+
     if (writerSet.length > 0) {
-      const writer = await dispatchReviewFix(
+      const settled = await runFixPass(
         "testWriter",
+        writerSet,
         reviewTestWriterFixPrompt(writerSet, queueItem, rounds, max),
       );
-      const settled = await resolveFix("testWriter", writerSet, writer);
       if (!settled.ok) return settled.result;
       // The changed test re-enters the discipline REGARDLESS of pushback: the
       // writer may have edited before pushing back on a sibling finding.
@@ -7076,19 +7631,19 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       if (!discipline.ok) return discipline.result;
     }
 
-    const implLive = implSet.filter((entry) => !deadIds.has(entry.finding.id));
+    const implLive = implSet.filter((entry) => !dead.has(entry));
     if (implLive.length > 0) {
-      const fixer = await dispatchReviewFix(
+      const settled = await runFixPass(
         "implementer",
+        implLive,
         reviewImplementerFixPrompt(implLive, queueItem, rounds, max),
       );
-      const settled = await resolveFix("implementer", implLive, fixer);
       if (!settled.ok) return settled.result;
     }
 
     // A finding a pushback round REFUTED died: it demands nothing further and
     // contributes nothing at the cap.
-    surviving = roundSurvivors.filter((entry) => !deadIds.has(entry.finding.id));
+    surviving = roundSurvivors.filter((entry) => !dead.has(entry));
 
     // (2f) fix => re-validate (§3.3). Always after a fix pass: a fix dispatch may
     //      have edited the tree whatever its receipt said.
@@ -8003,10 +8558,69 @@ function reportItemLines(
   return itemLines;
 }
 
+// GAP-022: the §2.9 stop-report names the run's ONE disposition alongside the
+// recorded kind, so an operator reading the artifact of a run that stopped
+// mid-flight sees the same fact the closer decided on rather than a kind with no
+// stated basis.
+function stopReportDisposition(
+  store: StateStore,
+  runId: string,
+  runDir: string,
+  queue: Queue,
+  publishEnabled: boolean,
+): string {
+  const items = queue.items.map((entry) => {
+    const persisted = store.loadItem(runId, entry.id);
+    return {
+      id: entry.id,
+      state: persisted.state,
+      dependsOn: entry.dependsOn,
+      blocked: persisted.blocked,
+      deferred: persisted.deferred,
+    };
+  });
+  const openQuestionIds = readQuestions(runDir)
+    .filter((q) => q.answeredIso === null)
+    .map((q) => q.id);
+  const dispositions = dispositionsOf(items, { publishEnabled, openQuestionIds });
+  return runDispositionOf([...dispositions.values()], { openQuestions: openQuestionIds.length });
+}
+
 function reportQuestionLines(runDir: string): string[] {
   return readQuestions(runDir)
     .filter((q) => q.answeredIso === null)
-    .map((q) => "- " + q.id + " — " + q.question);
+    .map((q) => "- " + q.id + " — " + q.question + " (answer at " + answerDropPath(q.runId, q.id) + ")");
+}
+
+// ISSUE-051's invisibility half. Every report mode filtered questions to
+// `answeredIso === null`, so an ANSWERED question appeared in no report at all:
+// a run could surface a blocking question, answer it itself, and proceed, leaving
+// the artifact that describes the run silent about the whole exchange. Answered
+// questions are rendered with their answer and the channel it arrived through, so
+// a relayed answer and a human's own are distinguishable by reading the report.
+function reportAnsweredQuestionLines(runDir: string): string[] {
+  return readQuestions(runDir)
+    .filter((q) => q.answeredIso !== null)
+    .map(
+      (q) =>
+        "- " +
+        q.id +
+        " [" +
+        provenanceLabel(q.answeredVia) +
+        "] " +
+        q.question +
+        " => " +
+        (q.answer ?? "") +
+        // A §6.2 question the model answered through the tool is RECORDED but not
+        // settled: the run it was blocking stays stopped until the operator's own
+        // artifact arrives. Saying so here is what keeps that state readable — a
+        // reader who saw only "answered" would take the exchange for closed.
+        (awaitsOperatorConfirmation(q)
+          ? " — AWAITING OPERATOR CONFIRMATION (§6.2 human territory): the run stays stopped until " +
+            "the operator's answer is dropped at " +
+            answerDropPath(q.runId, q.id)
+          : ""),
+    );
 }
 
 function reportDecisionLines(runDir: string): string[] {
@@ -8077,10 +8691,12 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
       "",
       "Stop kind: " + stop.kind,
       "Reason: " + stop.reasonDisplay,
+      "Run disposition: " + stopReportDisposition(store, runId, runDir, queue, publishEnabled),
       "Closing verify: none — a stop-report proves no claim and re-runs nothing (§2.9)",
       "",
       reportSection("Items", reportItemLines(store, runId, runDir, queue, publishEnabled)),
       reportSection("Open questions", reportQuestionLines(runDir)),
+      reportSection("Questions answered", reportAnsweredQuestionLines(runDir)),
       reportSection("Decisions", reportDecisionLines(runDir)),
       reportSection("Stale-red additions", reportStaleLines(queue, staleRedAdded)),
       reportMetricsSection(summary),
@@ -8130,6 +8746,24 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   // §4.2 exclusion set, so the verify would pass WITHOUT EVER EXECUTING the
   // failure that makes the run unfinished. Ordering it first is not an
   // optimization; it is the only order in which the check means anything.
+  // GAP-022: the run's ONE disposition, derived from the SAME persisted state the
+  // report precondition reads — item files plus the §2.11 ledger. The stop kind
+  // this writer records is a function of it, so "what the report says" and "how
+  // the run ended" can never be two different readings of one run.
+  const openQuestionIds = readQuestions(runDir)
+    .filter((q) => q.answeredIso === null)
+    .map((q) => q.id);
+  const dispositions = dispositionsOf(items, { publishEnabled, openQuestionIds });
+  const runClosure = {
+    disposition: runDispositionOf([...dispositions.values()], { openQuestions: openQuestionIds.length }),
+    blockedItems: items.filter((item) => item.blocked !== null).length,
+    openQuestions: openQuestionIds.length,
+    advancedItems: items.filter(
+      (item) => item.state === "PUBLISHED" || (!publishEnabled && item.state === "REVIEWED"),
+    ).length,
+    deferredItems: items.filter((item) => item.deferred !== null).length,
+  };
+
   const settled = settledForReport(items, { publishEnabled });
   if (!settled.allSettled) {
     throw new Error(
@@ -8204,6 +8838,7 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   // ---- report.md ---------------------------------------------------------
   const itemLines = reportItemLines(store, runId, runDir, queue, publishEnabled);
   const questionLines = reportQuestionLines(runDir);
+  const answeredQuestionLines = reportAnsweredQuestionLines(runDir);
   const decisionLines = reportDecisionLines(runDir);
   const staleLines = reportStaleLines(queue, staleRedAdded);
 
@@ -8228,14 +8863,38 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
     batchLines.push("");
   }
 
+  // GAP-021 / MACRO-006: the stop kind is CHOSEN by the one closer over the run's
+  // persisted dispositions, never asserted by this writer. Two members of §2.9's
+  // closed vocabulary — `blocked` and `surfaced` — had no writer at all, so a run
+  // whose every remaining item waited on a human closed "the run completed".
+  //
+  // The closing verify's result is CONSULTED here rather than merely rendered
+  // (ISSUE-053, decision D5 STRICT): §3.2 calls it "verification-before-completion
+  // made mechanical", and a law that cannot fail the completion is advisory. A red
+  // closing verify maps to `blocked` or `env` by failure class and can never stamp
+  // `done`. The verdict is computed BEFORE report.md is written so the artifact
+  // and run.json carry the same answer.
+  const verdict = stopKindOf(
+    record.green
+      ? { cause: "settle", run: runClosure }
+      : {
+          cause: "closing-verify-red",
+          run: runClosure,
+          failureClass: closingVerifyFailure(record.scopes),
+        },
+  );
+
   const parts: string[] = [
     "# conductor report — run " + runId,
     "",
     "Mode: " + mode,
     "Closing verify: " + (record.green ? "green" : "RED") + " (evidence seq " + String(record.seq) + ")",
+    "Run disposition: " + runClosure.disposition,
+    "Stop kind: " + verdict.kind + " — " + verdict.why,
     "",
     reportSection("Items", itemLines),
     reportSection("Open questions", questionLines),
+    reportSection("Questions answered", answeredQuestionLines),
   ];
 
   // G10: a trivial run has no decision ledger to speak of, so an EMPTY section is
@@ -8264,10 +8923,11 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
     throw new Error(REPORT_TOOL + ": " + edge.why);
   }
 
-  const stop: { kind: "done"; reasonDisplay: string; tsMs: number } = {
-    kind: "done",
+  const stop: { kind: StopKind; reasonDisplay: string; tsMs: number } = {
+    kind: verdict.kind,
     reasonDisplay:
-      "the run completed: " +
+      verdict.why +
+      ": " +
       String(queue.items.length) +
       " item(s), closing verify " +
       (record.green ? "green" : "RED"),

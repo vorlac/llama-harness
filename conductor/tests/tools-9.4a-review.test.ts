@@ -525,7 +525,7 @@ test("[C032-D2-stale-red] a vet re-entered after a repair cannot advance a PASSI
   assert.equal(store.loadItem(runId, "I1").state, "RED", "the item stays at RED");
 
   // The human answers, which clears `blocked` — the ONLY supported way to resume.
-  answerQuestion(runDir, call1.questionId as string, "rewrite the test so it pins the sign", START_MS + 1000);
+  answerQuestion(runDir, call1.questionId as string, "rewrite the test so it pins the sign", "tool", START_MS + 1000);
   assert.equal(store.loadItem(runId, "I1").blocked, null, "answering unblocks the item");
 
   // Call 2: the critics are CLEAN. The test on disk still passes, so there is no red
@@ -759,7 +759,7 @@ test("[C032-D6-attempts-accumulate] item.attempts.testRepairs accumulates across
   assert.equal(call1.ok, false, "a class-\"error\" test is never a red");
   assert.equal(store.loadItem(runId, "I1").attempts.testRepairs, 1, "call 1 spent its one repair");
 
-  answerQuestion(runDir, call1.questionId as string, "write it as a plain assertion", START_MS + 1000);
+  answerQuestion(runDir, call1.questionId as string, "write it as a plain assertion", "tool", START_MS + 1000);
 
   const second = makeWiring(runId, config, journal, script());
   await handleSubmitTest({

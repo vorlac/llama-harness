@@ -151,7 +151,7 @@ export interface QuarantineInput {
   runId: string;
   /** The owning run's pid (defaults to process.pid) — stamped into the manifest. */
   pid?: number;
-  /** The owning run's start (defaults to Date.now()) — stamped into the manifest. */
+  /** The owning run's start (defaults to `Date.now()`) — stamped into the manifest. */
   startMs?: number;
 }
 
@@ -356,7 +356,7 @@ export function restoreQuarantine(handle: QuarantineHandle): void {
  * every `<runId>` manifest under `<stateHome>/conductor/<workspaceKey>/quarantine/`, restore every
  * pending entry, and remove each healed dir. Returns the originals restored; a
  * second call with nothing pending is a no-op ([]) and never clobbers a
- * now-present repo file (an already-restored stored file is absent, so skipped).
+ * repo file that is present (an already-restored stored file is absent, so skipped).
  */
 export function replayPendingRestores(input: { stateHome: string; workspaceKey: string }): string[] {
   const { stateHome, workspaceKey } = input;

@@ -7,7 +7,8 @@
 // (conductor_dispatch_wave). Every other §3.4 name reached its handler with no
 // legality question asked of it at all: two layers each assumed the other owned
 // the meta tools, and neither did (ISSUE-005). This table is the answer to "who
-// owns 'is this tool legal now?'" — one row per tool, no exceptions, and a name
+// owns 'is this tool legal at this position?'" — one row per tool, no exceptions,
+// and a name
 // with no row is REFUSED rather than run (the growth property: a tool cannot be
 // born guarded by nothing).
 //

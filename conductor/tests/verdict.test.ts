@@ -4,22 +4,30 @@
 // shape, a legal red per §2.6.1).
 //
 // Spec: plan Task 1.3 (lines 2115-2116): findingSurvives(verdicts[], k) ->
-// boolean — a finding survives iff upholds >= ceil(k/2); a TIE UPHOLDS (a
-// finding two skeptics split on is worth a fix round; §2.1 skepticsPerFinding,
-// line 565). Verdict shape is §2.10's skeptic VERDICT
-// ({findingId, upheld, reasoning}, lines 930-932).
+// boolean — a finding survives iff the seats that did not refute it reach
+// ceil(k/2); a TIE UPHOLDS (a finding two skeptics split on is worth a fix
+// round; §2.1 skepticsPerFinding, line 565). Verdict shape is §2.10's skeptic
+// VERDICT ({findingId, upheld, reasoning}, lines 930-932) plus GAP-036's
+// refutationEvidence.
+//
+// GAP-036 / owner decision D11: a refutation counts as one only when it carries
+// its evidence (the discriminating input, the run, the reading). `upheld:false`
+// without that evidence is an ABSTENTION, and an abstention UPHOLDS — which is
+// why every overturn fixture below carries evidence, and why the abstention rows
+// at the bottom are their mirror.
 // Assertion: 1.3-verdict.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { findingSurvives } from "../core/verdict.ts";
+import { findingSurvives, verdictKind } from "../core/verdict.ts";
 
 /** Minimal §2.10 VERDICT fixture — what every skeptic session returns. */
 interface VerdictFixture {
   findingId: string;
   upheld: boolean;
   reasoning: string;
+  refutationEvidence: { discriminatingInput: string; run: string; reading: string } | null;
 }
 
 const verdict = (upheld: boolean, i: number): VerdictFixture => ({
@@ -28,6 +36,21 @@ const verdict = (upheld: boolean, i: number): VerdictFixture => ({
   reasoning: upheld
     ? `skeptic ${i}: the claim holds; the guard on line 42 does not cover this case`
     : `skeptic ${i}: the claim mis-reads the guard on line 42; the case is handled`,
+  refutationEvidence: upheld
+    ? null
+    : {
+        discriminatingInput: "the empty-string input the claim says reaches line 42",
+        run: `skeptic ${i} traced the caller and re-ran the unit test`,
+        reading: "the caller validates before the call, so line 42 never sees it",
+      },
+});
+
+/** A refutation with NO evidence: the reply D11 records as an abstention. */
+const abstention = (i: number): VerdictFixture => ({
+  findingId: "F1",
+  upheld: false,
+  reasoning: `skeptic ${i}: could not evaluate this claim`,
+  refutationEvidence: null,
 });
 
 const verdicts = (...upholds: boolean[]): VerdictFixture[] => upholds.map((u, i) => verdict(u, i));
@@ -66,3 +89,36 @@ for (const row of rows) {
     );
   });
 }
+
+// ---------------------------------------------------------------------------
+// GAP-036 (D11): incapacity cannot convert into a verdict.
+// ---------------------------------------------------------------------------
+
+test("[1.3-verdict] an evidence-free overturn is an ABSTENTION, and an abstention counts with the upholds: at k=1 the finding SURVIVES a lone unevidenced refutation", () => {
+  assert.equal(verdictKind(abstention(0)), "abstained");
+  assert.equal(findingSurvives([abstention(0)], 1), true);
+});
+
+test("[1.3-verdict] the evidenced refutation keeps its full force: at k=1 it still kills the finding, and at k=3 two of them do", () => {
+  assert.equal(verdictKind(verdict(false, 0)), "refuted");
+  assert.equal(findingSurvives([verdict(false, 0)], 1), false);
+  assert.equal(findingSurvives([verdict(false, 0), verdict(false, 1), verdict(true, 2)], 3), false);
+});
+
+test("[1.3-verdict] a panel of abstentions cannot bury a finding at any k", () => {
+  for (const k of [1, 2, 3, 4]) {
+    const panel = Array.from({ length: k }, (_unused, i) => abstention(i));
+    assert.equal(findingSurvives(panel, k), true, `k=${k}: an all-abstention panel adjudicated nothing, so the finding stands`);
+  }
+});
+
+test("[1.3-verdict] evidence with a blank field is no evidence: the verdict abstains rather than refuting", () => {
+  const hollow: VerdictFixture = {
+    findingId: "F1",
+    upheld: false,
+    reasoning: "it does not reproduce",
+    refutationEvidence: { discriminatingInput: "  ", run: "read the file", reading: "the guard is there" },
+  };
+  assert.equal(verdictKind(hollow), "abstained");
+  assert.equal(findingSurvives([hollow], 1), true);
+});

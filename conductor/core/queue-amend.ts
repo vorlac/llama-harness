@@ -42,7 +42,7 @@ function isAmendable(state: ItemState): boolean {
 
 // Two scope lists describe the same scope only if they are the same sequence of
 // the same strings. Anything else — a reorder, an entry that is not a string, a
-// missing list on a malformed op — counts as CHANGED: this rule is a proof that
+// missing list on a malformed op — counts as `CHANGED`: this rule is a proof that
 // the item's §2.6 evidence still describes the item, and a scope we cannot
 // establish to be identical is not that proof.
 function sameScopeList(before: unknown, after: unknown): boolean {
@@ -213,7 +213,7 @@ export function applyAmendOps(
       // re-scope they would leave the item sitting at RED/GREEN on the strength of
       // runs over files it no longer owns, and the §2.6 freshness rule — stamps
       // and HEAD, never the scope a record was produced under — would rest on
-      // them. An item whose scope changed has been proven of nothing, so the
+      // them. An item whose scope moved has been proven of nothing, so the
       // re-scope must be stated as the rebirth it is: remove then add, one net
       // birth, reborn PENDING with no evidence and no attempts. At PENDING there
       // is nothing to invalidate (no §3.3 edge into PENDING exists, so no evidence

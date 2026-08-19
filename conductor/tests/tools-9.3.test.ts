@@ -389,7 +389,15 @@ function findingsJson(findings: Finding[]): string {
 }
 const EMPTY_FINDINGS = findingsJson([]);
 
-// §2.10 verdict fixtures.
+// §2.10 verdict fixtures. GAP-036: a refutation counts as one only when it carries
+// its evidence (discriminating input, run, reading); `upheld:false` without that is
+// an ABSTENTION, and an abstention upholds. Every overturn here is an evidenced
+// one, so these rows keep asserting what they always asserted.
+const PLAN_REFUTATION_EVIDENCE = {
+  discriminatingInput: "the plan section the claim says is missing",
+  run: "re-read the section and the queue item it maps to",
+  reading: "the section states it, so the claimed omission does not hold",
+};
 function verdictJson(findingId: string, upheld: boolean): string {
   const verdict: Verdict = {
     findingId,
@@ -397,11 +405,17 @@ function verdictJson(findingId: string, upheld: boolean): string {
     reasoning: upheld
       ? "the claim stands: the cited defect is real and unmitigated"
       : "the claim mis-reads the plan; the cited case is already handled",
+    refutationEvidence: upheld ? null : PLAN_REFUTATION_EVIDENCE,
   };
   return JSON.stringify(verdict);
 }
 function verdicts(...upholds: boolean[]): Verdict[] {
-  return upholds.map((upheld, i) => ({ findingId: "F", upheld, reasoning: `skeptic ${i}` }));
+  return upholds.map((upheld, i) => ({
+    findingId: "F",
+    upheld,
+    reasoning: `skeptic ${i}`,
+    refutationEvidence: upheld ? null : PLAN_REFUTATION_EVIDENCE,
+  }));
 }
 
 // The §3.2 "Plan" receipt for the planner revision re-prompt (schema registered by 9.2).

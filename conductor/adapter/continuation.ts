@@ -61,6 +61,7 @@ import {
   appendAnomaly,
   handleReport,
   handlerRunDir,
+  ingestAnswerFiles,
   inlineClaimScopeFor,
   waveVerdict,
 } from "./tools.ts";
@@ -70,6 +71,7 @@ import { decideEdit } from "../core/gates-edit.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { isHumanTerritory } from "../core/decide.ts";
+import { dispositionsOf, isResumableStop, runDispositionOf, stopKindOf } from "../core/disposition.ts";
 import { isTerminal, shouldTerminate } from "../core/stops.ts";
 import type { Config, Item, Queue, QuestionRecord, Run, StopKind, TreePath } from "../core/types.ts";
 
@@ -118,7 +120,7 @@ export interface ContinuationClient {
 export type PermissionResponse = "once" | "always" | "reject";
 
 /**
- * The §2.10 conversion a denied sub-session ask produces (no new status).
+ * The §2.10 conversion a denied sub-session ask produces (no additional status).
  *
  * `runId` is the run the ask was raised UNDER, and it is what makes the queue
  * below run-scoped: the queue itself is process-scoped (SG-3), it outlives the
@@ -380,7 +382,7 @@ function signatureOf(store: StateStore, run: Run, runDir: string, queue: Queue |
     .map((q) => ({ id: q.id, answered: q.answeredIso !== null }))
     .sort((a, b) => a.id.localeCompare(b.id));
 
-  // Keys are written in one fixed order, so the serialization is canonical.
+  // Keys are written in one settled order, so the serialization is canonical.
   return JSON.stringify({
     classificationKind: run.classification.kind,
     items,
@@ -471,13 +473,20 @@ function reconcileOrphanQuestions(
 
 function cleanupAndArchive(input: SessionIdleInput, run: Run, runDir: string): void {
   const { store, journal } = input;
-  // SG-5's channel closes with the run: a conversion raised under it can never be
-  // surfaced now, and it must not be carried into a later run (the drain below is
-  // run-scoped for exactly that). Silent loss is the one thing that is not
-  // allowed, so each undelivered conversion leaves a record naming what the
-  // orchestrator never heard.
-  for (const conversion of input.state.pendingConversions) {
-    if (conversion.runId !== run.runId) continue;
+  // SG-5's channel closes with the run: a conversion raised under it has no
+  // orchestrator left to surface it to, and it must not be carried into a later
+  // run (the drain below is run-scoped for exactly that). Silent loss is the one
+  // thing that is not allowed, so each undelivered conversion leaves a record
+  // naming what the orchestrator never heard — and is then REMOVED (ISSUE-036).
+  // Reporting it and leaving it queued reports the same dead conversion twice:
+  // once here as lost, once at the next drain as discarded, with the entry
+  // retained for the life of the process in between.
+  const closed = input.state.pendingConversions.filter((conversion) => conversion.runId === run.runId);
+  const carried = input.state.pendingConversions.filter((conversion) => conversion.runId !== run.runId);
+  // In place: the queue is one array the whole engine shares by reference.
+  input.state.pendingConversions.length = 0;
+  input.state.pendingConversions.push(...carried);
+  for (const conversion of closed) {
     journal.log(
       "error",
       "state",
@@ -612,6 +621,82 @@ function unfinishedItemIds(store: StateStore, runId: string, queue: Queue | null
   }
   ids.sort();
   return ids;
+}
+
+/**
+ * GAP-022: the run's ONE disposition and the counts the §2.9 closer reads, derived
+ * from the SAME persisted item files and §2.11 ledger conductor_report derives them
+ * from — so the engine and the report tool can never read one run two ways.
+ */
+function runClosureOf(
+  store: StateStore,
+  runId: string,
+  queue: Queue | null,
+): {
+  disposition: ReturnType<typeof runDispositionOf>;
+  blockedItems: number;
+  openQuestions: number;
+  advancedItems: number;
+} {
+  const items: Array<{
+    id: string;
+    state: string;
+    dependsOn: string[];
+    blocked: Item["blocked"];
+    deferred: Item["deferred"];
+  }> = [];
+  for (const entry of queue === null ? [] : queue.items) {
+    let item: Item;
+    try {
+      item = store.loadItem(runId, entry.id);
+    } catch {
+      continue;
+    }
+    items.push({
+      id: entry.id,
+      state: item.state,
+      dependsOn: entry.dependsOn,
+      blocked: item.blocked,
+      deferred: item.deferred,
+    });
+  }
+  const summary = store.itemsSummary(runId);
+  const openQuestionIds = readOpenQuestionIds(store, runId);
+  const dispositions = dispositionsOf(items, { openQuestionIds });
+  return {
+    disposition: runDispositionOf([...dispositions.values()], { openQuestions: summary.surfacedQuestions }),
+    blockedItems: summary.blocked,
+    openQuestions: summary.surfacedQuestions,
+    advancedItems: items.filter((item) => item.state === "PUBLISHED").length,
+  };
+}
+
+// The ids of the §2.11 questions still unanswered. Read through the run dir the
+// store owns, so a torn or absent ledger reads as "no live lever" rather than
+// throwing out of the idle pass (G5).
+function readOpenQuestionIds(store: StateStore, runId: string): string[] {
+  try {
+    return readQuestions(handlerRunDir(store, runId))
+      .filter((q) => q.answeredIso === null)
+      .map((q) => q.id);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * ISSUE-066: is this run terminal ONLY because it recorded a resumable stop while
+ * a human question is still open? Such a run is not finished with anything — it is
+ * waiting, and conductor_answer is the documented way out. It keeps its pointer.
+ *
+ * A run terminal by FSM STATE is excluded: conductor_report has closed it and
+ * written its §2.9 artifact, so there is nothing left for an answer to revive.
+ */
+function waitingForAnAnswer(store: StateStore, run: Run, runId: string): boolean {
+  if (run.stop === null) return false;
+  if (!isResumableStop(run.stop.kind)) return false;
+  if (isTerminal({ state: run.state, stop: null })) return false;
+  return store.itemsSummary(runId).surfacedQuestions > 0;
 }
 
 /**
@@ -785,6 +870,15 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   // (c) The C-032 E7 repair, before any re-prompt or stop decision.
   reconcileOrphanQuestions(store, runId, runDir, journal);
 
+  // (c2) GAP-013's out-of-band channel, ingested BEFORE the terminality and
+  //      futility verdicts below. The operator answers by dropping a file into the
+  //      state area no session may write, and this pass is what turns that file
+  //      into an answer — so a run that STOPPED waiting on the question is revived
+  //      by the same idle pass that finds it, with no model call anywhere in the
+  //      path. Ingesting after the terminality check would archive the run first
+  //      and lose exactly the work ISSUE-066 is about.
+  ingestAnswerFiles({ store, runId, journal, now });
+
   let run = store.loadRun(runId);
 
   // (d) §3.7.3 HALT outranks everything — the debounce, the recommendation and
@@ -815,6 +909,28 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   //     re-prompted; it is cleaned up and archived in this same pass, because
   //     archiveRun clears the pointer and no later pass would find it again.
   if (isTerminal(run)) {
+    // ISSUE-066: a run that stopped WAITING is exactly the run whose committed
+    // work archiving loses. Archiving clears the current-run pointer, so the
+    // documented conductor_answer resume path had nothing left to revive: the
+    // honest waiting model lost its work while the model that deferred the same
+    // item closed clean. A run terminal only by a RESUMABLE stop record, still
+    // holding the unanswered question it is waiting on, keeps its pointer.
+    if (waitingForAnAnswer(store, run, runId)) {
+      journal.log(
+        "info",
+        "continuation",
+        "idle",
+        {
+          why:
+            "the run stopped " +
+            String(run.stop?.kind) +
+            " and an unanswered question still gates it: the pointer is held so conductor_answer can revive it",
+          runState: run.state,
+        },
+        { runId, sessionID },
+      );
+      return { runId, prompted: false, stop: null };
+    }
     cleanupAndArchive(input, run, runDir);
     return { runId, prompted: false, stop: null };
   }
@@ -867,9 +983,44 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
     cleanupAndArchive(input, run, runDir);
     return { runId, prompted: false, stop };
   }
-  // Every OTHER kind shouldTerminate can return belongs to another recorder:
-  // blocked/surfaced/done to conductor_report, env to the override hatch
-  // (§2.9:900-905). This engine writes nothing for them and carries on.
+  // GAP-021 / ISSUE-065: `blocked` and `surfaced` used to belong to "another
+  // recorder" — conductor_report — which could not write them: it hardcoded
+  // `done`. A delegation ring with no writer, in which a run whose every remaining
+  // item waited on a human either closed "the run completed" or sat in EXECUTING
+  // forever. The engine records what the closer decided, writes the §2.9 artifact
+  // through the ONE writer, and — because both kinds are RESUMABLE — leaves the
+  // pointer alone so an answer can revive the run instead of finding it archived.
+  if (verdict.stop && (verdict.kind === "blocked" || verdict.kind === "surfaced")) {
+    const tsMs = now();
+    const summary = store.itemsSummary(runId);
+    const reasonDisplay =
+      verdict.kind === "blocked"
+        ? "no item can be advanced by this run: " +
+          String(summary.blocked) +
+          " blocked, " +
+          String(summary.deferred) +
+          " deferred, " +
+          String(summary.surfacedQuestions) +
+          " question(s) open — a human holds the next move"
+        : String(summary.surfacedQuestions) +
+          " human-territory question(s) are open and no item is schedulable: the run waits on an answer";
+    const stop: StopRecorded = { kind: verdict.kind, reasonDisplay, tsMs };
+    run = recordStop(store, run, stop);
+    journal.log(
+      "info",
+      "continuation",
+      "disengage",
+      { stop: stop.kind, reasonDisplay, ...summary },
+      { runId, sessionID },
+    );
+    await driveStopReport(input, runId);
+    if (!waitingForAnAnswer(store, store.loadRun(runId), runId)) {
+      cleanupAndArchive(input, run, runDir);
+    }
+    return { runId, prompted: false, stop };
+  }
+  // `env` remains the override hatch's to record and `done` conductor_report's
+  // (§2.9:900-905): this engine writes neither.
 
   // (h) The gate's own verdict. No second next-step derivation exists.
   const gate = waveVerdict(store, runId, runDir, queue ?? { items: [] });
@@ -895,6 +1046,38 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   const actionable =
     recommended !== null || (unfinished.length > 0 && positionSpecificTools(offered).length > 0);
   if (!actionable) {
+    // ISSUE-067: this silence was the whole wedge. A blocked item no answer can
+    // release, plus a dependent, offered no stage tool, no conductor_answer and no
+    // report — so the futile counter never moved, no §2.9 kind was reachable, and
+    // the run sat in EXECUTING forever with nothing on disk saying so. The
+    // discriminator is the run's ONE disposition: `stuck` means unfinished work
+    // with no lever a human or this run could pull, which is a stop, not a pause.
+    // `waiting-human` and `settled` stay silent — the first has an answer coming,
+    // the second is a run whose closer is the report tool.
+    const closure = runClosureOf(store, runId, queue);
+    if (closure.disposition === "stuck") {
+      const tsMs = now();
+      const stopVerdict = stopKindOf({ cause: "settle", run: closure });
+      const stop: StopRecorded = {
+        kind: stopVerdict.kind,
+        reasonDisplay:
+          stopVerdict.why +
+          "; the gate offers no lever here: " +
+          gate.why,
+        tsMs,
+      };
+      run = recordStop(store, run, stop);
+      journal.log(
+        "info",
+        "continuation",
+        "disengage",
+        { stop: stop.kind, reasonDisplay: stop.reasonDisplay, disposition: closure.disposition },
+        { runId, sessionID },
+      );
+      await driveStopReport(input, runId);
+      cleanupAndArchive(input, run, runDir);
+      return { runId, prompted: false, stop };
+    }
     journal.log("info", "continuation", "idle", { why: gate.why, runState: run.state }, { runId, sessionID });
     return { runId, prompted: false, stop: null };
   }

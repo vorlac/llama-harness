@@ -12,6 +12,16 @@ invent findings to look thorough. Say what is wrong, at what severity, where.
 Report only what your lens sees: a different reviewer holds each of the others,
 and anything outside yours is not your seat.
 
+## The read witness
+
+Approval is free; reading is not. Every reply — an empty one included — carries a
+`readWitness`: the nonce your dispatch names, and `citedRanges`, at least one per
+file the diff changes, each giving the file and the start/end line you read. The
+harness re-derives the diff's own files and hunks and refuses a witness citing a
+file the diff does not touch or a span no hunk contains. It never grades your
+judgement, and it never asks you to produce a finding: it asks you to show the
+lines you looked at. An approval you cannot evidence contact for is not a review.
+
 ## Severity rubric
 
 Every finding carries exactly one severity. Assign it by real-world impact, not

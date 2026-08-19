@@ -186,7 +186,7 @@ import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 import type { GateHookInput, RegistryEntry } from "../adapter/tools.ts";
 import { openWorkspace } from "../adapter/state.ts";
 import type { OpenOptions, StateStore } from "../adapter/state.ts";
-import { appendQuestion, readQuestions } from "../adapter/questions.ts";
+import { answerQuestion, appendQuestion, readQuestions } from "../adapter/questions.ts";
 import type { MetricsSummary } from "../adapter/router-client.ts";
 import { requireTwoOptions } from "../core/decide.ts";
 import { STOP_KINDS } from "../core/stops.ts";
@@ -1031,6 +1031,13 @@ test("[9.5c-stop-report-no-verify] NO closing verify runs on ANY stop-report pat
       item.blocked = null;
       item.deferred = null;
       bench.store.saveItem(bench.runId, item);
+    }
+    // GAP-021: `done` is the narrowest verdict the closer produces — it needs every
+    // disposition settled AND no human lever outstanding. This fixture's ledger
+    // carries the open questions the stop-mode rows minted, and an open question is
+    // a lever, so they are answered here to make the contrast a genuine `done`.
+    for (const q of readQuestions(bench.runDir).filter((entry) => entry.answeredIso === null)) {
+      answerQuestion(bench.runDir, q.id, "settled for this contrast", "tool", START_MS);
     }
     assert.equal(bench.store.loadRun(bench.runId).stop, null, "premise: no stop is recorded, so stop mode is not selected");
     assert.equal(existsSync(bench.sentinelPath), false, "premise: the sentinel does not exist before the call");

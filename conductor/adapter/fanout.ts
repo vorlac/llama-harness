@@ -402,7 +402,7 @@ export function createFanout(
         unsubRef.fn = unsub;
         // If the listener already fired synchronously during subscribe (release ran
         // before unsubRef.fn was assigned, so the real unsubscribe was not yet reachable),
-        // unsubscribe now that we finally hold it.
+        // unsubscribe once we finally hold it.
         if (released) unsub();
       };
 

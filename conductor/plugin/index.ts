@@ -1025,7 +1025,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   }
 
   // The ONE delivery every §6.4 hook reads. Composed per request (never cached):
-  // G9's whole point is that the state block describes the run as it is NOW, and a
+  // G9's whole point is that the state block describes the run at this moment, and a
   // memoized delivery would re-state a position the run has already left.
   //
   // G5 fail-soft: conductor failing must not take the user's session down. A
@@ -1300,6 +1300,11 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         ...deps,
         questionId: stringArg("conductor_answer", args, "questionId"),
         answer: stringArg("conductor_answer", args, "answer"),
+        // GAP-013: an answer typed through this tool arrived through this tool.
+        // The channel is what the composition root OBSERVED, never an argument —
+        // the same ruling C-044 applies to a decision's kind. Human provenance
+        // comes from the answer file the edit gate keeps every session out of.
+        via: "tool",
       }),
     conductor_defer: async (args, { deps }) =>
       handleDefer({

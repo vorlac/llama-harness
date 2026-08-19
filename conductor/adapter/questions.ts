@@ -14,7 +14,7 @@ import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { validate } from "../core/types.ts";
-import type { Item, QuestionOrigin, QuestionRecord } from "../core/types.ts";
+import type { AnswerChannel, Item, QuestionOrigin, QuestionRecord } from "../core/types.ts";
 
 export interface NewQuestion {
   runId: string;
@@ -81,6 +81,17 @@ function assertValidQuestion(record: QuestionRecord): void {
   if (!result.ok) {
     throw new Error("questions: refusing to write an invalid QuestionRecord: " + result.errors.join("; "));
   }
+  // GAP-013: the channel and the answer stamp move together. A record answered
+  // with no channel says a question was settled by nobody in particular, which is
+  // exactly the state ISSUE-051's self-answer hid in; a channel on an open
+  // question claims an answer that is not there. Neither is writable.
+  if ((record.answeredIso === null) !== (record.answeredVia === null)) {
+    throw new Error(
+      "questions: refusing to write " +
+        record.id +
+        " with answeredIso and answeredVia out of step — an answer carries its channel or it is not an answer",
+    );
+  }
 }
 
 // Mint the next id (Q-0001, Q-0002, …) as max-existing-numeric + 1, stamp tsMs
@@ -107,6 +118,7 @@ export function appendQuestion(runDir: string, input: NewQuestion, nowMs?: numbe
     blocksItems: [...input.blocksItems],
     answeredIso: null,
     answer: null,
+    answeredVia: null,
   };
   assertValidQuestion(record);
   writeRecords(runDir, [...records, record]);
@@ -118,14 +130,20 @@ export function readQuestions(runDir: string): QuestionRecord[] {
   return readRecords(runDir);
 }
 
-// Record the answer (answeredIso + answer) on the question AND clear the `blocked`
-// disposition on every item under <runDir>/items/ whose blocked.questionId ===
-// questionId, returning which items were cleared. Items that named a DIFFERENT
-// question — or none — are left untouched.
+// Record the answer (answeredIso + answer + answeredVia) on the question AND clear
+// the `blocked` disposition on every item under <runDir>/items/ whose
+// blocked.questionId === questionId, returning which items were cleared. Items
+// that named a DIFFERENT question — or none — are left untouched.
+//
+// `via` is a REQUIRED parameter rather than a defaulted one (GAP-013): a default
+// would let a later call site record a provenance it never thought about, and the
+// whole boundary is that every answer states the channel it actually arrived
+// through.
 export function answerQuestion(
   runDir: string,
   questionId: string,
   answer: string,
+  via: AnswerChannel,
   nowMs?: number,
   opts?: { onAfterItemsBeforeMark?: () => void },
 ): AnswerResult {
@@ -139,6 +157,7 @@ export function answerQuestion(
     ...records[index],
     answeredIso: new Date(ts).toISOString(),
     answer,
+    answeredVia: via,
   };
   assertValidQuestion(answered);
 

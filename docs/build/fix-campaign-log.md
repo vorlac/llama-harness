@@ -65,6 +65,43 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase III — review witnesses + disposition + human provenance
+- **Landed (III.1):** `core/review-witness.ts` — per-dispatch nonce + `diffContact` re-derived
+  from the item's diff INCLUDING created files (a creation-shaped item's lens must cite real
+  lines of the file it created); `[]` without contact evidence refused; honest empty review
+  still advances (review.md calibration line VERBATIM, D15b). `core/receipt-floor.ts` — a
+  DONE must intersect the finding; route-aware fallback (implementer falls back to fileScope
+  MINUS testScope); no-op DONE re-dispatched once then surfaced. `core/verdict.ts` —
+  abstention-upholds (D11): refutation carries evidence {discriminatingInput, run, reading};
+  evidence-free kills are gone; panel findings namespaced by session (ISSUE-049).
+  `core/reply-protocol.ts` — reply statuses derived from the schema enum; pushback matcher
+  exact-token (F10 ≠ F1). skeptic.md drops "uncertain ⇒ refuted" and the sealing line.
+- **Landed (III.2):** one disposition function (actionable | waiting-human | stuck | settled)
+  consumed by report/continuation/shouldTerminate; total stop closer — all six stop kinds
+  have writers; D5-strict: a RED closing verify stamps blocked/env, NEVER done; resume path
+  live; attempt-cap exhaustion lands as stuck/blocked.
+- **Landed (III.3):** GAP-013 answer-file channel — `<runDir>/answers/Q-*.md` in the state
+  area models cannot write; `answeredVia` provenance (tool vs human-file); ISSUE-052: defer
+  provenance DERIVED, never model-claimed; report renders Q/A/provenance; answered questions
+  stop vanishing (ISSUE-051).
+- **Fix round (6 closed):** creation-shaped witness vacuity; interpreter one-liner writes
+  (node -e/python -c/ruby -e) now write-classified with any `.conductor`-mentioning
+  interpreter script denied OUTRIGHT fail-closed; tool answers cannot self-revive a blocked
+  run (human-territory answers await operator confirmation via the file channel — the file
+  answer revives, the tool answer stands recorded); route-aware receipt fallback; answers/
+  dir created at surface; comment-hygiene GUARD landed (comments-only scan via the shared
+  strip-comments fixture inverted; tools.ts ratcheted at its current count, ratchet
+  mutation-verified tight).
+- **Evidence:** gate 1476 → 1553/1553; verifier CONFIRMED twice (phase + fix round) with
+  own-fixture escape re-attempts; orchestrator re-ran the self-revive guard mutation
+  (fail=1 observed; restore hash-identical e86451d4…).
+- **Residuals routed:** `env`-wrapped interpreter/shell writes escape the single unwrap
+  (pre-existing, shared with the committed extractor; enumeration class — Phase IV.1 adds
+  multi-unwrap; the GAP-025 flip closes the class). Glob-vs-glob subtraction misses nested
+  test layouts (Phase IV.3). `pathLikeTokens` misses `path:line` citations (Phase IV.3).
+  conductor_status lacks the AWAITING-OPERATOR-CONFIRMATION notice (Phase IV.3). tools.ts
+  hygiene ratchet at 40 (about half legit §3.3 vocabulary) — tighten opportunistically.
+
 ## Phase II — GAP-006 + the scope/TDD pass + GAP-041 (the trust floor)
 - **Landed (II.1, GAP-006):** `core/tool-legality.ts` — one declaration table (phase rule from
   a closed vocabulary + caller allowlist) through which EVERY `conductor_*` call passes via

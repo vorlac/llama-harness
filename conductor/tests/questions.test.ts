@@ -142,7 +142,7 @@ test("[4.1-questions] answerQuestion records the answer AND clears every item th
   writeItem(runDir, makeItem("I3", { state: "RED", blocked: { reason: "other", sinceMs: NOW, questionId: "Q-0002", stage: "RED" } }));
   writeItem(runDir, makeItem("I9", { state: "GREEN" }));
 
-  const res = answerQuestion(runDir, blocking.id, "collect and report all", NOW);
+  const res = answerQuestion(runDir, blocking.id, "collect and report all", "tool", NOW);
   assert.deepEqual(res.clearedItemIds, ["I2"], "exactly the items that named the question are cleared");
   assert.equal(res.question.answer, "collect and report all", "the answer is recorded on the question");
   assert.notEqual(res.question.answeredIso, null, "answeredIso is stamped");
@@ -181,7 +181,7 @@ test("[4.1-questions] F1: answerQuestion clears items BEFORE marking answered â€
   // answered: the injected hook fires between the two phases and throws.
   assert.throws(
     () =>
-      answerQuestion(runDir, blocking.id, "collect and report all", NOW, {
+      answerQuestion(runDir, blocking.id, "collect and report all", "tool", NOW, {
         onAfterItemsBeforeMark: () => {
           throw new Error("boom: crash between clearing items and marking answered");
         },
@@ -199,7 +199,7 @@ test("[4.1-questions] F1: answerQuestion clears items BEFORE marking answered â€
 
   // (c) a retry completes the answer idempotently: the already-cleared item is skipped
   // by the item.blocked guard (cleared nothing), and the question is now answered.
-  const res = answerQuestion(runDir, blocking.id, "collect and report all", NOW);
+  const res = answerQuestion(runDir, blocking.id, "collect and report all", "tool", NOW);
   assert.deepEqual(res.clearedItemIds, [], "the retry re-clears nothing (the item was already unblocked) â€” idempotent");
   assert.equal(res.question.answer, "collect and report all", "the retry records the answer on the returned record");
   assert.notEqual(res.question.answeredIso, null, "the retry stamps answeredIso");

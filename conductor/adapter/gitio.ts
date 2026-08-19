@@ -126,7 +126,7 @@ export function stagedFiles(cwd: string): string[] {
 // In the -z name-status stream each entry is `status NUL path NUL`, except a rename
 // or copy which is `status NUL origPath NUL newPath NUL` (source before destination).
 // We walk the NUL fields, consuming one path for ordinary changes and two for an
-// R/C entry, so the extra rename field is never mistaken for a new entry's status.
+// R/C entry, so the extra rename field is never mistaken for a further entry's status.
 export function stagedNameStatus(cwd: string): NameStatusEntry[] {
   const fields = runGit(cwd, ["diff", "--cached", "--name-status", "-z"]).split("\0");
   const entries: NameStatusEntry[] = [];

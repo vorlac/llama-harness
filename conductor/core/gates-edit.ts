@@ -331,6 +331,161 @@ function isPerlInPlaceFlag(tok: string): boolean {
   return /^-[A-Za-z]*i/.test(tok);
 }
 
+// ---------------------------------------------------------------------------
+// Interpreter one-liners (the Phase III fix round).
+//
+// The extractor above reads SHELL write shapes: a redirect, `tee`, `sed -i`, an
+// `mv` destination. `node -e "require('fs').writeFileSync(p, s)"` is none of
+// those, and neither is `python3 -c "open(p,'w').write(s)"` — so both classified
+// as class `read`, took no edit-gate decision, and wrote wherever they liked. That
+// hole reached all the way into the provenance channel: the ONE artifact the
+// design says a gated session cannot produce is a file under `.conductor`, and a
+// session holding the bash tool could mint one with a single interpreter call.
+//
+// Two rules, because the two cases are different. A recognized write CALL yields
+// its path operand, which then meets the ordinary edit gate like any other write.
+// A script that so much as MENTIONS `.conductor` is refused whole
+// (interpreterStateAreaScript), path operand or not: a program text can build the
+// path it writes to, and a state-area write is the one case where guessing wrong
+// costs the harness its only proof of human authorship.
+// ---------------------------------------------------------------------------
+
+// Interpreters whose `-e`/`-c` argument is a PROGRAM to run, not a file to read.
+const INTERPRETERS: readonly string[] = [
+  "node",
+  "nodejs",
+  "bun",
+  "deno",
+  "python",
+  "python2",
+  "python3",
+  "perl",
+  "ruby",
+];
+
+// The flags that carry the program text. Perl's single-dash bundles (`-pe`,
+// `-lne`, `-nE`) end in the eval letter and take the program as the next token.
+function isScriptFlag(token: string): boolean {
+  if (token === "-e" || token === "-c" || token === "-E" || token === "--eval") return true;
+  return /^-[A-Za-z]*[eE]$/.test(token);
+}
+
+// The program strings an interpreter invocation carries, in operand order.
+function interpreterScripts(operands: readonly string[]): string[] {
+  const scripts: string[] = [];
+  for (let i = 0; i < operands.length; i += 1) {
+    const token = operands[i];
+    if (token.startsWith("--eval=")) {
+      scripts.push(token.slice("--eval=".length));
+      continue;
+    }
+    if (isScriptFlag(token) && i + 1 < operands.length) {
+      scripts.push(operands[i + 1]);
+      i += 1;
+    }
+  }
+  return scripts;
+}
+
+// The write calls a one-liner makes, each paired with the string literal that is
+// its path operand. Deliberately an enumeration rather than a heuristic: a name on
+// this list is a write in the language it belongs to, and a caller reading the
+// list can check that claim.
+const NODE_FS_WRITE =
+  /(?:^|[^A-Za-z0-9_$])(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|openSync|truncateSync|copyFileSync|cpSync|renameSync|rmSync|unlinkSync|mkdirSync|rmdirSync)\s*\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
+// `open(path, mode)` where the mode asks for anything but a plain read.
+const PY_OPEN_WRITE = /\bopen\s*\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1\s*,\s*(['"])([^'"]*)\3/g;
+const PY_PATH_WRITE = /\bPath\s*\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1\s*\)\s*\.\s*write_(?:text|bytes)\s*\(/g;
+const PY_OS_WRITE =
+  /\b(?:os\s*\.\s*(?:remove|unlink|rename|replace|makedirs|mkdir|rmdir|truncate)|shutil\s*\.\s*(?:copy|copy2|copyfile|move|rmtree))\s*\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/g;
+const RUBY_WRITE =
+  /\b(?:File\s*\.\s*(?:write|binwrite|open|delete|unlink|rename)|IO\s*\.\s*write|FileUtils\s*\.\s*(?:cp|mv|rm|rm_rf|mkdir_p))\s*\(?\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/g;
+// Perl's `open(FH, ">", $path)` and the two-argument `open(FH, ">$path")`.
+const PERL_OPEN_WRITE = /\bopen\s*\(?[^,]{0,64},\s*(['"])\s*\+?>>?\s*((?:\\.|(?!\1)[^\\])*)\1(?:\s*,\s*(['"])((?:\\.|(?!\3)[^\\])*)\3)?/g;
+const PERL_UNLINK = /\bunlink\s*\(?\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/g;
+
+function pushMatches(script: string, pattern: RegExp, group: number, out: string[]): void {
+  pattern.lastIndex = 0;
+  let match: RegExpExecArray | null = pattern.exec(script);
+  while (match !== null) {
+    const target = match[group];
+    if (target !== undefined && target.length > 0) out.push(target);
+    match = pattern.exec(script);
+  }
+}
+
+/**
+ * The paths one interpreter one-liner writes, as far as its literal operands say.
+ * Exported for the audit that pins the recognized shapes; the gate reaches it
+ * through writeShapedPaths.
+ */
+export function interpreterWritePaths(script: string): string[] {
+  const out: string[] = [];
+  pushMatches(script, NODE_FS_WRITE, 2, out);
+  pushMatches(script, PY_PATH_WRITE, 2, out);
+  pushMatches(script, PY_OS_WRITE, 2, out);
+  pushMatches(script, RUBY_WRITE, 2, out);
+  pushMatches(script, PERL_UNLINK, 2, out);
+
+  PY_OPEN_WRITE.lastIndex = 0;
+  let open: RegExpExecArray | null = PY_OPEN_WRITE.exec(script);
+  while (open !== null) {
+    // Mode `r` (and `rb`) alone is a read; every other letter opens for writing.
+    if (/[wax+]/.test(open[4])) out.push(open[2]);
+    open = PY_OPEN_WRITE.exec(script);
+  }
+
+  PERL_OPEN_WRITE.lastIndex = 0;
+  let perl: RegExpExecArray | null = PERL_OPEN_WRITE.exec(script);
+  while (perl !== null) {
+    // Three-argument form: the mode is its own literal and the path follows.
+    const target = perl[2].length > 0 ? perl[2] : perl[4];
+    if (target !== undefined && target.length > 0) out.push(target);
+    perl = PERL_OPEN_WRITE.exec(script);
+  }
+  return out;
+}
+
+// The `.conductor` state area, as a program text mentions it.
+const STATE_AREA_TOKEN = ".conductor";
+
+/**
+ * The first interpreter program in this command that names the `.conductor` state
+ * area, or null when none does. A hit is refused OUTRIGHT by the caller rather
+ * than resolved to a path: the one thing the state area proves is that no gated
+ * session wrote it, and a proof that holds only for the path shapes this file
+ * happens to parse is not a proof.
+ *
+ * Wrapper-aware on the same terms as writeShapedPaths — a one-liner behind
+ * `env sh -c "..."` is found by re-running the walk over the inner string.
+ */
+export function interpreterStateAreaScript(command: string): string | null {
+  const found: string[] = [];
+  collectStateAreaScripts(command, found, 0);
+  return found.length > 0 ? found[0] : null;
+}
+
+function collectStateAreaScripts(command: string, out: string[], depth: number): void {
+  if (depth > MAX_WRAPPER_DEPTH) return;
+  for (const seg of splitOnOperators(shellTokens(command))) {
+    const cmdIdx = unwrappedCommandIndex(seg);
+    if (cmdIdx >= seg.length) continue;
+    const cmd = commandBasename(seg[cmdIdx]);
+    const operands = seg.slice(cmdIdx + 1);
+    if (SHELLS.includes(cmd)) {
+      const ci = operands.indexOf("-c");
+      if (ci !== -1 && ci + 1 < operands.length) {
+        collectStateAreaScripts(operands[ci + 1], out, depth + 1);
+      }
+      continue;
+    }
+    if (!INTERPRETERS.includes(cmd)) continue;
+    for (const script of interpreterScripts(operands)) {
+      if (script.includes(STATE_AREA_TOKEN)) out.push(script);
+    }
+  }
+}
+
 export function writeShapedPaths(command: string): string[] {
   const out: string[] = [];
   collectWriteTargets(command, out, 0);
@@ -375,6 +530,14 @@ function collectWriteTargets(command: string, out: string[], depth: number): voi
         collectWriteTargets(operands[ci + 1], out, depth + 1);
       }
       continue;
+    }
+
+    // An interpreter one-liner's write calls, before the per-command branches:
+    // `perl` reaches both this and its own in-place rule below, so no `continue`.
+    if (INTERPRETERS.includes(cmd)) {
+      for (const script of interpreterScripts(operands)) {
+        for (const target of interpreterWritePaths(script)) out.push(target);
+      }
     }
 
     if (cmd === "tee") {

@@ -71,12 +71,15 @@ function opensRegex(previous: string, word: string): boolean {
   return !(previous === ")" || previous === "]" || previous === "}");
 }
 
-export function stripComments(source: string): string {
-  const out: string[] = new Array<string>(source.length);
-  for (let k = 0; k < source.length; k += 1) out[k] = source[k];
+// The half-open [from, to) spans every comment in the source occupies, in source
+// order. Both lenses below are built from this ONE walk: a second walk that
+// disagreed about where a comment starts would let the two audits inspect
+// different text while both claiming to read the same file.
+function commentSpans(source: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
 
-  const blank = (from: number, to: number): void => {
-    for (let k = from; k < to; k += 1) out[k] = source[k] === "\n" ? "\n" : " ";
+  const mark = (from: number, to: number): void => {
+    spans.push([from, to]);
   };
 
   const frames: Frame[] = [];
@@ -117,7 +120,7 @@ export function stripComments(source: string): string {
     if (ch === "/" && source[i + 1] === "/") {
       let j = i;
       while (j < source.length && source[j] !== "\n") j += 1;
-      blank(i, j);
+      mark(i, j);
       i = j;
       continue;
     }
@@ -125,7 +128,7 @@ export function stripComments(source: string): string {
     if (ch === "/" && source[i + 1] === "*") {
       const end = source.indexOf("*/", i + 2);
       const stop = end === -1 ? source.length : end + 2;
-      blank(i, stop);
+      mark(i, stop);
       i = stop;
       continue;
     }
@@ -210,5 +213,49 @@ export function stripComments(source: string): string {
     i += 1;
   }
 
+  return spans;
+}
+
+// Blank one half of the file, keeping the other verbatim. Every blanked character
+// becomes a space except a newline, which survives — so the result has the same
+// length and the same line numbering as the file on disk, whichever half is kept.
+function blankOutside(source: string, keep: Array<[number, number]>): string {
+  const out: string[] = new Array<string>(source.length);
+  let cursor = 0;
+  const blank = (from: number, to: number): void => {
+    for (let k = from; k < to; k += 1) out[k] = source[k] === "\n" ? "\n" : " ";
+  };
+  for (const [from, to] of keep) {
+    blank(cursor, from);
+    for (let k = from; k < to; k += 1) out[k] = source[k];
+    cursor = to;
+  }
+  blank(cursor, source.length);
   return out.join("");
+}
+
+function complement(source: string, spans: Array<[number, number]>): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let cursor = 0;
+  for (const [from, to] of spans) {
+    if (from > cursor) out.push([cursor, from]);
+    cursor = to;
+  }
+  if (cursor < source.length) out.push([cursor, source.length]);
+  return out;
+}
+
+/** The source with every comment blanked: the CODE lens. */
+export function stripComments(source: string): string {
+  return blankOutside(source, complement(source, commentSpans(source)));
+}
+
+/**
+ * The source with every non-comment character blanked: the COMMENT lens, the
+ * exact inverse of stripComments. What the comment-hygiene audit reads, so a
+ * prohibited word inside a string literal or an identifier is never mistaken for
+ * a prohibited word in prose — the two lenses partition the file between them.
+ */
+export function commentsOnly(source: string): string {
+  return blankOutside(source, commentSpans(source));
 }

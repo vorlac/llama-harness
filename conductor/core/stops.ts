@@ -4,6 +4,8 @@
 // 705-711, 1456-1476). Core module: pure — decisions from counters and
 // counts only; no I/O, no clock.
 
+import { runDispositionOf, stopKindOf } from "./disposition.ts";
+import type { Disposition } from "./disposition.ts";
 import type { StopKind } from "./types.ts";
 
 // §2.9's closed vocabulary, exported as runtime data so consumers iterate
@@ -84,6 +86,24 @@ export function isTerminal(run: RunLike): boolean {
 const FUTILE_RE_PROMPT_LIMIT = 3;
 
 /**
+ * The §2.9 counts, read as GAP-022 dispositions. `itemsSummary` carries counts
+ * rather than items, so the fold is expressed over the counts directly — the
+ * SAME four-member vocabulary the per-item derivation produces, so this engine
+ * and the report closer cannot disagree about what a position means:
+ *   open      -> an item this run can still advance      (actionable)
+ *   blocked   -> a human holds the lever                 (waiting-human)
+ *   questions -> a human lever with nothing blocked       (waiting-human)
+ *   otherwise -> nothing outstanding                      (settled)
+ * `deferred` contributes nothing: a deferred item is settled, never actionable.
+ */
+function summaryDisposition(itemsSummary: ItemsSummary): Disposition {
+  const dispositions: Disposition[] = [];
+  if (itemsSummary.open > 0) dispositions.push("actionable");
+  if (itemsSummary.blocked > 0) dispositions.push("waiting-human");
+  return runDispositionOf(dispositions, { openQuestions: itemsSummary.surfacedQuestions });
+}
+
+/**
  * Decide whether the run must stop, and with which §2.9 kind:
  *  - noop: futileRePrompts reached 3 (§3.7's rule verbatim) — fires even
  *    with open items: a wedged loop must end loudly, not burn tokens;
@@ -110,15 +130,27 @@ export function shouldTerminate(
   // isTerminal). Computing a second stop for it would double-record.
   if (isTerminal(run)) return { stop: false };
 
+  // The kinds are never spelled here: GAP-021's closer owns the cause-to-kind
+  // mapping, so a rule added to §2.9 lands in one place instead of in each
+  // recorder's own literal.
+  const closure = {
+    disposition: summaryDisposition(itemsSummary),
+    blockedItems: itemsSummary.blocked,
+    openQuestions: itemsSummary.surfacedQuestions,
+    // This engine never closes a run on completion — `done` is conductor_report's
+    // to record — so no advancement count is in play here.
+    advancedItems: 0,
+  };
+
   if (counters.futileRePrompts >= FUTILE_RE_PROMPT_LIMIT) {
-    return { stop: true, kind: "noop" };
+    return { stop: true, kind: stopKindOf({ cause: "futility", run: closure }).kind };
   }
 
   if (
     counters.overridesUsed > 0 &&
     counters.overridesUsed >= config.workflow.maxOverridesPerRun
   ) {
-    return { stop: true, kind: "env" };
+    return { stop: true, kind: stopKindOf({ cause: "override-exhausted", run: closure }).kind };
   }
 
   // An open item is actionable work: while one remains, no summary-derived
@@ -126,9 +158,9 @@ export function shouldTerminate(
   // run stops regardless of open work).
   if (itemsSummary.open > 0) return { stop: false };
 
-  if (itemsSummary.blocked > 0) return { stop: true, kind: "blocked" };
+  // Nothing outstanding is not a stop this engine records: an all-settled run is
+  // closed by conductor_report, which is the only writer of `done`.
+  if (itemsSummary.blocked === 0 && itemsSummary.surfacedQuestions === 0) return { stop: false };
 
-  if (itemsSummary.surfacedQuestions > 0) return { stop: true, kind: "surfaced" };
-
-  return { stop: false };
+  return { stop: true, kind: stopKindOf({ cause: "settle", run: closure }).kind };
 }

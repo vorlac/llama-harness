@@ -63,6 +63,7 @@ const SCHEMA_NAMES = [
   "QuestionRecord",
   "StaleRedRegistry",
   "Findings",
+  "ItemFindings",
   "Verdict",
   "Classification",
   "ClassificationCheck",
@@ -465,14 +466,17 @@ const questionExample: QuestionRecord = {
   blocksItems: ["I2"],
   answeredIso: null,
   answer: null,
+  answeredVia: null,
 };
 
 // Supplementary: the answered form — conductor_answer records answer and
-// unblocks (plan lines 996-998); answeredIso/answer flip from null to strings.
+// unblocks (plan lines 996-998); answeredIso/answer flip from null to strings,
+// and answeredVia names the CHANNEL the answer arrived through (GAP-013).
 const questionAnsweredExample: QuestionRecord = {
   ...questionExample,
   answeredIso: "2026-08-07T13:00:00Z",
   answer: "collect and report all",
+  answeredVia: "tool",
 };
 
 // §2.11, plan lines 1002-1008.
@@ -602,7 +606,7 @@ describe("exported surface of core/types.ts", () => {
     assert.equal(CONDUCTOR_NAME, "conductor");
   });
 
-  test("SCHEMAS contains a JSON Schema object for each of the 17 §2 names", () => {
+  test("SCHEMAS contains a JSON Schema object for each of the 18 §2 names", () => {
     const record = SCHEMAS as Record<string, unknown>;
     for (const name of SCHEMA_NAMES) {
       const schema = record[name];
@@ -916,6 +920,27 @@ describe("Findings (§2.10)", () => {
     };
     assertRejects("Findings", badFindings, "an extra finding property");
   });
+
+  // GAP-011. Plan-level review has no diff to cite, so the shared shape leaves the
+  // witness optional; the ITEM-level schema — the one conductor_item_review's lens
+  // dispatch declares — makes it an obligation the receipt cannot omit.
+  test("accepts a Findings carrying GAP-011's readWitness, and ItemFindings REQUIRES it", () => {
+    const witnessed = {
+      ...findingsExample,
+      readWitness: { nonce: "RW-0", citedRanges: [{ file: "src/a.ts", startLine: 3, endLine: 7 }] },
+    };
+    assertAccepts("Findings", witnessed, "a findings reply carrying a read witness");
+    assertAccepts("ItemFindings", witnessed, "the same reply at item level");
+    assertRejects("ItemFindings", findingsExample, "an item-level reply with NO read witness");
+  });
+
+  test("rejects a readWitness whose cited range is missing a line bound", () => {
+    const bad = {
+      ...findingsExample,
+      readWitness: { nonce: "RW-0", citedRanges: [{ file: "src/a.ts", startLine: 3 }] },
+    };
+    assertRejects("ItemFindings", bad, "a cited range with no endLine");
+  });
 });
 
 describe("Verdict (§2.10)", () => {
@@ -932,6 +957,24 @@ describe("Verdict (§2.10)", () => {
       "Verdict",
       withProp(verdictExample, "unexpectedExtra", true),
       "an extra property",
+    );
+  });
+
+  // GAP-036. The schema ADMITS the evidence-free refutation on purpose: core
+  // verdict.ts records it as an abstention (which upholds) rather than losing it to
+  // a schema retry, and a partial evidence object is refused outright.
+  test("accepts a Verdict carrying refutationEvidence, accepts one without it, and rejects a partial evidence object", () => {
+    const evidenced = withProp(verdictExample, "refutationEvidence", {
+      discriminatingInput: "the empty string",
+      run: "re-ran the unit test with it",
+      reading: "the caller validates first, so the branch is unreachable",
+    });
+    assertAccepts("Verdict", evidenced, "an evidenced refutation");
+    assertAccepts("Verdict", withProp(verdictExample, "refutationEvidence", null), "an explicit null evidence");
+    assertRejects(
+      "Verdict",
+      withProp(verdictExample, "refutationEvidence", { discriminatingInput: "the empty string" }),
+      "an evidence object missing `run` and `reading`",
     );
   });
 });

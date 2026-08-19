@@ -9,7 +9,7 @@
 //     at it) and reports any §2.11 stale-red exclusions in its first response;
 //   - a prompt arriving DURING a live (non-terminal) run is routed into it as
 //     orchestrator context — journaled `user.midrun-prompt` — and NEVER starts a
-//     new run (plan line 1073).
+//     fresh run (plan line 1073).
 //
 // ADAPTER (G14): a THIN composition over subjects that already exist —
 // adapter/state.ts (openWorkspace -> StateStore, which owns run creation and the
@@ -67,7 +67,7 @@ export interface HandleChatMessageInput {
 }
 
 // A FLAT result (not a discriminated union) so callers need no narrowing:
-//  - "created":       a fresh run was minted; runId is that new run; staleReport
+//  - "created":       a fresh run was minted; runId is that fresh run; staleReport
 //                     is the user-facing exclusion notice (null when none in force).
 //  - "routed-midrun": no run created; runId is the LIVE run the prompt was routed
 //                     into; staleReport is null.
@@ -115,7 +115,7 @@ export function handleChatMessage(input: HandleChatMessageInput): ChatMessageRes
 
   if (hasLiveRun) {
     // A prompt arriving DURING a live run is routed into it as orchestrator
-    // context — never a new run (plan line 1073). Journal it as
+    // context — never a fresh run (plan line 1073). Journal it as
     // `user.midrun-prompt`, correlated to the live run, with the prompt text
     // preserved so the orchestrator context is not lost.
     const liveRunId = live.runId;
@@ -127,7 +127,7 @@ export function handleChatMessage(input: HandleChatMessageInput): ChatMessageRes
 
   // No live run (none, or the last run is terminal): create a fresh run. The
   // store captures startHead/startBranch/startDirty + excludedStaleRed and points
-  // current-run at the new run (§3.2), coercing the git terms to "" under §3.9.
+  // current-run at the fresh run (§3.2), coercing the git terms to "" under §3.9.
   const run = store.createRun({ prompt, sessionID, classification: PROVISIONAL_CLASSIFICATION });
   registry.register(sessionID, ORCHESTRATOR);
   return {

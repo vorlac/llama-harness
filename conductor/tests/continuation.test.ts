@@ -290,6 +290,7 @@ import type {
   Queue,
   QueueItem,
   Run,
+  StopKind,
   TreePath,
 } from "../core/types.ts";
 
@@ -1214,7 +1215,7 @@ test("[10.1-reprompt-names-gate-recommendation] the named action is READ from co
 // [10.1-idle-null-recommendation]
 // ===========================================================================
 
-test("[10.1-idle-null-recommendation] SG-2: a non-terminal EXECUTING run whose verdict has recommended === null (I1 BLOCKED, I2 dependsOn I1) prompts NOTHING, leaves BOTH counters untouched, and emits exactly one continuation/idle record carrying legalTools' own `why` verbatim", async () => {
+test("[10.1-idle-null-recommendation] SG-2 plus ISSUE-067's closure: a non-terminal EXECUTING run whose verdict has recommended === null (I1 BLOCKED with no live question, I2 dependsOn I1) prompts NOTHING and leaves BOTH counters untouched — and because its ONE disposition reads `stuck`, meaning no answer and no tool would release it, the wait is RECORDED as a §2.9 `blocked` stop with its report rather than sat in silently forever", async () => {
   const root = scratchRepo();
   const config = makeConfig();
   const journal = makeJournal();
@@ -1262,11 +1263,26 @@ test("[10.1-idle-null-recommendation] SG-2: a non-terminal EXECUTING run whose v
     "futileRePrompts is untouched — a run the engine cannot advance is not a futile RE-PROMPT",
   );
 
-  const idles = continuationRecords(journal.records, "idle");
-  assert.equal(idles.length, 1, "exactly one continuation/idle record");
+  // ISSUE-067: this fixture WAS the silent wedge — no stage tool, no
+  // conductor_answer (nothing is open to answer), no report, so the futile counter
+  // never moved and no §2.9 kind was reachable. The run sat in EXECUTING forever
+  // with nothing on disk saying so, and the committed test asserted that silence
+  // was correct. Silence is still right about PROMPTING; it was never right about
+  // RECORDING.
+  const disengages = continuationRecords(journal.records, "disengage");
+  assert.equal(disengages.length, 1, "exactly one continuation/disengage record");
+  assert.equal(disengages[0].data["stop"], "blocked", "recording the §2.9 kind the closer produced");
+  assert.equal(disengages[0].data["disposition"], "stuck", "on the disposition that made it detectable");
   assert.ok(
-    JSON.stringify(idles[0].data).includes(verdict.why),
-    `the idle record carries legalTools' authoritative why verbatim; got: ${JSON.stringify(idles[0].data)}`,
+    JSON.stringify(disengages[0].data).includes(verdict.why),
+    `the record carries legalTools' authoritative why verbatim; got: ${JSON.stringify(disengages[0].data)}`,
+  );
+  assert.equal(res.stop?.kind, "blocked", "and the pass returns the stop it recorded");
+  assert.equal(readRunFile(store, runId).stop?.kind, "blocked", "as persisted in run.json");
+  assert.equal(
+    existsSync(path.join(runDirOf(store, runId), "report.md")),
+    true,
+    "§2.9's rule holds — every stop writes its report through the ONE writer",
   );
   store.release();
 });
@@ -1467,7 +1483,10 @@ test("[10.1-futile-signature-excludes-counters] SG-1: across three consecutive r
 
 test("[10.1-signature-change-resets] ANY state change resets counters.futileRePrompts to 0, asserted independently for three change classes — an item advancing, a disposition appearing, and the run state advancing — each from a persisted futileRePrompts of 2, and each still re-prompting", async () => {
   type Mutator = (store: StateStore, runId: string) => void;
-  const cases: Array<{ name: string; mutate: Mutator }> = [
+  // `stops` names the §2.9 kind the mutated fixture must close on, when the change
+  // itself leaves the run with nothing to re-prompt. The counter reset is what this
+  // row is about, and it is asserted on every case alike.
+  const cases: Array<{ name: string; mutate: Mutator; stops?: StopKind }> = [
     {
       name: "(a) an item advances PENDING -> RED",
       mutate: (store, runId) => {
@@ -1478,6 +1497,10 @@ test("[10.1-signature-change-resets] ANY state change resets counters.futileRePr
     },
     {
       name: "(b) a disposition appears (the item gains `blocked`)",
+      // GAP-021: this fixture's ONLY item gains the block, so the run has no item
+      // left to advance — a human holds the next move. The engine closes it
+      // `blocked` rather than re-prompting an orchestrator that cannot act.
+      stops: "blocked",
       mutate: (store, runId) => {
         store.setBlocked(runId, "I1", { reason: "the writer could not produce a red", stage: "RED" });
       },
@@ -1549,12 +1572,18 @@ test("[10.1-signature-change-resets] ANY state change resets counters.futileRePr
       0,
       `${kase.name}: the state change resets futileRePrompts to 0, read back from run.json`,
     );
-    assert.equal(res.prompted, true, `${kase.name}: and the engine still re-prompts`);
-    assert.equal(
-      wiring.sdk.prompts.length,
-      promptsBefore + 1,
-      `${kase.name}: exactly one more prompt after the change`,
-    );
+    if (kase.stops === undefined) {
+      assert.equal(res.prompted, true, `${kase.name}: and the engine still re-prompts`);
+      assert.equal(
+        wiring.sdk.prompts.length,
+        promptsBefore + 1,
+        `${kase.name}: exactly one more prompt after the change`,
+      );
+    } else {
+      assert.equal(res.stop?.kind, kase.stops, `${kase.name}: and the run closes on the kind its dispositions produce`);
+      assert.equal(res.prompted, false, `${kase.name}: a run with no item left to advance is not re-prompted`);
+      assert.equal(wiring.sdk.prompts.length, promptsBefore, `${kase.name}: no further prompt after the change`);
+    }
     store.release();
   }
 });
@@ -1864,9 +1893,12 @@ test("[10.1-noop-stop-report-one-writer] the noop path writes the §2.9 stop-rep
 // [10.1-engine-records-only-noop-and-interrupt]
 // ===========================================================================
 
-test("[10.1-engine-records-only-noop-and-interrupt] the engine records ONLY the two stop kinds §2.9 assigns to it: on fixtures where shouldTerminate returns blocked, surfaced and env the run.stop stays NULL and the engine re-prompts the gate's own recommendation instead", async () => {
+test("[10.1-engine-records-only-noop-and-interrupt] GAP-021 closes ISSUE-065's delegation ring: `blocked` and `surfaced` had no writer at all — the engine computed them, deferred both to conductor_report, and conductor_report hardcoded `done`. The engine RECORDS both, each with its §2.9 stop-report, while `env` still belongs to the override hatch and `done` to the report tool: on the env fixture run.stop stays NULL and the engine re-prompts the gate's own recommendation instead", async () => {
   interface Case {
     name: string;
+    // The §2.9 kind this fixture must produce, or null when the kind belongs to
+    // another recorder and the engine must carry on re-prompting.
+    records: StopKind | null;
     seed: (store: StateStore, runId: string, runDir: string) => Queue;
     configOpts?: ConfigOpts;
     counters?: (run: Run) => void;
@@ -1874,6 +1906,7 @@ test("[10.1-engine-records-only-noop-and-interrupt] the engine records ONLY the 
   const cases: Case[] = [
     {
       name: "blocked (every item blocked, futileRePrompts 0)",
+      records: "blocked",
       seed: (store, runId) => {
         const queue: Queue = {
           items: [makeQueueItem("I1", { fileScope: ["src/a.ts"], testScope: ["tests/a.test.ts"] })],
@@ -1885,6 +1918,7 @@ test("[10.1-engine-records-only-noop-and-interrupt] the engine records ONLY the 
     },
     {
       name: "surfaced (no open item, no blocked item, an open human-territory question)",
+      records: "surfaced",
       seed: (store, runId, runDir) => {
         const queue: Queue = {
           items: [makeQueueItem("I1", { fileScope: ["src/a.ts"], testScope: ["tests/a.test.ts"] })],
@@ -1907,6 +1941,7 @@ test("[10.1-engine-records-only-noop-and-interrupt] the engine records ONLY the 
     },
     {
       name: "env (the override budget is exhausted)",
+      records: null,
       configOpts: { maxOverridesPerRun: 1 },
       seed: (store, runId) => seedOneItemExecuting(store, runId),
       counters: (run) => {
@@ -1949,19 +1984,39 @@ test("[10.1-engine-records-only-noop-and-interrupt] the engine records ONLY the 
     });
     await turns();
 
-    assert.equal(res.stop, null, `${kase.name}: the engine records no stop for this verdict`);
-    assert.equal(
-      readRunFile(store, runId).stop,
-      null,
-      `${kase.name}: run.stop stays null — blocked/surfaced belong to the report tool and env to the override hatch (§2.9:900-905)`,
-    );
-    assert.equal(existsSync(path.join(runDir, "report.md")), false, `${kase.name}: and no stop-report is written`);
-    assert.equal(res.prompted, true, `${kase.name}: the engine re-prompts instead`);
-    assert.equal(wiring.sdk.prompts.length, 1, `${kase.name}: exactly one prompt`);
-    assert.ok(
-      wiring.sdk.prompts[0].text.includes(recommended.tool),
-      `${kase.name}: naming the gate's own recommendation (${recommended.tool})`,
-    );
+    if (kase.records === null) {
+      assert.equal(res.stop, null, `${kase.name}: the engine records no stop for this verdict`);
+      assert.equal(
+        readRunFile(store, runId).stop,
+        null,
+        `${kase.name}: run.stop stays null — env belongs to the override hatch (§2.9:900-905)`,
+      );
+      assert.equal(existsSync(path.join(runDir, "report.md")), false, `${kase.name}: and no stop-report is written`);
+      assert.equal(res.prompted, true, `${kase.name}: the engine re-prompts instead`);
+      assert.equal(wiring.sdk.prompts.length, 1, `${kase.name}: exactly one prompt`);
+      assert.ok(
+        wiring.sdk.prompts[0].text.includes(recommended.tool),
+        `${kase.name}: naming the gate's own recommendation (${recommended.tool})`,
+      );
+    } else {
+      assert.equal(res.stop?.kind, kase.records, `${kase.name}: the engine records the kind the closer produced`);
+      assert.equal(
+        readRunFile(store, runId).stop?.kind,
+        kase.records,
+        `${kase.name}: and run.json carries it on disk — a computed kind with no writer is how ISSUE-065 stamped an all-blocked run "the run completed"`,
+      );
+      assert.ok(
+        (res.stop?.reasonDisplay ?? "").length > 0,
+        `${kase.name}: with a reason that says what the human is holding`,
+      );
+      assert.equal(
+        existsSync(path.join(runDir, "report.md")),
+        true,
+        `${kase.name}: §2.9's rule holds — every stop writes its report through the ONE writer`,
+      );
+      assert.equal(res.prompted, false, `${kase.name}: a stopped run is not also re-prompted`);
+      assert.equal(wiring.sdk.prompts.length, 0, `${kase.name}: zero prompts`);
+    }
     store.release();
   }
 });
@@ -3310,7 +3365,7 @@ test("[10.1-binding-orphan-question-reconcile] C-032 E7 repair half: at idle, BE
   store.setBlocked(runId, "I2", { reason: "already blocked on " + appliedId, stage: "RED", questionId: appliedId });
   // I3: an ANSWERED question naming it; the item is unblocked and must stay that way.
   const answeredId = ask("I3");
-  answerQuestion(runDir, answeredId, "go ahead", START_MS);
+  answerQuestion(runDir, answeredId, "go ahead", "tool", START_MS);
 
   assert.equal(store.loadItem(runId, "I1").blocked, null, "premise: I1 is the orphan — question open, item unblocked");
   assert.notEqual(store.loadItem(runId, "I2").blocked, null, "premise: I2's pair is fully applied");
@@ -3362,7 +3417,7 @@ test("[10.1-binding-orphan-question-reconcile] C-032 E7 repair half: at idle, BE
 
   // The item is now answerable through the normal path: answerQuestion clears exactly the
   // items whose blocked.questionId matches.
-  const cleared = answerQuestion(runDir, orphanId, "write it as a missing-subject red", START_MS);
+  const cleared = answerQuestion(runDir, orphanId, "write it as a missing-subject red", "tool", START_MS);
   assert.deepEqual(cleared.clearedItemIds, ["I1"], "answering the orphan question clears exactly the reconciled item");
   store.release();
 });
@@ -3571,6 +3626,7 @@ test("[10.1-binding-answer-reblocks-on-next-open-question] C-056's residual: rel
       now: () => tsMs,
       questionId,
       answer: "answered by the human",
+      via: "tool",
     });
 
   // Schedulability read from the SAME committed derivation adapter/tools.ts
@@ -4336,6 +4392,25 @@ test("[10.1-ask-needs-context-conversion] the surface queue is RUN-SCOPED: a con
     "a conversion raised under an archived run is never delivered into a later run's re-prompt",
   );
   assert.equal(text.includes("I1"), false, "and the later run is never told about an item it does not contain");
+
+  // ISSUE-036: "exactly once" is only true if the count is taken AFTER the queue
+  // has had its next chance to speak. The archived run's conversion was reported
+  // lost and left IN the queue, so the next idle drained it and reported it a
+  // second time — the same dead conversion, now as "discarded" — and it sat in
+  // state.pendingConversions for the life of the process. The count belongs here.
+  const lostAfter = journal.records.filter(
+    (r) => r.level === "error" && String((r.data as { hook?: unknown }).hook ?? "").includes("surface-conversion"),
+  );
+  assert.equal(
+    lostAfter.length,
+    1,
+    "STILL exactly one loss record after the next run's idle: the archived run's conversion was removed when it was reported, not reported again by the next drain",
+  );
+  assert.equal(
+    state.pendingConversions.some((c) => c.neededContext === conversion.neededContext),
+    false,
+    "and the dead conversion is out of the queue — a conversion nobody can ever deliver must not be retained for the life of the process",
+  );
   store.release();
 });
 
@@ -5021,5 +5096,107 @@ test("[fc-meta-tools-derived-not-restated] the universal meta-tool set adapter/c
     derived,
     `the meta tools continuation.ts treats as universal are not the ones the gate legalizes for a position that says nothing about where the run is — a tool missing from continuation.ts's set is read as position-specific and makes the engine speak where it should stay silent; gate: ${derived.join(", ")}`,
   );
+  store.release();
+});
+
+// ===========================================================================
+// [10.1-waiting-run-keeps-its-pointer] — GAP-021 / ISSUE-066
+// ===========================================================================
+//
+// PROBE-A's lost work, end to end. A run whose remaining item was blocked on an
+// unanswered §2.11 question was terminal the instant a stop was recorded, and the
+// very next idle pass archived it — archiveRun clears the current-run pointer, so
+// every subsequent pass found no run at all. Answering the question afterwards
+// released the item and left its dependent PENDING forever: the documented
+// conductor_answer resume path was dead, and the honest waiting model lost its
+// committed work while the model that deferred the same item closed clean.
+
+test("[10.1-waiting-run-keeps-its-pointer] a run that stops WAITING keeps its pointer: the engine records the §2.9 kind its dispositions produce, writes the report, and does NOT archive while the question is unanswered — the next idle finds the same run, the operator's answer revives it, and the engine re-prompts the live work", async () => {
+  const root = scratchRepo();
+  const config = makeConfig();
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createRunFor(store);
+  const runDir = runDirOf(store, runId);
+  const queue: Queue = {
+    items: [
+      makeQueueItem("I1", { fileScope: ["src/a.ts"], testScope: ["tests/a.test.ts"] }),
+      makeQueueItem("I2", { fileScope: ["src/b.ts"], testScope: ["tests/b.test.ts"], dependsOn: ["I1"] }),
+    ],
+  };
+  seedExecuting(store, runId, queue);
+  const question = appendQuestion(
+    runDir,
+    {
+      runId,
+      question: HUMAN_Q,
+      askedBy: { role: "orchestrator", sessionID: ORCH },
+      humanTerritory: true,
+      origin: "surface-tool",
+      blocksItems: ["I1", "I2"],
+    },
+    START_MS,
+  );
+  for (const itemId of ["I1", "I2"]) {
+    store.setBlocked(runId, itemId, { reason: "waiting on the human", stage: "RED", questionId: question.id });
+  }
+
+  const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
+  const wiring = makeWiring(registry);
+  const clock = makeClock();
+  const state = createContinuationState();
+  const stateHome = freshStateHome();
+  const idle = async (): Promise<SessionIdleResult> => {
+    const res: SessionIdleResult = await handleSessionIdle({
+      store,
+      state,
+      registry,
+      sessionID: ORCH,
+      client: wiring.client,
+      config,
+      journal: journal.sink,
+      stateHome,
+      workspaceKey: "wk",
+      now: clock.now,
+    });
+    await turns();
+    clock.advance(DEBOUNCE_MS * 2);
+    return res;
+  };
+
+  const first = await idle();
+  assert.equal(first.stop?.kind, "blocked", "the waiting run stops on the kind its dispositions produce");
+  assert.equal(existsSync(path.join(runDir, "report.md")), true, "with its §2.9 artifact on disk");
+  assert.equal(store.currentRun()?.runId, runId, "and the pointer is HELD — the work is not written off");
+
+  // The pass that used to lose it: a terminal run is archived on the next idle.
+  const second = await idle();
+  assert.equal(second.prompted, false, "a stopped run is not re-prompted");
+  assert.equal(store.currentRun()?.runId, runId, "and it is still not archived while the question stands");
+
+  // The channel matters here, not just the answer: the fixture question is §6.2
+  // human territory, and a stop raised for a human is lifted by the operator's own
+  // artifact. A relayed `tool` answer is recorded but leaves the stop standing —
+  // otherwise the session that raised the escalation discharges it itself
+  // (core/provenance.ts awaitsOperatorConfirmation). This is the ingest path's
+  // channel, driven directly.
+  const answered = handleAnswer({
+    store,
+    runId,
+    journal: journal.sink,
+    questionId: question.id,
+    answer: "no — keep the production data",
+    via: "human-file",
+    now: clock.now,
+  });
+  assert.equal(answered.resumed, true, "the operator's answer revives the run it was waiting on");
+  assert.deepEqual([...answered.clearedItemIds].sort(), ["I1", "I2"], "releasing both blocked items");
+  assert.equal(readRunFile(store, runId).stop, null, "the stop record is cleared");
+  const resumeRecords = journal.records.filter((r) => r.component === "state" && r.event === "run.resumed");
+  assert.equal(resumeRecords.length, 1, "and the revival leaves exactly one §7.4 record");
+
+  const third = await idle();
+  assert.equal(third.prompted, true, "the revived run is live again: the engine re-prompts its work");
+  assert.equal(readRunFile(store, runId).state, "EXECUTING", "with no backwards FSM edge invented");
   store.release();
 });

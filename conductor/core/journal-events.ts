@@ -56,7 +56,7 @@ export const EVENTS: Record<Component, readonly string[]> = {
   // §3.2 chat.message route of a prompt arriving during a live run (plan line 1074),
   // and the §2.7 decision/deferral ledger append the Phase-9 stage tools emit
   // (§7.4 observability widening: a decide/defer records no run/item state, so it
-  // owns its own grep-able name rather than borrowing item.updated).
+  // owns its own grep-able name rather than borrowing `item.updated`).
   //
   // The last four follow the SAME rule, each for a fact no other name states
   // truthfully (see the widening note at the foot of this file):
@@ -74,16 +74,17 @@ export const EVENTS: Record<Component, readonly string[]> = {
   //                       No gate/fsm/state name states that fact — the call was
   //                       not adjudicated, no transition was attempted, and
   //                       nothing was persisted.
-  //   config.updated    — §2.1/§3.4: conductor_setup wrote .conductor/config.json.
-  //                       data.changes carries the reconfigure diff (the changed keys
-  //                       with their old and new values; empty on a first setup, which
+  //   `config.updated`  — §2.1/§3.4: conductor_setup wrote .conductor/config.json.
+  //                       data.changes carries the reconfigure diff (the keys that
+  //                       moved, with their prior and current values; empty on a
+  //                       first setup, which
   //                       has nothing to diff against) and data.answers carries the
   //                       §2.1:622 values the call was answered with — including the
   //                       `acknowledgeNoTdd` word, which has no config field to land in
   //                       and would otherwise leave the one call that can turn the TDD
   //                       law off with no trace anywhere (GAP-015). Setup
   //                       precedes every run, writes no item and records no
-  //                       decision, so item.updated and decision.recorded would
+  //                       decision, so `item.updated` and decision.recorded would
   //                       both LIE about what happened; the widening follows the
   //                       decision.recorded precedent exactly (C-029 F7).
   state: [
@@ -96,7 +97,21 @@ export const EVENTS: Record<Component, readonly string[]> = {
     "user.midrun-prompt",
     "decision.recorded",
     "question.surfaced",
+    // GAP-013's provenance record: a §2.11 question was ANSWERED, and this names
+    // the channel it arrived through (`via`, plus the derived `human` flag).
+    // Widened rather than borrowed: question.surfaced describes the ask,
+    // `item.updated` describes the items the answer released, and neither can
+    // answer "what did a human actually decide in this run?" — which is the one
+    // question a forged human-in-the-loop makes unanswerable (§7.4).
+    "question.answered",
     "run.stop-report",
+    // ISSUE-066's resume path: a §2.9 stop of a resumable kind was CLEARED because
+    // the human answered the question the run was waiting on. Widened rather than
+    // borrowed: run.created describes a run that did not exist before,
+    // run.stop-report describes an artifact, and `item.updated` names the wrong
+    // subject — a record filed under any of them is a record no replay filter can
+    // trust (§7.4).
+    "run.resumed",
     "hook.failed",
     "config.updated",
   ],

@@ -31,6 +31,7 @@ import type { GateItem, GateRun } from "./gates-phase.ts";
 import { ITEM_STATES } from "./fsm-item.ts";
 import { TOOL_BINDINGS } from "./tool-bindings.ts";
 import { TOOL_LEGALITY } from "./tool-legality.ts";
+import { renderReplyProtocol } from "./reply-protocol.ts";
 import { renderVetCriteria } from "./vet-criteria.ts";
 
 // The markers that fence the generated section inside a pack. HTML comments, so
@@ -157,7 +158,7 @@ export function subSessionTools(): string[] {
 // The rendered section, per pack.
 // ---------------------------------------------------------------------------
 
-type MechanicsSection = "run" | "item" | "meta" | "callers" | "criteria";
+type MechanicsSection = "run" | "item" | "meta" | "callers" | "criteria" | "replies";
 
 // Which derived facts each pack's readers need. A planner never runs an item
 // stage tool and an implementer never runs the run pipeline, so handing every
@@ -172,7 +173,7 @@ const PACK_SECTIONS: Readonly<Record<string, readonly MechanicsSection[]>> = {
   "debug.md": ["item", "callers"],
   "review.md": ["item", "callers"],
   "skeptic.md": ["run", "item", "callers"],
-  "receive-review.md": ["item", "callers"],
+  "receive-review.md": ["item", "callers", "replies"],
 };
 
 export function renderMechanics(pack: string): string {
@@ -219,6 +220,13 @@ export function renderMechanics(pack: string): string {
   // for a different examination than the one the harness scores.
   if (sections.includes("criteria")) {
     lines.push("", renderVetCriteria());
+  }
+  // GAP-040: the reply statuses and the exact concern token, derived from
+  // ./reply-protocol.ts — which derives the statuses from the schema enum itself.
+  // They existed only inside dispatch prompt literals, so the doctrine told a
+  // fixer to push back while naming no channel to push back ON.
+  if (sections.includes("replies")) {
+    lines.push("", renderReplyProtocol());
   }
   return lines.join("\n");
 }

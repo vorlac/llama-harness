@@ -2674,7 +2674,7 @@ test("[9.5b-report-stop-done] handleReport closes the run: run.json READ BACK FR
 // [9.5b-report-trivial-lite]
 // ---------------------------------------------------------------------------
 
-test("[9.5b-report-trivial-lite] a trivial run is closed by the SAME handleReport in report-lite mode: EXECUTING->TRIVIAL_DONE (never REPORTED), still running the closing verify, still writing report.md, still registering stale-red, still recording stop `done` — the lite/full difference is section content only", async () => {
+test("[9.5b-report-trivial-lite] a trivial run is closed by the SAME handleReport in report-lite mode: EXECUTING->TRIVIAL_DONE (never REPORTED), still running the closing verify, still writing report.md, still registering stale-red, still recording the stop kind its dispositions produce — the lite/full difference is section content only", async () => {
   const buildBench = (classification: ClassificationKind): Bench => {
     const bench = makeBench({
       classification,
@@ -2711,7 +2711,12 @@ test("[9.5b-report-trivial-lite] a trivial run is closed by the SAME handleRepor
     "TRIVIAL_DONE",
     "as persisted on disk",
   );
-  assert.equal(lite.stop?.kind, "done", "still recording stop `done`");
+  // GAP-021: the recorded kind is the CLOSER's, not the mode's. This fixture leaves
+  // I2 blocked, and ISSUE-065 recorded that shape closing `done` — "the run
+  // completed" over an item still waiting on a human. What the lite/full split owes
+  // is that BOTH modes record the SAME kind through the SAME derivation, which the
+  // work half asserts below.
+  assert.equal(lite.stop?.kind, "blocked", "recording the stop kind the run's dispositions produce");
   assert.equal(verifyRecords(trivial.runDir).length, 1, "still running the closing verify (only 9.5c's stop mode skips it)");
   assert.deepEqual(lite.staleRedAdded, ["tests/b.test.mjs"], "still registering stale-red through the shared helper");
   const liteMd = readReport(trivial.runDir);
@@ -2721,6 +2726,7 @@ test("[9.5b-report-trivial-lite] a trivial run is closed by the SAME handleRepor
   const full = await report(work);
   assert.equal(full.mode, "full", "a work run is closed in full mode by the SAME handler");
   assert.equal(full.runState, "REPORTED", "to REPORTED");
+  assert.equal(full.stop?.kind, lite.stop?.kind, "and recording the SAME stop kind as lite on the same dispositions");
   const fullMd = readReport(work.runDir);
 
   // One writer, one mode parameter: the skeleton is shared, and the ONLY documented

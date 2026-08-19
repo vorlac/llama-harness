@@ -69,6 +69,7 @@ import { validate } from "../core/types.ts";
 import { treePath } from "../core/types.ts";
 import type { Config, EvidenceRecord, Item, ItemState, Queue, QueueItem, TreePath } from "../core/types.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
+import { witnessFromPrompt } from "./fixtures/review-witness.ts";
 
 // ---------------------------------------------------------------------------
 // Markers. Every one is distinctive enough that a substring match is unambiguous,
@@ -492,7 +493,11 @@ const IMPL_RECEIPT = JSON.stringify({
   neededContext: null,
   blockReason: null,
 });
-const NO_FINDINGS = JSON.stringify({ findings: [] });
+// GAP-011: an item-review lens reply carries the read witness the handler
+// re-derives against the item's own diff, so the empty reply is built FROM the
+// prompt rather than as a literal.
+const noFindings = (promptText: string): string =>
+  JSON.stringify({ findings: [], readWitness: witnessFromPrompt(promptText) });
 
 // ---------------------------------------------------------------------------
 // Fixture sanity (the probe-block discipline): the canned payloads must satisfy the
@@ -506,9 +511,9 @@ assert.equal(
   "sanity: the implementer receipt satisfies SCHEMAS.ImplementerResult",
 );
 assert.equal(
-  validate("Findings", JSON.parse(NO_FINDINGS) as unknown).ok,
+  validate("ItemFindings", JSON.parse(noFindings("READ WITNESS NONCE: RW-x")) as unknown).ok,
   true,
-  "sanity: the empty findings reply satisfies SCHEMAS.Findings",
+  "sanity: the witness-carrying empty findings reply satisfies SCHEMAS.ItemFindings",
 );
 assert.ok(
   (PACKS["tdd.md"] ?? "").length > 200,
@@ -802,7 +807,7 @@ test("[worktree-item-review-reads-the-items-tree] conductor_item_review builds i
 
   const wiring = makeWiring(runId, config, journal.sink, (req) => {
     if (req.role !== "reviewer") return `UNSCRIPTED ROLE ${req.role}`;
-    return NO_FINDINGS;
+    return noFindings(req.text);
   });
 
   const res: ItemReviewResult = await handleItemReview({

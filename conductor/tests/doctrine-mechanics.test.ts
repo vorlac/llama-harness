@@ -325,7 +325,7 @@ const DERIVATION_ROWS: ReadonlyArray<{
   {
     label: "skepticRefutePrompt",
     pack: "skeptic.md",
-    heading: "Default toward refuted when uncertain",
+    heading: "Refutation carries evidence; abstention upholds",
     build: (packs) =>
       skepticRefutePrompt(testFinding(), "correctness", 3, "do the work", "# plan", testQueue(), packs),
   },
@@ -333,15 +333,15 @@ const DERIVATION_ROWS: ReadonlyArray<{
     label: "itemLensPrompt",
     pack: "review.md",
     heading: "An empty review is the approval",
-    build: (packs) => itemLensPrompt(["correctness"], testQueueItem(), "\ndiff\n", "test text", 2, packs),
+    build: (packs) => itemLensPrompt(["correctness"], testQueueItem(), "\ndiff\n", "test text", 2, packs, "RW-nonce"),
   },
   {
     label: "itemSkepticPrompt",
     pack: "skeptic.md",
-    heading: "Default toward refuted when uncertain",
+    heading: "Refutation carries evidence; abstention upholds",
     build: (packs) =>
       itemSkepticPrompt(
-        { finding: testFinding(), lens: "correctness", sessionID: "s1" },
+        { finding: testFinding(), lens: "correctness", sessionID: "s1", key: "s1:F1" },
         3,
         testQueueItem(),
         "\ndiff\n",

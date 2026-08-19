@@ -107,6 +107,7 @@ import { readQuestions } from "../adapter/questions.ts";
 import { fetchMetricsSummary } from "../adapter/router-client.ts";
 import type { MetricsSummary, RouterClientConfig } from "../adapter/router-client.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
+import { witnessFromPrompt } from "./fixtures/review-witness.ts";
 import { validate } from "../core/types.ts";
 import type { Config, EvidenceRecord, Item, Run, TreePath } from "../core/types.ts";
 
@@ -610,8 +611,12 @@ function done(summary: string): unknown {
   return { status: "DONE", summary, concerns: [], neededContext: null, blockReason: null };
 }
 
-function noFindings(): unknown {
-  return { findings: [] };
+// GAP-011: an item-review lens reply carries the read witness the handler
+// re-derives against the item's diff. It is built FROM the prompt — the way a
+// reviewer who read the diff builds it — so a scenario that advances an item
+// through review advances it on real contact, not on a literal typed here.
+function noFindings(promptText: string): unknown {
+  return { findings: [], readWitness: witnessFromPrompt(promptText) };
 }
 
 // One sub-session the fan-out engine has OPEN right now: the fake SDK's own
@@ -1519,12 +1524,23 @@ async function runFullPipeline(): Promise<FullPipeline> {
       // Plan review, judged against the plan THIS lens was handed.
       if (!ctx.text.includes(PLAN_INDEPENDENCE)) return { body: { findings: [PF1, PF2] } };
       if (!ctx.text.includes(PLAN_VERIFICATION)) return { body: { findings: [PF3] } };
-      return { body: noFindings() };
+      return { body: noFindings(ctx.text) };
     }
     if (ctx.role === "skeptic") {
       // The classification check is the only skeptic before any finding exists.
       if (ctx.text.includes("PF1")) {
-        return { body: { findingId: "PF1", upheld: false, reasoning: "the scopes are disjoint; the claim reads titles, not scopes" } };
+        return {
+          body: {
+            findingId: "PF1",
+            upheld: false,
+            reasoning: "the scopes are disjoint; the claim reads titles, not scopes",
+            refutationEvidence: {
+              discriminatingInput: "the two items' declared fileScopes, side by side",
+              run: "read both scope lists out of the queue the plan was written against",
+              reading: "they share no path, so the claimed conflict cannot arise",
+            },
+          },
+        };
       }
       if (ctx.text.includes("PF2")) {
         return { body: { findingId: "PF2", upheld: true, reasoning: "the plan really is silent on independence" } };
@@ -1533,7 +1549,18 @@ async function runFullPipeline(): Promise<FullPipeline> {
         return { body: { findingId: "PF3", upheld: true, reasoning: "the plan really names no test file and no verify command" } };
       }
       if (ctx.text.includes("IF1")) {
-        return { body: { findingId: "IF1", upheld: false, reasoning: "the module already handles the case the finding claims is missing" } };
+        return {
+          body: {
+            findingId: "IF1",
+            upheld: false,
+            reasoning: "the module already handles the case the finding claims is missing",
+            refutationEvidence: {
+              discriminatingInput: "the input the finding says is unhandled",
+              run: "read the module's early return and re-ran the item test",
+              reading: "the early return covers it, so the claimed defect does not reproduce",
+            },
+          },
+        };
       }
       return { body: { agreed: true, correctedKind: null, note: "a behavioural change with tests" } };
     }
@@ -1569,10 +1596,11 @@ async function runFullPipeline(): Promise<FullPipeline> {
                 suggestedFix: "collapse runs of whitespace",
               },
             ],
+            readWitness: witnessFromPrompt(ctx.text),
           },
         };
       }
-      return { body: noFindings() };
+      return { body: noFindings(ctx.text) };
     }
     return { body: done("no work required") };
   };
@@ -2144,7 +2172,7 @@ test(
         if (ctx.nth === 0) return { body: QUEUE };
         return { body: { markdown: "# plan\n\nBuild shout, verified by its own test file.\n", decisions: [] } };
       }
-      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
       if (ctx.role === "testWriter") {
         // The repair dispatch is recognised by the critics' OWN must-fix line,
         // never by a call counter: a union that never reached the writer leaves
@@ -2162,7 +2190,7 @@ test(
         if (ctx.itemState === "RED") {
           return { body: ctx.text.includes(STRONG_ASSERT) ? testVet() : testVet([MUST_FIX]) };
         }
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };
@@ -2276,7 +2304,7 @@ test(
         if (ctx.nth === 0) return { body: QUEUE };
         return { body: { markdown: "# plan\n\nBuild pad, verified by its own test file.\n", decisions: [] } };
       }
-      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
       if (ctx.role === "testWriter") {
         return { body: done("wrote the test"), write: [{ rel: TEST_REL, text: ITEM_TEST }] };
       }
@@ -2295,11 +2323,11 @@ test(
         // asking a reviewer about this item is the §3.3 changed-test re-vet.
         if (ctx.itemState === "RED") return { body: testVet() };
         if (!ctx.text.includes("LENSES:")) return { body: testVet() };
-        if (!ctx.text.includes("LENSES: spec/contract")) return { body: noFindings() };
+        if (!ctx.text.includes("LENSES: spec/contract")) return { body: noFindings(ctx.text) };
         // The spec lens judges the fileScope AS IT STANDS, which the handler's
         // own diff block carries into this prompt.
-        if (ctx.text.includes(SPEC_FIX_MARKER)) return { body: noFindings() };
-        return { body: { findings: [SF1] } };
+        if (ctx.text.includes(SPEC_FIX_MARKER)) return { body: noFindings(ctx.text) };
+        return { body: { findings: [SF1], readWitness: witnessFromPrompt(ctx.text) } };
       }
       return { body: done("nothing to do") };
     };
@@ -2415,7 +2443,7 @@ test(
         if (ctx.nth === 0) return { body: QUEUE };
         return { body: { markdown: "# plan\n\nBuild clip, verified by its own test file.\n", decisions: [] } };
       }
-      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
       if (ctx.role === "testWriter") {
         // The review-fix dispatch is recognised by the finding it carries.
         if (ctx.text.includes("TA1")) {
@@ -2429,11 +2457,11 @@ test(
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
         if (!ctx.text.includes("LENSES:")) return { body: testVet() };
-        if (!ctx.text.includes("LENSES: test-adequacy")) return { body: noFindings() };
+        if (!ctx.text.includes("LENSES: test-adequacy")) return { body: noFindings(ctx.text) };
         // The adequacy lens judges the test AS IT STANDS, which the handler
         // carries into this prompt.
-        if (ctx.text.includes(TA_ASSERT)) return { body: noFindings() };
-        return { body: { findings: [TA1] } };
+        if (ctx.text.includes(TA_ASSERT)) return { body: noFindings(ctx.text) };
+        return { body: { findings: [TA1], readWitness: witnessFromPrompt(ctx.text) } };
       }
       return { body: done("nothing to do") };
     };
@@ -2534,7 +2562,7 @@ test(
         if (ctx.nth === 0) return { body: QUEUE };
         return { body: { markdown: "# plan\n\nBuild dash, verified by its own test file.\n", decisions: [] } };
       }
-      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
       if (ctx.role === "testWriter") {
         // The repair dispatch is recognised by the handler's OWN refusal — the
         // captured failure and its class, handed back. A stage that swallowed
@@ -2550,7 +2578,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };
@@ -2689,7 +2717,7 @@ test(
         if (ctx.nth === 0) return { body: QUEUE };
         return { body: { markdown: "# plan\n\nExtend baseline with an optional suffix, verified by its own test file.\n", decisions: [] } };
       }
-      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
       if (ctx.role === "testWriter") {
         return { body: done("wrote the item test"), write: [{ rel: TEST_REL, text: ITEM_TEST }] };
       }
@@ -2709,7 +2737,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };
@@ -2894,7 +2922,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };
@@ -2987,7 +3015,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet(), park: subject !== undefined };
-        return { body: noFindings(), park: subject !== undefined };
+        return { body: noFindings(ctx.text), park: subject !== undefined };
       }
       return { body: done("no work required") };
     };
@@ -3172,7 +3200,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       if (ctx.role === "implementer") {
         return {
@@ -3274,7 +3302,7 @@ test(
         if (ctx.nth === 0) return { body: QUEUE };
         return { body: { markdown: "# plan\n\nBuild the broken thing.\n", decisions: [] } };
       }
-      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+      if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
       if (ctx.role === "testWriter") {
         // Every repair attempt writes the same unevaluable test: the repair
         // budget really is exhausted rather than short-circuited.
@@ -3282,7 +3310,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };
@@ -3550,7 +3578,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };
@@ -3693,7 +3721,7 @@ async function runWedgeWalk(): Promise<WedgeObservation> {
       if (ctx.nth === 0) return { body: QUEUE };
       return { body: { markdown: "# plan\n\nBuild the blocker, then the dependent.\n", decisions: [] } };
     }
-    if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings() };
+    if (ctx.role === "reviewer" && ctx.itemId === "") return { body: noFindings(ctx.text) };
     if (ctx.role === "testWriter") {
       // Every repair attempt writes the same unevaluable test, so the budget is
       // really exhausted rather than short-circuited.
@@ -3701,7 +3729,7 @@ async function runWedgeWalk(): Promise<WedgeObservation> {
     }
     if (ctx.role === "reviewer") {
       if (ctx.itemState === "RED") return { body: testVet() };
-      return { body: noFindings() };
+      return { body: noFindings(ctx.text) };
     }
     return { body: done("nothing to do") };
   };
@@ -4252,7 +4280,7 @@ test(
       }
       if (ctx.role === "reviewer") {
         if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings() };
+        return { body: noFindings(ctx.text) };
       }
       return { body: done("nothing to do") };
     };

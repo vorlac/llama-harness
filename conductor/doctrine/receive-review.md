@@ -25,6 +25,18 @@ every finding with technical rigor: **verify before implementing**.
 A reviewer being confident does not make them correct, and a reviewer being
 wrong does not make you right — only the code and its tests settle it. Verify.
 
+## The channels each answer travels on
+
+Each of the three outcomes above has one channel, and the receipt is where you
+take it. Say the finding is right and you fixed it: reply DONE — the harness
+diffs the tree, and a receipt that touched no file the finding names is refused
+and handed back to you with the discrepancy. Say the finding is wrong: reply
+DONE_WITH_CONCERNS and name it in `concerns` as `finding:<id>`, the exact token,
+with your reasoning; that reasoning goes to one more skeptic round, and the
+finding dies only if the skeptics agree with you. A concern that names no
+`finding:<id>` reaches nobody. Say the finding is unclear: reply NEEDS_CONTEXT
+naming exactly what you need. Silence is not one of the channels.
+
 ## No performative agreement
 
 Do not perform agreement to smooth the exchange. Skip the reflexive praise, the
@@ -62,4 +74,11 @@ Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conduc
 A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 
 The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+
+Reply statuses, and what each one commits you to:
+- DONE: the fix is implemented — the harness diffs the tree and refuses a receipt that touched no file the finding names.
+- DONE_WITH_CONCERNS: you are pushing back — every concerns[] entry names its finding as `finding:<id>` and carries your reasoning, and the handler routes that reasoning through one more skeptic round.
+- NEEDS_CONTEXT: you cannot proceed without something you were not given — name exactly what, in neededContext.
+- BLOCKED: the work cannot be done in this scope at all — name the blocker in blockReason.
+A concern that names no finding as `finding:<id>` is not a pushback: it is read as agreement, and the receipt still has to show the fix in the tree.
 <!-- END GENERATED MECHANICS -->

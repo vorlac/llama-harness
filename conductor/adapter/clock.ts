@@ -2,13 +2,13 @@
 // hands every handler (GAP-035). Adapter, not core: core takes every timestamp as
 // DATA (G3), so this is the one place that reads a clock at all.
 //
-// Why a plain Date.now() is not enough at the enforcement seams. Two of the §2
+// Why a plain `Date.now()` is not enough at the enforcement seams. Two of the §2
 // verdicts are comparisons between stamps:
 //   - §2.6 freshness — "did an edit land after the verify started?" compares a start
 //     stamp against filesystem mtimes, which carry sub-millisecond precision;
 //   - §3.3's stale-red rule — "has a later run happened than the red the critics
 //     would be shown?" orders records that a run can append inside one millisecond.
-// Date.now() truncates to whole milliseconds and can repeat, so two events inside
+// `Date.now()` truncates to whole milliseconds and can repeat, so two events inside
 // one tick compare EQUAL and the verdict falls to whichever tie-break the rule
 // happens to carry — an enforcement decision made by machine speed. hrtime's
 // nanosecond counter orders them, and it is monotonic besides: a wall clock read

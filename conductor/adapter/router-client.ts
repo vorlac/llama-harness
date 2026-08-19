@@ -61,7 +61,7 @@ export interface UpstreamConfig {
   port: number;
 }
 
-// The injected journal sink: (level, event, data) => void. The component is fixed
+// The injected journal sink: (level, event, data) => void. The component is pinned
 // to "router-client" by the journal adapter; the events here stay within that
 // component's closed vocabulary (core/journal-events.ts line 54:
 // request/response/failover/retry). Optional so unit tests can omit it.

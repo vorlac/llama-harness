@@ -2,10 +2,15 @@
 // docs/plans/2026-08-07-conductor-harness-plan.md, once (Task 1.1): each schema
 // exists as a TS type AND a hand-written JSON Schema object in SCHEMAS, plus the
 // minimal subset validator `validate` (plan lines 2059-2084). Core module: pure.
-// Its one import is ./vet-criteria.ts, itself a leaf, which owns the §2.10 vet
-// criteria that SCHEMAS.TestVet is built from (GAP-041 single source).
+// Its imports are two leaves: ./vet-criteria.ts, which owns the §2.10 vet
+// criteria that SCHEMAS.TestVet is built from (GAP-041 single source), and
+// ./review-witness.ts, which owns the GAP-011 read-witness shape SCHEMAS.Findings
+// carries.
 //
 import { VET_CRITERIA } from "./vet-criteria.ts";
+import type { CitedRange, ReadWitness } from "./review-witness.ts";
+
+export type { CitedRange, ReadWitness };
 
 //
 // Schema-subset discipline (plan lines 2070-2075): every schema here restricts
@@ -98,12 +103,27 @@ const QUESTION_ORIGINS = [
 ] as const;
 export type QuestionOrigin = (typeof QUESTION_ORIGINS)[number];
 
+// §2.11 `answeredVia` (GAP-013): the CHANNEL an answer arrived through, which is
+// the only thing in the record that distinguishes a human's judgment from a
+// model's relay of one.
+//
+//   tool        — typed through conductor_answer by a gated session. It is a real
+//                 answer and it clears the block; it carries no human authority,
+//                 because §2.7's reading of "human" is "was asked of a human" and
+//                 a tool call was not (the C-044 ruling).
+//   human-file  — an answer file appeared under the `.conductor` state area, which
+//                 core/gates-edit.ts denies to EVERY session. A file there was not
+//                 written by a gated session, by construction, so this is the one
+//                 channel an in-session model cannot forge.
+export const ANSWER_CHANNELS = ["tool", "human-file"] as const;
+export type AnswerChannel = (typeof ANSWER_CHANNELS)[number];
+
 // §2.10, plan line 924.
 const SEVERITIES = ["major", "minor", "nit"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
 // §2.10, plan lines 968-969.
-const IMPLEMENTER_STATUSES = [
+export const IMPLEMENTER_STATUSES = [
   "DONE",
   "DONE_WITH_CONCERNS",
   "NEEDS_CONTEXT",
@@ -451,6 +471,10 @@ export interface QuestionRecord {
   blocksItems: string[];
   answeredIso: string | null;
   answer: string | null;
+  // Null exactly while the question is open; a channel exactly once it is
+  // answered. adapter/questions.ts refuses to write the two out of step, so
+  // "answered by nobody in particular" is not a state the ledger can hold.
+  answeredVia: AnswerChannel | null;
 }
 
 // §2.11 `.conductor/state/stale-red.json`, plan lines 1002-1008.
@@ -466,6 +490,12 @@ export interface StaleRedRegistry {
 }
 
 // §2.10 FINDINGS, plan lines 922-928.
+//
+// GAP-011: `readWitness` is the reviewer's proof of CONTACT with the diff — this
+// dispatch's nonce plus the ranges the reviewer read, which the handler re-derives
+// against the item's own diff. Plan-level review has no diff to cite, so the field
+// is optional on the shared shape and REQUIRED by the item-level schema
+// (SCHEMAS.ItemFindings), which is the one the lens dispatch declares.
 export interface Findings {
   findings: Array<{
     id: string;
@@ -475,13 +505,31 @@ export interface Findings {
     evidence: string;
     suggestedFix: string;
   }>;
+  readWitness?: ReadWitness | null;
+}
+
+export interface ItemFindings extends Findings {
+  readWitness: ReadWitness;
 }
 
 // §2.10 VERDICT, plan lines 930-932.
+//
+// GAP-036: `refutationEvidence` is the refuting half of the symmetry — the
+// discriminating input, what was run, and the reading under which the finding
+// fails. The schema ADMITS a refutation without it on purpose: core/verdict.ts
+// records that reply as an ABSTENTION rather than losing it to a schema retry,
+// and an abstention upholds.
+export interface RefutationEvidence {
+  discriminatingInput: string;
+  run: string;
+  reading: string;
+}
+
 export interface Verdict {
   findingId: string;
   upheld: boolean;
   reasoning: string;
+  refutationEvidence?: RefutationEvidence | null;
 }
 
 // §2.10 CLASSIFICATION, plan lines 934-948: trivialItem is a COMPLETE §2.4
@@ -1193,6 +1241,7 @@ const questionRecordSchema = {
     blocksItems: stringArraySchema,
     answeredIso: stringOrNullSchema,
     answer: stringOrNullSchema,
+    answeredVia: { enum: [...ANSWER_CHANNELS, null] },
   },
   required: [
     "id",
@@ -1205,6 +1254,7 @@ const questionRecordSchema = {
     "blocksItems",
     "answeredIso",
     "answer",
+    "answeredVia",
   ],
   additionalProperties: false,
 };
@@ -1234,38 +1284,89 @@ const staleRedRegistrySchema = {
   additionalProperties: false,
 };
 
-// §2.10 FINDINGS, plan lines 922-928.
-const findingsSchema = {
+// §2.10 FINDINGS, plan lines 922-928, plus GAP-011's read witness.
+const findingEntrySchema = {
   type: "object",
   properties: {
-    findings: {
+    id: stringSchema,
+    severity: { enum: SEVERITIES },
+    lens: stringSchema,
+    claim: stringSchema,
+    evidence: stringSchema,
+    suggestedFix: stringSchema,
+  },
+  required: ["id", "severity", "lens", "claim", "evidence", "suggestedFix"],
+  additionalProperties: false,
+};
+
+// GAP-011. `type: ["object","null"]` on the witness lets a plan-level reply carry
+// the key explicitly as null; the ITEM-level schema below is the one that makes
+// a real witness mandatory, because it is the only review layer with a diff to
+// cite.
+const readWitnessSchema = {
+  type: ["object", "null"],
+  properties: {
+    nonce: stringSchema,
+    citedRanges: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          id: stringSchema,
-          severity: { enum: SEVERITIES },
-          lens: stringSchema,
-          claim: stringSchema,
-          evidence: stringSchema,
-          suggestedFix: stringSchema,
+          file: stringSchema,
+          startLine: numberSchema,
+          endLine: numberSchema,
         },
-        required: ["id", "severity", "lens", "claim", "evidence", "suggestedFix"],
+        required: ["file", "startLine", "endLine"],
         additionalProperties: false,
       },
     },
+  },
+  required: ["nonce", "citedRanges"],
+  additionalProperties: false,
+};
+
+const findingsSchema = {
+  type: "object",
+  properties: {
+    findings: { type: "array", items: findingEntrySchema },
+    readWitness: readWitnessSchema,
   },
   required: ["findings"],
   additionalProperties: false,
 };
 
-// §2.10 VERDICT, plan lines 930-932.
+// The schema the §3.3 item-review lens dispatch declares: the same findings, plus
+// the read witness as an OBLIGATION. A lens reply that cannot name its contact
+// with the diff never reaches the handler.
+const itemFindingsSchema = {
+  type: "object",
+  properties: {
+    findings: { type: "array", items: findingEntrySchema },
+    readWitness: readWitnessSchema,
+  },
+  required: ["findings", "readWitness"],
+  additionalProperties: false,
+};
+
+// §2.10 VERDICT, plan lines 930-932, plus GAP-036's refutation evidence.
+const refutationEvidenceSchema = {
+  type: ["object", "null"],
+  properties: {
+    discriminatingInput: stringSchema,
+    run: stringSchema,
+    reading: stringSchema,
+  },
+  required: ["discriminatingInput", "run", "reading"],
+  additionalProperties: false,
+};
+
 const verdictSchema = {
   type: "object",
   properties: {
     findingId: stringSchema,
     upheld: booleanSchema,
     reasoning: stringSchema,
+    refutationEvidence: refutationEvidenceSchema,
   },
   required: ["findingId", "upheld", "reasoning"],
   additionalProperties: false,
@@ -1373,6 +1474,7 @@ export const SCHEMAS: Record<string, unknown> = {
   QuestionRecord: questionRecordSchema,
   StaleRedRegistry: staleRedRegistrySchema,
   Findings: findingsSchema,
+  ItemFindings: itemFindingsSchema,
   Verdict: verdictSchema,
   Classification: classificationSchema,
   ClassificationCheck: classificationCheckSchema,

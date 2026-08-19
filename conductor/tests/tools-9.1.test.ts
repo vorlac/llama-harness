@@ -826,7 +826,7 @@ test("[9.1-answer] clears exactly the bound items, marks answered, journals", as
     store.saveItem(runId, makeItem("I3", { state: "RED", blocked: { reason: "q2", sinceMs: START_MS, questionId: q2.id, stage: "surface" } }));
     store.saveItem(runId, makeItem("I4", { state: "PENDING" }));
 
-    const out = handleAnswer({ store, runId, journal: journal.sink, now: () => START_MS, questionId: q1.id, answer: "collect and report all" });
+    const out = handleAnswer({ store, runId, journal: journal.sink, now: () => START_MS, questionId: q1.id, answer: "collect and report all", via: "tool" });
 
     // Exactly the items bound to Q1 are cleared — and no others.
     assert.deepEqual([...out.clearedItemIds].sort(), ["I1", "I2"], "answer clears exactly the items bound to the question");
@@ -1394,6 +1394,7 @@ test("[9.1-fix-surface-first-block-wins] a second surfaced question naming an al
       journal: journal.sink,
       now: () => START_MS + 120_000,
       questionId: second.questionId,
+      via: "tool",
       answer: "per-session",
     });
     assert.deepEqual(ansSecond.clearedItemIds, ["I2"], "answering the second question clears only the item it blocked");
@@ -1417,6 +1418,7 @@ test("[9.1-fix-surface-first-block-wins] a second surfaced question naming an al
       journal: journal.sink,
       now: () => START_MS + 180_000,
       questionId: first.questionId,
+      via: "tool",
       answer: "collect and report all",
     });
     assert.deepEqual(ansFirst.clearedItemIds, ["I1"], "answering the first question releases the item it blocked");

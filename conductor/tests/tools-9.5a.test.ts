@@ -199,6 +199,7 @@ import type {
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
+import { witnessFromPrompt } from "./fixtures/review-witness.ts";
 
 // ---------------------------------------------------------------------------
 // The pinned surface, restated STRUCTURALLY so every call site below type-checks the
@@ -704,7 +705,10 @@ interface FixtureFinding {
   evidence?: string;
 }
 
-function findingsJson(findings: readonly FixtureFinding[]): string {
+// GAP-011: every lens reply carries the read witness the handler re-derives against
+// the item's diff — read out of the prompt the reviewer was handed, the way a
+// reviewer who opened the diff would produce it.
+function findingsJson(findings: readonly FixtureFinding[], promptText = ""): string {
   return JSON.stringify({
     findings: findings.map((f) => ({
       id: f.id,
@@ -714,16 +718,29 @@ function findingsJson(findings: readonly FixtureFinding[]): string {
       evidence: f.evidence ?? `see ${SUBJECT_REL} and ${TEST_REL}`,
       suggestedFix: f.suggestedFix,
     })),
+    readWitness: witnessFromPrompt(promptText),
   });
 }
 
 const NO_FINDINGS = findingsJson([]);
 
-function verdictJson(findingId: string, upheld: boolean, reasoning?: string): string {
+// GAP-036: `upheld:false` counts as a REFUTATION only when it carries the
+// discriminating input, the run and the reading. Every overturn below is an
+// evidenced one, so these rows still mean what they meant; `abstain` is the
+// evidence-free form, which upholds.
+function verdictJson(findingId: string, upheld: boolean, reasoning?: string, abstain = false): string {
   return JSON.stringify({
     findingId,
     upheld,
     reasoning: reasoning ?? (upheld ? `${findingId} stands up to refutation` : `${findingId} does not survive refutation`),
+    refutationEvidence:
+      upheld || abstain
+        ? null
+        : {
+            discriminatingInput: `the input ${findingId} claims reaches the defect`,
+            run: `re-ran the item test against ${SUBJECT_REL} with that input`,
+            reading: "the cited line is guarded on the branch above, so the claim does not reproduce",
+          },
   });
 }
 
@@ -812,12 +829,20 @@ interface Witnesses {
   itemTest: string;
 }
 
+function applyFixtureFix(root: string, role: string, sessionID: string): void {
+  const rel = role === "testWriter" ? TEST_REL : SUBJECT_REL;
+  const file = path.join(root, rel);
+  if (!existsSync(file)) return;
+  writeFileSync(file, readFileSync(file, "utf8") + `// review fix by ${role} ${sessionID}\n`);
+}
+
 function makeWiring(
   runId: string,
   config: Config,
   journal: JournalSink,
   witnesses: Witnesses,
   respond: Responder,
+  root: string,
 ): Wiring {
   const registry = new Map<string, RegistryEntry>();
   const sdk = makeFakeSdk({ registry });
@@ -888,6 +913,7 @@ function makeWiring(
     });
     if (canned.kind === "park") return { kind: "pending" };
     if (canned.kind === "error") return { kind: "error", error: canned.error };
+    if (role === "implementer" || role === "testWriter") applyFixtureFix(root, role, req.sessionID);
     return { kind: "reply", text: canned.text };
   });
 
@@ -969,7 +995,7 @@ function seedBench(opts: BenchOpts): Bench {
   const runDir = runDirOf(store, runId);
   seedExecuting(store, runId, opts.itemState ?? "VALIDATED", opts.trivial ?? false);
   const journal = opts.realJournal === true ? makeRealJournal(runDir, config) : makeJournal();
-  const wiring = makeWiring(runId, config, journal.sink, witnesses, opts.respond);
+  const wiring = makeWiring(runId, config, journal.sink, witnesses, opts.respond, root);
   return { root, stateHome, store, runId, runDir, config, journal, witnesses, wiring };
 }
 
@@ -1025,7 +1051,7 @@ function scripted(opts: ScriptOpts): Responder {
       for (const lens of req.lenses) {
         for (const finding of table[lens] ?? []) out.push(finding);
       }
-      return { kind: "reply", text: findingsJson(out) };
+      return { kind: "reply", text: findingsJson(out, req.text) };
     }
     const named = opts.findingIds.filter((id) => req.text.includes(id));
     if (req.role === "skeptic") {
@@ -1155,15 +1181,20 @@ for (const [count, groups] of Object.entries(COMPOSITIONS)) {
 
 // The two survival facts this file leans on are the COMMITTED core rule's, never a
 // restatement: k=2 TIE-UPHOLDS, and a two-overturn panel dies.
+const REFUTATION_EVIDENCE = {
+  discriminatingInput: "the input the finding names",
+  run: "traced the caller and re-ran the unit test",
+  reading: "the guard on the branch above already covers it",
+};
 const TIE_PANEL: Verdict[] = [
-  { findingId: "F-X", upheld: true, reasoning: "stands" },
-  { findingId: "F-X", upheld: false, reasoning: "falls" },
+  { findingId: "F-X", upheld: true, reasoning: "stands", refutationEvidence: null },
+  { findingId: "F-X", upheld: false, reasoning: "falls", refutationEvidence: REFUTATION_EVIDENCE },
 ];
 assert.equal(findingSurvives(TIE_PANEL, 2), true, "sanity: core findingSurvives — at k=2 a TIE UPHOLDS");
 assert.equal(
-  findingSurvives([{ findingId: "F-X", upheld: false, reasoning: "falls" }], 2),
+  findingSurvives([{ findingId: "F-X", upheld: false, reasoning: "falls", refutationEvidence: REFUTATION_EVIDENCE }], 2),
   false,
-  "sanity: core findingSurvives — a lone OVERTURN at k=2 does NOT survive (the trap the binding row guards)",
+  "sanity: core findingSurvives — a lone EVIDENCED OVERTURN at k=2 does NOT survive (the trap the binding row guards)",
 );
 
 // The clamp arithmetic, read off the COMMITTED readFanout.
@@ -1517,8 +1548,8 @@ test("[9.5a-underdelivered-panel-upholds] MANDATORY DEFERRED BINDING (Phase 1 ga
         return {
           kind: "reply",
           text: req.lenses.includes(SPEC)
-            ? findingsJson([{ id: F_MAJOR, lens: SPEC, suggestedFix: `edit ${SUBJECT_REL}` }])
-            : NO_FINDINGS,
+            ? findingsJson([{ id: F_MAJOR, lens: SPEC, suggestedFix: `edit ${SUBJECT_REL}` }], req.text)
+            : findingsJson([], req.text),
         };
       }
       if (req.role === "skeptic") {
@@ -1535,7 +1566,21 @@ test("[9.5a-underdelivered-panel-upholds] MANDATORY DEFERRED BINDING (Phase 1 ga
   // The trap, restated on the committed core so the claim is unmistakable: feeding the
   // PARTIAL panel straight to findingSurvives drops the major.
   assert.equal(
-    findingSurvives([{ findingId: F_MAJOR, upheld: false, reasoning: "the delivered overturn" }], 2),
+    findingSurvives(
+      [
+        {
+          findingId: F_MAJOR,
+          upheld: false,
+          reasoning: "the delivered overturn",
+          refutationEvidence: {
+            discriminatingInput: "the input the finding names",
+            run: "traced the caller",
+            reading: "the guard above already covers it",
+          },
+        },
+      ],
+      2,
+    ),
     false,
     "the naive partial-panel call WOULD drop this major — which is exactly what the handler must not do",
   );

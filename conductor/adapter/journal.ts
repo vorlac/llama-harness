@@ -176,7 +176,7 @@ export function createJournal(
   // On this instance's FIRST file write we verify the trailing newline once: if a
   // prior process crashed mid-append and left a torn partial line, we prepend a
   // newline so that partial is terminated on its own (unparseable) line and the
-  // new record stays a complete, parseable line of its own. Checked once — every
+  // record we append stays a complete, parseable line of its own. Checked once — every
   // append this instance makes thereafter keeps the file newline-terminated.
   let trailingNewlineVerified = false;
 

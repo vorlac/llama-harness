@@ -15,7 +15,7 @@
 // The composition root (Task 13.1) CONSUMES this table when it binds handlers to
 // the plugin's tool map, and conductor/tests/tool-binding.test.ts enforces, for
 // every bound tool, that the handler's REQUIRED input fields are exactly the
-// declared args ∪ infrastructure ∪ fixed. The table is written once here rather
+// declared args ∪ infrastructure ∪ `fixed`. The table is written once here rather
 // than derived twice — the same single-source construction G6 gives the FSM
 // vocabularies.
 //
@@ -27,7 +27,7 @@
 // A `null` entry is a tool whose handler does not exist yet (forget_stale). The
 // guard test
 // asserts null-ness against the adapter source, so the moment such a handler is
-// exported the guard goes red until its binding is declared here — a new handler
+// exported the guard goes red until its binding is declared here — a later handler
 // is born under the guard, never retrofitted into it.
 //
 // Pure data (G3): no imports, no I/O, no clock.
@@ -186,7 +186,13 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     handler: "handleAnswer",
     input: "AnswerInput",
     infrastructure: ["store", "runId", "journal"],
-    fixed: NO_FIXED,
+    // GAP-013, the same construction as conductor_decide's kind: the answer
+    // CHANNEL is a fact about how the answer reached the harness, so the tool
+    // surface fixes it. A model calling this tool is the "tool" channel by
+    // definition and has no argument with which to say otherwise; the one caller
+    // that records "human-file" is the ingest of a file from the state area no
+    // session may write.
+    fixed: { via: "tool" },
   },
   conductor_defer: {
     handler: "handleDefer",

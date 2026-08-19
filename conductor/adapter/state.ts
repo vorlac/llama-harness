@@ -60,7 +60,7 @@ export interface OpenOptions {
   journal: StateJournal;
   version: string;
   sessionID: string;
-  // THE clock the store reads for every stamped timestamp; defaults to Date.now.
+  // THE clock the store reads for every stamped timestamp; defaults to `Date.now`.
   now?: () => number;
   pid?: number; // defaults to process.pid; names the temp files and the lock owner
   staleLockMs?: number; // over-age lock threshold; defaults to 24h
@@ -99,6 +99,9 @@ export interface StateStore {
   saveRun(run: Run): void;
   currentRun(): Run | null;
   archiveRun(runId: string): void;
+  // archiveRun's named inverse: re-point the current-run pointer at a run whose
+  // stop a human answer has cleared (ISSUE-066).
+  resumeRun(runId: string): void;
   loadItem(runId: string, itemId: string): Item;
   saveItem(runId: string, item: Item): void;
   removeItem(runId: string, itemId: string): void;
@@ -569,6 +572,18 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     if (ptr !== null && ptr.runId === runId) setCurrentRun(null);
   }
 
+  // archiveRun's named inverse (ISSUE-066). A run that stopped waiting on a human
+  // has its pointer cleared, so the work it committed is unreachable to every
+  // subsequent pass even after the human answers. Re-pointing is a pointer write
+  // and nothing else: run.json is untouched here, so the caller stays the sole
+  // authority on whether the run is revivable at all.
+  function resumeRun(runId: string): void {
+    if (!existsSync(runJsonPath(runId))) {
+      throw new Error(`state: cannot resume run "${runId}" — no run.json on disk`);
+    }
+    setCurrentRun(runId);
+  }
+
   // --- item CRUD + dispositions -------------------------------------------
 
   function loadItem(runId: string, itemId: string): Item {
@@ -618,7 +633,7 @@ export function openWorkspace(opts: OpenOptions): StateStore {
   // release is written down here, in the item's own durable record, rather than left
   // to be inferred later from file timestamps that a replay, a backup restore or a
   // copy would destroy. Recorded once per question: a second release under the same
-  // reused question adds nothing new to the history.
+  // reused question adds nothing to the history that is not there already.
   function clearBlocked(runId: string, itemId: string): Item {
     const item = loadItem(runId, itemId);
     const questionId = item.blocked?.questionId;
@@ -752,6 +767,7 @@ export function openWorkspace(opts: OpenOptions): StateStore {
     saveRun,
     currentRun,
     archiveRun,
+    resumeRun,
     loadItem,
     saveItem,
     removeItem,

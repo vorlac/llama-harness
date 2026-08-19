@@ -713,7 +713,7 @@ const WILDCARD = /[*?{[]/;
  * blocked no item and the run executed what the review condemned. Each of those
  * shapes is normalised here.
  */
-function pathLikeTokens(text: string): string[] {
+export function pathLikeTokens(text: string): string[] {
   // "[the parser](src/beta/parse.ts)" -> the path becomes its own token.
   const normalised = text.replace(/\]\(/g, " ");
   const tokens: string[] = [];

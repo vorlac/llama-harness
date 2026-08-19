@@ -445,10 +445,13 @@ test("8.1-anchors-plan: plan.md carries its §6.1 doctrine (exact paths, complet
 
 // ===========================================================================
 // 8.1-anchors-skeptic — HARDENING: skeptic.md must carry the refutation posture
-// (refute; majority ⌈k/2⌉ survival; default toward refuted). Present today; this
-// anchor guards against silent drift.
+// (refute; majority ⌈k/2⌉ survival) and, under GAP-036/D11, the ASYMMETRY that
+// replaced "uncertain ⇒ refuted": a refutation carries evidence, and a verdict
+// without it abstains — which upholds. The old anchor pinned the biasing
+// instruction itself (C-082/P10: a unanimous unevidenced refutation sealed a true
+// finding), so it is inverted here rather than deleted.
 // ===========================================================================
-test("8.1-anchors-skeptic: skeptic.md carries the refutation posture", () => {
+test("8.1-anchors-skeptic: skeptic.md carries the refutation posture and the abstention that upholds", () => {
   const skeptic = readPack("skeptic.md");
   assert.ok(
     has(skeptic, "refute"),
@@ -459,7 +462,15 @@ test("8.1-anchors-skeptic: skeptic.md carries the refutation posture", () => {
     "skeptic.md must state the majority (⌈k/2⌉) survival threshold",
   );
   assert.ok(
-    has(skeptic, "refuted") && has(skeptic, "default"),
-    "skeptic.md must default toward refuted when uncertain",
+    has(skeptic, "abstention") && has(skeptic, "refutationEvidence"),
+    "skeptic.md must name the abstention and the evidence a refutation carries",
+  );
+  assert.ok(
+    /an abstention upholds/i.test(skeptic),
+    "skeptic.md must state that an abstention UPHOLDS the finding (D11)",
+  );
+  assert.ok(
+    !/When you cannot decide, the verdict is/i.test(skeptic),
+    "skeptic.md must NOT tell a skeptic to default to refuted when it cannot decide",
   );
 });
