@@ -2676,6 +2676,45 @@ class WaitUntilReadyCase(WiringTestCase):
         self.assertFalse(ready, "a dead server process must never be reported ready")
         self.assertLess(elapsed, 5.0, "proc.poll() must short-circuit, not wait out the timeout")
 
+    class _CountingBusyHandler(http.server.BaseHTTPRequestHandler):
+        """A server that is up but not serving yet: every /health answers 204.
+        A 2xx that is not 200 does NOT raise from urlopen, so it is the exact
+        non-raising non-200 that fell through the readiness loop without a sleep.
+        The class counts the requests it fields so a caller can tell polling
+        from busy-spinning."""
+
+        requests = 0
+
+        def do_GET(self) -> None:  # noqa: N802
+            type(self).requests += 1
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, fmt: str, *args: Any) -> None:
+            return
+
+    def test_non_200_backs_off_instead_of_busy_spinning(self) -> None:
+        # ISSUE-108 latent half: a non-raising non-200 answer (a 2xx that is not
+        # 200 - the server is up but not serving yet) used to fall through with no
+        # sleep, hammering the endpoint until the deadline. The backoff bounds the
+        # polls; a 1s budget at 0.5s/poll fields only a few requests, where a busy
+        # spin would field hundreds.
+        handler = type(self)._CountingBusyHandler
+        handler.requests = 0
+        server = _HealthServer((LISTEN_HOST, 0), handler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        ready = serve.wait_until_ready(LISTEN_HOST, port, self._AliveProc(), timeout=1)
+        self.assertFalse(ready, "a 503 /health is never ready")
+        self.assertLessEqual(
+            handler.requests, 6, "a non-200 must back off, not busy-spin the deadline"
+        )
+
 
 class EvictionKnob(unittest.TestCase):
     def test_iv3_no_download_missing_key(self) -> None:

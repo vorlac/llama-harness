@@ -366,7 +366,11 @@ def wait_until_ready(host: str, port: int, proc: subprocess.Popen, timeout: int 
                 if resp.status == 200:
                     return True
         except Exception:
-            time.sleep(0.5)
+            pass
+        # A non-200 answer (the server is up but not serving yet) falls through
+        # here just like a refused connection; both back off before the next poll
+        # so a slow-starting server is polled, not busy-spun to the deadline.
+        time.sleep(0.5)
     return False
 
 
