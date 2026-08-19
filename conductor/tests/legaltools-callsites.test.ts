@@ -31,6 +31,15 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Comments are BLANKED (not deleted) before scanning, so line numbers survive and
+// prose that merely mentions the function — "forwards to legalTools (repoConfigured)"
+// — is never mistaken for a call. The first version of this guard matched exactly
+// that and reported two comments as under-argumented call sites: a scanner that
+// inspects the wrong text is the same defect class it exists to catch. The blanker
+// is shared with journal-vocab.test.ts and pinned by strip-comments.test.ts, whose
+// canaries fail if either audit's view of a shipped file narrows again.
+import { stripComments } from "./fixtures/strip-comments.ts";
+
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const conductorDir = path.resolve(testsDir, "..");
 
@@ -68,36 +77,6 @@ interface CallSite {
   line: number;
   args: string[];
   text: string;
-}
-
-// Comments are BLANKED (not deleted) before scanning, so line numbers survive and
-// prose that merely mentions the function — "forwards to legalTools (repoConfigured)"
-// — is never mistaken for a call. The first version of this guard matched exactly
-// that and reported two comments as under-argumented call sites: a scanner that
-// inspects the wrong text is the same defect class it exists to catch.
-function stripComments(source: string): string {
-  let out = "";
-  let i = 0;
-  while (i < source.length) {
-    const two = source.slice(i, i + 2);
-    if (two === "//") {
-      while (i < source.length && source[i] !== "\n") {
-        out += " ";
-        i += 1;
-      }
-    } else if (two === "/*") {
-      while (i < source.length && source.slice(i, i + 2) !== "*/") {
-        out += source[i] === "\n" ? "\n" : " ";
-        i += 1;
-      }
-      out += "  ";
-      i += 2;
-    } else {
-      out += source[i];
-      i += 1;
-    }
-  }
-  return out;
 }
 
 function legalToolsCallSites(): CallSite[] {

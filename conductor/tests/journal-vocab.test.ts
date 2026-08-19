@@ -43,6 +43,14 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Comments are BLANKED, not deleted, so line numbers survive and prose that
+// merely mentions `journal.log(...)` is never scanned as a call site (the
+// legaltools-callsites.test.ts idiom, for the same reason it was needed there).
+// One shared blanker serves both audits and is pinned by strip-comments.test.ts:
+// a stripper that reads the `/*` inside a glob literal as a comment opener blanks
+// a file's tail, and both audits then report full coverage of a file they stopped
+// reading part way through.
+import { stripComments } from "./fixtures/strip-comments.ts";
 import { createJournal } from "../adapter/journal.ts";
 import type { Journal } from "../adapter/journal.ts";
 import { openWorkspace } from "../adapter/state.ts";
@@ -117,34 +125,6 @@ interface CallSite {
   line: number;
   args: string[];
   text: string;
-}
-
-// Comments are BLANKED, not deleted, so line numbers survive and prose that
-// merely mentions `journal.log(...)` is never scanned as a call site (the
-// legaltools-callsites.test.ts idiom, for the same reason it was needed there).
-function stripComments(source: string): string {
-  let out = "";
-  let i = 0;
-  while (i < source.length) {
-    const two = source.slice(i, i + 2);
-    if (two === "//") {
-      while (i < source.length && source[i] !== "\n") {
-        out += " ";
-        i += 1;
-      }
-    } else if (two === "/*") {
-      while (i < source.length && source.slice(i, i + 2) !== "*/") {
-        out += source[i] === "\n" ? "\n" : " ";
-        i += 1;
-      }
-      out += "  ";
-      i += 2;
-    } else {
-      out += source[i];
-      i += 1;
-    }
-  }
-  return out;
 }
 
 function productionFiles(): string[] {

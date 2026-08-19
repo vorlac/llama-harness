@@ -43,6 +43,28 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   own git helper while the adapter's `headSha()` was correct; one bun-leg gate failure,
   evidence preserved at the gate's durable path. Watch for recurrence; not scheduled.
 
+## Phase I.3 — ISSUE-088 stripComments canary
+- **Landed:** one shared string/template/regex-aware `stripComments` at
+  `conductor/tests/fixtures/strip-comments.ts` (both private quote-blind copies deleted);
+  8 tests incl. three whole-tree canaries (no shipped file loses a CODE line, every tail
+  survives, the original witness site is readable). Measured blast radius at HEAD before
+  the fix: 150 blanked code lines in `core/gates-edit.ts`, 189 in `adapter/tools.ts`.
+- **Widened-view sweep:** zero real violations in the newly visible ~340 lines — the one
+  newly seen journal site (`config.updated`, tools.ts:9276) is a legal, listed event.
+  Cross-checked against a real TS 5.9.3 parse over all 104 files: 0 code chars blanked,
+  0 comment chars kept. Register drift noted: file is `core/gates-edit.ts` (register said
+  adapter/), ranges shifted; defect reproduced exactly.
+- **Evidence:** TDD red 6/8 → green 8/8; full gate 1404/1404 (implementer) + orchestrator
+  mutation re-run (quote-branch neutered → fail=6; restore hash-identical) + full gate.
+- **Verification note:** the stage's adversarial verifier never ran (see incident below);
+  orchestrator verification substituted. The implementer itself caught and fixed a
+  non-load-bearing regex assertion via mutation testing mid-stage.
+- **Incident:** the machine SLEPT mid-workflow — the I.4a wiring agent died mid-response
+  ("computer went to sleep"); the canary had already finished; no partial wiring edits
+  reached the tree (verified: only the four canary files present). `caffeinate -is`
+  (pid noted in session) now pins the machine awake for the campaign's remainder; the
+  wiring stage resumes from the workflow cache.
+
 ## Phase I.2 — ISSUE-002 (CRITICAL) + GAP-004 + CR-2
 - **Landed:** `sessionTreeOf(store, item)` returns `item.worktree ?? store.root` — always a
   PATH — with `itemTreeOf` deriving the marker SLUG independently; the shipped default
