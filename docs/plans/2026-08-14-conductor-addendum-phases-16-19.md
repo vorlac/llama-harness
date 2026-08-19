@@ -1,6 +1,8 @@
 # Conductor addendum — Phases 16-19: intake clarification, artifact discipline, cleanup, activity audit
 
-**Status:** proposed, awaiting review. Nothing here is started.
+**Status:** amended per the step-5 decisions (D14, 2026-08-18 —
+`docs/reviews/conductor-review/step5-decisions.md` §3). Nothing here is started; execution is
+gated on the fix campaign's build-floor pass (constraint A4 below).
 **Relationship to the base plan:** this is an **addendum**, not an edit.
 `docs/plans/2026-08-07-conductor-harness-plan.md` is immutable (`HANDOFF.md`, standing rules) and
 stays immutable. Its Phases 0-15 and its §11 acceptance checklist are untouched. This document adds
@@ -27,6 +29,28 @@ Two addendum-specific constraints:
 - **A2 — Phase 14's POC arms are measured with `clarify.enabled: false`.** A clarification-on arm is
   a separate future measurement and is explicitly out of scope here. Any POC re-run that enables it
   must say so in its report.
+
+Four step-5 amendments (D14, 2026-08-18):
+
+- **A3 — Orchestrator-agnostic trust.** Trust lives in the harness, not the orchestrator: any
+  prompter (human or LLM) must get a self-defending result produced entirely by local models. No
+  task here may assume a stronger-model orchestrator compensates for a missing witness
+  (`docs/reviews/conductor-review/step5-decisions.md` §1).
+- **A4 — Sequencing.** No addendum task starts before the fix campaign's build-floor pass
+  (Phase VII of `docs/build/fix-campaign-plan.md`) is complete — these ~12 tasks must land on the
+  new audit floor, not the regime that stopped scaling at ~task 40 of 52 (MACRO-030). Phase 16
+  planning also re-takes the tools.ts split decision (the D2 rider); if the split lands, it lands
+  before Phase 17's tool additions.
+- **A5 — The tool-addition map.** A new `conductor_*` tool touches FIVE files: `tools.ts`
+  (handler + input + `CONDUCTOR_TOOL_NAMES`); `types.ts` (schema, twice — interface + JSON schema);
+  `tool-bindings.ts` (binding); `plugin/index.ts` (ToolSpec — a missing entry silently falls back
+  to an argument-free definition); `gates-phase.ts` (legality via `requireMetaTool`'s declaration
+  table, landed by the fix campaign's GAP-006 — never bespoke). Every task file list below means
+  all five even where it predates this map (MACRO-025).
+- **A6 — Dependency gates on Phase 17.** Task 17.4's `recommended: null` acceptance (stop kind
+  `surfaced`) is unsatisfiable before GAP-021's total stop closer (fix campaign Phase III.2).
+  Task 17.5's delivery assertions presuppose the §6.4 injection layer is wired (ISSUE-001, fix
+  campaign Phase I.4). Neither task may be accepted before its dependency lands.
 
 ---
 
@@ -180,7 +204,10 @@ optional field, `CLARIFY_CANDIDATES` + `CLARIFY_REFUTATION` schemas),
 `conductor/core/journal-events.ts` (widen per the rule at
 [journal-events.ts:101-109](../../conductor/core/journal-events.ts#L101-L109): add
 `clarify.candidates`, `clarify.dropped`, `clarify.refuted`, `clarify.asked` under a new `clarify`
-component, each with a grepping test in the same commit).
+component, each with a grepping test in the same commit),
+`conductor/adapter/tool-bindings.ts` (binding), `conductor/plugin/index.ts` (ToolSpec — the
+silent-fallback seam), `conductor/core/gates-phase.ts` (legality row in `requireMetaTool`'s table)
+— the last three added per A5 (MACRO-025's two omitted files plus the legality seam).
 
 ### Task 17.4 — INTAKE gate branch
 
@@ -198,7 +225,9 @@ keeps discriminating on run fields exactly as it already does for `classificatio
 
 The **`recommended: null`** row is load-bearing: the continuation engine must not re-prompt a run
 that is waiting on a human. Its assertion is explicit — *given a run in that row, `continuation.ts`
-emits no re-prompt and `shouldTerminate` yields stop kind `surfaced`*.
+emits no re-prompt and `shouldTerminate` yields stop kind `surfaced`*. Per A6, this acceptance is
+unsatisfiable until GAP-021's total stop closer gives `surfaced` a writer (fix campaign
+Phase III.2) — 17.4 is gated on it.
 
 Under `onUnanswered: "proceed"`, unanswered questions are instead written to `decisions.jsonl` as
 explicit **assumptions** (option A "assume X", option B "ask", choice A, why "clarify.onUnanswered =
@@ -216,6 +245,8 @@ An answered clarification is worthless if `conductor_decompose` never sees it.
 - **Test:** an end-to-end fixture where the answer text is a distinctive token, asserting the token
   appears in the dispatched planner prompt. A wired-but-undelivered pack is the exact defect class
   `HANDOFF.md` records as C-028; this test is the guard against repeating it.
+- Per A6: "ahead of the doctrine pack" and the C-028 guard both presuppose the §6.4 injection
+  layer is wired (ISSUE-001, fix campaign Phase I.4) — 17.5 is gated on it.
 
 **Phase 17 acceptance:** A1 regression green; a clarify-enabled fixture run asks ≥1 question on an
 ambiguous prompt and **zero** on an unambiguous one; a candidate answerable from the repo is killed
@@ -249,6 +280,9 @@ mechanically rather than in prose (G9) and produces a journal record for free (G
 - Journal `artifact.written`.
 
 **Legality:** every non-terminal run state, every registered session. It advances no FSM state.
+
+**Files:** the full A5 five-file map (`tools.ts`, `types.ts`, `tool-bindings.ts`,
+`plugin/index.ts`, `gates-phase.ts`) plus the artifact ledger module this task introduces.
 
 ### Task 18.2 — Lifetimes and the sweep
 
