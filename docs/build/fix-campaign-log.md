@@ -65,6 +65,33 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase V (non-live) — doctrine content + pre-live readiness
+- **Landed (V.1, committed f33b95b):** GAP-037 generated run-shape playbook in core.md (no
+  hand-listed tools); GAP-042 generated "measured limits" in decompose.md derived from
+  core/planning.ts constants (ITEM_MAX_FILES, read-set budget), teaching the real size rule
+  and dropping the falsified "law bends by path arithmetic" prose (ISSUE-012); GAP-043 uniform
+  stuck-state protocol single-sourced into every pack's generated block; GAP-044 core.md ask
+  policy reconciled with the mid-run surface/answer-file mechanism. Gate 1758/1758.
+  (Salvaged: the workflow crashed on StructuredOutput serialization — the model packed all
+  fields into `summary` with angle brackets — but the work and its gate run were complete;
+  committed after an independent gate confirmation, verify folded into the V stage.)
+- **Landed (V.2):** GAP-032 `core/preflight.ts` spec-currency go/no-go (keyed on
+  verifiedAgainstHead vs HEAD + cited-file diffs) — the owner's ~2-min pre-13.2 check; GAP-033
+  `checkLiveArtifact` binds SMOKE.md / conductor-report.md to runId + an evidence seq + a real
+  command line + a content floor, before the artifacts exist. ISSUE-042 (D9) router pool-sizing
+  liveness fix in `router/admission.hpp` — distinct in-flight model KEYS bounded so many
+  client-controlled model strings cannot each seize maxInflightPerModel workers and starve
+  `/conductor/health` (a single key keeps its full allowance). ISSUE-104 (reviews-upheld reads
+  None/not-measured, not a fabricated 0), ISSUE-107 (cell PATH threaded through the spawnability
+  preflight), ISSUE-108/-112 editable halves.
+- **Evidence:** node gate 1769/1769; router-tests 93 cases / 27736 assertions SUCCESS;
+  verifier CONFIRMED, all 6 load-bearing mutations reproduced red + inverse-restored.
+- **Owner-owned follow-ups (serve.py / docs / live):** ISSUE-105 (serve.py session trap must
+  drop INT/TERM so Ctrl-C doesn't abandon a live model), ISSUE-108 sleep-on-non-200 in
+  wait_until_ready, ISSUE-106 main-launch test, ISSUE-078 (14.2 spec committed-path clause —
+  couples to the live 14.2 run), and the 13.2 spec fanout.ts line-number bump — done by the
+  orchestrator in this session's follow-on where editable, else handed to the 13.2/14.2 owner.
+
 ## Phase IV — security XS day + concurrency/crash + cheap fixes/honesty
 - **Landed (IV.1 security):** git `-c` exec-config keys denied by git's own key-shape rules
   (exec sections + leaves) AND the equivalent env-var class (GIT_PAGER/EXTERNAL_DIFF/SSH/…,

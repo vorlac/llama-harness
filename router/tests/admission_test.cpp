@@ -1156,6 +1156,43 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "[11.4-bound-distinct-inflight-keys] a distinct model KEY cannot claim a fresh "
+    "maxInflightPerModel allowance once the distinct-in-flight budget is spent — the ISSUE-042 "
+    "pool-starvation guard, per distinct key, not global") {
+    // maxInflightPerModel 8 spends the whole task-queue margin on one model, so the
+    // distinct-in-flight budget is exactly ONE key. A stream of distinct model
+    // strings (the client controls the `model` field) can no longer each seize
+    // maxInflightPerModel workers and starve /conductor/health.
+    constexpr int kInflightCap = 8;
+    conductor::router::AdmissionController controller(makeConfig(1, kInflightCap, 64, 600000));
+
+    // The one distinct key claims a slot.
+    CHECK(controller.admit(kModelA, "interactive") == AdmissionOutcome::Admitted);
+    CHECK(controller.inflight_count(kModelA) == 1);
+
+    // The SAME key keeps its own allowance — the bound is on distinct KEYS, never
+    // on one model's in-flight count.
+    CHECK(controller.admit(kModelA, "interactive") == AdmissionOutcome::Admitted);
+    CHECK(controller.inflight_count(kModelA) == 2);
+
+    // A DIFFERENT model, while the first holds in-flight, is refused immediately:
+    // it neither seizes a worker nor parks in the queue. admit() returns without
+    // blocking (this thread is not backed by a releaser), which is the whole point.
+    CHECK(controller.admit(kModelB, "interactive") == AdmissionOutcome::Overflowed);
+    CHECK(controller.inflight_count(kModelB) == 0);
+    CHECK(controller.queued_count() == 0);
+
+    // Draining the first key frees the distinct-in-flight budget, so the second
+    // model becomes admissible — the bound tracks live keys, it is not a ban.
+    controller.release(kModelA);
+    controller.release(kModelA);
+    CHECK(controller.inflight_count(kModelA) == 0);
+    CHECK(controller.admit(kModelB, "interactive") == AdmissionOutcome::Admitted);
+    controller.release(kModelB);
+    CHECK(controller.inflight_count(kModelB) == 0);
+}
+
+TEST_CASE(
     "[11.4-health-at-full-queue] with every in-flight slot held and the queue full, "
     "GET /conductor/health still answers 200 — the pool-exhaustion proof") {
     constexpr int kInflightCap = 2;

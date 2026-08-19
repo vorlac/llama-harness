@@ -39,6 +39,13 @@ import conductor_wiring
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# ISSUE-107: the cell environment is hermetic in its opencode STATE (home dirs),
+# not in its executable search path. Omitting PATH left a bare `opencode` (and
+# `git`) unresolvable against os.defpath, so every cell spawn-failed. The cell
+# runs with THIS PATH, and the spawnability preflight resolves argv[0] against
+# the SAME value, so an approved command is one the cell can actually launch.
+CELL_PATH = os.environ.get("PATH") or os.defpath
+
 # Beside - never on top of - the model benchmark's own report.md and its
 # per-model directories, which are gitignored and unrecoverable.
 BENCH_DIR = REPO_ROOT / ".data" / "benchmark"
@@ -423,7 +430,7 @@ def command_is_spawnable(argv: Sequence[str]) -> bool:
         return os.path.isfile(program) and os.access(program, os.X_OK)
     if os.sep in program:
         return os.path.isfile(program) and os.access(program, os.X_OK)
-    return shutil.which(program) is not None
+    return shutil.which(program, path=CELL_PATH) is not None
 
 
 def check_commands_spawnable(tasks: Sequence[Task]) -> List[str]:
@@ -598,6 +605,11 @@ def build_cell_env(cell_dir: Any, config_path: Any) -> Dict[str, str]:
     cell = Path(cell_dir)
     home = cell / "home"
     return {
+        # ISSUE-107: opencode and git are spawned by bare name, so the cell needs
+        # a PATH to resolve them; without it every cell spawn-fails against
+        # os.defpath. Hermeticity is over opencode STATE (the homes below), not
+        # over the executable search path.
+        "PATH": CELL_PATH,
         "OPENCODE_CONFIG": str(Path(config_path)),
         "OPENCODE_TEST_HOME": str(home),
         "HOME": str(home),
@@ -783,8 +795,11 @@ def build_conductor_cell_config(task: Task) -> Dict[str, Any]:
         "parallel": {
             "writes": "off",
             "maxImplementers": 1,
-            "maxReaders": 6,
-            "subSessionTimeoutMs": 900000,
+            # ISSUE-112: derived from conductor_wiring's single source, never a
+            # third hand-spelled copy that drifts from the served --parallel /
+            # admission sizing with nothing to catch it.
+            "maxReaders": conductor_wiring.DEFAULT_MAX_READERS,
+            "subSessionTimeoutMs": conductor_wiring.SUB_SESSION_TIMEOUT_MS,
         },
         "models": {"default": "", "roles": {}},
         "ponytail": "full",
@@ -1217,10 +1232,17 @@ def _count_schema_retries(journal_path: Path) -> int:
     return count
 
 
-def _count_upheld_findings(reviews_dir: Path) -> int:
-    """Upheld verdicts across every review file this run wrote."""
+def _count_upheld_findings(reviews_dir: Path) -> Optional[int]:
+    """Upheld verdicts across every review file this run wrote.
+
+    ISSUE-104: no live run writes this directory yet (the §1.2 reviews writer is
+    not landed), so an absent source reads as None — "not measured" — rather than
+    a fabricated measured 0 that a report column would render as a real finding
+    count. When the writer lands and a run records reviews/<id>.json with the
+    verdict shape below, the count becomes a real datum with no reader change.
+    """
     if not reviews_dir.is_dir():
-        return 0
+        return None
     total = 0
     for path in sorted(reviews_dir.glob("*.json")):
         try:

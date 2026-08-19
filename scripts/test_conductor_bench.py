@@ -425,6 +425,29 @@ class ManifestTests(unittest.TestCase):
                         kw.arg, "shell", "conductor_bench.py must never pass shell=True"
                     )
 
+    def test_cell_env_carries_path_and_preflight_uses_it(self):
+        """[14.1-cell-path] ISSUE-107: the cell env carries a PATH so bare
+        `opencode`/`git` resolve, and the spawnability preflight resolves argv[0]
+        against that SAME PATH - so an approved command is one the cell can
+        actually launch, not one the driver's richer PATH happens to reach."""
+        cell = self.tmp / "cell-path"
+        env = cb.build_cell_env(cell, cell / "arm.json")
+        self.assertIn("PATH", env)
+        self.assertEqual(env["PATH"], cb.CELL_PATH)
+        self.assertTrue(env["PATH"], "an empty cell PATH cannot spawn opencode")
+
+        # A command that resolves only on the CELL PATH must be approved, and one
+        # that does not must be refused - proving the preflight reads CELL_PATH,
+        # not the process PATH.
+        bindir = self.tmp / "cellbin"
+        bindir.mkdir()
+        fake = bindir / "cell-only-runner"
+        fake.write_text("#!/bin/sh\nexit 0\n")
+        fake.chmod(0o755)
+        with mock.patch.object(cb, "CELL_PATH", str(bindir)):
+            self.assertTrue(cb.command_is_spawnable(["cell-only-runner"]))
+            self.assertFalse(cb.command_is_spawnable(["definitely-not-a-real-runner"]))
+
 
 class ArmTests(unittest.TestCase):
     def setUp(self):
@@ -866,7 +889,22 @@ class PlanAndCellTests(unittest.TestCase):
                 self.assertEqual(
                     cfg, cb.build_conductor_cell_config(task), "must be a pure function of the task"
                 )
-                self.assertIn(cfg["git"]["mode"], ("read-only", "commit", "commit-and-push"))
+                # ISSUE-112: git.mode is pinned to the literal the 90-run campaign
+                # requires - a read-only cell would score every run as a failure -
+                # and parallel.* is pinned so a fan-out default cannot drift the
+                # cell away from the served --parallel / admission sizing. maxReaders
+                # and subSessionTimeoutMs are asserted equal to conductor_wiring's
+                # single source, so the two spellings cannot diverge silently.
+                self.assertEqual(cfg["git"]["mode"], "commit")
+                self.assertEqual(cfg["parallel"]["writes"], "off")
+                self.assertEqual(cfg["parallel"]["maxImplementers"], 1)
+                self.assertEqual(
+                    cfg["parallel"]["maxReaders"], cb.conductor_wiring.DEFAULT_MAX_READERS
+                )
+                self.assertEqual(
+                    cfg["parallel"]["subSessionTimeoutMs"],
+                    cb.conductor_wiring.SUB_SESSION_TIMEOUT_MS,
+                )
                 self.assertEqual(cfg["verify"]["behavioralPaths"], task.behavioral_paths)
                 for token in task.repo_test_command:
                     self.assertIn(token, blob, "the visible runner must be configured")
@@ -1407,14 +1445,17 @@ class MetricsTests(unittest.TestCase):
         self.make_run_dir(running, "run-0001", stop=None, state="IMPLEMENTING")
         self.assertIsNone(cb.collect_conductor_metrics(running)["stopKind"])
 
-        # A run directory with no reviews/ recorded none - zero, not null.
+        # ISSUE-104: a run directory with no reviews/ source has nothing to count.
+        # A live cell is exactly this case - no writer produces reviews/ yet - so
+        # the metric reads None ("not measured"), never a fabricated measured 0 a
+        # report column would render as a real "0 findings upheld".
         no_reviews = self.tmp / "noreviews"
         no_reviews.mkdir()
         run_dir = self.make_run_dir(no_reviews, "run-0001")
         for path in (run_dir / "reviews").glob("*.json"):
             path.unlink()
         (run_dir / "reviews").rmdir()
-        self.assertEqual(cb.collect_conductor_metrics(no_reviews)["reviewFindingsUpheld"], 0)
+        self.assertIsNone(cb.collect_conductor_metrics(no_reviews)["reviewFindingsUpheld"])
 
     def test_nonconductor_metrics_null(self):
         """[14.1-nonconductor-metrics-null] the four conductor-only metrics are

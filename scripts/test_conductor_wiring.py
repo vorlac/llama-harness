@@ -2636,6 +2636,47 @@ class RouterHealthProbe(WiringTestCase):
 # ---------------------------------------------------------------------------
 
 
+class WaitUntilReadyCase(WiringTestCase):
+    """ISSUE-108: serve.wait_until_ready was reached by no test - every
+    main()-driven case stubs it - so a `return True` stub and a dropped
+    proc.poll() early-exit both survived. These drive the REAL function against a
+    real listener, so those mutations are now caught."""
+
+    class _AliveProc:
+        def poll(self) -> Any:
+            return None
+
+    class _DeadProc:
+        def __init__(self, code: int) -> None:
+            self._code = code
+
+        def poll(self) -> Any:
+            return self._code
+
+    def test_ready_when_listener_answers_200(self) -> None:
+        server = _HealthServer((LISTEN_HOST, 0), _HealthHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        ready = serve.wait_until_ready(LISTEN_HOST, port, self._AliveProc(), timeout=5)
+        self.assertTrue(ready, "a live 200 /health must be reported ready")
+
+    def test_not_ready_when_process_already_exited(self) -> None:
+        # No listener is bound: readiness must come back False via the proc.poll()
+        # early-exit, not by hanging until the timeout. A dropped early-exit would
+        # spin the full timeout, so a tight bound proves the branch runs.
+        started = time.time()
+        ready = serve.wait_until_ready(
+            LISTEN_HOST, free_port(), self._DeadProc(1), timeout=30
+        )
+        elapsed = time.time() - started
+        self.assertFalse(ready, "a dead server process must never be reported ready")
+        self.assertLess(elapsed, 5.0, "proc.poll() must short-circuit, not wait out the timeout")
+
+
 class EvictionKnob(unittest.TestCase):
     def test_iv3_no_download_missing_key(self) -> None:
         """[iv3-eviction-no-download-knob] the generated benchmark config offers no download_missing."""

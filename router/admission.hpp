@@ -65,6 +65,23 @@ namespace conductor::router {
     inline constexpr int kAdmissionThreadBudget = detail::kAdmissionThreadBudget;
     inline constexpr int kTaskQueueThreadMargin = detail::kTaskQueueThreadMargin;
 
+    // ISSUE-042: the task queue is sized maxQueued + maxInflightPerModel + margin —
+    // a SINGLE maxInflightPerModel addend, on the §2.2 single-model premise. But the
+    // `model` field is client-controlled and each distinct string opens its own
+    // in-flight counter, so a handful of distinct model names would otherwise seize
+    // maxInflightPerModel workers apiece until the pool is exhausted and the
+    // out-of-admission /conductor/health probe can no longer be dispatched. Bounding
+    // the number of distinct model keys that may hold in-flight slots at once keeps
+    // total in-flight within (margin - 1) workers of the single-model budget, so one
+    // worker is always free for health even with the queue full. One key always
+    // admits; extra distinct keys ride the margin. maxInflightPerModel <= 0 admits
+    // nothing, so the bound is unreachable and reported as zero.
+    [[nodiscard]] inline std::size_t maxDistinctInflightModels(int maxInflightPerModel) {
+        if (maxInflightPerModel <= 0)
+            return 0;
+        return static_cast<std::size_t>(1 + (kTaskQueueThreadMargin - 1) / maxInflightPerModel);
+    }
+
     enum class AdmissionOutcome {
         Admitted,
         TimedOut,
@@ -98,6 +115,7 @@ namespace conductor::router {
     public:
         explicit AdmissionController(const RouterConfig& config)
             : maxInflightPerModel_(config.admission.maxInflightPerModel)
+            , maxDistinctInflight_(maxDistinctInflightModels(config.admission.maxInflightPerModel))
             , maxQueued_(config.admission.maxQueued < 0
                              ? 0u
                              : static_cast<std::size_t>(config.admission.maxQueued))
@@ -117,6 +135,16 @@ namespace conductor::router {
             std::unique_lock<std::mutex> lock(mutex_);
 
             if (hasFreeSlot(model)) {
+                // A model with nothing in flight is a NEW distinct key: hasFreeSlot
+                // grants it a worker the instant it arrives. Refuse it as a capacity
+                // overflow (G5's honest capacity signal, no wait) once the distinct
+                // in-flight keys already spend the sized budget, so distinct model
+                // strings cannot exhaust the pool. inflight_ holds only keys with a
+                // positive count, so its size IS the distinct in-flight total.
+                const bool newKey = inflightFor(model) == 0;
+                if (newKey && inflight_.size() >= maxDistinctInflight_)
+                    return AdmissionOutcome::Overflowed;
+
                 ++inflight_[model];
                 return AdmissionOutcome::Admitted;
             }
@@ -284,6 +312,7 @@ namespace conductor::router {
         }
 
         const int maxInflightPerModel_;
+        const std::size_t maxDistinctInflight_;
         const std::size_t maxQueued_;
         const std::chrono::milliseconds queueTimeout_;
         const Priorities priorities_;

@@ -2291,14 +2291,17 @@ TEST_CASE(
     answerWith(upstream, kUpstreamAnswer);
     upstream.start();
 
-    conductor::router::Router router(makeConfig(upstream.port(), tmp.ledgerPath()));
+    // maxInflightPerModel 1 sizes the distinct-in-flight budget (ISSUE-042) to
+    // exactly this burst of distinct keys, so all kConcurrent are admitted at once
+    // — each its own admission bucket AND its own ledger marker — and the ledger is
+    // still hammered by kConcurrent live completions.
+    conductor::router::Router router(
+        makeConfig(upstream.port(), tmp.ledgerPath(), /*maxInflightPerModel=*/1));
     router.start();
 
     std::vector<RequestPtr> requests;
     requests.reserve(kConcurrent);
     for (int i = 0; i < kConcurrent; ++i) {
-        // Distinct models: each request is its own admission bucket (all
-        // admitted immediately) AND its own ledger marker.
         requests.push_back(
             postAsync(router.listen_port(), {}, chatBody("cc-" + std::to_string(i))));
     }
