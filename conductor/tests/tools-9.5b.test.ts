@@ -2578,6 +2578,17 @@ test("[9.5b-report-md-questions-exclusions-metrics] report.md is written atomica
     }
     assert.ok(exclusions.includes("src/beta.mjs"), "and the preexistingDirty path publish skipped");
     assert.ok(section(md, "Metrics").includes("4711"), "the metrics section carries the §7.2 summary");
+    // GAP-029: the router-contact witness records that a real MetricsSummary
+    // crossed the §4.4 seam, and renders the served totalRequests so an unrouted
+    // run is loud rather than silent.
+    assert.ok(
+      section(md, "Metrics").includes("Router contact: CONFIRMED"),
+      "the metrics section states the router was CONTACTED (GAP-029)",
+    );
+    assert.ok(
+      section(md, "Metrics").includes("totalRequests=4711"),
+      "and renders the served request count beside the witness (GAP-029)",
+    );
 
     assert.equal(res.reportPath, path.join(bench.runDir, "report.md"), "written at the §1.2 path");
     assert.equal(
@@ -2614,6 +2625,12 @@ test("[9.5b-report-md-questions-exclusions-metrics] report.md is written atomica
     assert.ok(
       /unavailable/i.test(section(readReport(bench.runDir), "Metrics")),
       "and report.md says so on its metrics line",
+    );
+    // GAP-029: and the positive ABSENT witness distinguishes "router was down" from
+    // "metrics were never read" — the two the G5 tautology cannot tell apart.
+    assert.ok(
+      section(readReport(bench.runDir), "Metrics").includes("Router contact: ABSENT"),
+      "the metrics section states the router was NOT contacted (GAP-029)",
     );
   });
 });

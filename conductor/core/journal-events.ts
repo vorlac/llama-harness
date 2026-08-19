@@ -11,12 +11,21 @@
 
 import type { LogLevel } from "./types.ts";
 
+// The component names other tools (conductor/tools/replay.ts) match records
+// against BY SYMBOL. Declared here as the single source (GAP-034 / ISSUE-131) and
+// spliced into COMPONENTS below, so a rename moves in ONE place and every tool
+// that imports the symbol moves with it — a renamed component can no longer blank
+// a replay lane while the vocabulary claims reuse.
+export const COMPONENT_FSM = "fsm";
+export const COMPONENT_GATES = "gates";
+export const COMPONENT_FANOUT = "fanout";
+
 // The eight §7.1 components (plan lines 1911-1914). An `as const` array is the
 // single source for both the union type and the EVENTS keys (per G2: no `enum`).
 export const COMPONENTS = [
-  "fsm",
-  "gates",
-  "fanout",
+  COMPONENT_FSM,
+  COMPONENT_GATES,
+  COMPONENT_FANOUT,
   "evidence",
   "continuation",
   "inject",
@@ -25,24 +34,38 @@ export const COMPONENTS = [
 ] as const;
 export type Component = (typeof COMPONENTS)[number];
 
+// The event names other tools reference BY SYMBOL, declared once here and spliced
+// into EVENTS below (GAP-034 / ISSUE-131). replay.ts imports these rather than
+// restating the literals, so a name renamed here follows into every timeline it
+// feeds instead of silently blanking one while a guard-test claims reuse.
+export const FSM_TRANSITION = "transition";
+export const FSM_GUARD_REJECT = "guard-reject";
+export const GATES_DENY = "deny";
+export const GATES_GATE_CRASH = "gate-crash";
+export const FANOUT_DISPATCHED = "subsession.dispatched";
+export const FANOUT_HOLD = "subsession.hold";
+export const FANOUT_COMPLETE = "subsession.complete";
+export const FANOUT_RETRY = "subsession.retry";
+export const FANOUT_ABORT = "subsession.abort";
+
 // The closed event vocabulary, one non-empty list per component, derived from
 // the plan's event usage across §2, §3 and §7. Adapters emit only these names;
 // widening the vocabulary means adding a name here (and a test that greps for
 // it), never inventing one at the call site.
 export const EVENTS: Record<Component, readonly string[]> = {
   // §3.1 / §7.4: FSM transitions and refusals.
-  fsm: ["transition", "refusal", "guard-reject", "invalid-transition"],
+  fsm: [FSM_TRANSITION, "refusal", FSM_GUARD_REJECT, "invalid-transition"],
   // §3.6 / §7.2 / §7.4: gate decisions (with their input snapshot at debug),
   // the §2.8 gate-crash anomaly, and the budgeted override hatch.
-  gates: ["deny", "allow", "snapshot", "gate-crash", "override-granted"],
+  gates: [GATES_DENY, "allow", "snapshot", GATES_GATE_CRASH, "override-granted"],
   // §7.2 gives fanout/subsession.dispatched as the record-shape example; the
   // rest are the sub-session lifecycle the fan-out engine drives.
   fanout: [
-    "subsession.dispatched",
-    "subsession.hold",
-    "subsession.complete",
-    "subsession.retry",
-    "subsession.abort",
+    FANOUT_DISPATCHED,
+    FANOUT_HOLD,
+    FANOUT_COMPLETE,
+    FANOUT_RETRY,
+    FANOUT_ABORT,
   ],
   // §2.6 evidence kinds: red / green / verify.
   evidence: ["red", "green", "verify"],

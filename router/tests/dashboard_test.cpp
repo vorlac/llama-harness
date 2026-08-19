@@ -1982,3 +1982,60 @@ TEST_CASE(
         CHECK(mentions(text, "error"));
     }
 }
+
+// GAP-048 — the dashboard read pass, recorded. dashboard/ledger_view.hpp and
+// dashboard/main.cpp were examined by nobody across the three reviews; the risk
+// the review accepted was that a reader over the ledgers might inherit the two
+// live ledger defects — ISSUE-101 (a bare per-line JSON.parse that THROWS on a
+// torn file, killing conductor_status and the stop-report writer at exactly the
+// post-crash moment torn lines exist) and ISSUE-026 (a cross-process seq hole in
+// evidence.jsonl's appender). The read found the dashboard inherits NEITHER, and
+// this case pins WHY as a named regression guard so the risk-acceptance is now a
+// coverage entry, not a hope. Both properties are exercised piecemeal above; here
+// they are bound to the issue numbers they answer.
+TEST_CASE(
+    "[gap048-no-inherited-ledger-defects] the dashboard reader inherits neither the ISSUE-101 "
+    "torn-line THROW nor the ISSUE-026 cross-process seq hole: it decodes fail-soft and follows by "
+    "byte offset, so a torn tail is carried not thrown and the follow position has no seq to hole") {
+    SUBCASE("ISSUE-101: a torn / truncated / non-JSON line is skipped-and-counted, never thrown") {
+        // The exact shape ISSUE-101 dies on: a line cut off mid-object. The
+        // dashboard's parse is non-throwing by construction (json::parse(...,
+        // /*allow_exceptions=*/false) + is_object guard), so it yields nullopt.
+        CHECK_NOTHROW((void)parseLedgerLine(R"({"model":"cut","status":2)"));
+        CHECK_FALSE(parseLedgerLine(R"({"model":"cut","status":2)").has_value());
+
+        LedgerTail tail;
+        std::vector<LedgerRecord> out;
+        // A torn record between two good ones costs exactly that record and the
+        // surrounding good lines still emit — the reader stays up on a file the
+        // questions-ledger reader would throw over.
+        CHECK_NOTHROW(out = tail.consume(lineNamed("before") + "\n" +
+                                         R"({"model":"broken","status":2)" + "\n" +
+                                         lineNamed("after") + "\n"));
+        REQUIRE(out.size() == 2);
+        CHECK(modelsOf(out) == std::vector<std::string>{ "before", "after" });
+        CHECK(tail.skipped() == 1);
+
+        // A half-written trailing line is CARRIED, not thrown and not mis-parsed:
+        // it completes on the next chunk, which is precisely the post-crash torn
+        // tail ISSUE-101 could not survive.
+        LedgerTail carrying;
+        CHECK_NOTHROW(out = carrying.consume(R"({"model":"half","sta)"));
+        CHECK(out.empty());
+        CHECK(carrying.skipped() == 0);  // an unterminated line is not yet corruption
+    }
+
+    SUBCASE("ISSUE-026: the follow position is derived from bytes, so there is no per-record seq to hole") {
+        // The dashboard never assigns or reads a cross-process sequence number;
+        // it follows the file by byte offset. nextRead is that whole decision,
+        // and it can neither skip (a gap) nor double-count (a dup):
+        //   - an append reads forward from exactly where the last read stopped;
+        CHECK(nextRead(100, 250) == conductor::dashboard::TailStep{ 100, false });
+        //   - an unchanged size re-reads nothing, so no record is counted twice;
+        CHECK(nextRead(100, 100) == conductor::dashboard::TailStep{ 100, false });
+        //   - a shrunken file is a new run: re-read from 0 and restart counters,
+        //     never a total spanning two files (the metrics ledger has no seq at
+        //     all, so the ISSUE-026 evidence.jsonl race has nothing to race on).
+        CHECK(nextRead(250, 40) == conductor::dashboard::TailStep{ 0, true });
+    }
+}

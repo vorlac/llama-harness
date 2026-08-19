@@ -8842,12 +8842,25 @@ function reportStaleLines(queue: Queue, staleRedAdded: string[]): string[] {
   });
 }
 
+// GAP-029: every report states, as a POSITIVE witness, whether the router was
+// actually CONTACTED for this run — a real MetricsSummary crossing the §4.4 seam —
+// or ABSENT. Without this line a "router / no-router equivalence" claim (the G5
+// tautology ISSUE-074 flagged) is trivially true: a report that never reads
+// metrics is byte-identical to one whose router was down. The witness also renders
+// the served totalRequests, so a run whose request count is implausibly low
+// against the sub-sessions it launched reads as unrouted rather than silently so.
+// totalRequests is read DEFENSIVELY: the seam hands over an UNVALIDATED
+// MetricsSummary (ISSUE-139), so a malformed body that slipped the fail-soft parse
+// renders "unknown" rather than a bare "undefined".
 function reportMetricsSection(summary: MetricsSummary | null): string {
-  return (
-    "## Metrics\n\n" +
-    (summary === null ? "(unavailable)" : JSON.stringify(summary, null, 2)) +
-    "\n"
-  );
+  const witness =
+    summary === null
+      ? "Router contact: ABSENT — no metrics summary crossed the §4.4 seam (router down, or the metrics seam was not wired)"
+      : "Router contact: CONFIRMED — router served metrics (totalRequests=" +
+        (typeof summary.totalRequests === "number" ? String(summary.totalRequests) : "unknown") +
+        ")";
+  const body = summary === null ? "(unavailable)" : JSON.stringify(summary, null, 2);
+  return "## Metrics\n\n" + witness + "\n\n" + body + "\n";
 }
 
 export async function handleReport(input: ReportInput): Promise<ReportResult> {

@@ -2881,80 +2881,174 @@ test(
 // Scenario 2 — trivial
 // ===========================================================================
 
-test(
-  "[13.1-trivial] a prompt classified `trivial` carries a complete §2.10 trivialItem, rides EXECUTING(trivial) through the whole item FSM with the merged lens set, and closes report-lite to TRIVIAL_DONE",
-  { timeout: 120_000 },
-  async () => {
-    const TEST_REL = "tests/trim.test.ts";
-    const FILE = "src/trim.ts";
-    const script: Script = (ctx) => {
-      if (ctx.role === "mechanical") {
-        return {
-          body: {
-            kind: "trivial",
-            rationale: "a single pure helper with one acceptance line",
-            confidence: "high",
-            trivialItem: {
-              title: "trim",
-              rationale: "the caller needs a trimmed label",
-              fileScope: [FILE],
-              testScope: [TEST_REL],
-              acceptance: ['fn(" a ") === "a"'],
-              behavioral: true,
-              ponytail: {
-                necessary: "the prompt asks for it",
-                reuse: "checked src/; nothing trims",
-                ladderRung: "one-liner",
-              },
+interface TrivialWalk {
+  bench: Bench;
+  itemId: string;
+  classifiedKind: string;
+  stateAfterClassify: string;
+  runClassification: string | undefined;
+  dispositionState: string | undefined;
+  itemStates: string[];
+  reportRunState: string;
+  reportMd: string;
+  stopKind: string | undefined;
+  seamDelta: number;
+}
+
+// Scenario 2 driven ONCE. The single §2.10 trivial classification is taken from
+// INTAKE straight to EXECUTING, through the full item FSM, and closed report-lite;
+// each of the three §13.1 s2 rows below reads one facet off this one capture. The
+// item-state list is read off the SAME journal the store wrote to, so "no stage
+// skipped" is a fact about what the FSM recorded, not what the driver assumed.
+async function runTrivialWalk(): Promise<TrivialWalk> {
+  const TEST_REL = "tests/trim.test.ts";
+  const FILE = "src/trim.ts";
+  const script: Script = (ctx) => {
+    if (ctx.role === "mechanical") {
+      return {
+        body: {
+          kind: "trivial",
+          rationale: "a single pure helper with one acceptance line",
+          confidence: "high",
+          trivialItem: {
+            title: "trim",
+            rationale: "the caller needs a trimmed label",
+            fileScope: [FILE],
+            testScope: [TEST_REL],
+            acceptance: ['fn(" a ") === "a"'],
+            behavioral: true,
+            ponytail: {
+              necessary: "the prompt asks for it",
+              reuse: "checked src/; nothing trims",
+              ladderRung: "one-liner",
             },
           },
-        };
-      }
-      if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "one file, one function" } };
-      if (ctx.role === "testWriter") {
-        return {
-          body: done("wrote the test"),
-          write: [{ rel: TEST_REL, text: itemTestSource(FILE, '" a "', '"a"') }],
-        };
-      }
-      if (ctx.role === "implementer") {
-        return { body: done("wrote the module"), write: [{ rel: FILE, text: "export function fn(s) { return s.trim(); }\n" }] };
-      }
-      if (ctx.role === "reviewer") {
-        if (ctx.itemState === "RED") return { body: testVet() };
-        return { body: noFindings(ctx.text) };
-      }
-      return { body: done("nothing to do") };
-    };
+        },
+      };
+    }
+    if (ctx.role === "skeptic") return { body: { agreed: true, correctedKind: null, note: "one file, one function" } };
+    if (ctx.role === "testWriter") {
+      return {
+        body: done("wrote the test"),
+        write: [{ rel: TEST_REL, text: itemTestSource(FILE, '" a "', '"a"') }],
+      };
+    }
+    if (ctx.role === "implementer") {
+      return { body: done("wrote the module"), write: [{ rel: FILE, text: "export function fn(s) { return s.trim(); }\n" }] };
+    }
+    if (ctx.role === "reviewer") {
+      if (ctx.itemState === "RED") return { body: testVet() };
+      return { body: noFindings(ctx.text) };
+    }
+    return { body: done("nothing to do") };
+  };
 
-    const bench = await makeBench({ tag: "trivial", prompt: "trim the label", script });
+  const bench = await makeBench({ tag: "trivial", prompt: "trim the label", script });
 
-    const classified = await handleClassify({ ...stageBase(bench) });
-    assert.equal(classified.kind, "trivial", "the classifier and its skeptic agreed on `trivial`");
-    assert.ok(typeof classified.itemId === "string" && classified.itemId.length > 0, "a trivial classification mints the single item");
-    const itemId = classified.itemId as string;
+  const classified = await handleClassify({ ...stageBase(bench) });
+  const itemId = classified.itemId as string;
+  const stateAfterClassify = bench.store.loadRun(bench.runId).state;
+  const runClassification = bench.store.loadRun(bench.runId).classification?.kind;
 
-    const wave = await drainWaves(bench);
-    const disposition = wave.items.find((d) => d.itemId === itemId);
-    assert.ok(disposition !== undefined, "the trivial item was scheduled");
-    assert.equal(
-      disposition?.state,
-      "PUBLISHED",
-      `the trivial item must reach PUBLISHED; it stopped at ${String(disposition?.stoppedAt)} (${String(disposition?.envError)})`,
+  const wave = await drainWaves(bench);
+  const disposition = wave.items.find((d) => d.itemId === itemId);
+
+  const itemStates = bench.journal.records
+    .filter((r) => r.event === "item.updated" && r.data.itemId === itemId && typeof r.data.state === "string")
+    .map((r) => r.data.state as string);
+
+  const seamBefore = seamCalls.length;
+  const report = await handleReport(reportArgs(bench));
+  const reportMd = readFileSync(path.join(bench.runDir, "report.md"), "utf8");
+  const stopKind = bench.store.loadRun(bench.runId).stop?.kind;
+  const seamDelta = seamCalls.length - seamBefore;
+
+  recordFacts(bench, "trivial", "ambient", report);
+
+  return {
+    bench,
+    itemId,
+    classifiedKind: classified.kind,
+    stateAfterClassify,
+    runClassification,
+    dispositionState: disposition?.state,
+    itemStates,
+    reportRunState: report.runState,
+    reportMd,
+    stopKind,
+    seamDelta,
+  };
+}
+
+describe(
+  "[13.1-trivial] a prompt classified `trivial` carries a complete §2.10 trivialItem, rides EXECUTING(trivial) through the whole item FSM with the merged lens set, and closes report-lite to TRIVIAL_DONE",
+  { timeout: 120_000 },
+  () => {
+    let captured: TrivialWalk | null = null;
+    let setupError: unknown = null;
+
+    before(
+      async () => {
+        try {
+          captured = await runTrivialWalk();
+        } catch (err) {
+          setupError = err;
+        }
+      },
+      { timeout: 90_000 },
     );
 
-    const seamBefore = seamCalls.length;
-    const report = await handleReport(reportArgs(bench));
-    assert.equal(report.runState, "TRIVIAL_DONE", "a trivial run closes report-lite to TRIVIAL_DONE, not REPORTED");
-    const md = readFileSync(path.join(bench.runDir, "report.md"), "utf8");
-    assert.match(md, new RegExp(itemId), "the lite report still names the item it published");
-    assert.equal(bench.store.loadRun(bench.runId).stop?.kind, "done", "the trivial run stopped done");
-    assert.equal(
-      seamCalls.length,
-      seamBefore + 1,
-      "the lite report crosses the same G5 metrics seam the full report does",
-    );
-    recordFacts(bench, "trivial", "ambient", report);
+    function caps(): TrivialWalk {
+      if (setupError !== null) {
+        const detail =
+          setupError instanceof Error ? (setupError.stack ?? setupError.message) : String(setupError);
+        throw new Error(`[13.1-trivial] the shared trivial walk FAILED, so this row proved nothing: ${detail}`);
+      }
+      if (captured === null) throw new Error("[13.1-trivial] the shared trivial walk produced no capture");
+      return captured;
+    }
+
+    it("[13.1-s2-trivial-enters-executing-skipping-stages] a `trivial` classification carrying a full §2.10 trivialItem mints the single item and takes the run INTAKE->EXECUTING directly, skipping DECOMPOSED and PLANNED", () => {
+      const c = caps();
+      assert.equal(c.classifiedKind, "trivial", "the classifier and its skeptic agreed on `trivial`");
+      assert.ok(c.itemId.length > 0, "a trivial classification mints the single item");
+      assert.equal(c.runClassification, "trivial", "run.json records the trivial classification");
+      assert.equal(
+        c.stateAfterClassify,
+        "EXECUTING",
+        "a trivial classify advances INTAKE straight to EXECUTING (§3.1), never through DECOMPOSED/PLANNED",
+      );
+    });
+
+    it("[13.1-s2-trivial-full-item-fsm-merged-lenses] the trivial item rides the FULL item FSM to PUBLISHED with no stage skipped — the recorded transitions include RED (a real test-first red, not a jump to GREEN) and end at PUBLISHED", () => {
+      const c = caps();
+      assert.equal(
+        c.dispositionState,
+        "PUBLISHED",
+        `the trivial item must reach PUBLISHED; it stopped at ${String(c.dispositionState)}`,
+      );
+      assert.ok(
+        c.itemStates.includes("RED"),
+        `the item FSM must record a RED — 'trivial compresses fan-out width, not process' (§3.2). Recorded: ${c.itemStates.join(",")}`,
+      );
+      assert.ok(
+        c.itemStates.includes("PUBLISHED"),
+        `the item FSM must record the terminal PUBLISHED edge. Recorded: ${c.itemStates.join(",")}`,
+      );
+      // NOT proven here: that the review ran with the MERGED lens set specifically
+      // (the scenario drives one reviewer seat but does not expose the lens list),
+      // and that EVERY intermediate edge is present — RED and PUBLISHED bound the
+      // walk, and the PUBLISHED disposition proves the gated edges in between all
+      // passed, but the lens composition is a unit concern proved in tools-9.4x.
+    });
+
+    it("[13.1-s2-report-lite-trivial-done] the SAME conductor_report handler closes the trivial run report-lite: report.md is written naming the item, the run advances EXECUTING->TRIVIAL_DONE (never REPORTED), stop {kind:'done'} is recorded, and the G5 metrics seam is crossed exactly once", () => {
+      const c = caps();
+      assert.equal(c.reportRunState, "TRIVIAL_DONE", "a trivial run closes report-lite to TRIVIAL_DONE, not REPORTED");
+      assert.match(c.reportMd, new RegExp(c.itemId), "the lite report still names the item it published");
+      assert.equal(c.stopKind, "done", "the trivial run stopped done");
+      assert.equal(c.seamDelta, 1, "the lite report crosses the same G5 metrics seam the full report does, exactly once");
+    });
   },
 );
 
@@ -4330,8 +4424,8 @@ test(
       assert.match(md, /^## Metrics$/m, `${tag}: the report carries its §4.4 metrics section`);
       assert.match(
         md,
-        /^## Metrics\n\n\(unavailable\)$/m,
-        `${tag}: with no router the metrics section says so — the report is written, not withheld`,
+        /^## Metrics\n\nRouter contact: ABSENT[^\n]*\n\n\(unavailable\)$/m,
+        `${tag}: with no router the metrics section carries the ABSENT contact witness and the unavailable line — the report is written, not withheld (GAP-029)`,
       );
     }
 

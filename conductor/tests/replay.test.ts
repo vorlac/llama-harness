@@ -2096,6 +2096,38 @@ test("[15.0-builtins-only] replay.ts imports only node:fs, node:path, node:zlib 
     "replay REUSES core COMPONENTS / isKnownEvent instead of re-listing the §7.4 vocabulary",
   );
 
+  // GAP-034 / ISSUE-131: the nine event names and three component names replay
+  // matches records against must be BOUND to core/journal-events.ts, not restated
+  // as private literals. A private `const EV_… = "…"` is the exact shape that let
+  // a renamed core key blank a timeline silently while this guard-test claimed
+  // reuse. The names are asserted present as imports AND absent as private
+  // string-literal bindings.
+  const boundVocab = [
+    "COMPONENT_FANOUT",
+    "COMPONENT_GATES",
+    "COMPONENT_FSM",
+    "FANOUT_DISPATCHED",
+    "FANOUT_RETRY",
+    "FANOUT_HOLD",
+    "FANOUT_COMPLETE",
+    "FANOUT_ABORT",
+    "GATES_DENY",
+    "GATES_GATE_CRASH",
+    "FSM_TRANSITION",
+    "FSM_GUARD_REJECT",
+  ];
+  for (const sym of boundVocab) {
+    assert.ok(
+      new RegExp(`import[\\s\\S]*?\\b${sym}\\b[\\s\\S]*?from\\s*["']\\.\\./core/journal-events\\.ts["']`).test(src),
+      `replay must import ${sym} from core/journal-events.ts (GAP-034: derive the vocabulary, do not restate it)`,
+    );
+  }
+  assert.equal(
+    /const\s+(?:EV_[A-Z_]+|FANOUT|GATES|FSM)\s*=\s*["']/.test(src),
+    false,
+    "replay must bind its component/event names from core/journal-events.ts, never as private string literals — a private copy is what silently blanked a timeline on a core rename (GAP-034/ISSUE-131)",
+  );
+
   // Single-runtime and shell escapes (G14). Tokens assembled by concatenation so
   // this guard can never flag its own source.
   const forbidden: { token: string; why: string }[] = [

@@ -65,6 +65,35 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase VII-B — mutation suite + record pass + dashboard read
+- **Landed (VII.3):** GAP-018 standing mutation suite as an on-demand tool
+  `conductor/tools/audit-mutation-suite.ts` (NOT wired into the gate wrapper) — applies a
+  corpus of known mutations to the audit-layer checkers and asserts each is caught, with a
+  negative control proving the runner detects a survivor; a gate self-test keeps the runner
+  honest and anti-rot (every corpus find-string resolves to exactly one site). Institutionalizes
+  the campaign's most productive instrument (MACRO-019). GAP-029 router-contact witness in every
+  report (CONFIRMED-with-totalRequests vs ABSENT — defeats the G5 tautology). GAP-034 replay
+  imports its vocabulary from core/journal-events.ts (no private literals; the reuse guard
+  forbids them).
+- **Landed (VII.5):** GAP-030 row-id↔test-title bijection check over the 13.1 family (the
+  [13.1-trivial] scenario split into per-row tests; register shrank 20→17); GAP-031
+  gate-record-completeness check over STATE.json/GATES.json (currency + resolution +
+  discrimination); MACRO-021 ops-behavioral anchor binding false operator-doc claims to code
+  (a false behavioral claim goes red unless marked/bound). GAP-048 dashboard READ:
+  `dashboard/{ledger_view.hpp,main.cpp}` (1077 lines, examined by nobody in the review) read in
+  full and found SOUND — inherits neither the seq-hole (ISSUE-026) nor torn-line (ISSUE-101)
+  defects; recorded as a real coverage entry, closing the review's one coverage gap.
+- **Evidence:** gate 1788 → 1811/1811, router-tests 94/94; verifier CONFIRMED, no defects; all
+  load-bearing mutations reproduced red + restored.
+- **Tracked-but-deferred record backfill (owner, deliberately NOT fabricated):** the new checks
+  register current gaps in explicit allowlists so the debt is mechanically tracked while the gate
+  stays green: (1) 17 of 13.1's rows + the ~795-row all-specs disposition backfill (spec JSON is
+  docs); (2) 12 COMMITTED tasks lack an M1-M9 GATES.json record — these are NOT backfilled with
+  fabricated pass stamps (that would repeat the C-076/C-077 meter-fabrication the campaign
+  forbids); they stay on KNOWN_MISSING as honest tracked debt. (3) 10 OPERATIONS.md/HONEST-LIMITS.md
+  behavioral falsehoods — corrected by the orchestrator in the follow-on where the true statement
+  is verifiable at HEAD, else registered as bound-and-known.
+
 ## Phase VII-A — the build floor (audit/structural layer)
 - **Landed (VII.1):** `core/wiring-manifest.ts` + test — declares all six composition-root
   hooks + the tool binding + module wires; two-way parity asserts every declared wire is

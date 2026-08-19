@@ -33,7 +33,22 @@ import { readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import { gunzipSync } from "node:zlib";
 
-import { COMPONENTS, isKnownEvent } from "../core/journal-events.ts";
+import {
+  COMPONENTS,
+  isKnownEvent,
+  COMPONENT_FANOUT,
+  COMPONENT_GATES,
+  COMPONENT_FSM,
+  FANOUT_DISPATCHED,
+  FANOUT_RETRY,
+  FANOUT_HOLD,
+  FANOUT_COMPLETE,
+  FANOUT_ABORT,
+  GATES_DENY,
+  GATES_GATE_CRASH,
+  FSM_TRANSITION,
+  FSM_GUARD_REJECT,
+} from "../core/journal-events.ts";
 import { LOG_LEVELS, validate } from "../core/types.ts";
 import type { JournalRecord, LogLevel } from "../core/types.ts";
 
@@ -118,21 +133,25 @@ const SEC_FANOUT = "FAN-OUT";
 const SEC_REVIEW = "REVIEW ROUNDS";
 const SEC_MALFORMED = "MALFORMED";
 
-const FANOUT = "fanout";
-const EV_DISPATCHED = "subsession.dispatched";
-const EV_RETRY = "subsession.retry";
-const EV_HOLD = "subsession.hold";
-const EV_COMPLETE = "subsession.complete";
-const EV_ABORT = "subsession.abort";
+// The component and event names below are NOT restated here: each is bound to the
+// core single source (core/journal-events.ts), so a rename there follows into
+// every lane, mark and section this tool derives instead of blanking one silently
+// (GAP-034 / ISSUE-131).
+const FANOUT = COMPONENT_FANOUT;
+const EV_DISPATCHED = FANOUT_DISPATCHED;
+const EV_RETRY = FANOUT_RETRY;
+const EV_HOLD = FANOUT_HOLD;
+const EV_COMPLETE = FANOUT_COMPLETE;
+const EV_ABORT = FANOUT_ABORT;
 const TERMINAL_EVENTS: readonly string[] = [EV_COMPLETE, EV_ABORT];
 
-const GATES = "gates";
-const EV_DENY = "deny";
-const EV_GATE_CRASH = "gate-crash";
+const GATES = COMPONENT_GATES;
+const EV_DENY = GATES_DENY;
+const EV_GATE_CRASH = GATES_GATE_CRASH;
 
-const FSM = "fsm";
-const EV_TRANSITION = "transition";
-const EV_GUARD_REJECT = "guard-reject";
+const FSM = COMPONENT_FSM;
+const EV_TRANSITION = FSM_TRANSITION;
+const EV_GUARD_REJECT = FSM_GUARD_REJECT;
 
 const ARCHIVE_PATTERN = /^journal\.(\d+)\.jsonl\.gz$/;
 const ACTIVE_JOURNAL = "journal.jsonl";
