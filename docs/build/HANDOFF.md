@@ -1,15 +1,18 @@
 # HANDOFF — read this first on every start
 
-## Position — 2026-08-18: the review is complete; the next action is step 5, which re-orders THIS document
-Review steps 2–4 (enforcement, macro, capability) are complete and committed (`cfa929d`): three merged
-registers under `docs/reviews/conductor-review/` — ISSUE-001…-142, MACRO-001…-034, GAP-001…-048 — plus
-`step5-preflight-review.md`, whose pre-step-5 corrections are applied in place (marked at each edit site).
-**Next action: step 5**, the INTERACTIVE delegation-design session with the repo owner — agenda:
-`docs/reviews/conductor-review/5-delegation-design-session.md` (it names its own read-first list).
-The "Do these in this order" list below is the **pre-review** plan; re-ordering it against the capability
-register's §8 provisional plan and §9 open decisions is exactly what step 5 exists to do. **Do not start
-CR-2, 13.2, 14.2, or any register fix before the step-5 session concludes.** Everything below this block
-is kept unchanged as the 2026-08-14 build-state record, which is still accurate about the build itself.
+## Position — 2026-08-18 (late): step 5 is COMPLETE; the fix campaign is planned
+The step-5 delegation-design session ran with the repo owner. Every agenda decision and D1–D15 is
+decided or deliberately parked: the decision record is
+**`docs/reviews/conductor-review/step5-decisions.md`** (design premise: trust lives in the harness,
+not the orchestrator — any prompter, human or LLM, gets a self-defending result from local models
+only). The executable ordering is **`docs/build/fix-campaign-plan.md`** — seven phases, hard
+sequencing constraints, parks with re-open conditions. **The "Do these in this order" list below is
+SUPERSEDED** (its items are mapped into the plan's "Absorbed queue" section — CR-2 now rides plan
+Phase I.2). **Next action: plan Phase 0 (the D14 addendum amendment), then Phase I.1 (GAP-035).**
+Review steps 2–4 remain the evidence authority: three merged registers under
+`docs/reviews/conductor-review/` — ISSUE-001…-142, MACRO-001…-034, GAP-001…-048 — with
+`step5-preflight-review.md`'s corrections applied in place. Everything below this block is kept
+unchanged as the 2026-08-14 build-state record, which is still accurate about the build itself.
 
 ## Position — 2026-08-14, after the non-live closeout pass. Full history: **`docs/build/COMPLETION-REPORT.md`**
 **The build is NOT complete, and everything still missing needs a live model.** In a fresh detached
