@@ -390,12 +390,14 @@ means the model over-rated itself; near zero means it can tell when it is wrong.
 ### Running more models than fit on disk
 
 ```jsonc
-"eviction": { "download_missing": true, "delete_after_each": true }
+"eviction": { "delete_after_each": true }
 ```
 
-Each model is fetched, benchmarked, then deleted before the next one, so the
-whole catalog can be benchmarked on a machine that could never hold it at once.
-`--resume` makes an interrupted multi-hour run continue where it stopped.
+Each model is benchmarked, then deleted before the next one, so a sweep can
+cover more of the catalog than fits on disk at once. The plan is built from the
+models installed under `.data/models/` when the sweep starts: install a batch,
+run with eviction on, install the next batch, and continue with `--resume`,
+which makes an interrupted multi-hour run pick up where it stopped.
 
 ### Host profile
 

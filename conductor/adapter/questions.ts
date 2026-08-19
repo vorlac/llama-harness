@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 
+import { readJsonlTolerant } from "./jsonl.ts";
 import { validate } from "../core/types.ts";
 import type { AnswerChannel, Item, QuestionOrigin, QuestionRecord } from "../core/types.ts";
 
@@ -56,19 +57,46 @@ function readTextBomTolerant(filePath: string): string {
 // The current coalesced view of the ledger: one record per id, in first-seen
 // order. answerQuestion rewrites a question's line in place, so the file already
 // holds one line per id — the Map coalescing is a defensive belt over that.
+//
+// GAP-024 / ISSUE-101: the read is TORN-LINE TOLERANT, through the one shared
+// reader every ledger uses. A per-line JSON.parse made a crash-truncated
+// questions.jsonl fatal to conductor_status and to the stop-report writer — the two
+// readers whose whole job is to describe a run that just crashed — so the run
+// became unclosable at exactly the moment the artifact mattered. A line that does
+// not parse is not a question; it is the tail of a kill.
 function readRecords(runDir: string): QuestionRecord[] {
   const qp = path.join(runDir, "questions.jsonl");
-  if (!existsSync(qp)) return [];
+  const { records } = readJsonlTolerant<QuestionRecord>(qp);
   const byId = new Map<string, QuestionRecord>();
   const order: string[] = [];
-  for (const line of readTextBomTolerant(qp).split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    const record = JSON.parse(trimmed) as QuestionRecord;
+  for (const record of records) {
+    if (typeof record.id !== "string") continue;
     if (!byId.has(record.id)) order.push(record.id);
     byId.set(record.id, record);
   }
   return order.map((id) => byId.get(id) as QuestionRecord);
+}
+
+// The highest Q-<n> the ledger MENTIONS, torn lines included. The mint reads this
+// rather than the parsed records for the reason the decision-id mint does: a
+// half-written trailing line still carries an id, and re-issuing it would give two
+// different questions the same name.
+function maxQuestionNumberInFile(runDir: string): number {
+  const qp = path.join(runDir, "questions.jsonl");
+  if (!existsSync(qp)) return 0;
+  let raw: string;
+  try {
+    raw = readFileSync(qp, "utf8");
+  } catch {
+    return 0;
+  }
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  let max = 0;
+  for (const match of raw.matchAll(/"id"\s*:\s*"Q-(\d+)"/g)) {
+    const value = Number.parseInt(match[1], 10);
+    if (Number.isFinite(value) && value > max) max = value;
+  }
+  return max;
 }
 
 function writeRecords(runDir: string, records: QuestionRecord[]): void {
@@ -99,14 +127,7 @@ function assertValidQuestion(record: QuestionRecord): void {
 // return the record.
 export function appendQuestion(runDir: string, input: NewQuestion, nowMs?: number): QuestionRecord {
   const records = readRecords(runDir);
-  let maxNum = 0;
-  for (const record of records) {
-    const match = record.id.match(/^Q-(\d+)$/);
-    if (match !== null) {
-      const value = Number.parseInt(match[1], 10);
-      if (value > maxNum) maxNum = value;
-    }
-  }
+  const maxNum = maxQuestionNumberInFile(runDir);
   const record: QuestionRecord = {
     id: "Q-" + String(maxNum + 1).padStart(4, "0"),
     tsMs: nowMs ?? Date.now(),

@@ -307,10 +307,21 @@ function restoreEntries(manifest: QuarantineManifest): RestoreResult {
     const stored = path.join(manifest.quarantineDir, entry.stored);
     const dst = path.join(manifest.repoRoot, entry.original);
     if (existsSync(dst)) {
-      // The slot was refilled between the crash and this replay — the stored copy is a
-      // stale red. Do NOT clobber the refilled slot; leave the stored file in quarantine.
-      conflicts.push(entry.original);
-      continue; // entry stays NOT restored so the caller preserves the quarantine dir
+      // ISSUE-029: two different situations put a file in the repo slot, and only
+      // one of them is a conflict.
+      //   - the stored copy is ALSO present: the slot was refilled while the file
+      //     was parked out of the tree, so restoring would destroy the newer file.
+      //     That is a real conflict, and the stored copy stays parked.
+      //   - the stored copy is ABSENT: this entry was NEVER MOVED (the manifest is
+      //     written before the moves, so it names planned moves, and a kill between
+      //     two of them leaves the rest in place). There is nothing to restore and
+      //     nothing at risk — the entry is settled.
+      if (existsSync(stored)) {
+        conflicts.push(entry.original);
+        continue; // entry stays NOT restored so the caller preserves the quarantine dir
+      }
+      entry.restored = true;
+      continue;
     }
     if (existsSync(stored)) {
       mkdirSync(path.dirname(dst), { recursive: true });
@@ -331,6 +342,24 @@ function restoreEntries(manifest: QuarantineManifest): RestoreResult {
   return { restored, conflicts };
 }
 
+// Write the flipped `restored` flags back to disk (ISSUE-029). restoreEntries
+// flips them in memory; a manifest that keeps saying `restored:false` makes every
+// later sweep re-walk entries that are already home, and a preserved conflict dir
+// re-attempts a restore that can never succeed. A dir that fully drained is about
+// to be removed, so the write is only worth doing when something is staying.
+function persistRestoredFlags(manifest: QuarantineManifest, result: RestoreResult): void {
+  if (result.conflicts.length === 0) return;
+  try {
+    writeFileAtomicSync(
+      path.join(manifest.quarantineDir, MANIFEST_NAME),
+      JSON.stringify(manifest, null, 2),
+    );
+  } catch {
+    // A manifest we cannot re-persist costs a repeated (idempotent) sweep, never
+    // correctness — the restore itself already happened.
+  }
+}
+
 /**
  * Restore a quarantine created by `quarantineFiles`: rename every pending entry
  * back into the repo (mtime survives the round-trip), then remove the quarantine
@@ -343,6 +372,7 @@ export function restoreQuarantine(handle: QuarantineHandle): void {
     return;
   }
   const result = restoreEntries(manifest);
+  persistRestoredFlags(manifest, result);
   // §F2: a conflict means a stored file is still parked in quarantine (its slot was
   // refilled). Preserve the quarantine dir so nothing is lost; otherwise clear it.
   if (result.conflicts.length === 0) {
@@ -387,6 +417,7 @@ export function replayPendingRestores(input: { stateHome: string; workspaceKey: 
       // §F4: a vanished repoRoot means the checkout is gone — skip, never mkdir-recreate.
       if (!existsDir(manifest.repoRoot)) continue;
       const result = restoreEntries(manifest);
+      persistRestoredFlags(manifest, result);
       for (const original of result.restored) restored.push(original);
       // §F2: only clear a fully-drained dir; a conflict leaves stored files parked.
       if (result.conflicts.length === 0) {

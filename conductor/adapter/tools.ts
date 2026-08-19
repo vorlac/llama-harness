@@ -85,7 +85,7 @@ import { nextWave, readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
 import { checkReadWitness, createdFileDiff, diffContact, witnessNonce } from "../core/review-witness.ts";
 import type { CreatedFile } from "../core/review-witness.ts";
-import { findingSubjects, receiptFloor } from "../core/receipt-floor.ts";
+import { findingSubjects, floorExclusions, receiptFloor } from "../core/receipt-floor.ts";
 import { concernNamesFinding } from "../core/reply-protocol.ts";
 import { MAIN_TREE, NO_TREE, SCHEMAS, treePath, treeSlug, validate } from "../core/types.ts";
 import type {
@@ -117,11 +117,17 @@ import type {
   TrivialItem,
   Verdict,
 } from "../core/types.ts";
-import { readJsonFileSync, registerConductorExclude, writeFileAtomicSync } from "./state.ts";
+import {
+  pidIsAlive as pidStillRunning,
+  readJsonFileSync,
+  registerConductorExclude,
+  writeFileAtomicSync,
+} from "./state.ts";
 import type { StateStore } from "./state.ts";
+import { readJsonlTolerant } from "./jsonl.ts";
 import { DEFAULT_CONFIG, configPath, loadConfig } from "./config-io.ts";
 import { appendQuestion, answerQuestion, readQuestions } from "./questions.ts";
-import type { NewQuestion } from "./questions.ts";
+import { blockItemWithQuestion } from "./block-and-ask.ts";
 import { answerFileAbsPath, pendingAnswers } from "./answer-file.ts";
 import {
   answerDropPath,
@@ -189,13 +195,25 @@ export type ToolClass = "read" | "write" | "conductor" | "spawn";
 // opencode's built-in sub-agent spawn tool (Task 0.2 discovery iii: its id is
 // `task`). Spawning is denied in EVERY session — the load-bearing registry rule.
 const SPAWN_TOOL = "task";
-// The edit/write/patch tools whose NAME alone marks the call a write.
-const WRITE_TOOLS: readonly string[] = ["edit", "write", "patch", "apply_patch"];
+// The edit/write tools whose NAME alone marks the call a write, and whose single
+// `args.filePath` the edit-scope gate adjudicates.
+const WRITE_TOOLS: readonly string[] = ["edit", "write"];
+
+// The patch tools, refused outright (D8, owner decision on ISSUE-017). They were
+// registered write tools, but the edit branch adjudicates ONE `args.filePath` and
+// a patch BODY carries none — so a multi-file patch reached the filesystem with
+// only the registry gate between it and `.conductor/**`, a sibling tree, or
+// anything outside fileScope, and no patch-body path extractor exists to build a
+// decision from. opencode holds them in its registry without offering them
+// (wire-notes.md), which is one config flip from reachable; the wire contract
+// pins that, and the gate refuses the tools themselves. They still classify as
+// WRITE so a gate crash on one fails closed (G5).
+const DENIED_TOOLS: readonly string[] = ["apply_patch", "patch"];
 
 export function classifyTool(toolName: string, command?: string): ToolClass {
   if (toolName === SPAWN_TOOL) return "spawn";
   if (toolName.startsWith("conductor_")) return "conductor";
-  if (WRITE_TOOLS.includes(toolName)) return "write";
+  if (WRITE_TOOLS.includes(toolName) || DENIED_TOOLS.includes(toolName)) return "write";
   if (toolName === "bash") {
     const text = command ?? "";
     // An interpreter program naming the state area counts as a write even when no
@@ -426,6 +444,21 @@ export function gateBeforeToolCall(input: GateHookInput): void {
     toolClass === "conductor" ||
     toolClass === "spawn";
 
+  // (a0) The patch tools, refused before every other gate and in every session
+  //      (D8). There is no adjudicable payload to reach a scope decision with: a
+  //      patch body names its targets in a format no gate here parses, and the
+  //      one `args.filePath` the edit branch reads is absent from exactly the
+  //      multi-file shape that matters. A refusal that does not depend on the
+  //      call's arguments cannot be spelled around by choosing different ones.
+  if (DENIED_TOOLS.includes(input.toolName)) {
+    denyThrow(
+      input,
+      "the " +
+        input.toolName +
+        " tool is denied in every session: a patch body carries its own write targets in a form no gate adjudicates, so the edit-scope gate cannot bound it. Use the edit/write tools, whose target is a single path this session's scope is checked against",
+    );
+  }
+
   const decideSessionFn: (i: SessionInput) => Decision =
     input.deps?.decideSession ?? decideSession;
   const decideGitFn: (
@@ -641,40 +674,6 @@ function assertDecisionValid(record: DecisionRecord): void {
   if (!result.ok) {
     throw new Error("tools: refusing to write an invalid DecisionRecord: " + result.errors.join("; "));
   }
-}
-
-/**
- * C-032 E7, prevention half. blockAndAsk and blockVetAndAsk append their §2.11
- * question FIRST and call store.setBlocked SECOND, so a crash between the two —
- * or a second call after the item was cleared while the question stayed open —
- * used to mint a DUPLICATE question for the same item. There can only ever be one
- * useful ask per stuck item: §2.5 gives the item one `blocked` disposition, so a
- * second question would be unanswerable-by-construction (answering it clears
- * nothing) while the first still gates the item.
- *
- * So before appending, look for an already-OPEN question of the same origin whose
- * blocksItems names this item, and re-point the item's block at THAT record. A
- * different item is unaffected and still mints its own.
- */
-function reuseOrAppendBlockingQuestion(
-  runDir: string,
-  input: NewQuestion,
-  nowMs: number,
-  itemId: string,
-): QuestionRecord {
-  let existing: QuestionRecord[] = [];
-  try {
-    existing = readQuestions(runDir);
-  } catch {
-    existing = [];
-  }
-  for (const candidate of existing) {
-    if (candidate.answeredIso !== null) continue;
-    if (candidate.origin !== input.origin) continue;
-    if (!candidate.blocksItems.includes(itemId)) continue;
-    return candidate;
-  }
-  return appendQuestion(runDir, input, nowMs);
 }
 
 // Validate (schema-subset, §2.7) then append one JSON line to decisions.jsonl.
@@ -961,6 +960,20 @@ export interface StatusResult {
   // an answer at. A channel nobody is told about is a channel nobody uses, and the
   // model's own relay is then the only route a human's judgment has.
   openQuestions: Array<{ id: string; question: string; answerPath: string }>;
+  // ISSUE-051's live-surface half. A §6.2 human-territory question the model
+  // answered through the tool is RECORDED but not settled: the run it blocks
+  // stays stopped until the operator's own artifact arrives. Such a question
+  // carries an answer, so it leaves openQuestions — and a reader of status was
+  // then told the run had nothing outstanding while it sat stopped on exactly
+  // that. It is carried here instead, with the notice the §2.9 report renders
+  // and the path the operator still owes, off the one predicate both surfaces
+  // read (core/provenance.ts awaitsOperatorConfirmation).
+  standingQuestions: Array<{
+    id: string;
+    question: string;
+    answerPath: string;
+    notice: string;
+  }>;
   // One row per session that has received doctrine in this run, its LAST delivery
   // (G9: the delivery is re-composed every request, so only the most recent one
   // describes the session as it stands). Empty when nothing has been delivered —
@@ -1034,9 +1047,17 @@ export function handleStatus(input: StatusInput): StatusResult {
   }
 
   const openQuestions: StatusResult["openQuestions"] = [];
+  const standingQuestions: StatusResult["standingQuestions"] = [];
   for (const q of readQuestions(runDir)) {
     if (q.answeredIso === null) {
       openQuestions.push({ id: q.id, question: q.question, answerPath: answerDropPath(runId, q.id) });
+    } else if (awaitsOperatorConfirmation(q)) {
+      standingQuestions.push({
+        id: q.id,
+        question: q.question,
+        answerPath: answerDropPath(runId, q.id),
+        notice: standingQuestionNotice(runId, q.id),
+      });
     }
   }
 
@@ -1051,6 +1072,7 @@ export function handleStatus(input: StatusInput): StatusResult {
     classification,
     items,
     openQuestions,
+    standingQuestions,
     deliveries: deliveriesOf(runDir),
   };
 }
@@ -2776,9 +2798,17 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
     // caller fabricates. (Asking is legal here regardless: §3.2 spends the whole
     // bounded machine loop first, so the cap is the point where the machine has
     // provably run out of moves.)
-    const record = appendQuestion(
+    // One ask per surviving major (reuseOpen:false): each finding is its own
+    // question, and merging two findings that happen to name the same item would
+    // lose one of them. The item still carries ONE disposition — the first
+    // question that names it owns the block, which the primitive enforces by
+    // leaving an already-blocked item alone.
+    const asked = blockItemWithQuestion({
+      store,
+      runId,
       runDir,
-      {
+      itemIds: [...entry.itemIds],
+      question: {
         runId,
         question,
         askedBy: { role: "reviewer", sessionID: entry.survivor.sessionID },
@@ -2786,34 +2816,14 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
         origin: "plan-review-cap",
         blocksItems: [...entry.itemIds],
       },
-      now(),
-    );
-    questionIds.push(record.id);
-
-    for (const itemId of entry.itemIds) {
-      // An item carries ONE `blocked` disposition, so the first surviving major
-      // that names it owns the block; a later question still records the item in
-      // its own blocksItems (that is what the finding says), but it does not
-      // overwrite the questionId the unblock path (conductor_answer) keys on.
-      if (blockedItemIds.includes(itemId)) continue;
-      store.setBlocked(runId, itemId, {
-        reason:
-          "blocked on plan-review question " +
-          record.id +
-          ": " +
-          entry.survivor.finding.claim,
-        stage: "plan-review",
-        questionId: record.id,
-      });
-      blockedItemIds.push(itemId);
-      journal.log(
-        "info",
-        "state",
-        "item.updated",
-        { itemId, blocked: true, questionId: record.id, stage: "plan-review" },
-        { runId, itemId },
-      );
-    }
+      reason: "blocked on the plan-review cap: " + entry.survivor.finding.claim,
+      stage: "plan-review",
+      journal,
+      now,
+      reuseOpen: false,
+    });
+    questionIds.push(asked.question.id);
+    for (const itemId of asked.blockedItemIds) blockedItemIds.push(itemId);
   }
 
   run.state = "PLAN_REVIEWED";
@@ -3141,21 +3151,12 @@ function requireStageTool(
   assertContainedPaths(tool, store.root, itemId, "testScope", queueItem.testScope);
   assertContainedPaths(tool, store.root, itemId, "fileScope", queueItem.fileScope);
 
-  // A crash-torn trailing line in questions.jsonl must fail as a NAMED legality
-  // failure — the reader has to know which tool refused and which file to repair —
-  // never as a raw SyntaxError naming neither (the shape readQueueJson avoids).
-  let questions: Array<{ id: string; answeredIso: string | null }>;
-  try {
-    questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
-  } catch (error) {
-    throw new Error(
-      tool +
-        ": cannot read questions.jsonl in " +
-        runDir +
-        " (a torn or invalid §2.11 record — repair the file to resume): " +
-        (error instanceof Error ? error.message : String(error)),
-    );
-  }
+  // A crash-torn trailing line in questions.jsonl is HEALED at the reader
+  // (GAP-024): the line is skipped and the legality verdict is taken on the
+  // questions that are actually there. The alternative — refusing the stage until
+  // a human repairs the file by hand — wedged a run at exactly the moment §2.11
+  // forbids hand-editing state to resume.
+  const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
   // §3.9 publish availability is DERIVED from the workspace, never assumed: the
   // handlers compute the same predicate, so gate and handler cannot disagree
   // about whether an item at REVIEWED still owes a publish (C-048/C-054).
@@ -3287,18 +3288,7 @@ export function requireToolLegal(input: ToolLegalityInput): void {
     stop: position.stop,
     classification: { kind: run.classification.kind },
   };
-  let questions: Array<{ id: string; answeredIso: string | null }>;
-  try {
-    questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
-  } catch (error) {
-    throw new Error(
-      tool +
-        ": cannot read questions.jsonl in " +
-        runDir +
-        " (a torn or invalid §2.11 record — repair the file to resume): " +
-        (error instanceof Error ? error.message : String(error)),
-    );
-  }
+  const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
   const offer = legalTools(
     gateRun,
     legalityGateItems(store, runId, runDir),
@@ -3881,19 +3871,6 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
           lastRed.failureExcerpt) +
       "\nSay how this item's first failing test should be written, or whether the item itself " +
       "should be reshaped.";
-    const question = reuseOrAppendBlockingQuestion(
-      runDir,
-      {
-        runId,
-        question: questionText,
-        askedBy: { role: "testWriter", sessionID: writerSessionID },
-        humanTerritory: isHumanTerritory(questionText),
-        origin: "implementer-blocked",
-        blocksItems: [itemId],
-      },
-      now(),
-      itemId,
-    );
     const reason =
       "test-writer could not produce a legal §2.6.1 red for the PENDING->RED stage: " +
       why +
@@ -3902,18 +3879,27 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
       " of workflow.testRepairAttempts=" +
       String(maxRepairs) +
       ")";
-    const blocked = store.setBlocked(runId, itemId, {
+    const asked = blockItemWithQuestion({
+      store,
+      runId,
+      runDir,
+      itemIds: [itemId],
+      question: {
+        runId,
+        question: questionText,
+        askedBy: { role: "testWriter", sessionID: writerSessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
       reason,
       stage: "RED",
-      questionId: question.id,
+      journal,
+      now,
+      journalData: { testRepairs: repairs },
     });
-    journal.log(
-      "info",
-      "state",
-      "item.updated",
-      { itemId, blocked: true, questionId: question.id, stage: "RED", testRepairs: repairs },
-      { runId, itemId },
-    );
+    const question = asked.question;
+    const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
     return {
       ok: false,
       itemState: blocked.state,
@@ -4359,24 +4345,6 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       ".\nThe critics judge a test against the failure it actually produces, so this item cannot " +
       "be vetted until its test is a legal §2.6.1 red again. Say how the test should pin this " +
       "item's acceptance, or whether the item itself should be reshaped.";
-    const question = reuseOrAppendBlockingQuestion(
-      runDir,
-      {
-        runId,
-        question: questionText,
-        askedBy: { role: "testWriter", sessionID },
-        humanTerritory: isHumanTerritory(questionText),
-        origin: "implementer-blocked",
-        blocksItems: [itemId],
-      },
-      now(),
-      itemId,
-    );
-    const blocked = store.setBlocked(runId, itemId, {
-      reason: "the test vet could not proceed: " + detail,
-      stage: "TEST_VETTED",
-      questionId: question.id,
-    });
     journal.log(
       "warn",
       "fsm",
@@ -4384,13 +4352,27 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       { stage: "TEST_VETTED", itemId, round: rounds, reason: detail },
       { runId, itemId },
     );
-    journal.log(
-      "info",
-      "state",
-      "item.updated",
-      { itemId, blocked: true, questionId: question.id, stage: "TEST_VETTED", vetRounds: rounds },
-      { runId, itemId },
-    );
+    const asked = blockItemWithQuestion({
+      store,
+      runId,
+      runDir,
+      itemIds: [itemId],
+      question: {
+        runId,
+        question: questionText,
+        askedBy: { role: "testWriter", sessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      reason: "the test vet could not proceed: " + detail,
+      stage: "TEST_VETTED",
+      journal,
+      now,
+      journalData: { vetRounds: rounds },
+    });
+    const question = asked.question;
+    const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
     return {
       ok: false,
       itemState: blocked.state,
@@ -4567,9 +4549,12 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
         union.map((entry) => "- " + entry).join("\n") +
         "\nThe test stands as written and the item is blocked until you answer: say how the test " +
         "should pin this item's acceptance, or that it should stand as it is.";
-      const question = appendQuestion(
+      const asked = blockItemWithQuestion({
+        store,
+        runId,
         runDir,
-        {
+        itemIds: [itemId],
+        question: {
           runId,
           question: questionText,
           askedBy: { role: "reviewer", sessionID: askedBySessionID },
@@ -4577,24 +4562,18 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
           origin: "review-round-cap",
           blocksItems: [itemId],
         },
-        now(),
-      );
-      const blocked = store.setBlocked(runId, itemId, {
         reason:
           "test vet reached vetMaxRounds=" +
           String(max) +
           " with mustFix still outstanding: " +
           union.join("; "),
         stage: "TEST_VETTED",
-        questionId: question.id,
+        journal,
+        now,
+        journalData: { vetRounds: rounds },
       });
-      journal.log(
-        "info",
-        "state",
-        "item.updated",
-        { itemId, blocked: true, questionId: question.id, stage: "TEST_VETTED", vetRounds: rounds },
-        { runId, itemId },
-      );
+      const question = asked.question;
+      const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
 
       return {
         ok: false,
@@ -5005,9 +4984,12 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
       '" to GREEN — ' +
       why +
       "\nSay how the implementation should proceed, or whether the item should be reshaped.";
-    const question = appendQuestion(
+    const asked = blockItemWithQuestion({
+      store,
+      runId,
       runDir,
-      {
+      itemIds: [itemId],
+      question: {
         runId,
         question: questionText,
         askedBy: { role: "implementer", sessionID: askedBySessionID },
@@ -5015,20 +4997,13 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
         origin: "implementer-blocked",
         blocksItems: [itemId],
       },
-      now(),
-    );
-    const blocked = store.setBlocked(runId, itemId, {
       reason: "the implementer could not take the item to GREEN: " + why,
       stage: "GREEN",
-      questionId: question.id,
+      journal,
+      now,
     });
-    journal.log(
-      "info",
-      "state",
-      "item.updated",
-      { itemId, blocked: true, questionId: question.id, stage: "GREEN" },
-      { runId, itemId },
-    );
+    const question = asked.question;
+    const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
     return {
       ok: false,
       itemState: blocked.state,
@@ -5432,9 +5407,12 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
         failure +
         "\nThe §3.3 three-fix rule reads a failure that resists this many fixes as an ARCHITECTURE " +
         "question, not another bug: say how the item (or the design it rests on) should change.";
-      const question = appendQuestion(
+      const asked = blockItemWithQuestion({
+        store,
+        runId,
         runDir,
-        {
+        itemIds: [itemId],
+        question: {
           runId,
           question: questionText,
           askedBy: { role: "implementer", sessionID: fixerSessionID },
@@ -5442,24 +5420,18 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
           origin: "debug-architecture",
           blocksItems: [itemId],
         },
-        now(),
-      );
-      const blocked = store.setBlocked(runId, itemId, {
         reason:
           "the full verify stayed red through workflow.debugFixCap=" +
           String(cap) +
           " fix attempts: " +
           failure,
         stage: "VALIDATED",
-        questionId: question.id,
+        journal,
+        now,
+        journalData: { debugFixes },
       });
-      journal.log(
-        "info",
-        "state",
-        "item.updated",
-        { itemId, blocked: true, questionId: question.id, stage: "VALIDATED", debugFixes },
-        { runId, itemId },
-      );
+      const question = asked.question;
+      const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
       return {
         ok: false,
         itemState: blocked.state,
@@ -6003,18 +5975,7 @@ export function waveVerdict(store: StateStore, runId: string, runDir: string, qu
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
   };
-  let questions: Array<{ id: string; answeredIso: string | null }>;
-  try {
-    questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
-  } catch (error) {
-    throw new Error(
-      DISPATCH_WAVE_TOOL +
-        ": cannot read questions.jsonl in " +
-        runDir +
-        " (a torn or invalid §2.11 record — repair the file to resume): " +
-        (error instanceof Error ? error.message : String(error)),
-    );
-  }
+  const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
   return legalTools(gateRun, gateItemsOf(store, runId, queue), questions, true, isRepo(store.root));
 }
 
@@ -7098,23 +7059,6 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       detail +
       ".\nSay how the surviving finding(s) should be resolved, or whether the item should " +
       "proceed as it stands.";
-    const question = appendQuestion(
-      runDir,
-      {
-        runId,
-        question: questionText,
-        askedBy: { role: askedByRole, sessionID: askedBySessionID },
-        humanTerritory: isHumanTerritory(questionText),
-        origin: "implementer-blocked",
-        blocksItems: [itemId],
-      },
-      now(),
-    );
-    const blocked = store.setBlocked(runId, itemId, {
-      reason: "the review fix round could not proceed: " + detail,
-      stage: "REVIEWED",
-      questionId: question.id,
-    });
     journal.log(
       "warn",
       "fsm",
@@ -7122,13 +7066,27 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       { stage: "REVIEWED", itemId, round: rounds, reason: detail },
       { runId, itemId },
     );
-    journal.log(
-      "info",
-      "state",
-      "item.updated",
-      { itemId, blocked: true, questionId: question.id, stage: "REVIEWED", reviewRounds: rounds },
-      { runId, itemId },
-    );
+    const asked = blockItemWithQuestion({
+      store,
+      runId,
+      runDir,
+      itemIds: [itemId],
+      question: {
+        runId,
+        question: questionText,
+        askedBy: { role: askedByRole, sessionID: askedBySessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "implementer-blocked",
+        blocksItems: [itemId],
+      },
+      reason: "the review fix round could not proceed: " + detail,
+      stage: "REVIEWED",
+      journal,
+      now,
+      journalData: { reviewRounds: rounds },
+    });
+    const question = asked.question;
+    const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
     return {
       ok: false,
       itemState: blocked.state,
@@ -7574,22 +7532,28 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       if (!settled.ok) return settled;
       const obliged = entries.filter((entry) => !dead.has(entry));
       if (obliged.length === 0) return { ok: true };
+      const scopes = { fileScope: queueItem.fileScope, testScope: queueItem.testScope };
+      // The per-PATH half of the same subtraction (core/receipt-floor.ts
+      // floorExclusions): a co-located testScope sits INSIDE the fileScope and so
+      // survives the entry-level subtraction, and an implementer's edit to a test
+      // the write gate refuses outright cannot be the receipt for its finding.
+      const excluded = floorExclusions(role, scopes);
       const subjects: string[] = [];
       for (const entry of obliged) {
         // The ROUTE is part of the question: a finding that names no path is
         // discharged inside the half of the item this fixer may write, never the
         // other one (core/receipt-floor.ts routeFallbackScope).
-        const named = findingSubjects(
-          entry.finding,
-          { fileScope: queueItem.fileScope, testScope: queueItem.testScope },
-          role,
-        );
+        const named = findingSubjects(entry.finding, scopes, role);
         for (const subject of named) {
           if (!subjects.includes(subject)) subjects.push(subject);
         }
       }
       const measure = (): { ok: boolean; reason: string } =>
-        receiptFloor(touchedBetween(before, treeTouchSignature(tree.root, queueItem)), subjects);
+        receiptFloor(
+          touchedBetween(before, treeTouchSignature(tree.root, queueItem)),
+          subjects,
+          excluded,
+        );
       const firstFloor = measure();
       if (firstFloor.ok) return { ok: true };
       journal.log(
@@ -7674,27 +7638,6 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       surviving.map(renderItemFinding).join("\n") +
       "\nThe item stays at VALIDATED and is blocked until you answer: say how the finding(s) " +
       "should be resolved, or that the item should proceed as it stands.";
-    const question = appendQuestion(
-      runDir,
-      {
-        runId,
-        question: questionText,
-        askedBy: { role: "reviewer", sessionID: surviving[0].sessionID },
-        humanTerritory: isHumanTerritory(questionText),
-        origin: "review-round-cap",
-        blocksItems: [itemId],
-      },
-      now(),
-    );
-    const blocked = store.setBlocked(runId, itemId, {
-      reason:
-        "item review reached reviewMaxRounds=" +
-        String(max) +
-        " with finding(s) still surviving: " +
-        survivingIds.join("; "),
-      stage: "REVIEWED",
-      questionId: question.id,
-    });
     journal.log(
       "warn",
       "fsm",
@@ -7702,13 +7645,31 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
       { stage: "REVIEWED", itemId, round: rounds, max, surviving: survivingIds },
       { runId, itemId },
     );
-    journal.log(
-      "info",
-      "state",
-      "item.updated",
-      { itemId, blocked: true, questionId: question.id, stage: "REVIEWED", reviewRounds: rounds },
-      { runId, itemId },
-    );
+    const asked = blockItemWithQuestion({
+      store,
+      runId,
+      runDir,
+      itemIds: [itemId],
+      question: {
+        runId,
+        question: questionText,
+        askedBy: { role: "reviewer", sessionID: surviving[0].sessionID },
+        humanTerritory: isHumanTerritory(questionText),
+        origin: "review-round-cap",
+        blocksItems: [itemId],
+      },
+      reason:
+        "item review reached reviewMaxRounds=" +
+        String(max) +
+        " with finding(s) still surviving: " +
+        survivingIds.join("; "),
+      stage: "REVIEWED",
+      journal,
+      now,
+      journalData: { reviewRounds: rounds },
+    });
+    const question = asked.question;
+    const blocked = asked.items[0] ?? store.loadItem(runId, itemId);
     return {
       ok: false,
       itemState: blocked.state,
@@ -7737,27 +7698,73 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
 // shrinkToFit replaces an oversized payload with {truncated:true}. A truncated
 // diff in a report is a report that lies about what shipped, so the diff travels
 // as an artifact that has no cap.
-// Read ONE §2.6 evidence record by its ledger seq. Returns null when the ledger
-// has no such seq — a torn or absent record is a fact the caller must handle, not
-// an exception: a publish whose verify record cannot be found is denied, not
-// crashed. Torn lines are skipped for the same reason the journal heals them.
-function readEvidenceAt(runDir: string, seq: number): EvidenceRecord | null {
-  const ledger = path.join(runDir, "evidence.jsonl");
-  if (!existsSync(ledger)) return null;
-  let raw = readFileSync(ledger, "utf8");
-  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    let parsed: EvidenceRecord;
-    try {
-      parsed = JSON.parse(trimmed) as EvidenceRecord;
-    } catch {
-      continue;
-    }
-    if (parsed.seq === seq) return parsed;
+// What the caller asserts the record at `seq` must BE. ISSUE-027: resolving a
+// record by seq alone trusts the pointer completely, and a seq is exactly the
+// thing two writers can mint twice — so the seq locates the line and the
+// attribution decides whether it is the caller's line at all. capturedRedOf has
+// always filtered by itemId; this is the same check at the publish-side resolver,
+// which is where a mis-pointed seq ships one item's green on another's evidence.
+export interface EvidenceExpectation {
+  itemId: string;
+  // §4.2 worktree mode: a green produced against the shared tree is not a green
+  // for the item's worktree. Omitted when the caller does not care which tree.
+  tree?: TreeSlug;
+}
+
+export interface EvidenceLookup {
+  /** The record, or null when there is none at `seq` or it is another's. */
+  record: EvidenceRecord | null;
+  /** Non-null exactly when a record WAS at `seq` and failed attribution. */
+  refused: { seq: number; foundItemId: string; foundTree?: string } | null;
+}
+
+/**
+ * Read ONE §2.6 evidence record by its ledger seq AND its attribution.
+ *
+ * A missing record is a fact the caller must handle, not an exception: a publish
+ * whose verify record cannot be found is denied, not crashed. Torn lines are
+ * skipped for the same reason every other ledger reader heals them. A record that
+ * IS present but belongs to another item (or another tree) is REFUSED and
+ * reported as such, so the denial can say which — "no record" and "someone else's
+ * record" are different failures, and only one of them means corruption.
+ *
+ * The LAST match wins: if two writers ever minted the same number, the newer line
+ * is the one a pointer written afterwards refers to (the same rule capturedRedOf
+ * applies for the same reason).
+ */
+export function lookupEvidenceAt(
+  runDir: string,
+  seq: number,
+  expect: EvidenceExpectation,
+): EvidenceLookup {
+  const { records } = readJsonlTolerant<EvidenceRecord>(path.join(runDir, "evidence.jsonl"));
+  let found: EvidenceRecord | null = null;
+  for (const parsed of records) {
+    if (parsed.seq === seq) found = parsed;
   }
-  return null;
+  if (found === null) return { record: null, refused: null };
+  const foundTree = found.kind === "verify" ? found.tree : undefined;
+  const itemMatches = found.itemId === expect.itemId;
+  const treeMatches = expect.tree === undefined || foundTree === undefined || foundTree === expect.tree;
+  if (itemMatches && treeMatches) return { record: found, refused: null };
+  return {
+    record: null,
+    refused: {
+      seq,
+      foundItemId: found.itemId,
+      ...(foundTree === undefined ? {} : { foundTree }),
+    },
+  };
+}
+
+// The lookup for the callers that need only the record: a refusal reads as
+// absence, which is what a report line and a commit-message proof both do with it.
+function readEvidenceAt(
+  runDir: string,
+  seq: number,
+  expect: EvidenceExpectation,
+): EvidenceRecord | null {
+  return lookupEvidenceAt(runDir, seq, expect).record;
 }
 
 const PUBLISH_BATCH_FILE = "publish-batch.jsonl";
@@ -8020,12 +8027,33 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
   // cwd = the worktree and tree = the item id (G10), and the integrated tree gets
   // its own tree:"main" record after merge-back.
   const validatedRef = item.evidence.validated ?? item.evidence.green ?? null;
-  const record =
-    validatedRef === null ? null : (readEvidenceAt(runDir, validatedRef.seq) as VerifyEvidence | null);
+  // ISSUE-027: the pointer's seq LOCATES the record; the item id and (in worktree
+  // mode) the tree decide whether it is this item's record at all. A publish that
+  // trusts the seq alone is the last link of the double-writer chain — it ships one
+  // item's commit on another item's green.
+  const expectedTree = worktreeMode ? treeSlug(itemId) : MAIN_TREE;
+  const lookup =
+    validatedRef === null
+      ? { record: null, refused: null }
+      : lookupEvidenceAt(runDir, validatedRef.seq, { itemId, tree: expectedTree });
+  const record = lookup.record as VerifyEvidence | null;
   if (record === null) {
     return publishDenial(
       item.state,
-      PUBLISH_TOOL + ': item "' + itemId + '" carries no §2.6 verify record to publish on',
+      lookup.refused === null
+        ? PUBLISH_TOOL + ': item "' + itemId + '" carries no §2.6 verify record to publish on'
+        : PUBLISH_TOOL +
+            ': item "' +
+            itemId +
+            '" points at evidence seq ' +
+            String(lookup.refused.seq) +
+            ', but the record there belongs to item "' +
+            lookup.refused.foundItemId +
+            '"' +
+            (lookup.refused.foundTree === undefined
+              ? ""
+              : ' on tree "' + lookup.refused.foundTree + '"') +
+            " — a green produced for something else is not this item's evidence (§2.6). Re-validate the item.",
     );
   }
 
@@ -8058,9 +8086,16 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
       // The human's uncommitted work sits inside the scope this run claims. That
       // is a conflict between the run's scope and the human's, which is exactly
       // what the closed `scope-conflict` origin names — no widening needed.
-      const question = appendQuestion(
+      // The ask and the item's disposition are ONE transaction (GAP-028): a
+      // publish that surfaced the question and then died left an item nothing
+      // said was blocked, and the next pass offered it publish again — against
+      // the same human WIP, minting the same question.
+      const asked = blockItemWithQuestion({
+        store,
+        runId,
         runDir,
-        {
+        itemIds: [itemId],
+        question: {
           runId,
           question:
             "Publishing " +
@@ -8073,15 +8108,14 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
           origin: "scope-conflict",
           blocksItems: [itemId],
         },
-        now(),
-      );
-      journal.log(
-        "warn",
-        "state",
-        "question.surfaced",
-        { questionId: question.id, origin: "scope-conflict", itemId, conflicts },
-        { runId, itemId },
-      );
+        reason:
+          "publishing would touch the human's pre-existing uncommitted work: " + conflicts.join(", "),
+        stage: item.state,
+        journal,
+        now,
+        journalData: { conflicts },
+      });
+      const question = asked.question;
       return publishDenial(
         item.state,
         PUBLISH_TOOL +
@@ -8242,7 +8276,10 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
 
   // ---- step 5: the message, built by the pure template --------------------
   const redRef = item.evidence.red ?? null;
-  const redRecord = redRef === null ? null : (readEvidenceAt(runDir, redRef.seq) as Extract<EvidenceRecord, { kind: "red" }> | null);
+  const redRecord =
+    redRef === null
+      ? null
+      : (readEvidenceAt(runDir, redRef.seq, { itemId }) as Extract<EvidenceRecord, { kind: "red" }> | null);
   const redProof: RedProof | null =
     redRecord === null
       ? null
@@ -8543,7 +8580,13 @@ function reportItemLines(
     itemLines.push("Disposition: " + disposition);
 
     const redRef = persisted.evidence.red ?? null;
-    const red = redRef === null ? null : (readEvidenceAt(runDir, redRef.seq) as Extract<EvidenceRecord, { kind: "red" }> | null);
+    const red =
+      redRef === null
+        ? null
+        : (readEvidenceAt(runDir, redRef.seq, { itemId: entry.id }) as Extract<
+            EvidenceRecord,
+            { kind: "red" }
+          > | null);
     itemLines.push(
       red === null
         ? "Red proof: none"
@@ -8586,6 +8629,175 @@ function stopReportDisposition(
   return runDispositionOf([...dispositions.values()], { openQuestions: openQuestionIds.length });
 }
 
+// A report section that cannot be built says so and does not sink the artifact
+// (ISSUE-061). A stop-report is the one artifact a broken run is entitled to, so
+// "the report writer threw" is the one outcome that is never acceptable: the
+// section that failed renders its own failure, and every other section still lands.
+function softSection(heading: string, build: () => string[]): string {
+  try {
+    return reportSection(heading, build());
+  } catch (err) {
+    return reportSection(heading, [
+      "(unavailable: " + (err instanceof Error ? err.message : String(err)) + ")",
+    ]);
+  }
+}
+
+function softLine(label: string, build: () => string): string {
+  try {
+    return label + ": " + build();
+  } catch (err) {
+    return label + ": (unavailable: " + (err instanceof Error ? err.message : String(err)) + ")";
+  }
+}
+
+export interface EnsureTerminalReportInput {
+  store: StateStore;
+  /** Defaults to the workspace's current run. */
+  runId?: string;
+  journal: HandlerJournal;
+  now?: () => number;
+}
+
+export interface EnsureTerminalReportResult {
+  written: boolean;
+  reportPath: string;
+  /** Why the artifact was (or was not) written — the fact a caller journals. */
+  reason: string;
+}
+
+/**
+ * GAP-024's second half: EVERY terminal run leaves the §2.9 artifact.
+ *
+ * A run whose conductor was killed records no stop and writes no report — the
+ * process that would have done both is gone — so the human is left with a run
+ * directory and no statement of what happened to it. This is the sweep the next
+ * open runs: if the current run already carries a stop but has no artifact
+ * (ISSUE-061's throwing writer), or if the conductor that held the workspace
+ * before this session is DEAD, report.md is written naming the run's disposition.
+ *
+ * It is deliberately NOT a stop recorder. Writing run.json here would make the
+ * crashed run terminal on this sweep's authority, which would take ISSUE-066's
+ * resume path away from a run a human may still answer; the artifact states what
+ * is true and changes nothing.
+ *
+ * Every section is fail-soft, because the run dirs that need this most are exactly
+ * the ones a kill left torn.
+ */
+export function ensureTerminalReport(input: EnsureTerminalReportInput): EnsureTerminalReportResult {
+  const store = input.store;
+  const now = input.now ?? Date.now;
+  let runId = input.runId;
+  if (runId === undefined) {
+    let current: Run | null = null;
+    try {
+      current = store.currentRun();
+    } catch {
+      current = null;
+    }
+    if (current === null) return { written: false, reportPath: "", reason: "no current run" };
+    runId = current.runId;
+  }
+  const runDir = handlerRunDir(store, runId);
+  const reportPath = path.join(runDir, REPORT_FILE);
+  if (existsSync(reportPath)) {
+    return { written: false, reportPath, reason: "the run already has its artifact" };
+  }
+
+  let run: Run | null = null;
+  try {
+    run = store.loadRun(runId);
+  } catch {
+    run = null;
+  }
+  const prior = store.priorBeacon;
+  const ownerGone =
+    prior !== null && !pidStillRunning(prior.pid);
+  const stopped = run !== null && run.stop !== null;
+  if (!stopped && !ownerGone) {
+    return { written: false, reportPath, reason: "the run's conductor is still live" };
+  }
+
+  const publishEnabled = isRepo(store.root);
+  // The queue is READ ONCE and its failure is carried, not swallowed: a run dir a
+  // kill left torn has no readable queue, and a report that quietly rendered an
+  // empty one would state a disposition ("settled") drawn from items it could not
+  // see. Every section built from the queue reports the failure instead.
+  const queueRead = readQueue(runDir);
+  const requireQueue = (): Queue => {
+    if (queueRead.error !== null) throw queueRead.error;
+    return queueRead.queue;
+  };
+  const parts: string[] = [
+    "# conductor terminal report — run " + runId,
+    "",
+    stopped && run !== null && run.stop !== null
+      ? "Stop kind: " + run.stop.kind + "\nReason: " + run.stop.reasonDisplay
+      : "Stop kind: none recorded — the conductor that owned this run is gone (pid " +
+        String(prior === null ? "unknown" : prior.pid) +
+        (prior === null || prior.sessionID.length === 0 ? "" : ', session "' + prior.sessionID + '"') +
+        "), so the run stopped without recording one",
+    softLine("Run disposition", () =>
+      stopReportDisposition(store, runId as string, runDir, requireQueue(), publishEnabled),
+    ),
+    "Closing verify: none — a terminal report proves no claim and re-runs nothing (§2.9)",
+    "",
+    softSection("Items", () =>
+      reportItemLines(store, runId as string, runDir, requireQueue(), publishEnabled),
+    ),
+    softSection("Open questions", () => reportQuestionLines(runDir)),
+    softSection("Questions answered", () => reportAnsweredQuestionLines(runDir)),
+    softSection("Decisions", () => reportDecisionLines(runDir)),
+  ];
+  writeFileAtomicSync(reportPath, parts.join("\n") + "\n");
+  input.journal.log(
+    "warn",
+    "state",
+    "run.stop-report",
+    {
+      kind: stopped && run !== null && run.stop !== null ? run.stop.kind : "unrecorded",
+      recovered: !stopped,
+      ...(prior === null ? {} : { priorPid: prior.pid }),
+      tsMs: now(),
+    },
+    { runId },
+  );
+  return {
+    written: true,
+    reportPath,
+    reason: stopped ? "a stopped run had no artifact" : "the run's conductor is gone",
+  };
+}
+
+// The run's queue, or the reason it could not be read. Absent and torn are both
+// failures here: a run that never got a queue and a run whose queue a kill cut in
+// half are both states the report must NAME rather than paper over.
+function readQueue(runDir: string): { queue: Queue; error: Error | null } {
+  try {
+    return { queue: readJsonFileSync(path.join(runDir, "queue.json")) as Queue, error: null };
+  } catch (err) {
+    return {
+      queue: { items: [] },
+      error: err instanceof Error ? err : new Error(String(err)),
+    };
+  }
+}
+
+// A §6.2 question the model answered through the tool is RECORDED but not
+// settled: the run it was blocking stays stopped until the operator's own
+// artifact arrives. This is the one sentence that says so, written once and
+// rendered by BOTH surfaces that report it — the §2.9 report's answered-question
+// line and conductor_status's standing list. A reader who saw only "answered"
+// would take the exchange for closed, and two spellings of the sentence would let
+// one surface drift into saying something milder than the other.
+function standingQuestionNotice(runId: string, questionId: string): string {
+  return (
+    "AWAITING OPERATOR CONFIRMATION (§6.2 human territory): the run stays stopped until " +
+    "the operator's answer is dropped at " +
+    answerDropPath(runId, questionId)
+  );
+}
+
 function reportQuestionLines(runDir: string): string[] {
   return readQuestions(runDir)
     .filter((q) => q.answeredIso === null)
@@ -8611,15 +8823,7 @@ function reportAnsweredQuestionLines(runDir: string): string[] {
         q.question +
         " => " +
         (q.answer ?? "") +
-        // A §6.2 question the model answered through the tool is RECORDED but not
-        // settled: the run it was blocking stays stopped until the operator's own
-        // artifact arrives. Saying so here is what keeps that state readable — a
-        // reader who saw only "answered" would take the exchange for closed.
-        (awaitsOperatorConfirmation(q)
-          ? " — AWAITING OPERATOR CONFIRMATION (§6.2 human territory): the run stays stopped until " +
-            "the operator's answer is dropped at " +
-            answerDropPath(q.runId, q.id)
-          : ""),
+        (awaitsOperatorConfirmation(q) ? " — " + standingQuestionNotice(q.runId, q.id) : ""),
     );
 }
 
@@ -8652,7 +8856,11 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   const runDir = handlerRunDir(store, runId);
   const root = store.root;
 
-  const queue = readJsonFileSync(path.join(runDir, "queue.json")) as Queue;
+  // The queue read is deferred rather than fatal: a `done` report over an
+  // unreadable queue is a bug and still throws below, while the §2.9 stop-report —
+  // the artifact a CRASHED run owes the human — renders the queue-derived sections
+  // as unavailable and hands over the rest (ISSUE-061).
+  const queueRead = readQueue(runDir);
   const run = store.loadRun(runId);
   const trivial = run.classification !== null && run.classification.kind === "trivial";
   const mode: "full" | "lite" = trivial ? "lite" : "full";
@@ -8675,6 +8883,11 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
   //     recorder wrote, least of all upgraded to `done`.
   if (run.stop !== null) {
     const stop = run.stop;
+    const queue = queueRead.queue;
+    const requireQueue = (): Queue => {
+      if (queueRead.error !== null) throw queueRead.error;
+      return queueRead.queue;
+    };
 
     // §2.11 disclosure through the ONE shared helper the `done` path also calls.
     const staleRedAdded = registerStaleRed({
@@ -8686,19 +8899,27 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
     });
     const summary = input.metrics === undefined ? null : await input.metrics();
 
+    // ISSUE-061: every section is FAIL-SOFT here. A stopped run is the one run
+    // entitled to an artifact — it is unsettled, possibly mid-edit, and the human
+    // has nothing else to read — so a section that cannot be built (an item file a
+    // crash never wrote, a torn ledger) renders its own failure and the rest of
+    // the report still lands. A throwing writer left the run with no artifact at
+    // all, which is the §2.9 promise broken in the exact case it was made for.
     const parts: string[] = [
       "# conductor stop-report — " + stop.kind + " — run " + runId,
       "",
       "Stop kind: " + stop.kind,
       "Reason: " + stop.reasonDisplay,
-      "Run disposition: " + stopReportDisposition(store, runId, runDir, queue, publishEnabled),
+      softLine("Run disposition", () =>
+        stopReportDisposition(store, runId, runDir, requireQueue(), publishEnabled),
+      ),
       "Closing verify: none — a stop-report proves no claim and re-runs nothing (§2.9)",
       "",
-      reportSection("Items", reportItemLines(store, runId, runDir, queue, publishEnabled)),
-      reportSection("Open questions", reportQuestionLines(runDir)),
-      reportSection("Questions answered", reportAnsweredQuestionLines(runDir)),
-      reportSection("Decisions", reportDecisionLines(runDir)),
-      reportSection("Stale-red additions", reportStaleLines(queue, staleRedAdded)),
+      softSection("Items", () => reportItemLines(store, runId, runDir, requireQueue(), publishEnabled)),
+      softSection("Open questions", () => reportQuestionLines(runDir)),
+      softSection("Questions answered", () => reportAnsweredQuestionLines(runDir)),
+      softSection("Decisions", () => reportDecisionLines(runDir)),
+      softSection("Stale-red additions", () => reportStaleLines(requireQueue(), staleRedAdded)),
       reportMetricsSection(summary),
     ];
 
@@ -8726,6 +8947,11 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
       stop: { kind: stop.kind, reasonDisplay: stop.reasonDisplay, tsMs: stop.tsMs },
     };
   }
+
+  // Past the stop branch this is a §3.2 closing report over a live run: an
+  // unreadable queue here is a real fault and must not be papered over.
+  if (queueRead.error !== null) throw queueRead.error;
+  const queue = queueRead.queue;
 
   const items = queue.items.map((entry) => {
     const persisted = store.loadItem(runId, entry.id);

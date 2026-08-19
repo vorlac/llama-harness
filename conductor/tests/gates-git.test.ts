@@ -617,3 +617,248 @@ describe("[5.1-checkout-switch-discard] force/discard-changes forms deny uncondi
     expectAllow("git switch feature", { branchPolicy: "check-only", runActive: false });
   });
 });
+
+// ===========================================================================
+// [5.1-config-exec] ISSUE-015 — `git -c <key>=<command>` runs ARBITRARY COMMANDS
+// behind a clean `git` command word and a read-only subcommand. `gitSubcommand`
+// skips `-c k=v` (plan line 2089 mandates the skip), lands on `log`/`diff`, and
+// the read-only allow-list allows — then git executes the configured pager,
+// external diff, editor, credential helper, hook, or alias. The sigil-deny never
+// engages because the command word is the literal `git`. Every row here is a real
+// arbitrary-command-execution route the gate MUST deny; the controls prove the
+// deny is keyed on the EXEC-capable key, not on `-c` itself.
+// ===========================================================================
+
+describe("[5.1-config-exec] -c config keys whose value git EXECUTES deny", () => {
+  const execRows: Array<{ name: string; cmd: string }> = [
+    { name: "core.pager (the reported repro)", cmd: "git -c core.pager=touch\\ pwned log" },
+    { name: "diff.external", cmd: "git -c diff.external=id diff" },
+    { name: "core.pager behind a decoy inert -c", cmd: "git -c pager.log=false -c core.pager=id log" },
+    { name: "sequence.editor", cmd: "git -c sequence.editor=id log" },
+    { name: "uploadpack.packObjectsHook", cmd: "git -c uploadpack.packObjectsHook=id log" },
+    { name: "core.editor", cmd: "git -c core.editor=id log" },
+    { name: "core.sshCommand", cmd: "git -c core.sshCommand=id log" },
+    { name: "core.hooksPath", cmd: "git -c core.hooksPath=/tmp/evil log" },
+    { name: "credential.helper", cmd: "git -c credential.helper='!sh -c id' log" },
+    { name: "alias.x (the route the disclosure claimed closed)", cmd: "git -c alias.x='!git push' log" },
+    { name: "diff.<driver>.command", cmd: "git -c diff.mine.command=id diff" },
+    { name: "diff.<driver>.textconv", cmd: "git -c diff.mine.textconv=id log" },
+    { name: "filter.<f>.clean", cmd: "git -c filter.f.clean=id log" },
+    { name: "filter.<f>.smudge", cmd: "git -c filter.f.smudge=id log" },
+    { name: "merge.<d>.driver", cmd: "git -c merge.d.driver=id log" },
+    { name: "difftool.<t>.cmd", cmd: "git -c difftool.t.cmd=id diff" },
+    { name: "gpg.program", cmd: "git -c gpg.program=id log" },
+    { name: "remote.<r>.uploadpack", cmd: "git -c remote.origin.uploadpack=id log" },
+    { name: "trailer.<t>.command", cmd: "git -c trailer.sign.command=id log" },
+    { name: "key case is not a bypass (CORE.PAGER)", cmd: "git -c CORE.Pager=id log" },
+  ];
+  for (const row of execRows) {
+    test(`git -c ${row.name} denies (config-driven arbitrary execution)`, () => {
+      expectDeny(row.cmd);
+    });
+  }
+
+  // The deny is keyed on the exec-capable KEY. An inert `-c` still allows, so the
+  // fix is not "deny every -c" wearing a security costume.
+  const inertRows: Array<{ name: string; cmd: string }> = [
+    { name: "user.name", cmd: "git -c user.name=x log" },
+    { name: "color.ui", cmd: "git -c color.ui=never log" },
+    { name: "diff.algorithm", cmd: "git -c diff.algorithm=histogram diff" },
+    { name: "core.fileMode", cmd: "git -c core.fileMode=false status" },
+  ];
+  for (const row of inertRows) {
+    test(`control: git -c ${row.name} still ALLOWS (an inert config key is not execution)`, () => {
+      expectAllow(row.cmd);
+    });
+  }
+
+  test("control: git -C /repo status still ALLOWS (-C is a directory, not config)", () => {
+    expectAllow("git -C /repo status");
+  });
+
+  test("control: git --git-dir=/r/.git log still ALLOWS", () => {
+    expectAllow("git --git-dir=/r/.git log");
+  });
+
+  test("git --exec-path=/tmp/evil log denies (git would dispatch its subcommand binary from there)", () => {
+    expectDeny("git --exec-path=/tmp/evil log");
+  });
+});
+
+// ===========================================================================
+// [5.1-config-exec-env] The same execution class through the ENVIRONMENT rather
+// than `-c`: an env-assignment prefix is SEEN THROUGH by command-word detection
+// (so the segment reads as git) but its VALUE was never adjudicated, and
+// `GIT_PAGER=<cmd> git log` executes exactly what `-c core.pager=<cmd>` does.
+// ===========================================================================
+
+describe("[5.1-config-exec-env] exec-capable env prefixes on a git segment deny", () => {
+  const envRows: Array<{ name: string; cmd: string }> = [
+    { name: "GIT_PAGER", cmd: "GIT_PAGER=id git log" },
+    { name: "GIT_EXTERNAL_DIFF", cmd: "GIT_EXTERNAL_DIFF=id git diff" },
+    { name: "GIT_SSH_COMMAND", cmd: "GIT_SSH_COMMAND=id git log" },
+    { name: "GIT_EDITOR", cmd: "GIT_EDITOR=id git log" },
+    { name: "GIT_SEQUENCE_EDITOR", cmd: "GIT_SEQUENCE_EDITOR=id git log" },
+    { name: "GIT_ASKPASS", cmd: "GIT_ASKPASS=id git log" },
+    { name: "GIT_EXEC_PATH", cmd: "GIT_EXEC_PATH=/tmp/evil git log" },
+    { name: "GIT_CONFIG_PARAMETERS", cmd: "GIT_CONFIG_PARAMETERS='core.pager=id' git log" },
+    { name: "GIT_CONFIG_KEY_0 (numbered config injection)", cmd: "GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=id GIT_CONFIG_COUNT=1 git log" },
+    { name: "GIT_CONFIG_GLOBAL", cmd: "GIT_CONFIG_GLOBAL=/tmp/evil.cfg git log" },
+    { name: "PAGER (git falls back to it)", cmd: "PAGER=id git log" },
+    { name: "GIT_PAGER behind the env wrapper", cmd: "env GIT_PAGER=id git log" },
+  ];
+  for (const row of envRows) {
+    test(`${row.name} denies (environment-driven arbitrary execution)`, () => {
+      expectDeny(row.cmd);
+    });
+  }
+
+  test("control: A=b git status still ALLOWS (an ordinary env prefix is not execution)", () => {
+    expectAllow("A=b git status");
+  });
+
+  test("control: GIT_PAGER=id ls ALLOWS (no git segment at all)", () => {
+    expectAllow("GIT_PAGER=id ls");
+  });
+});
+
+// ===========================================================================
+// [5.1-dashed-plumbing] ISSUE-019 — git's own dashed dispatch form. `git apply`
+// IS `git-apply`, and where git-core sits on PATH the hyphenated binary writes
+// exactly what the denied spaced form writes. Basename equality against "git"
+// never saw it.
+// ===========================================================================
+
+describe("[5.1-dashed-plumbing] git-<subcommand> binaries are detected as git", () => {
+  const denies: Array<{ name: string; cmd: string }> = [
+    { name: "git-apply p.diff (writes files around the edit gate)", cmd: "git-apply p.diff" },
+    { name: "git-push", cmd: "git-push" },
+    { name: "git-reset --hard", cmd: "git-reset --hard" },
+    { name: "git-commit -m x", cmd: "git-commit -m x" },
+    { name: "git-add src/a.ts", cmd: "git-add src/a.ts" },
+    { name: "git-branch -D old (operands still decide the discriminated form)", cmd: "git-branch -D old" },
+    { name: "absolute path: /usr/libexec/git-core/git-apply p.diff", cmd: "/usr/libexec/git-core/git-apply p.diff" },
+    { name: "behind a wrapper: sudo git-push", cmd: "sudo git-push" },
+    { name: "in a compound: git log && git-apply p.diff", cmd: "git log && git-apply p.diff" },
+  ];
+  for (const row of denies) {
+    test(`${row.name} denies`, () => {
+      expectDeny(row.cmd);
+    });
+  }
+
+  test("git-status ALLOWS (the dashed form maps to the read-only subcommand, not a blanket deny)", () => {
+    expectAllow("git-status");
+  });
+
+  test("control: digit-apply p.diff ALLOWS (a basename merely ENDING in git- is not git)", () => {
+    expectAllow("digit-apply p.diff");
+  });
+});
+
+// ===========================================================================
+// [5.1-branch-list-only] ISSUE-020 — the `branch` allow arm admitted everything
+// that was not on a hand-list of mutating flags, so bare branch CREATION (a ref
+// write) allowed and the `=`-glued `--set-upstream-to=x` slipped past the exact
+// token comparison. Only the LIST forms are read-only.
+// ===========================================================================
+
+describe("[5.1-branch-list-only] only list forms of git branch allow", () => {
+  const denies: Array<{ name: string; cmd: string }> = [
+    { name: "bare creation: git branch newbranch", cmd: "git branch newbranch" },
+    { name: "creation from a start point: git branch feature main", cmd: "git branch feature main" },
+    { name: "=-glued upstream: --set-upstream-to=origin/x", cmd: "git branch --set-upstream-to=origin/x" },
+    { name: "space upstream: --set-upstream-to origin/x", cmd: "git branch --set-upstream-to origin/x" },
+    { name: "-u origin/x main", cmd: "git branch -u origin/x main" },
+    { name: "--unset-upstream", cmd: "git branch --unset-upstream" },
+    { name: "--track feat origin/main", cmd: "git branch --track feat origin/main" },
+    { name: "--edit-description", cmd: "git branch --edit-description" },
+    { name: "-d old", cmd: "git branch -d old" },
+    { name: "-D old", cmd: "git branch -D old" },
+    { name: "-M main", cmd: "git branch -M main" },
+    { name: "-c old copy", cmd: "git branch -c old copy" },
+    { name: "-f feature main", cmd: "git branch -f feature main" },
+  ];
+  for (const row of denies) {
+    test(`${row.name} denies (a ref write is not a list form)`, () => {
+      expectDeny(row.cmd);
+    });
+  }
+
+  const allows: Array<{ name: string; cmd: string }> = [
+    { name: "bare list", cmd: "git branch" },
+    { name: "--list with a pattern", cmd: "git branch --list feat/*" },
+    { name: "-a", cmd: "git branch -a" },
+    { name: "-r", cmd: "git branch -r" },
+    { name: "-v", cmd: "git branch -v" },
+    { name: "-vv", cmd: "git branch -vv" },
+    { name: "--all --verbose", cmd: "git branch --all --verbose" },
+    { name: "--show-current", cmd: "git branch --show-current" },
+    { name: "--contains HEAD (value-taking list filter)", cmd: "git branch --contains HEAD" },
+    { name: "--merged main (value-taking list filter)", cmd: "git branch --merged main" },
+    { name: "--points-at HEAD", cmd: "git branch --points-at HEAD" },
+    { name: "--sort=-committerdate", cmd: "git branch --sort=-committerdate" },
+    { name: "--format with a glued value", cmd: "git branch --format=%(refname)" },
+  ];
+  for (const row of allows) {
+    test(`control: git branch ${row.name} still ALLOWS (a read-only list form)`, () => {
+      expectAllow(row.cmd);
+    });
+  }
+
+  // Phase IV residual (P5): `-l` was treated as the pattern-taking `--list`, so a
+  // positional beside it read as a match pattern and allowed. `-l` means
+  // `--create-reflog` on git < 2.28, where `git branch -l topic` CREATES `topic` —
+  // a ref write, admitted by a gate that had decided the operand was a pattern.
+  // The gate cannot see which git is on the other side of the call, so the
+  // spelling that means two things in two versions is read as the writing one.
+  const ambiguousShortList: Array<{ name: string; cmd: string }> = [
+    { name: "-l with a positional: git branch -l topic", cmd: "git branch -l topic" },
+    { name: "-l with a glob-looking positional", cmd: "git branch -l feat/*" },
+    { name: "-l after a list flag", cmd: "git branch -a -l topic" },
+  ];
+  for (const row of ambiguousShortList) {
+    test(`${row.name} denies — on git < 2.28 the same spelling CREATES the branch (--create-reflog)`, () => {
+      expectDeny(row.cmd);
+    });
+  }
+
+  test("control: the unambiguous spellings are unaffected — `git branch --list topic` allows and bare `git branch -l` allows", () => {
+    expectAllow("git branch --list topic");
+    expectAllow("git branch --list feat/*");
+    // A bare `-l` writes nothing under either reading: `--create-reflog` needs a
+    // branch name to create a reflog for, and `--list` without a pattern lists.
+    expectAllow("git branch -l");
+  });
+});
+
+// ===========================================================================
+// [5.1-checkout-patch] ISSUE-021 — `git checkout -p` / `--patch` discards
+// working-tree hunks and moves no HEAD, so publish's HEAD check cannot see the
+// loss. It belongs with the other unconditional worktree-discard forms, not on
+// the policy-gated movement path where `check-only` allowed it. The sibling
+// `git restore -p` already denies.
+// ===========================================================================
+
+describe("[5.1-checkout-patch] checkout -p/--patch denies unconditionally", () => {
+  const discards: Array<{ name: string; cmd: string }> = [
+    { name: "checkout -p", cmd: "git checkout -p" },
+    { name: "checkout --patch", cmd: "git checkout --patch" },
+    { name: "checkout -p <path>", cmd: "git checkout -p src/a.ts" },
+    { name: "checkout --patch HEAD", cmd: "git checkout --patch HEAD" },
+    { name: "checkout -p behind the dashed form", cmd: "git-checkout -p" },
+  ];
+  for (const row of discards) {
+    test(`git ${row.name} denies under the MOST permissive posture (check-only, no active run)`, () => {
+      expectDeny(row.cmd, { branchPolicy: "check-only", runActive: false });
+    });
+  }
+
+  test("control: git restore -p denies too (the sibling this row was measured against)", () => {
+    expectDeny("git restore -p src/a.ts", { branchPolicy: "check-only", runActive: false });
+  });
+
+  test("control: git checkout feature still ALLOWS under check-only (movement, not a discard)", () => {
+    expectAllow("git checkout feature", { branchPolicy: "check-only", runActive: false });
+  });
+});

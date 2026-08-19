@@ -56,6 +56,7 @@ import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { readQuestions } from "./questions.ts";
+import { reconcileOrphanQuestions, replayBlockIntents } from "./block-and-ask.ts";
 import { removeWorktree as removeWorktreeImpl } from "./worktrees.ts";
 import {
   appendAnomaly,
@@ -390,81 +391,6 @@ function signatureOf(store: StateStore, run: Run, runDir: string, queue: Queue |
     questions: questionProjection,
     runState: run.state,
   });
-}
-
-// ---------------------------------------------------------------------------
-// The C-032 E7 reconciliation (repair half)
-// ---------------------------------------------------------------------------
-
-/**
- * blockAndAsk (tools.ts) and blockVetAndAsk append their §2.11 question FIRST and
- * call store.setBlocked SECOND. A crash between those two writes — or two
- * in-flight calls — leaves an OPEN question that no item references, and the
- * stage gate then offers the tool again on an item nothing says is blocked.
- *
- * The second write is fully determined by the first and is idempotent, so the
- * engine completes it: for every OPEN implementer-blocked question naming an item
- * whose `blocked` is null, set the block at that question. A fully-applied pair is
- * left untouched (the item already carries a disposition) and an ANSWERED question
- * never re-blocks anything. No question is ever appended here.
- *
- * THE RELEASE TEST. "Open question, unblocked item" is ALSO what a legal release
- * looks like: §2.5 names conductor_queue_amend a legal clearer of `blocked`, and
- * tools.ts clears it while leaving the question open. Repairing without separating
- * the two re-blocks every amended item on the very next idle — permanently, and
- * again after every later amend, which kills the documented escape hatch.
- *
- * The separator is the item's own `releasedQuestions` history: store.clearBlocked
- * writes the question id down at the one moment the item still knows it, so a
- * released item names the question it was released from and a half-applied one
- * names nothing. Nothing outside the durable record is consulted. The file
- * timestamps this guard used to compare could not do the job at any granularity —
- * questions.jsonl carries ONE mtime for every question in the run, so a later
- * append for any other item moved it past the released item and the release was
- * forgotten — and a discriminator drawn from the filesystem is undone by replay, a
- * backup restore, a copy, or a volume with coarse timestamps besides.
- */
-function reconcileOrphanQuestions(
-  store: StateStore,
-  runId: string,
-  runDir: string,
-  journal: ContinuationJournal,
-): void {
-  let questions: QuestionRecord[];
-  try {
-    questions = readQuestions(runDir);
-  } catch {
-    return;
-  }
-  for (const question of questions) {
-    if (question.answeredIso !== null) continue;
-    if (question.origin !== "implementer-blocked") continue;
-    for (const itemId of question.blocksItems) {
-      let item: Item;
-      try {
-        item = store.loadItem(runId, itemId);
-      } catch {
-        continue;
-      }
-      if (item.blocked !== null) continue;
-      if ((item.releasedQuestions ?? []).includes(question.id)) continue;
-      store.setBlocked(runId, itemId, {
-        reason:
-          "completing a half-applied block: open question " +
-          question.id +
-          " names this item but the item carried no disposition (§2.11, C-032 E7)",
-        stage: item.state,
-        questionId: question.id,
-      });
-      journal.log(
-        "info",
-        "state",
-        "item.updated",
-        { itemId, blocked: true, questionId: question.id, reconciled: true },
-        { runId, itemId },
-      );
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -867,7 +793,10 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
   const runId = current.runId;
   const runDir = handlerRunDir(store, runId);
 
-  // (c) The C-032 E7 repair, before any re-prompt or stop decision.
+  // (c) The C-032 E7 repair, before any re-prompt or stop decision — both layers:
+  //     the intents a killed block-and-ask left behind, then the ledger sweep that
+  //     catches an ask whose intent never landed (GAP-028).
+  replayBlockIntents({ store, runId, runDir, journal, now });
   reconcileOrphanQuestions(store, runId, runDir, journal);
 
   // (c2) GAP-013's out-of-band channel, ingested BEFORE the terminality and
@@ -1264,8 +1193,16 @@ function hasWildcard(pattern: string): boolean {
 function extractAskPath(event: PermissionAskedEvent): string | null {
   const patterns = event.patterns ?? [];
   if (patterns.some((pattern) => hasWildcard(pattern))) return null;
+  // The wildcard screen governs EVERY field the extraction can return, not only
+  // `patterns`. The metadata fields WIN the precedence, so a wildcard riding
+  // `metadata.filePath` was adjudicated as one concrete file and replied "once" —
+  // the `**`-on-one-file grant SG-10 forbids, arriving through the field the
+  // extraction prefers most. The field that wins the precedence is the field that
+  // decides: a wildcard in it makes the payload unadjudicable outright, never a
+  // reason to fall through to a lower-precedence field, which would grant the
+  // wildcard ask on the strength of some other entry.
   const direct = stringField(event.metadata, "filePath") ?? stringField(event.metadata, "path");
-  if (direct !== null) return direct;
+  if (direct !== null) return hasWildcard(direct) ? null : direct;
   const concrete = patterns.filter((pattern) => pattern.length > 0);
   return concrete.length === 1 ? concrete[0] : null;
 }

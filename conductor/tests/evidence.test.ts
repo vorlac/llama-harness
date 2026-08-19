@@ -380,6 +380,9 @@ test("[6.1-per-kind] validateEvidenceRecord rejects a verify record missing star
     excluded: [] as string[],
     green: true,
     scopes: { unit: { green: true, exitCode: 0, durationMs: 41876 } },
+    // The §2.6 writer stamp: every appended record names the process that wrote it,
+    // so a foreign session's line is attributable on its face (ISSUE-026/-027).
+    writer: { pid: 4242, startedMs: 1754560000000 },
   };
 
   // A complete verify record passes evidence.ts's own per-kind validator.
@@ -424,6 +427,7 @@ test("[6.1-per-kind] validateEvidenceRecord rejects a verify record missing star
     failureExcerpt: "AssertionError",
     failureClass: "assertion" as const,
     targeted: true,
+    writer: { pid: 4242, startedMs: 1754560000000 },
   };
   assert.equal(validateEvidenceRecord(redOk).ok, true, "a complete red record validates");
   const redMissing: Record<string, unknown> = { ...redOk };

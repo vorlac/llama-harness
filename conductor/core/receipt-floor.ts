@@ -54,11 +54,14 @@ function dedupe(entries: readonly string[]): string[] {
  * a union scope let it land in the other half of the item.
  *
  * So: a test-writer's fallback is the testScope, and an implementer's is the
- * fileScope MINUS anything the testScope covers — the same subtraction
- * core/gates-edit.ts applies to the implementer's write permission, so the floor
- * demands exactly what the gate would have allowed. A fileScope entirely covered
+ * fileScope MINUS any ENTRY the testScope covers. A fileScope entirely covered
  * by the testScope (which §3.2 queue acceptance refuses) falls back to the whole
  * fileScope rather than to nothing: a floor of "nothing" is no floor.
+ *
+ * Entry-level subtraction is only half the rule, and it is the half a glob list
+ * can carry. The other half — the co-located layout, where the testScope is
+ * nested INSIDE a fileScope entry — belongs to floorExclusions below, which
+ * subtracts per touched file the way the write gate does.
  */
 export function routeFallbackScope(route: FixRoute, scopes: SubjectScopes): string[] {
   if (route === "testWriter") return dedupe(scopes.testScope);
@@ -96,12 +99,40 @@ function touchesSubject(touchedPath: string, subject: string): boolean {
 }
 
 /**
+ * The touched paths that are not evidence FOR THIS ROUTE, as globs.
+ *
+ * routeFallbackScope subtracts whole entries, glob against glob, and that is all
+ * a glob list can express — which a CO-LOCATED layout defeats completely. With
+ * fileScope `src/**` and testScope `src/**\/*.test.mjs` the test glob equals no
+ * fileScope entry and matches none of them as strings, so nothing is subtracted
+ * and the implementer's fallback universe contains the very test files an
+ * implementer may not touch. No glob spells "src/** minus the tests inside it",
+ * so the subtraction has to happen where core/gates-edit.ts already makes it: on
+ * the FILE IN HAND. An implementer's touch of a path inside the item's testScope
+ * is refused outright at the write gate, so it can never be the receipt for an
+ * implementation finding either — and a test-writer, whose whole territory is
+ * the testScope, excludes nothing.
+ */
+export function floorExclusions(route: FixRoute, scopes: SubjectScopes): string[] {
+  return route === "implementer" ? dedupe(scopes.testScope) : [];
+}
+
+/**
  * Does a fix receipt's touch set intersect what the routed finding(s) name? The
  * reason is written to be handed BACK to the fixer verbatim: it names the
  * discrepancy (what the receipt touched vs what the findings claim), which is the
  * whole content of the re-dispatch.
+ *
+ * `excluded` (floorExclusions above) is the per-path subtraction: a touched path
+ * it matches is not evidence, whatever the subjects say. Passing it is not
+ * optional — a floor that forgot the exclusion is the floor this parameter
+ * exists to close, and an argument the caller must write is one a reader can see.
  */
-export function receiptFloor(touched: readonly string[], subjects: readonly string[]): FloorCheck {
+export function receiptFloor(
+  touched: readonly string[],
+  subjects: readonly string[],
+  excluded: readonly string[],
+): FloorCheck {
   const named = subjects.length > 0 ? subjects.join(", ") : "(no path named)";
   if (touched.length === 0) {
     return {
@@ -112,7 +143,22 @@ export function receiptFloor(touched: readonly string[], subjects: readonly stri
         named,
     };
   }
-  for (const path of touched) {
+  const admissible = touched.filter(
+    (path) => !excluded.some((glob) => glob === path || globMatch(glob, path)),
+  );
+  if (admissible.length === 0) {
+    return {
+      ok: false,
+      reason:
+        "the receipt reports the fix as done but every file it touched (" +
+        touched.join(", ") +
+        ") is inside the item's testScope [" +
+        excluded.join(", ") +
+        "], which this fixer may not edit at all: the finding(s) name " +
+        named,
+    };
+  }
+  for (const path of admissible) {
     for (const subject of subjects) {
       if (touchesSubject(path, subject)) return { ok: true, reason: "" };
     }

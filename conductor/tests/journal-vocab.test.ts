@@ -594,11 +594,14 @@ test("[vocab-live-lock] a LIVE foreign lock journals its contention record throu
     JSON.stringify({ pid: process.pid, startMs: START_MS - 1000 }),
   );
 
-  const store = openStore(root, tee, config, process.pid + 1);
-
   // Premise: the contention branch is the branch that ran. Without this the test
-  // could pass on a fixture where the lock was simply claimed.
-  assert.equal(store.readOnly, true, "premise: a live foreign lock forced read-only (§4.1)");
+  // could pass on a fixture where the lock was simply claimed. A second session is
+  // REFUSED (owner decision D6), so the refusal itself is the premise.
+  assert.throws(
+    () => openStore(root, tee, config, process.pid + 1),
+    /held by another live conductor/,
+    "premise: a live foreign lock refuses the second session (§4.1)",
+  );
 
   assertAllInVocabulary(tee, 1, "the lock-contention path");
   const onDisk = persisted(tee);

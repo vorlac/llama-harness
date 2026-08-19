@@ -1230,9 +1230,18 @@ namespace conductor::router {
         }
 
         // The §4.4 capacity refusal, in the same envelope shape as every other
-        // router-origin error so one parser handles them all. `code` carries the
-        // discriminator the fan-out side acts on: a timeout means the queue moved
-        // too slowly and retrying may work, an overflow means it was already full.
+        // router-origin error so one parser handles them all. `code` distinguishes
+        // the two capacity refusals: a timeout means the queue moved too slowly and
+        // retrying may work, an overflow means it was already full.
+        //
+        // The distinction is DIAGNOSTIC ONLY (ISSUE-041). §4.4 describes a 503 "the
+        // fan-out engine understands (backs off and retries; bounded)", and that
+        // consumer was never built and structurally cannot see this envelope: the
+        // fan-out reaches this router through opencode's provider fetch, which
+        // surfaces a failed request as an error string with no body for anyone to
+        // parse. So these codes reach a human reading the router log or the metrics
+        // ledger, and reach no backoff. Anything that changes that has to start on
+        // the conductor side, by giving the envelope a reader.
         static void sendAdmissionError(httplib::Response& response, AdmissionOutcome outcome,
                                        const std::string& model) {
             const bool overflowed = outcome == AdmissionOutcome::Overflowed;

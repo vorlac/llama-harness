@@ -789,6 +789,106 @@ test("[prov-escape-tool-answer-cannot-self-revive] THE ESCAPE: the orchestrator 
   assert.equal(fresh.store.loadRun(fresh.runId).stop, null, "and the stop is cleared");
 });
 
+test("[prov-status-names-the-standing-question] the LIVE surface says it too: an answered-but-standing §6.2 question leaves openQuestions (it IS answered), so conductor_status carries it as a standing question with the same AWAITING OPERATOR CONFIRMATION notice the report renders and the same drop path — an operator watching status is otherwise told the run has no question outstanding while the run sits stopped on one", () => {
+  const bench = makeBench({
+    tag: "statusstanding",
+    queue: { items: [makeQueueItem("I1"), makeQueueItem("I2")] },
+    states: { I1: "PENDING", I2: "PENDING" },
+  });
+
+  const human = handleSurface({
+    store: bench.store,
+    runId: bench.runId,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    question: HUMAN_TERRITORY_Q,
+    blocksItems: ["I1"],
+    askedBy: { role: "orchestrator", sessionID: ORCH },
+  });
+  const machine = surfaceOn(bench, ["I2"]);
+
+  handleAnswer({
+    store: bench.store,
+    runId: bench.runId,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    questionId: human.questionId,
+    answer: "yes, delete it",
+    via: "tool",
+  });
+  handleAnswer({
+    store: bench.store,
+    runId: bench.runId,
+    journal: bench.journal.sink,
+    now: () => START_MS,
+    questionId: machine.questionId,
+    answer: "two's complement",
+    via: "tool",
+  });
+
+  // The premise, read off the ledger through the predicate the report uses.
+  assert.equal(awaitsOperatorConfirmation(questionById(bench.runDir, human.questionId)), true);
+  assert.equal(awaitsOperatorConfirmation(questionById(bench.runDir, machine.questionId)), false);
+
+  const status = handleStatus({ store: bench.store, runId: bench.runId, journal: bench.journal.sink });
+  assert.deepEqual(
+    status.openQuestions.map((entry) => entry.id),
+    [],
+    "premise: both questions carry an answer, so neither is OPEN — which is exactly how the standing one went invisible",
+  );
+
+  assert.deepEqual(
+    status.standingQuestions.map((entry) => entry.id),
+    [human.questionId],
+    "only the §6.2 question answered by something other than the operator stands",
+  );
+  const standing = status.standingQuestions[0];
+  assert.equal(standing.question, HUMAN_TERRITORY_Q, "the question is carried verbatim");
+  assert.equal(
+    standing.answerPath,
+    answerDropPath(bench.runId, human.questionId),
+    "with the one path the operator must write",
+  );
+  assert.match(
+    standing.notice,
+    /AWAITING OPERATOR CONFIRMATION/,
+    "and the notice a reader of the report would see",
+  );
+  assert.ok(
+    standing.notice.includes(answerDropPath(bench.runId, human.questionId)),
+    "the notice names the drop path itself, so a status line stands alone",
+  );
+
+  // The honest path, on a fresh run: the OPERATOR answers first, through the file
+  // channel. That question is settled, so it is neither open nor standing — the
+  // list carries a state the operator can act on, not every answered question.
+  const fresh = makeBench({
+    tag: "statussettled",
+    queue: { items: [makeQueueItem("I1")] },
+    states: { I1: "PENDING" },
+  });
+  const freshQ = handleSurface({
+    store: fresh.store,
+    runId: fresh.runId,
+    journal: fresh.journal.sink,
+    now: () => START_MS,
+    question: HUMAN_TERRITORY_Q,
+    blocksItems: ["I1"],
+    askedBy: { role: "orchestrator", sessionID: ORCH },
+  });
+  dropAnswerFile(fresh.runDir, freshQ.questionId, "no — keep the production data\n");
+  ingestAnswerFiles({
+    store: fresh.store,
+    runId: fresh.runId,
+    journal: fresh.journal.sink,
+    now: () => START_MS,
+  });
+  assert.equal(questionById(fresh.runDir, freshQ.questionId).answeredVia, "human-file");
+  const settled = handleStatus({ store: fresh.store, runId: fresh.runId, journal: fresh.journal.sink });
+  assert.deepEqual(settled.openQuestions, [], "the operator's answer closed it");
+  assert.deepEqual(settled.standingQuestions, [], "and an operator-answered question never stands");
+});
+
 test("[prov-report-names-the-standing-question] the answered-but-standing state is READABLE: the §2.9 report renders the tool-answered human question with the drop path the operator still owes, so a reader cannot mistake it for a closed exchange", () => {
   const answeredByTool = {
     humanTerritory: true,

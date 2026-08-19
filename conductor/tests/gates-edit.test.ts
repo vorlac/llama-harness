@@ -61,7 +61,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { decideEdit, writeShapedPaths, decideSession } from "../core/gates-edit.ts";
+import {
+  decideEdit,
+  writeShapedPaths,
+  decideSession,
+  interpreterStateAreaScript,
+} from "../core/gates-edit.ts";
 // The matcher the gate itself uses — imported so [5.2-out-of-tree-escape] can assert
 // its PREMISE rather than assume it.
 import { globMatch } from "../core/shell-parse.ts";
@@ -663,5 +668,319 @@ test("[5.2-out-of-tree-escape] an ABSOLUTE path outside the session tree is deni
     decideEdit(editInput({ fileScope: ["**"], path: p("src/a.ts") })).action,
     "allow",
     "an in-tree path under a wildcard scope is still allowed",
+  );
+});
+
+// ===========================================================================
+// [5.2-state-area-casefold] GAP-026 / ISSUE-016 — the `.conductor/**` deny was
+// byte-exact while the filesystem it defends is case-INSENSITIVE (darwin, and
+// Windows), so `.Conductor/runs/<id>/state.json` is the SAME FILE as
+// `.conductor/runs/<id>/state.json` and wrote the real state area: run state,
+// evidence, and journal forged by a session whose scope admits the path.
+// `headsOverlap` already folds case for exactly this reason. Every spelling of
+// the state area is the state area.
+// ===========================================================================
+
+const STATE_AREA_SPELLINGS: readonly string[] = [
+  ".Conductor/runs/run-0001/state.json",
+  ".CONDUCTOR/runs/run-0001/state.json",
+  ".cOnDuCtOr/journal.ndjson",
+  ".Conductor/runs/run-0001/answers/Q-0001.md",
+];
+
+for (const rel of STATE_AREA_SPELLINGS) {
+  test(`[5.2-state-area-casefold] <tree>/${rel} is the state area on a case-insensitive filesystem and is DENIED`, () => {
+    const d = decideEdit(
+      editInput({
+        sessionRole: "implementer",
+        fileScope: ["**"],
+        path: p(rel),
+      }),
+    );
+    const reason = denyReason(d, `case-folded state-area path ${rel}`);
+    assert.match(reason, /\.conductor/i, "the reason names the state area it protects");
+  });
+}
+
+test("[5.2-state-area-casefold] the fold does not over-match: a neighbouring name that merely STARTS with the token is still editable", () => {
+  assertAllow(
+    decideEdit(editInput({ fileScope: ["**"], path: p(".conductorial/notes.md") })),
+    "a directory whose name only begins with the token is not the state area",
+  );
+  assertAllow(
+    decideEdit(editInput({ fileScope: ["**"], path: p("conductor/core/gates-edit.ts") })),
+    "the dotless project directory is ordinary source",
+  );
+  assertAllow(
+    decideEdit(editInput({ fileScope: ["**"], path: p("src/Conductor.ts") })),
+    "a source file named after the project is ordinary source",
+  );
+});
+
+// ===========================================================================
+// [5.2-wrapper-chain] Phase III residual — `unwrappedCommandIndex` skipped
+// exactly ONE wrapper word and none of that wrapper's own flags or assignments,
+// so `env -i sh -c "…"` and `env FOO=1 sh -c "…"` reached NEITHER the write-shape
+// extractor NOR the interpreter state-area rule: the command word read as `-i` /
+// `FOO=1` and the segment surfaced nothing at all. The record's wrapper list
+// (env with its flags and assignments, nice, nohup, time, timeout, xargs, and the
+// already-listed command/sudo/builtin/exec) must be unwrapped ITERATIVELY, with
+// the same fail-closed posture as one level.
+// ===========================================================================
+
+const WRAPPER_CHAINS: ReadonlyArray<{ cmd: string; target: string; note: string }> = [
+  { cmd: `env -i sh -c "rm /outside/x"`, target: "/outside/x", note: "env -i sh -c (the reported shape)" },
+  { cmd: `env FOO=1 sh -c "rm /outside/x"`, target: "/outside/x", note: "env FOO=1 sh -c (the reported shape)" },
+  { cmd: `env -i sh -c "echo x > /outside/f"`, target: "/outside/f", note: "redirect behind env -i sh -c" },
+  { cmd: `env -u PATH sh -c "rm /outside/x"`, target: "/outside/x", note: "env -u NAME consumes its value" },
+  { cmd: "nice rm /outside/x", target: "/outside/x", note: "nice" },
+  { cmd: "nice -n 10 rm /outside/x", target: "/outside/x", note: "nice -n 10" },
+  { cmd: "nohup rm /outside/x", target: "/outside/x", note: "nohup" },
+  { cmd: "time rm /outside/x", target: "/outside/x", note: "time" },
+  { cmd: "timeout 5 rm /outside/x", target: "/outside/x", note: "timeout with its duration operand" },
+  { cmd: "timeout -k 1 5 rm /outside/x", target: "/outside/x", note: "timeout -k with its duration operand" },
+  { cmd: "xargs rm /outside/x", target: "/outside/x", note: "xargs" },
+  { cmd: "xargs -n 1 rm /outside/x", target: "/outside/x", note: "xargs -n 1" },
+  { cmd: "sudo -u bob rm /outside/x", target: "/outside/x", note: "a listed wrapper's value flag" },
+  { cmd: "nice nohup rm /outside/x", target: "/outside/x", note: "two wrappers deep" },
+  { cmd: `nice env -i sh -c "rm /outside/x"`, target: "/outside/x", note: "three levels: nice, env -i, sh -c" },
+  { cmd: `env -i sh -c "sed -i 's/a/b/' /outside/g.ts"`, target: "/outside/g.ts", note: "sed -i behind env -i sh -c" },
+  { cmd: `nice mv src/a.ts /outside/b.ts`, target: "/outside/b.ts", note: "mv destination behind nice" },
+];
+
+for (const { cmd, target, note } of WRAPPER_CHAINS) {
+  test(`[5.2-wrapper-chain] writeShapedPaths sees through ${note}: ${cmd}`, () => {
+    const paths = writeShapedPaths(cmd);
+    assert.ok(
+      paths.includes(target),
+      `the wrapper chain must not hide the write of ${target}; got ${JSON.stringify(paths)}`,
+    );
+  });
+}
+
+test("[5.2-wrapper-chain] an interpreter one-liner naming the state area is found behind the same chains", () => {
+  const chains: ReadonlyArray<[string, string]> = [
+    [
+      `env -i node -e "require('fs').writeFileSync('.conductor/runs/r/answers/Q.md','x')"`,
+      "env -i node -e",
+    ],
+    [
+      `env FOO=1 sh -c "node -e \\"require('fs').writeFileSync('.conductor/runs/r/answers/Q.md','x')\\""`,
+      "env FOO=1 sh -c node -e",
+    ],
+    [
+      `nice node -e "require('fs').writeFileSync('.conductor/state.json','x')"`,
+      "nice node -e",
+    ],
+    [
+      `timeout 5 node -e "require('fs').writeFileSync('.conductor/state.json','x')"`,
+      "timeout 5 node -e",
+    ],
+  ];
+  for (const [cmd, note] of chains) {
+    assert.notEqual(
+      interpreterStateAreaScript(cmd),
+      null,
+      `${note}: the state-area program must be found behind the wrapper chain`,
+    );
+  }
+});
+
+test("[5.2-wrapper-chain] a pure read behind the same chains still surfaces NOTHING (the unwrap widens detection, not the deny)", () => {
+  assert.deepEqual(writeShapedPaths("nice cat file.ts"), [], "nice cat is a read");
+  assert.deepEqual(writeShapedPaths("timeout 5 grep foo file.ts"), [], "timeout grep is a read");
+  assert.deepEqual(writeShapedPaths(`env -i sh -c "cat file.ts"`), [], "a wrapped read never matches");
+  assert.equal(
+    interpreterStateAreaScript(`env -i node -e "console.log('hello')"`),
+    null,
+    "an innocent one-liner behind a wrapper is not a state-area program",
+  );
+});
+
+// ===========================================================================
+// [5.2-wrapper-path] Phase IV residual (P1) — the wrapper test was token-EXACT
+// while the very next line, and the sibling git gate, resolve a command word to
+// its BASENAME. So `/usr/bin/env sh -c "…"`, `/bin/nice rm …` and every other
+// path spelling of a listed wrapper fell out of the unwrap: the command word read
+// as `/usr/bin/env`, the inner command was never analyzed, and a write behind it
+// surfaced nothing. A gate whose reach depends on how a caller spells `env` is
+// spelled around by writing the path.
+// ===========================================================================
+
+const PATH_SPELLED_WRAPPERS: ReadonlyArray<{ cmd: string; target: string; note: string }> = [
+  { cmd: `/usr/bin/env sh -c "printf x > /outside/y"`, target: "/outside/y", note: "absolute env, redirect inside sh -c (the reported shape)" },
+  { cmd: `/usr/bin/env -i sh -c "rm /outside/x"`, target: "/outside/x", note: "absolute env with its own flag" },
+  { cmd: `./env sh -c "rm /outside/x"`, target: "/outside/x", note: "relative env" },
+  { cmd: "/bin/nice rm /outside/x", target: "/outside/x", note: "absolute nice" },
+  { cmd: "/usr/bin/timeout 5 rm /outside/x", target: "/outside/x", note: "absolute timeout with its duration operand" },
+  { cmd: "/usr/bin/sudo -u bob rm /outside/x", target: "/outside/x", note: "absolute sudo with a value flag" },
+  { cmd: `/usr/bin/nice /usr/bin/env -i /bin/sh -c "rm /outside/x"`, target: "/outside/x", note: "every level path-spelled" },
+];
+
+for (const { cmd, target, note } of PATH_SPELLED_WRAPPERS) {
+  test(`[5.2-wrapper-path] a path-spelled wrapper does not hide the write — ${note}: ${cmd}`, () => {
+    const paths = writeShapedPaths(cmd);
+    assert.ok(
+      paths.includes(target),
+      `the wrapper is resolved to its basename before the membership test; got ${JSON.stringify(paths)}`,
+    );
+    // …and the surfaced target meets the gate, which is where the escape ended.
+    const reason = denyReason(
+      decideEdit(editInput({ fileScope: ["**"], testScope: [], path: target })),
+      `the write behind ${cmd}`,
+    );
+    assert.ok(reason.length > 0, "the surfaced target reaches a DENY carrying a reason");
+  });
+}
+
+test("[5.2-wrapper-path] a path-spelled interpreter behind a path-spelled wrapper still reaches the state-area rule", () => {
+  const chains: ReadonlyArray<[string, string]> = [
+    [
+      `/usr/bin/env -i /usr/local/bin/node -e "require('fs').writeFileSync('.conductor/state.json','x')"`,
+      "absolute env + absolute node",
+    ],
+    [
+      `/usr/bin/env sh -c "/usr/bin/python3 -c \\"open('.conductor/x','w')\\""`,
+      "absolute env, sh -c, absolute python3",
+    ],
+    [
+      `/bin/nice /usr/bin/python3 -c "open('.conductor/runs/r/answers/Q.md','w').write('x')"`,
+      "absolute nice + absolute python3",
+    ],
+  ];
+  for (const [cmd, note] of chains) {
+    assert.notEqual(
+      interpreterStateAreaScript(cmd),
+      null,
+      `${note}: a state-area program is found however its wrapper and interpreter are spelled`,
+    );
+  }
+});
+
+test("[5.2-wrapper-path] basename resolution does not widen the wrapper LIST: a command that merely ends in a wrapper's name is not unwrapped", () => {
+  // `myenv` and `subenv` are not `env`; resolving `/usr/bin/env` must not make
+  // every word ending in those three letters a pass-through wrapper.
+  assert.deepEqual(
+    writeShapedPaths(`myenv sh -c "rm /outside/x"`),
+    [],
+    "a command word that merely CONTAINS a wrapper name is a command, not a wrapper",
+  );
+  assert.deepEqual(
+    writeShapedPaths(`/usr/bin/notnice rm /outside/x`),
+    [],
+    "a path whose basename is not a listed wrapper is not unwrapped",
+  );
+});
+
+// ===========================================================================
+// [5.2-interpreter-casefold] Phase IV residual (P2) — GAP-026's case fold landed
+// on the edit-path deny but the interpreter state-area rule stayed byte-exact, so
+// `python3 -c "open('.Conductor/x','w')"` was not a state-area program at all. The
+// filesystem this defends is case-insensitive: `.Conductor/x` and `.conductor/x`
+// are one file on darwin and on Windows, and the state area is the one artifact
+// whose whole value is that no gated session wrote it.
+// ===========================================================================
+
+const FOLDED_STATE_AREA_SCRIPTS: ReadonlyArray<[string, string]> = [
+  [`python3 -c "open('.Conductor/x','w')"`, "capitalized .Conductor (the reported shape)"],
+  [`python3 -c "open('.CONDUCTOR/x','w')"`, "upper-case token"],
+  [`node -e "require('fs').writeFileSync('.CoNdUcToR/state.json','x')"`, "mixed case"],
+  [`env -i sh -c "python3 -c \\"open('.Conductor/x','w')\\""`, "folded token behind a wrapper chain"],
+  [`/usr/bin/env python3 -c "open('.Conductor/x','w')"`, "folded token behind a path-spelled wrapper"],
+];
+
+for (const [cmd, note] of FOLDED_STATE_AREA_SCRIPTS) {
+  test(`[5.2-interpreter-casefold] the interpreter state-area rule folds case — ${note}`, () => {
+    assert.notEqual(
+      interpreterStateAreaScript(cmd),
+      null,
+      `${cmd}: a state-area program is caught by the interpreter rule itself, not only by whatever literal operand a backstop happens to parse`,
+    );
+  });
+}
+
+test("[5.2-interpreter-casefold] the fold does not over-match: an innocent program naming a neighbouring word is not a state-area program", () => {
+  assert.equal(
+    interpreterStateAreaScript(`python3 -c "print('the conductorial notes')"`),
+    null,
+    "a word that merely begins with the token is not the state area",
+  );
+  assert.equal(
+    interpreterStateAreaScript(`node -e "console.log('hello')"`),
+    null,
+    "an innocent one-liner is still innocent",
+  );
+});
+
+// ===========================================================================
+// [5.2-command-casefold] Phase IV residual (R0, same class as P2) — the P2 fold
+// landed on the state-area PATH TOKEN but NOT on the command NAMES. WRAPPERS,
+// SHELLS, INTERPRETERS and the write-shaped command set were matched byte-exactly
+// against the resolved basename, so on a case-insensitive FS (APFS, NTFS) an
+// upper/mixed-case spelling of a tool walked past all three gates: `/usr/bin/ENV`,
+// `/bin/SH`, `NODE`, `RM`, `/usr/bin/PYTHON3` are the very tools those lists name,
+// yet a write behind them classified as a harmless read. The command name is now
+// resolved to a folded basename before EVERY membership test.
+// ===========================================================================
+
+const CASE_SPELLED_WRITES: ReadonlyArray<{ cmd: string; target: string; note: string }> = [
+  { cmd: `/usr/bin/ENV sh -c "rm /outside/x"`, target: "/outside/x", note: "upper-case wrapper ENV" },
+  { cmd: `/bin/SH -c "printf x > /outside/y"`, target: "/outside/y", note: "upper-case shell SH, redirect inside" },
+  { cmd: `RM /outside/x`, target: "/outside/x", note: "bare upper-case rm" },
+  { cmd: `/bin/RM -rf /outside/x`, target: "/outside/x", note: "path-spelled upper-case rm with flags" },
+  { cmd: `NODE -e "require('fs').writeFileSync('/outside/x','y')"`, target: "/outside/x", note: "bare upper-case interpreter NODE" },
+  { cmd: `Timeout 5 rm /outside/x`, target: "/outside/x", note: "mixed-case wrapper Timeout with its operand" },
+  { cmd: `TEE /outside/x`, target: "/outside/x", note: "upper-case tee" },
+  { cmd: `MV src/a.ts /outside/b.ts`, target: "/outside/b.ts", note: "upper-case mv destination" },
+];
+
+for (const { cmd, target, note } of CASE_SPELLED_WRITES) {
+  test(`[5.2-command-casefold] an upper/mixed-case command name does not hide the write — ${note}: ${cmd}`, () => {
+    const paths = writeShapedPaths(cmd);
+    assert.ok(
+      paths.includes(target),
+      `the command name is folded to its resolved basename before the membership test; got ${JSON.stringify(paths)}`,
+    );
+    // …and the surfaced target reaches the DENY where the escape used to end.
+    const reason = denyReason(
+      decideEdit(editInput({ fileScope: ["**"], testScope: [], path: target })),
+      `the write behind ${cmd}`,
+    );
+    assert.ok(reason.length > 0, "the surfaced target reaches a DENY carrying a reason");
+  });
+}
+
+const CASE_SPELLED_STATE_AREA: ReadonlyArray<[string, string]> = [
+  [`/usr/bin/PYTHON3 -c "open('.conductor/x','w')"`, "upper-case PYTHON3 (the reported shape)"],
+  [`NODE -e "require('fs').writeFileSync('.conductor/state.json','x')"`, "bare upper-case NODE"],
+  [`/usr/bin/ENV PYTHON3 -c "open('.conductor/x','w')"`, "folded wrapper AND folded interpreter"],
+  [`/usr/bin/ENV SH -c "python3 -c \\"open('.conductor/x','w')\\""`, "folded wrapper and folded shell over the state area"],
+];
+
+for (const [cmd, note] of CASE_SPELLED_STATE_AREA) {
+  test(`[5.2-command-casefold] an upper/mixed-case interpreter still reaches the state-area rule — ${note}`, () => {
+    assert.notEqual(
+      interpreterStateAreaScript(cmd),
+      null,
+      `${cmd}: the interpreter is resolved case-insensitively, so its state-area program is caught`,
+    );
+  });
+}
+
+test("[5.2-command-casefold] folding the command name does not widen the tool sets: a name that merely resembles a listed tool still passes", () => {
+  assert.deepEqual(
+    writeShapedPaths(`MYENV sh -c "rm /outside/x"`),
+    [],
+    "MYENV folds to `myenv`, which is not the wrapper `env` — the inner command is not unwrapped",
+  );
+  assert.deepEqual(
+    writeShapedPaths(`NOTNICE rm /outside/x`),
+    [],
+    "NOTNICE folds to `notnice`, which is not the wrapper `nice`",
+  );
+  assert.equal(
+    interpreterStateAreaScript(`PRINT -c "open('.conductor/x','w')"`),
+    null,
+    "PRINT folds to `print`, which is not an interpreter — its argument is not a program the gate runs",
   );
 });

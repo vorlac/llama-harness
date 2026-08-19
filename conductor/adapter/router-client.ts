@@ -10,19 +10,36 @@
 //
 // Failure discipline (§4.4 "Fail-soft"): the router is a residual-risk dependency.
 // While it is down, requests to it fail, and this client must ABSORB every such
-// failure — routerHealthy resolves false and fetchMetricsSummary resolves null,
-// each without ever throwing or rejecting. The fan-out engine, on observing a
-// router request failure, records it via noteRouterFailure, which latches the
+// failure — fetchMetricsSummary resolves null without ever throwing or rejecting,
+// and a failed request is recorded through noteRouterFailure, which latches the
 // session onto the upstream base URL (resolveBaseUrl then returns the upstream for
-// the rest of the session) and marks the run's metrics partial. A second failover
-// in one session disables router probing entirely (§4.4 lines 1690-1692).
+// the rest of the session) and sets metricsPartial. A second failover in one
+// session stops the router being addressed at all (§4.4 lines 1690-1692).
+//
+// WHAT THE LATCH ACTUALLY COVERS (ISSUE-040, the recorded deviation from §4.4's
+// wording). §4.4 reads as though a router outage fails the whole run's traffic
+// over to the upstream. It does not, and cannot as the run is wired: the model
+// traffic goes opencode → the provider baseURL baked into the session config →
+// the router, and the plugin has no way to re-point an opencode session
+// mid-flight. So this latch diverts exactly the HTTP the conductor issues
+// ITSELF — the §2.1 setup proofs (adapter/tools.ts setupProofRequest) and the
+// closing metrics read. Sub-sessions in flight when the router dies die with it
+// and the run takes their `env` failures. Mid-run resilience against a dead
+// router is the supervisor's restart (scripts/serve.py), not this module.
 //
 // Interfaces (plan 2497-2504):
-//   routerHealthy(routerCfg, failoverState?)              -> Promise<boolean>
 //   fetchMetricsSummary(routerCfg, log?)                  -> Promise<MetricsSummary | null>
 //   resolveBaseUrl(routerCfg, upstreamCfg, failoverState) -> string   (SYNC pure resolver)
 //   noteRouterFailure(failoverState, log?)                -> void      (records one failover)
 //   createFailoverState()                                 -> FailoverState
+//
+// The plan's fifth interface, `routerHealthy(routerCfg, failoverState?)`, is not
+// here. It was built, tested and called by nothing for the whole build: the
+// setup path reaches the router through its own proof requests and reads the
+// verdict off those, and the live health probing an operator relies on is the
+// supervisor's, in scripts/serve.py. An exported, tested probe with no caller
+// reads as coverage of a mechanism that does not run, which is the same honesty
+// gap ISSUE-040 names; the probe is deleted rather than left standing.
 
 import { request as httpRequest } from "node:http";
 import type { LogLevel } from "../core/types.ts";
@@ -30,8 +47,9 @@ import type { LogLevel } from "../core/types.ts";
 // The router's per-session failover latch AND the partial-metrics signal, threaded
 // through the session by the fan-out engine (§4.4). `useUpstream` diverts the base
 // URL to the upstream once a router request has failed; `metricsPartial` is the
-// boolean Task 9.5b (conductor_report) reads; `probingDisabled` short-circuits
-// routerHealthy after the second failover so the router is never probed again.
+// boolean Task 9.5b (conductor_report) reads; `probingDisabled` is set by the
+// second failover and read by resolveBaseUrl, which from then on resolves the
+// upstream even if the latch were cleared — the router is not addressed again.
 export interface FailoverState {
   failovers: number;
   useUpstream: boolean;
@@ -71,7 +89,6 @@ export type RouterClientLog = (
   data: Record<string, unknown>,
 ) => void;
 
-const HEALTH_PATH = "/conductor/health";
 const METRICS_PATH = "/conductor/metrics";
 
 interface HttpResult {
@@ -168,21 +185,6 @@ function httpGet(routerCfg: RouterClientConfig, pathName: string): Promise<HttpR
 
     req.end();
   });
-}
-
-// True iff the router answers its health endpoint with 200. Any other status, a
-// refused connection, or a hang past probeTimeoutMs resolves false WITHOUT throwing.
-// Once the session has recorded two failovers (probingDisabled), this short-circuits
-// false with ZERO network calls.
-export async function routerHealthy(
-  routerCfg: RouterClientConfig,
-  failoverState?: FailoverState,
-): Promise<boolean> {
-  if (failoverState !== undefined && failoverState.probingDisabled) {
-    return false;
-  }
-  const res = await httpGet(routerCfg, HEALTH_PATH);
-  return res !== null && res.status === 200;
 }
 
 function errText(err: unknown): string {

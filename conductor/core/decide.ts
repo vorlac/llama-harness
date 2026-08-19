@@ -79,7 +79,13 @@ const HUMAN_PATTERNS: readonly RegExp[] = [
   /\bcosts?\s+money\b/i,
   /\bpay(?:ing)?\s+for\b/i,
   /\bpaid\s+(?:tier|plan|service|account|subscription)\b/i,
-  /\bsubscription\b/i,
+  // A subscription is human territory when the question is about PAYING for one:
+  // the bare noun is also the pub/sub vocabulary ("the subscription handler"),
+  // and classifying that as human territory stalls a run on a question the model
+  // owns. So the money half must be present — the commercial verb, or a price
+  // word — within the same clause.
+  /\b(?:cancel|cancelling|canceling|renew|renewing|buy|purchase|pay\s+for|paying\s+for)\b[^.?!\n]{0,40}\bsubscriptions?\b/i,
+  /\bsubscriptions?\b[^.?!\n]{0,40}\b(?:cost|costs|price|fee|fees|billing|billed|invoice|renewal)\b/i,
   // -- recurring paid price: a currency amount charged per month, or a monthly
   //    billing cadence named alongside a plan/tier/subscription. A measurable
   //    quota ("requests per second") never mentions money or a month, so it
@@ -88,21 +94,34 @@ const HUMAN_PATTERNS: readonly RegExp[] = [
   /(?:\/\s*month|\bper\s+month\b|\bmonthly\b)[\s\S]*\b(?:plan|tier|subscription)\b/i,
   /\b(?:plan|tier|subscription)\b[\s\S]*(?:\/\s*month|\bper\s+month\b|\bmonthly\b)/i,
   // -- irreversible / publish / delete. The destructive verb must open its
-  //    clause or follow a non-path character AND be followed by whitespace and
-  //    a word, so "delete" inside a file path (src/delete-user.ts) never
-  //    fires while "delete the production data" does.
-  /(?:^|[^\w/.-])(?:delete|destroy|erase|wipe)\s+[A-Za-z]/i,
-  /\bdrop\s+(?:the\s+)?(?:table|database|schema|column)\b/i,
-  /\bpublish/i,
+  //    clause or follow a non-path character, so "delete" inside a file path
+  //    (src/delete-user.ts) never fires. It must ALSO reach an irreversible
+  //    TARGET within a few words: deleting a cache entry, a temp directory or a
+  //    stale line is the ordinary work of the run, and treating every occurrence
+  //    of the verb as human territory is a stall, not a safeguard. The target
+  //    list is the externally-visible, unrecoverable kind of loss.
+  /(?:^|[^\w/.-])(?:delete|destroy|erase|wipe|purge)\s+(?:[\w'-]+\s+){0,3}?(?:production|prod|live|customer'?s?|user'?s?|users'|account|accounts|database|databases|db|table|tables|bucket|buckets|volume|volumes|snapshot|snapshots|backup|backups|repo|repository|history|weights|everything)\b/i,
+  /\b(?:drop|truncate)\s+(?:the\s+)?(?:table|database|schema|column)\b/i,
+  // Publishing is human territory when it leaves the repository: a package
+  // pushed to a public index, a release cut for the world. "publish the event
+  // to the bus" and "the publisher retries" are message-passing vocabulary and
+  // stay machine territory, so a distribution TARGET must be named alongside.
+  /\bpublish(?:es|ed|ing)?\b[^.?!\n]{0,60}\b(?:npm|pypi|crates\.io|rubygems|nuget|maven|homebrew|docker\s*hub|app\s*store|marketplace|registry|publicly|website|blog)\b/i,
+  /\b(?:npm|pypi|crates\.io|rubygems|nuget|maven|homebrew|docker\s*hub|app\s*store|marketplace|registry)\b[^.?!\n]{0,60}\bpublish(?:es|ed|ing)?\b/i,
+  /\bpublish\s+(?:a\s+|an\s+|the\s+|this\s+|our\s+)?(?:release|package|gem|crate|artifact|version|tag)\b/i,
   /\birreversible\b/i,
   /\bcannot\s+be\s+undone\b/i,
   /\bforce[-\s]push\b/i,
   /\bpush\s+(?:--force|-f)\b/i,
   /\bforce-with-lease\b/i,
-  // -- secrets / credentials. The bare-word forms bound both sides (so
-  //    "secretary" never fires); the uppercase run catches env-style names
-  //    like AWS_SECRET_ACCESS_KEY, where underscores defeat \b.
-  /\bsecrets?\b/i,
+  // -- secrets / credentials. "secret" alone is also a schema name, a config
+  //    key and a directory ("the secrets schema", "secrets/*.json"), so the
+  //    word must sit in a shape that HANDLES a credential: a named secret, a
+  //    secret's value, or a verb that moves one. The uppercase run catches
+  //    env-style names like AWS_SECRET_ACCESS_KEY, where underscores defeat \b.
+  /\b(?:client|app|application|api|shared|signing|webhook|deploy|deployment)\s+secrets?\b/i,
+  /\bsecrets?\s+(?:key|keys|value|values|token|tokens|string)\b/i,
+  /\b(?:rotate|rotating|share|sharing|paste|pasting|provide|supply|reveal|expose|leak|commit|committing|hard-?code|hard-?coding)\s+(?:the\s+|a\s+|an\s+|our\s+|my\s+|your\s+|this\s+|that\s+)?secrets?\b/i,
   /\bcredentials?\b/i,
   /\bpasswords?\b/i,
   /\bpassphrase\b/i,

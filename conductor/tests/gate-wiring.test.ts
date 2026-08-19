@@ -640,3 +640,71 @@ test("[5.3-tool-inventory] the plugin's tool hook registers exactly the §3.4 na
     "the plugin installs a tool.execute.before gate hook (the deny-by-throw seam)",
   );
 });
+
+// ===========================================================================
+// [5.3-patch-tools-denied] D8 (owner decision, ISSUE-017) — `apply_patch` and
+// `patch` were registered WRITE tools, but the edit branch adjudicates ONE
+// `args.filePath`, and a patch BODY carries none: a multi-file patch reached the
+// filesystem with only the registry gate between it and `.conductor/**`, a
+// sibling tree, or anywhere outside fileScope. No patch-body path extractor
+// exists. The decision is remove-and-deny: both tools are refused outright, in
+// every session and every role, and the wire contract pins that opencode does not
+// offer them (a config flip is all that stood between latent and reachable).
+// ===========================================================================
+
+const PATCH_TOOLS: readonly string[] = ["apply_patch", "patch"];
+
+for (const toolName of PATCH_TOOLS) {
+  test(`[5.3-patch-tools-denied] the ${toolName} tool is DENIED outright, with or without an adjudicable path`, () => {
+    const inPath = `${TREE}/src/a.ts`;
+    // Even the in-scope, path-carrying spelling — the one the edit branch would
+    // have allowed — is refused: the tool itself is the refusal, not its argument.
+    const withPath = expectThrow(
+      () =>
+        gateBeforeToolCall(
+          hookInput({ toolName, editPath: inPath, args: { filePath: inPath }, fileScope: ["src/**"] }),
+        ),
+      `${toolName} carrying an in-scope filePath`,
+    );
+    assert.match(
+      withPath.message,
+      new RegExp(toolName),
+      "the refusal names the tool the model reached for",
+    );
+
+    // The shape that motivated the decision: a patch BODY with no path operand at
+    // all, which the edit branch never adjudicated.
+    expectThrow(
+      () =>
+        gateBeforeToolCall(
+          hookInput({
+            toolName,
+            args: { patch: "*** Begin Patch\n*** Update File: /etc/passwd\n*** End Patch" },
+            fileScope: ["src/**"],
+          }),
+        ),
+      `${toolName} carrying only a patch body`,
+    );
+  });
+
+  test(`[5.3-patch-tools-denied] ${toolName} still classifies as a guarded (write-class) call, so a gate crash on it fails CLOSED`, () => {
+    assert.equal(
+      classifyTool(toolName),
+      "write",
+      "a call the gate refuses must never have been classified as a harmless read on the way in",
+    );
+  });
+}
+
+test("[5.3-patch-tools-denied] control: the ordinary edit/write tools are untouched by the patch-tool refusal", () => {
+  const inPath = `${TREE}/src/a.ts`;
+  for (const toolName of ["edit", "write"]) {
+    assert.doesNotThrow(
+      () =>
+        gateBeforeToolCall(
+          hookInput({ toolName, editPath: inPath, args: { filePath: inPath }, fileScope: ["src/**"] }),
+        ),
+      `${toolName} must still be allowed in scope`,
+    );
+  }
+});

@@ -1391,10 +1391,11 @@ def build_benchmark_config(
             },
             "eviction": {
                 "_comment": (
-                    "delete_after_each lets you benchmark more models than fit on "
-                    "disk; each is re-downloaded when its turn comes."
+                    "delete_after_each removes each model's weights once its "
+                    "results are recorded, so a sweep can cover more models than "
+                    "fit on disk. It is one-way: install what you want to measure "
+                    "again yourself."
                 ),
-                "download_missing": False,
                 "delete_after_each": False,
             },
         },

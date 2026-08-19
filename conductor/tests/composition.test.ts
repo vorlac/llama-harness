@@ -1296,6 +1296,61 @@ test("[5.4a-construction-failure-denies-loudly] a workspace that cannot be opene
 });
 
 // ===========================================================================
+// IV.2-second-session-refused (GAP-027, owner decision D6)
+// ===========================================================================
+
+test("[IV.2-second-session-refused] a workspace already held by a live conductor is refused LOUDLY at the composition root — the record names the holder, the gate still denies, and no run is created", async () => {
+  const root = gitRoot("conductor-iv2-second-session-");
+  // A holder that is alive, foreign, and not over-age: pid 1 always exists and is
+  // never this process, and probing it reports EPERM rather than ESRCH — which the
+  // liveness rule counts as alive, exactly as it must for a lock owned by another
+  // user's conductor.
+  mkdirSync(stateDirOf(root), { recursive: true });
+  writeFileSync(
+    path.join(stateDirOf(root), "run.lock"),
+    JSON.stringify({ pid: 1, startMs: Date.now(), sessionID: "ses_holder_5f3a" }),
+  );
+
+  const hooks = await startPlugin(root);
+  assert.equal(
+    typeof hooks["tool.execute.before"],
+    "function",
+    "a refused second session must NOT make the gate hook absent — an ungated session is worse than a refused one",
+  );
+
+  const captured = await captureStderr(async () => {
+    await expectDeny(
+      () =>
+        callGate(hooks, {
+          tool: "edit",
+          sessionID: SESSION,
+          args: { filePath: path.join(root, "src", "a.ts"), oldString: "a", newString: "b" },
+        }),
+      "edit from a session that does not hold the workspace",
+    );
+    await sendChatMessage(hooks, SESSION, ["a prompt arriving in a workspace someone else holds"]);
+  });
+
+  const loud = captured.records.filter((r) => r.level === "error" && r.event === "lock.contended");
+  assert.ok(
+    loud.length >= 1,
+    `the refusal is reported at ERROR level under lock.contended (captured: ${JSON.stringify(captured.lines)})`,
+  );
+  const text = JSON.stringify(loud);
+  assert.ok(text.includes('"holderPid":1'), "the refusal names the HOLDER's pid, so the operator knows which session to close");
+  assert.ok(text.includes("ses_holder_5f3a"), "and the holder's session id");
+
+  const runsDir = path.join(root, ".conductor", "runs");
+  const runDirs = existsSync(runsDir) ? readdirSync(runsDir) : [];
+  assert.deepEqual(runDirs, [], "the refused session created no run: it never got a store to write one with");
+  assert.equal(
+    JSON.parse(readFileSync(path.join(stateDirOf(root), "run.lock"), "utf8")).sessionID,
+    "ses_holder_5f3a",
+    "and the holder's lock is untouched",
+  );
+});
+
+// ===========================================================================
 // 5.4a-hook-failsoft-does-not-break-the-session
 // ===========================================================================
 

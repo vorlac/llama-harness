@@ -32,6 +32,7 @@ Run as::
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import copy
 import http.server
@@ -2620,3 +2621,54 @@ class RouterHealthProbe(WiringTestCase):
         for flag in (True, False):
             with self.assertRaises(cw.WiringError):
                 cw.parallel_server_args(flag)
+
+
+# ---------------------------------------------------------------------------
+# ISSUE-110 - the eviction knob whose restorative half was never written.
+#
+# `benchmark.py` implements `delete_after_each`: a model's weights are removed
+# the moment its results are recorded. The documented partner knob
+# `download_missing` was read by NOTHING, and the `fetch_model()` that would
+# have served it had no callers, so an operator who set the documented pair got
+# 20-40 GB deleted with no restorative fetch behind it. The destructive half
+# must not outlive the missing restorative half, so the knob and the dead
+# function are gone and this is the guard that keeps them gone.
+# ---------------------------------------------------------------------------
+
+
+class EvictionKnob(unittest.TestCase):
+    def test_iv3_no_download_missing_key(self) -> None:
+        """[iv3-eviction-no-download-knob] the generated benchmark config offers no download_missing."""
+        cfg = fm.build_benchmark_config([])
+        eviction = cfg["run"]["eviction"]  # type: ignore[index]
+        self.assertIsInstance(eviction, dict)
+        self.assertIn("delete_after_each", eviction, "the implemented half stays")
+        self.assertNotIn(
+            "download_missing",
+            eviction,
+            "download_missing is read by no code; offering it deletes weights nothing restores",
+        )
+        self.assertNotIn("download_missing", json.dumps(cfg), "no restatement anywhere in the document")
+
+        # The comment beside the surviving knob must not promise the fetch either:
+        # the prose is what an operator reads before turning deletion on.
+        comment = str(eviction.get("_comment", ""))
+        self.assertNotIn("download", comment.lower(), "the comment promises no re-download: %r" % comment)
+        self.assertNotIn("re-download", comment.lower(), comment)
+
+    def test_iv3_no_dead_fetch_model(self) -> None:
+        """[iv3-eviction-no-dead-fetch] benchmark.py defines no callerless fetch_model."""
+        source = (SCRIPTS_DIR / "benchmark.py").read_text()
+        tree = ast.parse(source)
+        names = [
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        self.assertIn("evict_model", names, "the implemented half stays")
+        self.assertNotIn(
+            "fetch_model",
+            names,
+            "fetch_model had zero callers - a restorative half that never ran",
+        )
+        self.assertNotIn("download_missing", source, "no reader was ever written for the knob")

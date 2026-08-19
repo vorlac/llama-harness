@@ -493,13 +493,12 @@ see [state machines](state-machines.md) for the routing table and the re-vet req
 ## The router client
 
 [`adapter/router-client.ts`](../../conductor/adapter/router-client.ts) is the plugin's
-health and metrics client for llama-router. It is an adapter because it does network I/O,
+metrics client for llama-router. It is an adapter because it does network I/O,
 and it is strictly fail-soft, because the router is a residual-risk dependency that the
 process must survive losing.
 
 | Function                                                | Returns                           | Failure behavior                                                                                                      |
 | ------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `routerHealthy(routerCfg, failoverState?)`              | `Promise<boolean>`                | `false` on any non-200, refused connection, or hang past the probe timeout — never throws                             |
 | `fetchMetricsSummary(routerCfg, log?)`                  | `Promise<MetricsSummary \| null>` | `null` on request failure, non-200, unparseable body, or a body that is not an object; journals the reason at `debug` |
 | `resolveBaseUrl(routerCfg, upstreamCfg, failoverState)` | `string`                          | synchronous and pure — no I/O, so it cannot fail                                                                      |
 | `noteRouterFailure(failoverState, log?)`                | `void`                            | records one failover and journals `failover` at `warn`                                                                |
@@ -530,11 +529,14 @@ report says so rather than presenting a partial dataset as complete.
 
 ### The second-failover rule
 
-A second failover in one session sets `probingDisabled`, and from that point
-`routerHealthy` short-circuits to `false` with **zero network calls** while `resolveBaseUrl`
-keeps returning the upstream. Two failures is enough evidence that the router is not coming
-back within this session; continuing to probe it would spend a probe timeout per check to
-learn something already known.
+A second failover in one session sets `probingDisabled`, and from that point `resolveBaseUrl`
+keeps returning the upstream with **zero network calls**. Two failures is enough evidence that
+the router is not coming back within this session; continuing to probe it would spend a probe
+timeout per check to learn something already known. The §4.4 failover protects conductor's own
+setup probes only — the run's model traffic reaches the router through opencode's fixed
+provider base URL, which the plugin cannot repoint mid-session, so a router that dies mid-run
+takes `env` failures on its in-flight sub-sessions and the supervisor's restart is the
+resilience story, not a client-side probe.
 
 The endpoints are `/conductor/health` and `/conductor/metrics`. `MetricsSummary` carries
 `totalRequests`, `schemaMissing`, `schemaConformed`, `statusCounts`, `promptTokens`, and

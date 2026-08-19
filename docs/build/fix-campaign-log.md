@@ -65,6 +65,52 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase IV — security XS day + concurrency/crash + cheap fixes/honesty
+- **Landed (IV.1 security):** git `-c` exec-config keys denied by git's own key-shape rules
+  (exec sections + leaves) AND the equivalent env-var class (GIT_PAGER/EXTERNAL_DIFF/SSH/…,
+  PAGER/EDITOR) (ISSUE-015); case-fold `.conductor` state-area deny at both the edit-path and
+  interpreter-script sites (GAP-026/ISSUE-016); hyphenated git plumbing detected (ISSUE-019);
+  `git branch` narrowed to list forms, bare creation + `--set-upstream-to=` denied (ISSUE-020);
+  `checkout -p/--patch` denied (ISSUE-021); ISSUE-037 ask-gate wildcard precedence; D8:
+  apply_patch/patch removed from WRITE_TOOLS, denied outright, wire-contract pin over the live
+  offered-tool list; wrapper unwrap made iterative AND basename+case-fold resolved across
+  env/nice/nohup/timeout/xargs/sudo and every command NAME (shells/interpreters/write-shapes),
+  closing the `/usr/bin/ENV sh -c` and upper-case-spelling bypasses.
+- **Landed (IV.2 concurrency, D6):** evidence attribution (writer identity on every record;
+  readEvidenceAt refuses itemId/tree mismatch, ISSUE-027); an N-party single-writer lock
+  (`state.ts`) — per-acquisition identity tokens, atomic compare-and-delete break rights
+  (O_EXCL, identity-keyed), linkSync whole-record publication, self-verify, age/liveness
+  reclaim of abandoned break rights (no permanent wedge), release keyed on token — real
+  N-process races give exactly one writer (ISSUE-023/-024/-025/-026); `block-and-ask.ts`
+  transactional primitive (GAP-028, ISSUE-100); tolerant ledgers + `jsonl.ts` (GAP-024);
+  quarantine leak cleanup (ISSUE-029).
+- **Landed (IV.3 cheap/honesty):** isHumanTerritory patterns narrowed (ISSUE-070, no more
+  pub/sub false stalls); dead eviction `download_missing`/`fetch_model` deleted (ISSUE-110
+  code); routerHealthy deleted, failover comments/headers corrected to "setup-probes-only,
+  supervisor-restart" (D9/ISSUE-040), 503 codes marked diagnostic-only (ISSUE-041); Phase III
+  residuals — route-aware receipt fallback for nested test layouts, `path:line` citation
+  extraction, conductor_status AWAITING-OPERATOR-CONFIRMATION notice.
+- **Doc fixes (orchestrator-owned):** scripts/README.md + docs/user/benchmarking.md eviction
+  sections (ISSUE-110 prose); docs/developer/{core-and-adapters,scheduling-and-fanout}.md
+  routerHealthy removed and §4.4 setup-probes-only framing added; conductor/docs/OPERATIONS.md
+  run.lock shape. Historical spec assertion JSONs (task-7.2, task-12.1-G5) left as frozen
+  records — spec currency is Phase VII.5's (GAP-030/-031).
+- **Evidence:** gate 1553 → 1753/1753 across the phase; three fix rounds. Round 1 verdict
+  PARTIAL → round 2 refuted the flock (real races made 2 writers 23/25) and rebuilt it as the
+  N-party lock (0/210 real-process violations); round 3 closed the case-fold-command-names
+  bypass, the break-right wedge, and added the atomic-publication guard. Verifier CONFIRMED
+  R0/R1/R2 against the real round-3 code.
+- **INCIDENT + recovery:** the round-3 verifier ran `git checkout -- state.ts` (a forbidden
+  git write) to restore a mutation; the file was uncommitted, so it reverted to HEAD and
+  destroyed the phase's lock rewrite in that one file. Recovered losslessly from the workflow
+  transcripts: the fixer's full-file Read gave the round-2 baseline, replaying its 7
+  construction Edits rebuilt round-3-final, and the gate returned to 1753/1753 with the
+  real-process race clean (0 violations, 4 and 8 openers). Lesson recorded to memory; future
+  workflow RULES forbid git checkout for mutation restore (inverse Edit only).
+- **Residuals routed:** LD_PRELOAD/DYLD env prefixes + ISSUE-014/-018 wrapper-hiding are the
+  enumeration class the GAP-025 flip closes (Phase VI, D7). capturedRedOf keeps its own jsonl
+  reader (needs line positions — defensible).
+
 ## Phase III — review witnesses + disposition + human provenance
 - **Landed (III.1):** `core/review-witness.ts` — per-dispatch nonce + `diffContact` re-derived
   from the item's diff INCLUDING created files (a creation-shaped item's lens must cite real

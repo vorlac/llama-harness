@@ -278,11 +278,10 @@ once. The methodology is in [`tools/README.md`](../../tools/README.md).
 ## Benchmarking more models than fit on disk
 
 The catalog is larger than most disks. Eviction lets a sweep proceed anyway, one model at a
-time. Both keys live under `run.eviction` in `.data/configs/benchmark.json`:
+time. The key lives under `run.eviction` in `.data/configs/benchmark.json`:
 
 ```jsonc
 "eviction": {
-  "download_missing": false,   // fetch a model that is not on disk when its turn comes
   "delete_after_each": false   // remove each model once its results are recorded
 }
 ```

@@ -150,6 +150,14 @@ function hasDotDotSegment(normalized: string): boolean {
   return false;
 }
 
+// The spelling of a path under which two names that are ONE FILE on a
+// case-insensitive filesystem compare equal. Used only by the state-area deny,
+// where over-matching costs an editable path name and under-matching costs the
+// harness its state.
+function foldForStateArea(path: string): string {
+  return path.normalize("NFKC").toLowerCase();
+}
+
 // True when any glob in `scopes` matches the (tree-relative) path. globMatch is
 // the hardened, DoS-safe matcher from shell-parse.ts.
 function scopeMatches(scopes: string[], normalized: string): boolean {
@@ -210,7 +218,15 @@ export function decideEdit(input: EditInput): Decision {
   // 3. Everyone: the `.conductor/**` state area is handler-written only, matched
   //    against the NORMALIZED path (the current tree's state area) so a
   //    `.conductor` prefix on the tree root never false-denies (§3.5:1395,1412).
-  if (globMatch(".conductor/**", normalized)) {
+  //    Matched CASE-FOLDED, because the filesystem this defends is
+  //    case-insensitive: `.Conductor/runs/<id>/state.json` and
+  //    `.conductor/runs/<id>/state.json` are one file on darwin and on Windows,
+  //    so a byte-exact match let a session forge run state, evidence, and journal
+  //    through the other spelling (ISSUE-016). `headsOverlap` folds case for
+  //    exactly this reason. The fold is on the DENY comparison only, and it folds
+  //    compatibility forms too, so a fullwidth or decomposed spelling of the token
+  //    is the state area as well.
+  if (globMatch(".conductor/**", foldForStateArea(normalized))) {
     return deny(
       "the .conductor state area is handler-written only; no session may edit .conductor/** paths",
     );
@@ -284,8 +300,50 @@ const OPERATOR_CHARS = ";&|<>()";
 const REDIRECT_TO_FILE = /^&?>>?\|?$/;
 // A shell env-assignment token in command-prefix position (`NAME=value`).
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
-// One leading command wrapper that passes its tail through to another command.
-const WRAPPERS: readonly string[] = ["env", "command", "sudo", "builtin", "exec"];
+// Leading command wrappers that pass their tail through to another command.
+// Unwrapped ITERATIVELY, together with each wrapper's own flags, flag values, and
+// (for `env`) its `NAME=value` assignments: a single bare-word level of unwrap
+// resolved `env -i sh -c "rm x"` to the command word `-i` and `env FOO=1 sh -c
+// "…"` to `FOO=1`, so the inner command reached neither the write-shape
+// extraction nor the interpreter state-area rule, and the whole command
+// classified as a harmless read. Every wrapper here passes its tail through, so
+// the write behind it is the write the segment performs.
+const WRAPPERS: readonly string[] = [
+  "env",
+  "command",
+  "sudo",
+  "builtin",
+  "exec",
+  "nice",
+  "nohup",
+  "time",
+  "timeout",
+  "xargs",
+  "stdbuf",
+  "ionice",
+];
+
+// Each wrapper's value-taking flags: a BARE `-x` of one of these consumes the
+// FOLLOWING token as its value, so the command word is the token after the value.
+// A self-contained `--flag=value` carries its own and consumes nothing.
+const WRAPPER_VALUE_FLAGS: Record<string, readonly string[]> = {
+  env: ["-u", "-C", "-S", "--unset", "--chdir", "--split-string"],
+  sudo: ["-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U"],
+  command: [],
+  builtin: [],
+  exec: ["-a"],
+  nice: ["-n", "--adjustment"],
+  nohup: [],
+  time: ["-o", "-f", "--output", "--format"],
+  timeout: ["-s", "-k", "--signal", "--kill-after"],
+  xargs: ["-n", "-I", "-i", "-P", "-d", "-s", "-a", "-E", "-L", "-e", "--max-args", "--replace", "--max-procs", "--delimiter", "--arg-file"],
+  stdbuf: ["-i", "-o", "-e", "--input", "--output", "--error"],
+  ionice: ["-c", "-n", "-p", "--class", "--classdata", "--pid"],
+};
+
+// Wrappers that take a POSITIONAL operand of their own before the command word:
+// `timeout 5 rm x` runs `rm`, not `5`.
+const WRAPPER_POSITIONAL_OPERANDS: Record<string, number> = { timeout: 1 };
 // Shell interpreters whose `-c` argument is an inner command string to reanalyze.
 const SHELLS: readonly string[] = ["sh", "bash", "dash", "zsh", "ksh"];
 // Bound on wrapper recursion so a pathological `sh -c "sh -c ..."` nest cannot
@@ -296,6 +354,23 @@ const MAX_WRAPPER_DEPTH = 8;
 function commandBasename(word: string): string {
   const slash = word.lastIndexOf("/");
   return slash === -1 ? word : word.slice(slash + 1);
+}
+
+// The command NAME a segment runs, resolved the way a case-insensitive filesystem
+// resolves it: basename first (`/usr/bin/rm` and `./rm` are both `rm`), then
+// case-folded on the SAME terms as the state-area deny (foldForStateArea). Every
+// membership test in this section — WRAPPERS, SHELLS, INTERPRETERS, and the
+// write-shaped command set (`rm`, `tee`, `mv`, …) — reads THIS, so one
+// case-insensitive resolution governs all of them. The basename had already been
+// folded on the state-area PATH TOKEN (the P2 fix) but NOT on the command names, so
+// on a case-insensitive FS (APFS, NTFS) `/usr/bin/PYTHON3`, `NODE`, `ENV`, `SH`,
+// `RM` are the very tools those lists name and a byte-exact match let every
+// upper/mixed-case spelling walk past all three gates (R0, same class as P2).
+// Folding is fail-closed: a lower-case-only tool set that also matches upper
+// case can only DENY more, never allow more — no ALLOW arm keys off a command name,
+// so surfacing more write shapes and unwrapping more wrappers only widens detection.
+function resolvedCommandName(word: string): string {
+  return foldForStateArea(commandBasename(word));
 }
 
 // A token made solely of operator-run characters (or a newline token): never a
@@ -310,12 +385,54 @@ function isOperatorRun(tok: string): boolean {
 }
 
 // The index of the command word in a segment: skip leading `NAME=value`
-// env-assignments, then unwrap one leading wrapper (`env`/`command`/…), then
-// point at the command word. May return seg.length when the segment is empty.
+// env-assignments, then unwrap EVERY leading wrapper (`env -i`, `nice -n 10`,
+// `timeout 5`, `xargs -n 1`, …) together with its own flags, its flag values, and
+// its positional operands, until a token that is neither an assignment nor a
+// wrapper is reached. That token is the command word. Returns seg.length when the
+// segment is empty or the wrappers consumed it — the caller surfaces no target,
+// which is the same posture the segment had before any unwrap.
+//
+// The loop advances `i` on every iteration, so it terminates on any input.
 function unwrappedCommandIndex(seg: string[]): number {
   let i = 0;
-  while (i < seg.length && ENV_ASSIGNMENT.test(seg[i])) i += 1;
-  if (i < seg.length && WRAPPERS.includes(seg[i])) i += 1;
+  while (i < seg.length) {
+    if (ENV_ASSIGNMENT.test(seg[i])) {
+      i += 1;
+      continue;
+    }
+    // Resolved to a BASENAME before the membership test, exactly as the command
+    // word one line below is resolved and as the git gate resolves its own: a
+    // token-exact test made `/usr/bin/env sh -c "…"` and every other path spelling
+    // of a listed wrapper fall out of the unwrap, so the inner command was never
+    // analyzed and the write behind it surfaced nothing.
+    const wrapper = resolvedCommandName(seg[i]);
+    if (!WRAPPERS.includes(wrapper)) break;
+    i += 1;
+    const valueFlags = WRAPPER_VALUE_FLAGS[wrapper] ?? [];
+    let positionals = WRAPPER_POSITIONAL_OPERANDS[wrapper] ?? 0;
+    while (i < seg.length) {
+      const token = seg[i];
+      if (wrapper === "env" && ENV_ASSIGNMENT.test(token)) {
+        i += 1;
+        continue;
+      }
+      if (token === "--") {
+        i += 1;
+        break;
+      }
+      if (token.startsWith("-") && token.length > 1) {
+        i += 1;
+        if (!token.includes("=") && valueFlags.includes(token)) i += 1;
+        continue;
+      }
+      if (positionals > 0) {
+        positionals -= 1;
+        i += 1;
+        continue;
+      }
+      break; // the first plain token past the wrapper's own operands
+    }
+  }
   return i;
 }
 
@@ -470,7 +587,7 @@ function collectStateAreaScripts(command: string, out: string[], depth: number):
   for (const seg of splitOnOperators(shellTokens(command))) {
     const cmdIdx = unwrappedCommandIndex(seg);
     if (cmdIdx >= seg.length) continue;
-    const cmd = commandBasename(seg[cmdIdx]);
+    const cmd = resolvedCommandName(seg[cmdIdx]);
     const operands = seg.slice(cmdIdx + 1);
     if (SHELLS.includes(cmd)) {
       const ci = operands.indexOf("-c");
@@ -481,7 +598,11 @@ function collectStateAreaScripts(command: string, out: string[], depth: number):
     }
     if (!INTERPRETERS.includes(cmd)) continue;
     for (const script of interpreterScripts(operands)) {
-      if (script.includes(STATE_AREA_TOKEN)) out.push(script);
+      // Folded on the same terms as the edit-path deny (GAP-026): the filesystem
+      // this rule defends is case-insensitive, so `.Conductor/x` and `.conductor/x`
+      // are one file, and a byte-exact test read a one-liner writing the state area
+      // under the other spelling as an ordinary program.
+      if (foldForStateArea(script).includes(STATE_AREA_TOKEN)) out.push(script);
     }
   }
 }
@@ -520,7 +641,7 @@ function collectWriteTargets(command: string, out: string[], depth: number): voi
   for (const seg of splitOnOperators(tokens)) {
     const cmdIdx = unwrappedCommandIndex(seg);
     if (cmdIdx >= seg.length) continue;
-    const cmd = commandBasename(seg[cmdIdx]);
+    const cmd = resolvedCommandName(seg[cmdIdx]);
     const operands = seg.slice(cmdIdx + 1);
 
     if (SHELLS.includes(cmd)) {

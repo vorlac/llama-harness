@@ -544,6 +544,25 @@ describe("opencode wire contract (Task 0.2)", { skip: SKIP }, () => {
     assert.equal(executed.data["note"], "from-stub");
   });
 
+  // D8 (ISSUE-017): `apply_patch`/`patch` exist in opencode's tool registry but
+  // are NOT in the offered set at 1.18.15 — a config flip away from reachable.
+  // The gate refuses both outright (gate-wiring.test.ts [5.3-patch-tools-denied]),
+  // and this row pins the OTHER half of that decision: the day a build starts
+  // offering either tool to the model, this assertion goes red and the decision
+  // gets re-taken deliberately rather than by drift.
+  it("0.2-patch-tools-unoffered: neither apply_patch nor patch is in the offered tool set (D8 pin)", () => {
+    const request = stubRequestWithMarker("WIRE_PRIMER");
+    assert.ok(request !== undefined);
+    const offered = (request.body["tools"] as { function?: { name?: string } }[]).map((t) => t.function?.name);
+    assert.ok(offered.length > 0, `no tools offered at all — the pin would be vacuous: ${JSON.stringify(offered)}`);
+    for (const denied of ["apply_patch", "patch"]) {
+      assert.ok(
+        !offered.includes(denied),
+        `${denied} is offered to the model; the gate denies it outright, so the D8 decision must be re-taken: ${offered.join(",")}`,
+      );
+    }
+  });
+
   it("0.2-headers: chat.headers output reaches the stub as HTTP headers (body vendor-field fallback also observed)", () => {
     const request = stubRequestWithMarker("WIRE_PRIMER");
     assert.ok(request !== undefined);

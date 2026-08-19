@@ -781,10 +781,10 @@ test("[C032-D6-attempts-accumulate] item.attempts.testRepairs accumulates across
 });
 
 // ---------------------------------------------------------------------------
-// D7 — a torn questions.jsonl line is a NAMED legality failure
+// D7 — a torn questions.jsonl line is HEALED at the reader (GAP-024)
 // ---------------------------------------------------------------------------
 
-test("[C032-D7-torn-questions] a crash-torn questions.jsonl line fails legality by name, not with a raw SyntaxError", async () => {
+test("[C032-D7-torn-questions] a crash-torn questions.jsonl line is skipped at the reader — the stage runs on the questions that are really there", async () => {
   const root = scratchRepo();
   const config = makeConfig();
   const journal = makeJournal();
@@ -816,16 +816,19 @@ test("[C032-D7-torn-questions] a crash-torn questions.jsonl line fails legality 
     (err: unknown) => err as Error,
   );
 
-  assert.ok(error instanceof Error, "the torn line still stops the stage");
-  assert.ok(
-    error.message.includes("conductor_submit_test"),
-    "but the failure names the TOOL, so the reader knows what refused: " + error.message,
+  assert.equal(
+    error,
+    null,
+    "a torn ledger line is a crash artifact, not a legality fact: refusing every stage until a human " +
+      "repairs the file by hand wedges the run at exactly the moment §2.11 forbids hand-editing state " +
+      "to resume (got: " + (error === null ? "" : error.message) + ")",
   );
-  assert.ok(
-    error.message.includes("questions.jsonl"),
-    "and names the FILE that needs repair: " + error.message,
+  assert.ok(wiring.prompted.length > 0, "the stage ran: the whole records in the ledger were readable all along");
+  assert.equal(
+    readQuestions(runDir).filter((q) => q.id === "Q-0002").length,
+    0,
+    "and the half-written line is not read back as a question",
   );
-  assert.equal(wiring.prompted.length, 0, "and nothing was dispatched");
 });
 
 // ---------------------------------------------------------------------------

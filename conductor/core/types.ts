@@ -373,6 +373,17 @@ export interface Item {
   inlineClaim: { reason: string; decisionId: string } | null;
 }
 
+// The identity of the process that wrote a ledger record: its pid and the moment
+// that pid began holding the workspace. A pid alone is not an identity — the OS
+// recycles them, and a recycled pid is exactly the case the §4.1 over-age lock
+// rule exists for — so the pair is what makes a record ATTRIBUTABLE: a line whose
+// writer is not this session's is a foreign line, and says so on its face rather
+// than being inferred from where it sits in the file.
+export interface WriterIdentity {
+  pid: number;
+  startedMs: number;
+}
+
 // §2.6 `runs/<runId>/evidence.jsonl`, plan lines 799-815 (+§2.6.1).
 export type EvidenceRecord =
   | {
@@ -385,6 +396,7 @@ export type EvidenceRecord =
       failureExcerpt: string;
       failureClass: FailureClass;
       targeted: boolean;
+      writer?: WriterIdentity;
     }
   | {
       seq: number;
@@ -398,6 +410,7 @@ export type EvidenceRecord =
       // full-scope fallback that happened to exit 0 (GAP-008). `targeted:false`
       // is precisely the run shape mark_green refuses to admit as a GREEN.
       targeted: boolean;
+      writer?: WriterIdentity;
     }
   | {
       seq: number;
@@ -413,6 +426,7 @@ export type EvidenceRecord =
       excluded: string[];
       green: boolean;
       scopes: Record<string, { green: boolean; exitCode: number; durationMs: number }>;
+      writer?: WriterIdentity;
     };
 
 // §2.7 `runs/<runId>/decisions.jsonl`, plan lines 854-867.
@@ -1084,9 +1098,22 @@ const itemSchema = {
 // TS; the keyword subset has no combinator, so the schema carries the union of
 // every kind's fields and requires only the four shared ones. The writer
 // (adapter/evidence.ts, Task 6.1) owns the per-kind shape.
+// The §2.6/§2.7 writer stamp, shared by every ledger schema that carries one so
+// the shape of "who wrote this line" is written down once. Optional in the SCHEMA
+// and mandatory at the WRITER (evidence.ts's per-kind validation): a ledger
+// written before the stamp existed still reads back, while nothing appended from
+// here on can omit it.
+const writerIdentitySchema = {
+  type: "object",
+  properties: { pid: numberSchema, startedMs: numberSchema },
+  required: ["pid", "startedMs"],
+  additionalProperties: false,
+};
+
 const evidenceRecordSchema = {
   type: "object",
   properties: {
+    writer: writerIdentitySchema,
     seq: numberSchema,
     ts: numberSchema,
     kind: { enum: EVIDENCE_KINDS },

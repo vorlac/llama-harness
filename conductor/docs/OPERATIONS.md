@@ -73,10 +73,18 @@ claim is measured rather than asserted.
 in-session failover latch. The first failed router request latches the whole session onto
 the **upstream** base URL (`upstream.host:upstream.port` — the direct `llama-server`
 origin), marks the run's metrics partial, and journals a `failover` record at `warn`.
-After a **second failover** in one session the client stops probing the router entirely:
-`routerHealthy` short-circuits and every later call resolves to the upstream without a
-round trip. Two `failover` records at `warn` in one run therefore mean the rest of that
-run was served direct, and the metrics ledger for it is incomplete by construction.
+After a **second failover** in one session the client stops addressing the router
+entirely: `resolveBaseUrl` names the upstream unconditionally, so every later
+conductor-issued request goes direct without a round trip to the router. Two `failover`
+records at `warn` in one run therefore mean the rest of that run was served direct, and
+the metrics ledger for it is incomplete by construction.
+
+**What the latch does not cover.** The latch diverts the HTTP the *conductor* issues —
+the §2.1 setup proofs and the closing metrics read. It does not divert the run's model
+traffic: that flows opencode → the provider base URL baked into the session config →
+the router, and the plugin cannot re-point a live opencode session. A router that dies
+mid-run therefore kills the sub-sessions in flight and the run takes their `env`
+failures; the recovery for that is the supervisor restarting the router, not this latch.
 
 **Router lifetime.** `serve.py` execs into the session shell and therefore cannot itself
 supervise anything. The router runs under a small supervisor process that restarts it on
@@ -98,7 +106,7 @@ State lives in two places, and only one of them is inside your repo.
 │   │   ├── alive.json              the §3.8 liveness beacon
 │   │   ├── stale-red.json          the cross-run registry of abandoned red tests (§2.11)
 │   │   ├── halt                    present ⇒ the workspace is halted (see "Halting a run")
-│   │   └── run.lock                the advisory single-writer lock {pid, startMs}
+│   │   └── run.lock                the single-writer lock {token, sessionID, pid, startMs}
 │   └── runs/<runId>/               one directory per prompt-run, self-contained
 │       ├── run.json                §2.3 — run FSM state, classification, stop record
 │       ├── queue.json              §2.4 — the item DAG, scopes, sizes
@@ -362,6 +370,12 @@ The `code` is the discriminator. `queue_overflow` means the queue already held
 retrying now will do the same thing. `queue_timeout` means the request *was* queued and
 its wait expired past `admission.queueTimeoutMs`; the queue moved too slowly, and retrying
 may well work. The `type` is `unavailable_error` in both cases.
+
+Both codes are **diagnostic only**. Nothing on the conductor side reads them: the fan-out
+reaches the router through opencode's provider fetch, which hands back an error string
+rather than the envelope, so a `503` here becomes a failed sub-session and not a bounded
+backoff. Read the codes in the router log and in the metrics ledger; do not expect a run
+to have acted on them.
 
 `/conductor/health` is registered outside admission on purpose, so it answers `200` even
 while every slot and every queue entry is held. If the router is refusing traffic, that

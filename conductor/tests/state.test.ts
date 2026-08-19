@@ -63,15 +63,16 @@
 //       // now() is THE clock the store reads for beacon.startMs, lock.startMs and
 //       // disposition sinceMs (defaults to Date.now); pid defaults to process.pid;
 //       // staleLockMs is the over-age lock threshold (default 24h).
-//   interface LockRecord { pid: number; startMs: number }        // .conductor/state/run.lock
+//   interface LockRecord { pid: number; startMs: number; sessionID? } // .conductor/state/run.lock
 //   interface Beacon { pid: number; startMs: number; version: string; sessionID: string }
 //   interface CreateRunInput { prompt; sessionID; classification: {kind;rationale;check:{agreed;note}} }
 //   openWorkspace(opts): StateStore
-//     // at init: writes the §3.8 beacon, registers the exclude (repo only), and acquires
-//     // the single-writer lock — a live foreign lock => readOnly true + a loud (warn)
-//     // journal record; a dead-pid OR over-age lock => broken (lock.stale-break) + claimed.
+//     // at init: registers the exclude (repo only), acquires the single-writer lock,
+//     // then writes the §3.8 beacon — a live foreign lock REFUSES the open (D6) with a
+//     // loud (warn) journal record; a dead-pid OR over-age lock => broken
+//     // (lock.stale-break) + claimed. See conductor/tests/workspace-lock.test.ts.
 //   interface StateStore {
-//     readonly readOnly: boolean; readonly root: string;
+//     readonly root: string;
 //     createRun(input): Run; loadRun(runId): Run; saveRun(run): void;
 //     currentRun(): Run | null; archiveRun(runId): void;
 //     loadItem(runId, itemId): Item; saveItem(runId, item): void;
@@ -572,7 +573,7 @@ test("[4.1-exclude] no-git mode skips the exclude write and does not crash (§3.
 
   // Opening a workspace on a non-repo must not crash and must not write an exclude.
   const store = openWorkspace(freshOpts(nonRepo));
-  assert.equal(store.readOnly, false, "no-git is not read-only (that flag is for a live foreign lock, not the absence of git)");
+  assert.ok(store !== null, "a non-repo root opens: the absence of git is not contention (§3.9)");
   assert.equal(existsSync(path.join(nonRepo, ".git")), false, "still no .git after open");
 
   // createRun still works without git: empty provenance, no throw (§3.9 drops the HEAD term).
@@ -623,7 +624,6 @@ test("[4.1-lock] a fresh workspace claims the single-writer lock", () => {
   const { sink, calls } = makeJournal();
   const store = openWorkspace(freshOpts(repo, { pid: 4242, journal: sink }));
 
-  assert.equal(store.readOnly, false, "a fresh workspace is a writer");
   const lock = readLock(repo);
   assert.equal(lock.pid, 4242, "the lock carries this instance's pid");
   assert.equal(lock.startMs, START_MS, "the lock startMs is stamped from the injected clock");
@@ -633,22 +633,21 @@ test("[4.1-lock] a fresh workspace claims the single-writer lock", () => {
   assert.ok(calls.some((c) => c.component === "state" && c.event === "lock.released"), "release journals lock.released");
 });
 
-test("[4.1-lock] a LIVE foreign lock forces read-only mode + a loud journal warning and is left intact", () => {
+test("[4.1-lock] a LIVE foreign lock REFUSES the second session (owner decision D6) + a loud journal warning, and is left intact", () => {
   const repo = initRepo();
   commit(repo, "f.ts", "x\n", "seed");
   // A lock owned by a DIFFERENT, still-alive process (this test process's own pid).
   preWriteLock(repo, { pid: process.pid, startMs: START_MS - 1000 });
 
   const { sink, calls } = makeJournal();
-  const store = openWorkspace(freshOpts(repo, { pid: process.pid + 1, journal: sink }));
+  assert.throws(
+    () => openWorkspace(freshOpts(repo, { pid: process.pid + 1, journal: sink })),
+    /held by another live conductor/,
+    "a live foreign lock refuses the second session: it gets no store to write through at all (§4.1)",
+  );
 
-  assert.equal(store.readOnly, true, "a live foreign lock forces read-only mode (§4.1 second-session rule)");
   assert.ok(calls.some((c) => c.level === "warn" && c.component === "state"), "a live foreign lock emits a LOUD (warn-level) journal record");
   assert.equal(readLock(repo).pid, process.pid, "the live foreign lock is left intact — never stolen");
-  assert.throws(
-    () => store.createRun({ prompt: "p", sessionID: "ses", classification }),
-    "a read-only conductor refuses to create a run",
-  );
 });
 
 test("[4.1-lock] a STALE lock (dead pid) is broken and the lock is claimed", () => {
@@ -664,7 +663,7 @@ test("[4.1-lock] a STALE lock (dead pid) is broken and the lock is claimed", () 
   const { sink, calls } = makeJournal();
   const store = openWorkspace(freshOpts(repo, { pid: 5555, journal: sink }));
 
-  assert.equal(store.readOnly, false, "a dead-pid lock is stale: broken, single-writer claimed (a crash never wedges a workspace)");
+  assert.ok(store !== null, "a dead-pid lock is stale: broken, single-writer claimed (a crash never wedges a workspace)");
   assert.ok(calls.some((c) => c.component === "state" && c.event === "lock.stale-break"), "breaking a stale lock is recorded as lock.stale-break (the anomaly trace)");
   assert.equal(readLock(repo).pid, 5555, "the workspace single-writer lock is now claimed by this instance");
 });
@@ -678,7 +677,7 @@ test("[4.1-lock] a STALE lock (over-age) is broken even though its pid is alive"
   const { sink, calls } = makeJournal();
   const store = openWorkspace(freshOpts(repo, { pid: process.pid + 7, journal: sink, staleLockMs: 60_000 }));
 
-  assert.equal(store.readOnly, false, "an over-age lock is stale even with a live pid: broken and claimed");
+  assert.ok(store !== null, "an over-age lock is stale even with a live pid: broken and claimed");
   assert.ok(calls.some((c) => c.component === "state" && c.event === "lock.stale-break"), "the over-age break is recorded as lock.stale-break");
   assert.equal(readLock(repo).pid, process.pid + 7, "single-writer claimed after breaking the over-age lock");
 });
@@ -776,11 +775,10 @@ test("[4.1-lifecycle] F5: createRun writes run.json BEFORE items/, so a crash be
 });
 
 // ---------------------------------------------------------------------------
-// F4 (minor): fresh-claim TOCTOU. Two cold starts can both readExistingLock() === null
-// and both write, both becoming writers. The fresh claim must use exclusive create so a
-// lock that appeared between the null-read and the write is detected as contention. The
-// seam plants a LIVE foreign lock in exactly that window; the loser must fall to
-// read-only and leave the racer's lock intact.
+// F4 (minor): fresh-claim TOCTOU. Two cold starts that both see no lock and both write
+// are both writers. The claim is an exclusive create, so a lock that appeared between
+// the decision and the write is detected as contention. The seam plants a LIVE foreign
+// lock in exactly that window; the loser must be REFUSED and leave the racer's lock intact.
 // ---------------------------------------------------------------------------
 
 test("[4.1-lock] F4: a fresh claim that loses a TOCTOU race to a live foreign writer is detected as contention, not a double-writer", () => {
@@ -789,21 +787,24 @@ test("[4.1-lock] F4: a fresh claim that loses a TOCTOU race to a live foreign wr
   const { sink, calls } = makeJournal();
   const foreignPid = process.pid; // alive: this test process
 
-  // At open, NO lock exists (readExistingLock === null). The injected seam fires AFTER
-  // that null-read and BEFORE the exclusive-create write, planting a live foreign lock —
-  // the cold-start race two writers would hit. Exclusive create must then EEXIST, re-read,
-  // and see the live foreign writer => read-only.
-  const store = openWorkspace(
-    freshOpts(repo, {
-      pid: process.pid + 1,
-      journal: sink,
-      onBeforeFreshLockWrite: () => {
-        preWriteLock(repo, { pid: foreignPid, startMs: START_MS });
-      },
-    }),
+  // At open, NO lock exists. The injected seam fires BEFORE the exclusive-create
+  // write, planting a live foreign lock — the cold-start race two writers would hit.
+  // Exclusive create must then EEXIST, re-read, and see the live foreign writer.
+  assert.throws(
+    () =>
+      openWorkspace(
+        freshOpts(repo, {
+          pid: process.pid + 1,
+          journal: sink,
+          onBeforeFreshLockWrite: () => {
+            preWriteLock(repo, { pid: foreignPid, startMs: START_MS });
+          },
+        }),
+      ),
+    /held by another live conductor/,
+    "losing the fresh-claim race to a live writer is a refusal (no double-writer)",
   );
 
-  assert.equal(store.readOnly, true, "losing the fresh-claim race to a live writer forces read-only (no double-writer)");
   assert.equal(readLock(repo).pid, foreignPid, "the racer's live lock is left intact — not overwritten by the loser");
   assert.ok(
     calls.some((c) => c.level === "warn" && c.component === "state" && c.event === "lock.contended"),

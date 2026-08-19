@@ -121,6 +121,23 @@ describe("isHumanTerritory", () => {
     ["Does tsc --strict pass on the current branch?", false],
     ["Is port 8080 already bound by the router process?", false],
     ["How many retries does the health check perform before failing?", false],
+    // ISSUE-070: ordinary software vocabulary is NOT human territory. Bare topic
+    // nouns ("subscription", "publish", "secrets") and a bare destructive verb
+    // stalled a run on questions the model owns, which is a liveness tax paid on
+    // every §6.2 classification. Each row below is a question a machine derives.
+    ["Should the subscription handler use a bounded queue for the pub/sub topic?", false],
+    ["Does the publisher retry when the broker rejects a published event?", false],
+    ["Where should the secrets schema live: core/types.ts or its own module?", false],
+    ["Should the reducer delete the stale cache entry or mark it expired?", false],
+    ["Should the fixture erase the scratch directory between cases?", false],
+    // ISSUE-070's other half: the conservative direction is preserved for the
+    // real categories — recurring spend, credential handling, irreversible loss,
+    // external distribution.
+    ["Should we cancel the hosted-metrics subscription to cut spend?", true],
+    ["Is it OK to wipe the customer database before the reimport?", true],
+    ["Should I paste the client secret into the config file?", true],
+    ["Should we publish the release to the npm registry?", true],
+    ["Should we erase the nightly backups older than a year?", true],
   ];
 
   for (const [question, expected] of cases) {

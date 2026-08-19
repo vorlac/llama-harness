@@ -27,10 +27,10 @@
 import {
   shellTokens,
   splitOnOperators,
-  isGitCommand,
-  gitSubcommand,
+  gitInvocation,
   commandWordLocation,
 } from "./shell-parse.ts";
+import type { GitInvocation } from "./shell-parse.ts";
 
 // ---------------------------------------------------------------------------
 // Return contract (signature pinned by conductor/tests/gates-git.test.ts).
@@ -106,26 +106,67 @@ const DESTRUCTIVE: readonly string[] = [
   "pull",
 ];
 
-// Branch mutating flags (§3.5 lines 1378-1379): the operands that turn the
-// allow-listed `branch` (list forms) into a deny — the REQUIRED false-ALLOW trap
-// is `git branch -D x`, which MUST deny even though `branch` is on the allow-list.
-const BRANCH_MUTATING: readonly string[] = [
-  "-d",
-  "-D",
-  "--delete",
-  "-m",
-  "-M",
-  "--move",
-  "-c",
-  "-C",
-  "--copy",
-  "-f",
-  "--force",
-  "-u",
-  "--set-upstream-to",
-  "--unset-upstream",
-  "--edit-description",
+// The LIST forms of `git branch` (§3.5 lines 1372, 1378-1379). Only these are
+// read-only, and the arm is an enumerated allow with a DEFAULT-DENY tail: an
+// allow arm built the other way round — everything not on a hand-list of
+// mutating flags — admitted bare branch CREATION (`git branch newbranch` writes
+// a ref) and let the `=`-glued `--set-upstream-to=origin/x` past an exact-token
+// comparison that only knew the spaced spelling (ISSUE-020).
+const BRANCH_LIST_FLAGS: readonly string[] = [
+  "--list",
+  "-l",
+  "-a",
+  "--all",
+  "-r",
+  "--remotes",
+  "-v",
+  "-vv",
+  "--verbose",
+  "-q",
+  "--quiet",
+  "-i",
+  "--ignore-case",
+  "--show-current",
+  "--color",
+  "--no-color",
+  "--column",
+  "--no-column",
+  "--omit-empty",
+  "--no-abbrev",
+  "--contains",
+  "--no-contains",
+  "--merged",
+  "--no-merged",
+  "--points-at",
+  "--sort",
+  "--format",
+  "--abbrev",
 ];
+
+// The list flags that take a VALUE. In the bare spelling the value is the
+// following token — a positional that must not be read as a branch name to
+// create. The `--flag=value` spelling carries its own value and consumes nothing.
+const BRANCH_LIST_VALUE_FLAGS: readonly string[] = [
+  "--contains",
+  "--no-contains",
+  "--merged",
+  "--no-merged",
+  "--points-at",
+  "--sort",
+  "--format",
+  "--abbrev",
+];
+
+// The list flags that turn a positional operand into a match PATTERN rather than
+// a branch name to create (`git branch --list 'feat/*'`).
+//
+// `-l` is NOT one of them, though it is a list flag on its own: it spells
+// `--create-reflog` on git < 2.28, where `git branch -l topic` CREATES `topic`.
+// The gate cannot see which git version is on the other side of the call, so the
+// spelling that means two things is read as the one that writes a ref — the
+// positional beside it is a branch NAME, and the enumerated allow denies it. Bare
+// `-l` stays on BRANCH_LIST_FLAGS: with no operand neither reading writes anything.
+const BRANCH_PATTERN_FLAGS: readonly string[] = ["--list"];
 
 // ---------------------------------------------------------------------------
 // Reason builders. Every deny carries a non-empty reason (§3.5 line 1338:
@@ -195,13 +236,6 @@ function isPathLike(operand: string): boolean {
   return operand === "." || operand === ".." || operand.includes("/");
 }
 
-function includesAny(operands: string[], flags: readonly string[]): boolean {
-  for (const op of operands) {
-    if (flags.includes(op)) return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // The discriminated subcommands. Each is decided over its full operand list.
 // ---------------------------------------------------------------------------
@@ -261,13 +295,34 @@ function decideReflog(operands: string[]): GitDecision {
   );
 }
 
+// The flag name of an operand token, with any `=`-glued value stripped: the
+// comparison must see `--set-upstream-to` in `--set-upstream-to=origin/x`, the
+// same normalization the gate already applies to `--git-dir=`.
+function flagName(token: string): string {
+  const eq = token.indexOf("=");
+  return eq === -1 ? token : token.slice(0, eq);
+}
+
+const BRANCH_NOT_LIST_REASON =
+  "git branch here is not a read-only list form — creating, deleting, renaming, copying, or re-pointing a branch writes a ref; only the list forms (`branch`, `branch --list <pattern>`, `-a`/`-r`/`-v`, and the list filters) are allowed";
+
 function decideBranch(operands: string[]): GitDecision {
-  // The false-ALLOW trap: `branch` is on the read-only allow-list, but any
-  // mutating flag (delete/rename/copy/force/upstream) turns it into a write.
-  if (includesAny(operands, BRANCH_MUTATING)) {
-    return deny(
-      "git branch with a delete/rename/copy/force/upstream flag mutates refs — only the read-only list forms (`branch`, `branch --list`) are allowed",
-    );
+  // Enumerated allow, DEFAULT-DENY tail. Any flag off the list-form enumeration
+  // is a write (delete/rename/copy/force/upstream/track/edit-description), and a
+  // positional operand is a branch NAME to create unless a pattern flag makes it
+  // a match pattern.
+  const patternMode = operands.some((op) => BRANCH_PATTERN_FLAGS.includes(flagName(op)));
+  for (let i = 0; i < operands.length; i += 1) {
+    const token = operands[i];
+    if (token.startsWith("-")) {
+      const name = flagName(token);
+      if (!BRANCH_LIST_FLAGS.includes(name)) return deny(BRANCH_NOT_LIST_REASON);
+      // A bare value-taking list filter consumes the following token as its
+      // value, so that token is not a branch name.
+      if (!token.includes("=") && BRANCH_LIST_VALUE_FLAGS.includes(name)) i += 1;
+      continue;
+    }
+    if (!patternMode) return deny(BRANCH_NOT_LIST_REASON);
   }
   return ALLOW; // list forms (§3.5 line 1372)
 }
@@ -296,6 +351,15 @@ function decideCheckout(
   ) {
     return deny(
       "git checkout -f/--force/--discard-changes discards working-tree changes — unconditional deny (worktree-discarding form)",
+    );
+  }
+  // `checkout -p`/`--patch` discards selected working-tree hunks and moves no
+  // HEAD, so publish's HEAD check cannot see the loss — it belongs with the other
+  // unconditional discard forms rather than on the policy-gated movement path,
+  // where `check-only` allowed it (ISSUE-021). The sibling `restore -p` denies.
+  if (operands.includes("-p") || operands.includes("--patch")) {
+    return deny(
+      "git checkout -p/--patch discards selected working-tree hunks — unconditional deny (worktree-discarding form)",
     );
   }
   // `checkout -b <br>` creates-and-moves: branch movement, policy-gated.
@@ -355,23 +419,177 @@ function decideRestore(operands: string[]): GitDecision {
 }
 
 // ---------------------------------------------------------------------------
+// Config- and environment-driven EXECUTION (ISSUE-015). `git -c core.pager=<cmd>
+// log` runs <cmd>: the command word is the literal `git` (so the unresolvable-
+// expansion rule never engages), `-c k=v` is skipped by subcommand resolution
+// (plan line 2089 mandates the skip), and the decision lands on an allow-listed
+// read-only verb — while git executes the configured pager, external diff,
+// editor, credential helper, hook, or alias. `GIT_PAGER=<cmd> git log` is the
+// same route through the environment, and env-assignment prefixes are seen
+// through by detection without their VALUES ever being adjudicated.
+//
+// Both rules are keyed on the exec-capable KEY, not on `-c` or on env prefixes as
+// such: `git -c user.name=x log` and `A=b git status` are untouched. Every other
+// global option spelling (`--exec-path=…`, `--config-env=…`, a glued `-ckey=v`)
+// is already deny-forcing — subcommand resolution returns the unrecognized flag
+// verbatim and the matrix default-denies it.
+// ---------------------------------------------------------------------------
+
+// Config SECTIONS whose every key names a program git runs.
+const EXEC_CONFIG_SECTIONS: readonly string[] = [
+  "alias",
+  "pager",
+  "credential",
+  "difftool",
+  "mergetool",
+  "filter",
+  "trailer",
+  "guitool",
+  "instaweb",
+];
+
+// Final key components whose value git executes, whatever section or subsection
+// carries them: `core.pager`, `diff.external`, `sequence.editor`,
+// `diff.<driver>.command`, `filter.<f>.clean`, `remote.<r>.uploadpack`, …
+const EXEC_CONFIG_LEAVES: readonly string[] = [
+  "pager",
+  "editor",
+  "external",
+  "command",
+  "cmd",
+  "driver",
+  "clean",
+  "smudge",
+  "process",
+  "helper",
+  "program",
+  "browser",
+  "textconv",
+  "packobjectshook",
+  "sshcommand",
+  "askpass",
+  "hookspath",
+  "gitproxy",
+  "proxy",
+  "fsmonitor",
+  "uploadpack",
+  "receivepack",
+  "templatedir",
+  "httpd",
+  "hook",
+];
+
+// git config section and final-key names are case-insensitive, so the fold is
+// git's own rule rather than an extra allowance.
+function isExecConfigKey(key: string): boolean {
+  const parts = key.toLowerCase().split(".");
+  if (EXEC_CONFIG_SECTIONS.includes(parts[0])) return true;
+  return EXEC_CONFIG_LEAVES.includes(parts[parts.length - 1]);
+}
+
+// Environment variables that hand git a program to run, or hand it configuration
+// that can name one (the `GIT_CONFIG_*` family injects config wholesale).
+const EXEC_ENV_VARS: readonly string[] = [
+  "GIT_PAGER",
+  "GIT_EXTERNAL_DIFF",
+  "GIT_EDITOR",
+  "GIT_SEQUENCE_EDITOR",
+  "GIT_SSH",
+  "GIT_SSH_COMMAND",
+  "GIT_ASKPASS",
+  "GIT_PROXY_COMMAND",
+  "GIT_EXEC_PATH",
+  "GIT_TEMPLATE_DIR",
+  "GIT_TEXTCONV",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CONFIG",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+  "GIT_CONFIG_GLOBAL",
+  "GIT_CONFIG_SYSTEM",
+  "PAGER",
+  "EDITOR",
+  "VISUAL",
+];
+
+const EXEC_ENV_PREFIXES: readonly string[] = ["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
+
+function isExecEnvName(name: string): boolean {
+  if (EXEC_ENV_VARS.includes(name)) return true;
+  for (const prefix of EXEC_ENV_PREFIXES) {
+    if (name.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=/;
+
+function configExecReason(key: string): string {
+  return (
+    "git -c " +
+    key +
+    " hands git a program to execute — a config key of this shape runs an arbitrary command under any subcommand, including a read-only one; request it via conductor_surface if it is genuinely needed"
+  );
+}
+
+function envExecReason(name: string): string {
+  return (
+    name +
+    " hands git a program to execute — an environment prefix of this shape runs an arbitrary command under any subcommand, including a read-only one; request it via conductor_surface if it is genuinely needed"
+  );
+}
+
+// The exec-route denial for one git segment, or null when it carries none.
+// `gitIndex` is the git command-word index: assignments before it are the
+// segment's environment prefix. `optionEnd` bounds the scan to git's OWN global
+// options — the region before the subcommand — so a subcommand's own `-c` (`git
+// grep -c <pattern>` counts matches) is never read as a config assignment.
+function configExecDenial(
+  seg: string[],
+  gitIndex: number,
+  optionEnd: number,
+): GitDecision | null {
+  for (let i = 0; i < gitIndex; i += 1) {
+    const match = ENV_ASSIGNMENT.exec(seg[i]);
+    if (match !== null && isExecEnvName(match[1])) return deny(envExecReason(match[1]));
+  }
+  for (let i = gitIndex + 1; i < optionEnd; i += 1) {
+    const token = seg[i];
+    if (token !== "-c" && token !== "--config-env") continue;
+    const value = i + 1 < seg.length ? seg[i + 1] : "";
+    const eq = value.indexOf("=");
+    const key = eq === -1 ? value : value.slice(0, eq);
+    if (key.length > 0 && isExecConfigKey(key)) return deny(configExecReason(key));
+    i += 1; // the option's value token is consumed either way
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Per-segment decision over the full parsed tokens.
 // ---------------------------------------------------------------------------
 
 function decideGitSegment(
   seg: string[],
+  invocation: GitInvocation,
   runActive: boolean,
   branchPolicy: "pin" | "check-only",
 ): GitDecision {
-  const sub = gitSubcommand(seg);
+  // The execution routes that ride a git invocation rather than its subcommand:
+  // an exec-capable `-c` config key, or an exec-capable environment prefix. Both
+  // are decided BEFORE the subcommand, because the whole point of the route is
+  // that the subcommand is a legal read-only one (ISSUE-015).
+  const configDenial = configExecDenial(seg, invocation.index, invocation.operandStart - 1);
+  if (configDenial !== null) return configDenial;
+
+  const sub = invocation.sub;
   if (sub === null) return deny(BARE_GIT_REASON);
 
-  // Operands = the tokens after the subcommand. The subcommand is the FIRST
-  // decision token gitSubcommand returns, so its first index in the segment is
-  // its position; slicing after it can only ever WIDEN the operand list (never
-  // narrow it), so this can only tighten — never loosen — a decision.
-  const subIndex = seg.indexOf(sub);
-  const operands = subIndex < 0 ? [] : seg.slice(subIndex + 1);
+  // Operands = the tokens after the subcommand, from the resolution that found
+  // the subcommand — so the dashed dispatch form (`git-branch -D x`, where the
+  // subcommand rides the binary name and appears in NO token) exposes the same
+  // operands the spaced form does.
+  const operands = seg.slice(invocation.operandStart);
 
   // Read-only verbs allowed regardless of operands.
   if (READ_ONLY_SIMPLE.includes(sub)) return ALLOW;
@@ -478,8 +696,9 @@ export function decideGit(
     // the whole command — it could resolve to a git write detection cannot see.
     const word = loc.index === null ? null : seg[loc.index];
     if (word !== null && hasUnresolvedExpansion(word)) return deny(UNRESOLVABLE_REASON);
-    if (!isGitCommand(seg)) continue; // non-git segments never deny
-    const decision = decideGitSegment(seg, runActive, branchPolicy);
+    const invocation = gitInvocation(seg);
+    if (invocation === null) continue; // non-git segments never deny
+    const decision = decideGitSegment(seg, invocation, runActive, branchPolicy);
     if (decision.action === "deny") return decision; // any denied git segment denies the whole command
   }
   return { action: "allow" };

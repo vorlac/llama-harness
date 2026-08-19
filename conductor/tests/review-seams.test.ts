@@ -50,7 +50,12 @@ import { fileURLToPath } from "node:url";
 // ---- the subjects ---------------------------------------------------------
 import { handleItemReview } from "../adapter/tools.ts";
 import { checkReadWitness, createdFileDiff, diffContact, witnessNonce } from "../core/review-witness.ts";
-import { findingSubjects, receiptFloor, routeFallbackScope } from "../core/receipt-floor.ts";
+import {
+  findingSubjects,
+  floorExclusions,
+  receiptFloor,
+  routeFallbackScope,
+} from "../core/receipt-floor.ts";
 import { concernNamesFinding, concernToken, renderReplyProtocol } from "../core/reply-protocol.ts";
 import { findingSurvives, verdictKind } from "../core/verdict.ts";
 
@@ -832,10 +837,10 @@ test("[III1-receipt-floor-core] receiptFloor refuses an empty touch set and a to
     "and a test-writer-routed one falls back to the test half",
   );
 
-  assert.equal(receiptFloor([], [SUBJECT_REL]).ok, false, "a receipt that touched NOTHING is refused");
-  assert.equal(receiptFloor(["docs/readme.md"], [SUBJECT_REL]).ok, false, "a receipt touching only files the finding never names is refused");
-  assert.equal(receiptFloor([SUBJECT_REL], [SUBJECT_REL]).ok, true, "a receipt touching the finding's subject clears the floor");
-  assert.equal(receiptFloor(["src/deep/b.ts"], ["src/**"]).ok, true, "the subject match is glob-aware (the ISSUE-054 lesson)");
+  assert.equal(receiptFloor([], [SUBJECT_REL], []).ok, false, "a receipt that touched NOTHING is refused");
+  assert.equal(receiptFloor(["docs/readme.md"], [SUBJECT_REL], []).ok, false, "a receipt touching only files the finding never names is refused");
+  assert.equal(receiptFloor([SUBJECT_REL], [SUBJECT_REL], []).ok, true, "a receipt touching the finding's subject clears the floor");
+  assert.equal(receiptFloor(["src/deep/b.ts"], ["src/**"], []).ok, true, "the subject match is glob-aware (the ISSUE-054 lesson)");
 });
 
 test("[III1-route-aware-fallback] THE ESCAPE: a vague IMPLEMENTATION finding is 'discharged' by editing the TEST file — the one edit an implementer is gated out of. The route-aware fallback refuses it, and a real source edit still clears the floor", () => {
@@ -851,20 +856,20 @@ test("[III1-route-aware-fallback] THE ESCAPE: a vague IMPLEMENTATION finding is 
 
   const implSubjects = findingSubjects(vague, scopes, "implementer");
   assert.equal(
-    receiptFloor([TEST_REL], implSubjects).ok,
+    receiptFloor([TEST_REL], implSubjects, floorExclusions("implementer", scopes)).ok,
     false,
     "touching the TEST file discharges no implementation finding — the union fallback is what let it",
   );
   assert.equal(
-    receiptFloor([SUBJECT_REL], implSubjects).ok,
+    receiptFloor([SUBJECT_REL], implSubjects, floorExclusions("implementer", scopes)).ok,
     true,
     "and a real source edit still clears the floor",
   );
 
   const writerSubjects = findingSubjects(vague, scopes, "testWriter");
-  assert.equal(receiptFloor([TEST_REL], writerSubjects).ok, true, "the test-writer's own half still clears its floor");
+  assert.equal(receiptFloor([TEST_REL], writerSubjects, floorExclusions("testWriter", scopes)).ok, true, "the test-writer's own half still clears its floor");
   assert.equal(
-    receiptFloor([SUBJECT_REL], writerSubjects).ok,
+    receiptFloor([SUBJECT_REL], writerSubjects, floorExclusions("testWriter", scopes)).ok,
     false,
     "and a test-writer that edited the source discharged nothing it was asked for",
   );
@@ -880,6 +885,74 @@ test("[III1-route-aware-fallback] THE ESCAPE: a vague IMPLEMENTATION finding is 
     routeFallbackScope("implementer", { fileScope: ["tests/**"], testScope: ["tests/**"] }),
     ["tests/**"],
     "a fileScope wholly inside the testScope falls back to the fileScope rather than to nothing — a floor of nothing is no floor",
+  );
+});
+
+test("[IV3-nested-testscope-bites] the CO-LOCATED layout defeats a glob-vs-glob subtraction: with fileScope ['src/**'] and testScope ['src/**/*.test.mjs'] the test glob equals no fileScope entry and matches none, so the implementer's fallback universe still contains the tests — the floor has to subtract by MATCHED FILE, which is what core/gates-edit.ts does at the write gate", () => {
+  const vague = {
+    id: "F1",
+    severity: "major" as const,
+    lens: CORRECTNESS,
+    claim: "the empty case is unhandled",
+    evidence: "somewhere in the parser",
+    suggestedFix: "handle the empty case",
+  };
+  const nested = { fileScope: ["src/**"], testScope: ["src/**/*.test.mjs"] };
+
+  // The fallback UNIVERSE is unchanged, and honestly so: no glob spells
+  // "src/** minus the tests inside it", and an empty universe is no floor.
+  assert.deepEqual(
+    routeFallbackScope("implementer", nested),
+    ["src/**"],
+    "the nested test glob subtracts no whole entry — that is the shape of the layout, not a defect",
+  );
+
+  const subjects = findingSubjects(vague, nested, "implementer");
+  const excluded = floorExclusions("implementer", nested);
+  assert.deepEqual(excluded, nested.testScope, "an implementer's evidence excludes the item's testScope");
+  assert.deepEqual(floorExclusions("testWriter", nested), [], "a test-writer's own half excludes nothing");
+
+  assert.equal(
+    receiptFloor(["src/parse.test.mjs"], subjects, excluded).ok,
+    false,
+    "touching only the co-located TEST discharges no implementation finding — the edit the write gate refuses outright cannot be the receipt for it",
+  );
+  assert.match(
+    receiptFloor(["src/parse.test.mjs"], subjects, excluded).reason,
+    /testScope/,
+    "the refusal names WHY the touched file was not evidence, since the reason is handed back to the fixer verbatim",
+  );
+  assert.equal(
+    receiptFloor(["src/parse.mjs"], subjects, excluded).ok,
+    true,
+    "a real source edit still clears the floor",
+  );
+  assert.equal(
+    receiptFloor(["src/parse.test.mjs", "src/parse.mjs"], subjects, excluded).ok,
+    true,
+    "and a source edit is still evidence when a test edit rode along beside it",
+  );
+
+  // The flat layout the row above covers keeps behaving: the exclusion is a
+  // second subtraction beside the entry-level one, never a replacement for it.
+  const flatScopes = { fileScope: [SUBJECT_REL], testScope: [TEST_REL] };
+  assert.equal(
+    receiptFloor(
+      [TEST_REL],
+      findingSubjects(vague, flatScopes, "implementer"),
+      floorExclusions("implementer", flatScopes),
+    ).ok,
+    false,
+    "the flat layout still refuses a test-only receipt for an implementation finding",
+  );
+
+  // THE WIRING. A seam that is correct and unreached is the defect this whole
+  // file exists to catch, so the fix pass in adapter/tools.ts must measure the
+  // receipt WITH the route's exclusions.
+  const toolsSource = readFileSync(new URL("../adapter/tools.ts", import.meta.url), "utf8");
+  assert.ok(
+    /floorExclusions\(/.test(toolsSource),
+    "adapter/tools.ts's fix pass computes the routed fixer's floor exclusions",
   );
 });
 

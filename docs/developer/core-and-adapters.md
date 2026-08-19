@@ -505,17 +505,19 @@ instruction. The registry entry is written *before* the first prompt, so no sub-
 a gated tool call while unregistered. Timers are the global `setTimeout`/`clearTimeout` so
 `node:test` mock timers can drive the watchdog.
 
-### adapter/router-client.ts — 241 lines
+### adapter/router-client.ts — 243 lines
 
-The plugin-side health and metrics client for the C++ llama-router, plus the `plan §4.4`
-fail-soft failover: `routerHealthy`, `fetchMetricsSummary`, `resolveBaseUrl`, `noteRouterFailure`,
-`createFailoverState`.
+The plugin-side metrics client for the C++ llama-router, plus the `plan §4.4` fail-soft
+failover: `fetchMetricsSummary`, `resolveBaseUrl`, `noteRouterFailure`, `createFailoverState`.
 
-**Easy to get wrong:** this client must absorb every failure. `routerHealthy` resolves `false`
-and `fetchMetricsSummary` resolves `null` without ever throwing or rejecting, because the router
-is a residual-risk dependency and layer 1 must keep working while it is down. One failover
-latches the session onto the upstream base URL and marks the run's metrics partial; a second
-disables probing entirely. See [llama-router.md](llama-router.md).
+**Easy to get wrong:** this client must absorb every failure. `fetchMetricsSummary` resolves
+`null` without ever throwing or rejecting, because the router is a residual-risk dependency and
+layer 1 must keep working while it is down. One failover latches the session onto the upstream
+base URL and marks the run's metrics partial; a second disables probing entirely. The §4.4
+failover protects conductor's own setup probes only — the run's model traffic reaches the
+router through opencode's fixed provider base URL, which the plugin cannot repoint mid-session,
+so mid-run resilience is the supervisor's restart, not a client-side health probe. See
+[llama-router.md](llama-router.md).
 
 ### adapter/inject.ts — 290 lines
 

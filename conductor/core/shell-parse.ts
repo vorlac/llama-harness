@@ -230,58 +230,87 @@ export function commandWordLocation(
   return i < seg.length ? { index: i, unresolvable: false } : { index: null, unresolvable: false };
 }
 
+// git's own DASHED DISPATCH form: `git apply` and `git-apply` are the same
+// program, and the hyphenated plumbing binaries (`git-apply`, `git-push`,
+// `git-reset`) ship in `$(git --exec-path)` and historically sit on PATH. A
+// basename compared for equality with "git" does not see them, so `git-apply
+// p.diff` wrote files with exactly the effect of the denied spaced form
+// (ISSUE-019). The suffix IS the subcommand, so the gate's own matrix — including
+// its DEFAULT-DENY for anything unrecognized — decides the dashed form on the
+// same terms as the spaced one.
+const DASHED_GIT = /^git-([A-Za-z0-9][A-Za-z0-9._-]*)$/;
+
 /**
- * The index of the git command word in a segment, or null when the segment
- * does not invoke git. Sees through leading `NAME=value` env-assignment tokens
- * and one wrapper together with its options (shared commandWordLocation), then
- * resolves the command word by BASENAME. Shared by isGitCommand and gitSubcommand
- * so detection and subcommand extraction never disagree — token equality on the
- * basename, never substring matching, so `echo git status` and
- * `cat tools/git/helper.txt` are still not git commands.
+ * A git invocation in a segment, resolved once so detection, subcommand
+ * extraction, and the gate's operand analysis can never disagree:
+ *   - `index`        the git command-word index (basename-resolved).
+ *   - `sub`          the subcommand, or null for a bare `git` with none.
+ *   - `operandStart` the index of the first operand AFTER the subcommand.
+ *
+ * Sees through leading `NAME=value` env-assignment tokens and one wrapper
+ * together with its options (shared commandWordLocation), then resolves the
+ * command word by BASENAME — token equality, never substring matching, so
+ * `echo git status` and `cat tools/git/helper.txt` are not git commands.
+ *
+ * Subcommand extraction skips the value-taking global options `-c k=v`,
+ * `-C dir`, `--git-dir <dir>`, and the inline `--git-dir=<dir>`. Any OTHER
+ * leading `-`/`--` flag FAILS SAFE: it is returned verbatim as the subcommand, a
+ * deny-forcing token that is on no allow-list, so the Task 5.1 gate
+ * default-denies rather than trusting the flag's value (which git may itself
+ * treat as the real subcommand). The first non-option token wins (`git stash
+ * push -m drop` parses as `stash`).
  */
-function gitCommandWordIndex(seg: string[]): number | null {
+export interface GitInvocation {
+  index: number;
+  sub: string | null;
+  operandStart: number;
+}
+
+export function gitInvocation(seg: string[]): GitInvocation | null {
   const { index } = commandWordLocation(seg);
   if (index === null) return null;
-  return commandBasename(seg[index]) === "git" ? index : null;
-}
-
-/**
- * True when the segment invokes git in COMMAND POSITION, seeing through leading
- * env-assignments, one wrapper, and an absolute/relative path (basename). Never
- * substring matching — `echo git status` and `cat tools/git/helper.txt` are not
- * git commands.
- */
-export function isGitCommand(seg: string[]): boolean {
-  return gitCommandWordIndex(seg) !== null;
-}
-
-/**
- * The git subcommand of a segment, or null when there is none (bare `git`)
- * or the segment is not a git command. Skips the value-taking global options
- * `-c k=v`, `-C dir`, `--git-dir <dir>`, and the inline `--git-dir=<dir>`. Any
- * OTHER leading `-`/`--` flag FAILS SAFE: it is returned verbatim as the
- * subcommand, a deny-forcing token that is on no allow-list, so the Task 5.1
- * gate default-denies rather than trusting the flag's value (which git may
- * itself treat as the real subcommand). The first non-option token wins
- * (`git stash push -m drop` parses as `stash`).
- */
-export function gitSubcommand(seg: string[]): string | null {
-  const gitIndex = gitCommandWordIndex(seg);
-  if (gitIndex === null) return null;
-  let i = gitIndex + 1;
+  const base = commandBasename(seg[index]);
+  const dashed = DASHED_GIT.exec(base);
+  if (dashed !== null) {
+    // `git-apply p.diff`: the subcommand rides the binary name, so every token
+    // after it is an operand.
+    return { index, sub: dashed[1], operandStart: index + 1 };
+  }
+  if (base !== "git") return null;
+  let i = index + 1;
   while (i < seg.length) {
     const token = seg[i];
     if (token === "-c" || token === "-C" || token === "--git-dir") {
       i += 2; // option plus its separate value argument
-    } else if (token.startsWith("--git-dir=")) {
-      i += 1;
-    } else if (token.startsWith("-")) {
-      return token; // unrecognized global option: fail safe (deny-forcing)
-    } else {
-      return token;
+      continue;
     }
+    if (token.startsWith("--git-dir=")) {
+      i += 1;
+      continue;
+    }
+    // An unrecognized global option is returned verbatim (fail safe); a plain
+    // token is the subcommand. Both end the scan at the same index.
+    return { index, sub: token, operandStart: i + 1 };
   }
-  return null;
+  return { index, sub: null, operandStart: seg.length };
+}
+
+/**
+ * True when the segment invokes git in COMMAND POSITION, seeing through leading
+ * env-assignments, one wrapper, an absolute/relative path (basename), and the
+ * dashed dispatch form. Never substring matching — `echo git status` and
+ * `cat tools/git/helper.txt` are not git commands.
+ */
+export function isGitCommand(seg: string[]): boolean {
+  return gitInvocation(seg) !== null;
+}
+
+/**
+ * The git subcommand of a segment, or null when there is none (bare `git`) or
+ * the segment is not a git command. See gitInvocation for the resolution rules.
+ */
+export function gitSubcommand(seg: string[]): string | null {
+  return gitInvocation(seg)?.sub ?? null;
 }
 
 // Expand one level of `{a,b}` alternation (recursing until brace-free).

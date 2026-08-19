@@ -2987,12 +2987,29 @@ test("[10.1-ask-claim-one-derivation-both-seams] the active-claim scope is ONE e
 // [10.1-ask-path-unextractable-reject]
 // ===========================================================================
 
-test("[10.1-ask-path-unextractable-reject] SG-10 fail-closed: an orchestrator edit ask from whose payload no concrete file path can be extracted — no metadata.filePath, no metadata.path, and patterns absent, empty or wildcard-only — is REJECTED and journaled gates/deny naming the unextractable payload, EVEN WHEN an active claim exists", async () => {
+// ISSUE-037: the wildcard screen covered `patterns` ONLY, while
+// `metadata.filePath`/`metadata.path` WIN the extraction precedence — so a
+// wildcard riding metadata was adjudicated as one concrete file and replied
+// "once", which is the `**`-on-one-file grant SG-10 forbids. The screen belongs
+// on every field the extraction can return, not on the one it prefers least.
+test("[10.1-ask-path-unextractable-reject] SG-10 fail-closed: an orchestrator edit ask from whose payload no concrete file path can be extracted — patterns absent, empty or wildcard-only, metadata carrying neither field, AND a wildcard riding metadata.filePath/metadata.path — is REJECTED and journaled gates/deny naming the unextractable payload, EVEN WHEN an active claim exists", async () => {
   const shapes: Array<{ name: string; patterns?: string[]; metadata?: Record<string, unknown> }> = [
     { name: "patterns absent, metadata absent" },
     { name: "patterns empty", patterns: [], metadata: {} },
     { name: "patterns wildcard-only", patterns: ["**", "src/*"], metadata: {} },
     { name: "metadata carries neither filePath nor path", patterns: [], metadata: { reason: "an edit", tool: "edit" } },
+    // `<ROOT>` is substituted with the scratch repo root below: the wildcard must
+    // ride an IN-TREE path, or the reject would be an accident of the
+    // outside-the-tree rule rather than the wildcard screen under test.
+    { name: "a `**` wildcard riding metadata.filePath (patterns absent)", metadata: { filePath: "<ROOT>/src/**" } },
+    { name: "a `*` wildcard riding metadata.path (patterns absent)", metadata: { path: "<ROOT>/src/*.ts" } },
+    { name: "a brace alternation riding metadata.filePath", metadata: { filePath: "<ROOT>/src/{a,b}.ts" } },
+    { name: "a `?` wildcard riding metadata.path", metadata: { path: "<ROOT>/src/a?.ts" } },
+    {
+      name: "a wildcard riding metadata.filePath while patterns carries one concrete entry",
+      patterns: ["<ROOT>/src/a.ts"],
+      metadata: { filePath: "<ROOT>/src/**" },
+    },
   ];
 
   for (const shape of shapes) {
@@ -3014,12 +3031,23 @@ test("[10.1-ask-path-unextractable-reject] SG-10 fail-closed: an orchestrator ed
 
     const registry = makeRegistry([[ORCH, { role: "orchestrator" }]]);
     const wiring = makeWiring(registry);
+    const atRoot = (value: string): string => value.split("<ROOT>").join(root);
+    const patterns = shape.patterns?.map(atRoot);
+    const metadata =
+      shape.metadata === undefined
+        ? undefined
+        : Object.fromEntries(
+            Object.entries(shape.metadata).map(([key, value]) => [
+              key,
+              typeof value === "string" ? atRoot(value) : value,
+            ]),
+          );
     const event: AskEvent = {
       id: "per_unextractable",
       sessionID: ORCH,
       permission: "edit",
-      ...(shape.patterns !== undefined ? { patterns: shape.patterns } : {}),
-      ...(shape.metadata !== undefined ? { metadata: shape.metadata } : {}),
+      ...(patterns !== undefined ? { patterns } : {}),
+      ...(metadata !== undefined ? { metadata } : {}),
     };
     const res: PermissionAskedResult = await handlePermissionAsked({
       store,

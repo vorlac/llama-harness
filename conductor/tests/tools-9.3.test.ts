@@ -1222,6 +1222,14 @@ test("[9.3-fix-blocks-common-citation-forms] the ordinary ways a reviewer cites 
     ["src/alpha/load.ts,src/beta/parse.ts overlap", ["I1", "I2"]],
     ["src/beta/parse.ts's reader is unsigned", ["I2"]],
     ["“src/beta/parse.ts” is the culprit", ["I2"]],
+    // The compiler/editor citation form: a reviewer quoting a line, a range, or a
+    // line:column. The path half is the citation; the numbers are where to look.
+    ["src/beta/parse.ts:118 reads the offset as unsigned", ["I2"]],
+    ["src/beta/parse.ts:118:14 is the read", ["I2"]],
+    ["src/beta/parse.ts:118-140 covers the whole reader", ["I2"]],
+    ["parse.ts:118 reads the offset as unsigned", ["I2"]],
+    // A bare directory keeps blocking nothing, line number or not (R2's rule).
+    ["src/:118 is not a citation", []],
   ];
   for (const [evidence, expected] of cases) {
     assert.deepEqual(

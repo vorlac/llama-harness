@@ -19,6 +19,7 @@
 import {
   appendFileSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -64,15 +65,115 @@ export interface OpenOptions {
   now?: () => number;
   pid?: number; // defaults to process.pid; names the temp files and the lock owner
   staleLockMs?: number; // over-age lock threshold; defaults to 24h
-  // Test seam (F4): fires AFTER the fresh-claim null-read and BEFORE the exclusive-create
-  // write, so a test can plant a racing lock in the TOCTOU window. Undefined in production.
+  // Test seam (F4): fires BEFORE a fresh claim is published at the lock path, so a
+  // test can plant a racing lock in that window. Undefined in production.
   onBeforeFreshLockWrite?: () => void;
+  // Test seam (P0/N-party): fires after a fresh claim is published and BEFORE it is
+  // verified against what is on disk, so a test can plant a displacing lock in
+  // exactly that window. Undefined in production.
+  onAfterFreshLockWrite?: () => void;
+  // Test seam (ISSUE-024, generalized to N parties): fires after this open judges a
+  // foreign lock STALE and before it breaks and claims, so a test can drive any
+  // number of other racers through that window. It is handed the attempt index and
+  // the record this open judged, which is what lets one seam model party 3, party 4
+  // and beyond on successive attempts rather than a single racer. Undefined in
+  // production.
+  onBeforeStaleClaim?: (window: { attempt: number; judged: LockRecord | null }) => void;
+  // Test seam (R2 publication-atomicity guard): fires inside claimLockFile AFTER the
+  // whole claim has been written to a same-dir temp and BEFORE it is published with
+  // linkSync. It is handed the temp path and the lock path, which lets a guard assert
+  // the two facts that distinguish atomic temp+link publication from a
+  // create-then-write: the temp exists and already carries the COMPLETE claim, and
+  // the lock path is NOT a present-but-empty file at the publish instant. A revert to
+  // an O_EXCL-create-then-write publication has no temp to hand here, so the guard
+  // that asserts this seam fires goes red. Undefined in production.
+  onClaimTempWritten?: (window: { temp: string; lockPath: string }) => void;
 }
 
-// .conductor/state/run.lock — the advisory single-writer lock.
+// The refusal a second session gets (owner decision D6). Carries the holder so the
+// composition root can name it to the operator rather than reporting an errno.
+export interface WorkspaceLockedError extends Error {
+  conductorCode: typeof WORKSPACE_LOCKED_CODE;
+  holder: LockRecord;
+}
+
+const WORKSPACE_LOCKED_CODE = "CONDUCTOR_WORKSPACE_LOCKED";
+
+export function isWorkspaceLocked(err: unknown): err is WorkspaceLockedError {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { conductorCode?: unknown }).conductorCode === WORKSPACE_LOCKED_CODE
+  );
+}
+
+function workspaceLockedError(root: string, holder: LockRecord): WorkspaceLockedError {
+  const who =
+    "pid " +
+    String(holder.pid) +
+    (holder.sessionID === undefined ? "" : ' (session "' + holder.sessionID + '")');
+  const err = new Error(
+    "state: the conductor workspace at " +
+      root +
+      " is held by another live conductor — " +
+      who +
+      ", holding since " +
+      new Date(holder.startMs).toISOString() +
+      ". Two conductors sharing one workspace mint colliding evidence seqs and publish " +
+      "one item's green on another item's verify, so the second session does not open. " +
+      "Close that session (or wait for it to release the workspace) and try again.",
+  );
+  return Object.assign(err, { conductorCode: WORKSPACE_LOCKED_CODE, holder }) as WorkspaceLockedError;
+}
+
+// The refusal for a RETRY-BUDGET exhaustion, as opposed to a live young holder. The
+// live-holder refusal (workspaceLockedError) is thrown from inside acquireLock and
+// truthfully names a live conductor; this one is thrown when the budget runs out
+// without a claim, where the artifact in the way may be a stale lock whose break
+// right is contended, or a stuck break right — NOT necessarily a live process. It
+// must not assert a (possibly dead) pid is a live conductor: it reports the holder's
+// pid together with whether that pid is actually alive, and names the break right as
+// a possible cause so the operator knows what to clear.
+function workspaceUnreclaimableError(root: string, holder: LockRecord | null): WorkspaceLockedError {
+  const fallback: LockRecord = holder ?? { pid: -1, startMs: 0 };
+  const alive = holder !== null && pidIsAlive(holder.pid);
+  const who =
+    holder === null
+      ? "no readable lock file is present"
+      : "the lock names pid " +
+        String(holder.pid) +
+        (alive ? " (alive)" : " (not alive — a stale lock or a stuck break right, not a live conductor)") +
+        (holder.sessionID === undefined ? "" : ' (session "' + holder.sessionID + '")');
+  const err = new Error(
+    "state: the conductor workspace at " +
+      root +
+      " could not be acquired within the retry budget — " +
+      who +
+      ". Either a live conductor holds it, or a stale lock could not be reclaimed because its break " +
+      "right is contended. Retry; if it persists, and no conductor is running, remove " +
+      ".conductor/state/run.lock and any .conductor/state/run.lock.break.* by hand.",
+  );
+  return Object.assign(err, {
+    conductorCode: WORKSPACE_LOCKED_CODE,
+    holder: fallback,
+  }) as WorkspaceLockedError;
+}
+
+// .conductor/state/run.lock — the OS-level single-writer lock. `sessionID` names
+// the opencode session behind the pid, so a refusal can tell the operator WHICH
+// conductor holds the workspace and not merely that something does.
+//
+// `token` is the ACQUISITION identity: a random word minted once per successful
+// claim. pid+startMs cannot name a claim uniquely — a recycled pid under an
+// injected clock repeats both — and every removal in this module is keyed on the
+// identity the remover READ, so the identity has to be unforgeable. A lock written
+// by an older conductor (or by a test fixture) carries no token; identity then
+// falls back to pid+startMs, which is what release() compared before.
 export interface LockRecord {
   pid: number;
   startMs: number;
+  sessionID?: string;
+  token?: string;
 }
 
 // .conductor/state/alive.json — the §3.8 liveness beacon.
@@ -90,7 +191,11 @@ export interface CreateRunInput {
 }
 
 export interface StateStore {
-  readonly readOnly: boolean;
+  // The §3.8 beacon as it stood BEFORE this session claimed the workspace: the
+  // conductor that held it last, or null for a first open. It is the signal that
+  // tells a fresh session whether the previous one exited or died — read once at
+  // open, because the claim overwrites the beacon with this session's own.
+  readonly priorBeacon: Beacon | null;
   // The workspace root, as the tree PATH the §3.5 gates compare an edit path
   // against: it IS the tree of every session working an item with no worktree.
   readonly root: TreePath;
@@ -181,6 +286,111 @@ export function appendLedgerLineRaw(filePath: string, record: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
+// The workspace lock, read from outside the store (ISSUE-026)
+// ---------------------------------------------------------------------------
+
+// Parse a lock file into a LockRecord, or null when it is absent, unreadable or
+// not lock-shaped. Shared by the store's own acquisition path and by the
+// out-of-store readers below, so "what a lock file says" has ONE derivation.
+function parseLockFile(lockPath: string): LockRecord | null {
+  if (!existsSync(lockPath)) return null;
+  let parsed: unknown;
+  try {
+    parsed = readJsonFileSync(lockPath);
+  } catch {
+    return null;
+  }
+  if (
+    parsed !== null &&
+    typeof parsed === "object" &&
+    typeof (parsed as { pid?: unknown }).pid === "number" &&
+    typeof (parsed as { startMs?: unknown }).startMs === "number"
+  ) {
+    const rec = parsed as { pid: number; startMs: number; sessionID?: unknown; token?: unknown };
+    const out: LockRecord = { pid: rec.pid, startMs: rec.startMs };
+    if (typeof rec.sessionID === "string") out.sessionID = rec.sessionID;
+    if (typeof rec.token === "string") out.token = rec.token;
+    return out;
+  }
+  return null;
+}
+
+// Two lock reads name the SAME acquisition. Token equality when both records carry
+// one (the only comparison that survives a recycled pid or a frozen clock), else
+// pid+startMs. An absent record matches only an absent record: "the lock file is
+// gone" is itself an identity, and it is the one an unreadable-lock break judged.
+function sameLockIdentity(a: LockRecord | null, b: LockRecord | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.token !== undefined && b.token !== undefined) return a.token === b.token;
+  return a.pid === b.pid && a.startMs === b.startMs;
+}
+
+// The filesystem-safe spelling of one lock identity, used to NAME the two files
+// that carry out a break. Keying those names on the identity being broken is what
+// makes the break a compare-and-delete: a racer holding a different view of the
+// lock composes a different name, so it can neither claim the break right for an
+// identity it did not read nor collide with the aside of one it did not judge.
+function lockIdentityKey(rec: LockRecord | null): string {
+  if (rec === null) return "unreadable";
+  const raw = rec.token ?? `p${String(rec.pid)}-t${String(rec.startMs)}`;
+  return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+}
+
+// Alive iff signal 0 does NOT report ESRCH. EPERM (the pid exists but is not ours)
+// and every other error count as alive — a lock is never treated as free unless
+// its owner is provably gone.
+export function pidIsAlive(checkPid: number): boolean {
+  try {
+    process.kill(checkPid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+// `<root>/.conductor/state/run.lock` for a run directory `<root>/.conductor/runs/<runId>`.
+// The run dir is what the evidence/question writers are handed, and the lock is the
+// fact they depend on, so the derivation lives here beside the writer of the lock
+// rather than being re-spelled at each ledger.
+export function lockPathForRunDir(runDir: string): string {
+  return path.join(path.resolve(runDir, "..", ".."), "state", "run.lock");
+}
+
+// The workspace lock holder for a run dir, or null when no lock file is present.
+export function lockHolderForRunDir(runDir: string): LockRecord | null {
+  return parseLockFile(lockPathForRunDir(runDir));
+}
+
+/**
+ * The cross-process guard a ledger mint runs before it issues a number
+ * (ISSUE-026). Single-writer is the primary mechanism — openWorkspace hands out a
+ * store only to the process holding the lock — and this is the seam that makes
+ * the dependency executable rather than assumed: minting beside a LIVE foreign
+ * holder throws, naming the holder, instead of quietly issuing a number that
+ * process is about to issue too.
+ *
+ * A missing lock (a bare run dir, a §3.9 no-git fixture) and a DEAD holder's lock
+ * are both permitted: a crash must never make a run unwritable, and the store's
+ * own stale-break is what reclaims the workspace.
+ */
+export function assertWorkspaceLockHeld(runDir: string, pid: number, what: string): void {
+  const holder = lockHolderForRunDir(runDir);
+  if (holder === null) return;
+  if (holder.pid === pid) return;
+  if (!pidIsAlive(holder.pid)) return;
+  throw new Error(
+    "state: refusing to mint " +
+      what +
+      " in " +
+      runDir +
+      " — the workspace single-writer lock is held by pid " +
+      String(holder.pid) +
+      (holder.sessionID === undefined ? "" : ' (session "' + holder.sessionID + '")') +
+      ", and two writers minting into one ledger is how a run ships one item's green on another's evidence",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Path-id trust boundary (F2)
 // ---------------------------------------------------------------------------
 
@@ -265,8 +475,6 @@ export function openWorkspace(opts: OpenOptions): StateStore {
   const alivePath = path.join(stateDir, "alive.json");
   const haltPath = path.join(stateDir, "halt");
 
-  let readOnly = false;
-
   // Every builder validates the ids it composes (F2). runJsonPath/itemsDirOf/
   // questionsPath route through runDirOf, so guarding runId there covers them all;
   // itemJsonPath additionally guards the itemId.
@@ -278,104 +486,284 @@ export function openWorkspace(opts: OpenOptions): StateStore {
   const questionsPath = (runId: string): string =>
     path.join(runDirOf(runId), "questions.jsonl");
 
-  // --- lock acquisition ---------------------------------------------------
+  // --- lock acquisition (GAP-027: one writer, decided by the OS) -----------
 
   function readExistingLock(): LockRecord | null {
-    if (!existsSync(lockPath)) return null;
-    let parsed: unknown;
-    try {
-      parsed = readJsonFileSync(lockPath);
-    } catch {
-      return null; // an unparseable lock is treated as absent and freshly claimed
-    }
-    if (
-      parsed !== null &&
-      typeof parsed === "object" &&
-      typeof (parsed as { pid?: unknown }).pid === "number" &&
-      typeof (parsed as { startMs?: unknown }).startMs === "number"
-    ) {
-      const rec = parsed as { pid: number; startMs: number };
-      return { pid: rec.pid, startMs: rec.startMs };
-    }
-    return null;
+    return parseLockFile(lockPath);
   }
 
-  // Alive iff signal 0 does NOT report ESRCH. EPERM (exists, not ours) and any
-  // other error are treated as alive — the over-age check is the independent
-  // safety net that breaks a crashed owner's lock, so we never steal a lock we
-  // cannot prove is dead.
-  function isAlive(checkPid: number): boolean {
+  /**
+   * Publish a claim at the lock path, or report that one already stands.
+   *
+   * The claim is written WHOLE into a same-directory temp file and then published
+   * with `link`, which is atomic and refuses to overwrite: the lock file is either
+   * absent or complete, never observed mid-write, and exactly one racer's link can
+   * win. An exclusive-create-then-write (`{flag:"wx"}`) has neither half of that
+   * property — the file exists, EMPTY, from the create until the write lands, and a
+   * concurrent opener that reads it in that window sees an unparseable lock, judges
+   * it broken, and breaks a live claim. Five real node processes racing one
+   * workspace hit exactly that: two writers, one of them holding a lock file
+   * another process had already deleted.
+   */
+  function claimLockFile(record: LockRecord): boolean {
+    const temp = `${lockPath}.claim.${String(pid)}.${randomBytes(6).toString("hex")}`;
+    writeFileSync(temp, JSON.stringify(record));
     try {
-      process.kill(checkPid, 0);
+      // R2 guard seam: the whole claim already sits in `temp` and the lock path has not
+      // been touched. An atomicity guard inspects both here; production leaves it undefined.
+      if (opts.onClaimTempWritten !== undefined) opts.onClaimTempWritten({ temp, lockPath });
+      linkSync(temp, lockPath);
       return true;
     } catch (err) {
-      return (err as NodeJS.ErrnoException).code !== "ESRCH";
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      return false;
+    } finally {
+      rmSync(temp, { force: true });
     }
   }
 
-  // Claim the lock by overwriting whatever is there with our own record. Used for the
-  // idempotent re-open of our OWN lock and for the deliberate stale-break rewrite —
-  // NOT for the fresh claim, which must be exclusive-create to close the TOCTOU race.
-  function claimLock(startMs: number): false {
-    writeFileAtomicSync(lockPath, JSON.stringify({ pid, startMs }));
-    journal.log("info", "state", "lock.acquired", { pid, startMs }, corr);
+  /**
+   * Break a lock this open has judged stale: an atomic compare-and-delete keyed on
+   * the identity that was READ.
+   *
+   * A bare rename of `run.lock` is not that compare-and-delete, and with three or
+   * more racers it is a double-writer generator. Rename moves whatever occupies the
+   * path at the instant it runs, not the inode the caller judged: racer A breaks the
+   * stale lock and exclusive-creates its own, and a laggard B — still holding its
+   * read of the dead lock — renames A's LIVE lock aside and drops it, leaving A
+   * convinced it holds a workspace whose lock file belongs to somebody else. Two
+   * parties never expose this: the loser's rename simply fails on a path nobody
+   * recreated. Real 4-process races produced concurrent writers in 12 of 25 runs.
+   *
+   * The break therefore runs in three parts, all keyed on identity X = the record
+   * this open read:
+   *
+   *   1. EXCLUSIVE BREAK RIGHT — an O_EXCL create of `run.lock.break.<X>`. The name
+   *      encodes X, so exactly one racer per identity may attempt the removal, and a
+   *      racer that read a DIFFERENT identity is not blocked by it (it will fail on
+   *      the re-read below instead, which is the outcome it deserves).
+   *   2. RE-READ UNDER THE RIGHT — the lock file must STILL carry X. Once X has been
+   *      broken it can never reappear (identities are minted per acquisition), so
+   *      seeing X here proves no break of X has completed, which in turn proves the
+   *      inode about to be moved is X's. A laggard whose view is stale reads
+   *      somebody else's live lock here and returns without touching a byte.
+   *   3. MOVE, VERIFY, DELETE — rename X aside under an X-keyed name and confirm the
+   *      moved file is X before deleting it. If an over-age holder released and a
+   *      successor claimed inside that window, the aside is put back with `link`,
+   *      which REFUSES to overwrite an existing lock, rather than with a rename,
+   *      which would clobber the successor's claim.
+   *
+   * `expected` is null when the judgment was made on an UNPARSEABLE lock file; a
+   * file that still does not parse is then the one that was judged.
+   *
+   * Returns true only when the lock removed is the stale one this open judged.
+   */
+  // Create the break right atomically AND exclusively: the whole record is written
+  // to a same-dir temp and then linked into place. linkSync refuses to overwrite (so
+  // exactly one racer per identity wins the right — the O_EXCL property the bare
+  // `{flag:"wx"}` create had) and publishes the file WHOLE (so a concurrent opener
+  // that inspects the right never reads a present-but-empty file and mistakes a live
+  // mid-create for an orphan — the property `{flag:"wx"}` did NOT have, and the seam
+  // the reclaim below would otherwise race against). Returns false on EEXIST.
+  function createBreakRight(breakRight: string, record: unknown): boolean {
+    const temp = `${breakRight}.mint.${String(pid)}.${randomBytes(6).toString("hex")}`;
+    writeFileSync(temp, JSON.stringify(record));
+    try {
+      linkSync(temp, breakRight);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      return false;
+    } finally {
+      rmSync(temp, { force: true });
+    }
+  }
+
+  // Is an existing break right an ORPHAN this open may reclaim — as opposed to a
+  // live breaker's exclusive right, which must NOT be stolen? Two grounds, both
+  // fail-safe: a break right whose breaker pid is provably gone (its removal of the
+  // identity can never follow — an identity is minted once per acquisition — yet the
+  // identity is stuck at the lock path, so the "identity has left" clear can never
+  // fire), and an over-age right (a recycled breaker pid that happens to be alive, or
+  // a right missing its breaker pid, must not wedge the workspace forever). Age is
+  // measured on the SAME injected-clock idiom as the stale-lock rule: `now()` minus the
+  // right's own stamped startMs, never the wall clock or a file mtime.
+  function breakRightIsReclaimable(breakRight: string): boolean {
+    let rec: { breakerPid?: unknown; startMs?: unknown };
+    try {
+      rec = readJsonFileSync(breakRight) as { breakerPid?: unknown; startMs?: unknown };
+    } catch {
+      // Gone (a racer cleared it) — nothing to reclaim; the caller retries. With
+      // atomic creation a present right is never empty, so this is "absent", not
+      // "being born", and returning false does not risk stealing a live mid-create.
+      return false;
+    }
+    if (typeof rec.breakerPid === "number" && !pidIsAlive(rec.breakerPid)) return true;
+    if (typeof rec.startMs === "number" && now() - rec.startMs > staleLockMs) return true;
     return false;
   }
 
-  // Decide the outcome against a foreign lock we can see: a dead pid or an over-age lock
-  // is stale (broken + claimed — an opencode crash must never wedge a workspace); a live,
-  // young foreign lock is a second session (drop to read-only, leave the lock intact,
-  // never stolen — §4.1). Returns readOnly.
-  function decideForeign(existing: LockRecord, startMs: number): boolean {
-    const alive = isAlive(existing.pid);
-    const overAge = startMs - existing.startMs > staleLockMs;
-    if (!alive || overAge) {
+  function breakStaleLock(expected: LockRecord | null): boolean {
+    const key = lockIdentityKey(expected);
+    const breakRight = `${lockPath}.break.${key}`;
+    const aside = `${lockPath}.stale.${key}`;
+    if (!createBreakRight(breakRight, { breakerPid: pid, key, startMs: now() })) {
+      // A break right for this identity already stands. It must resolve, never wedge:
+      //   (a) its identity has LEFT the lock path — no removal of it can ever follow,
+      //       so a right abandoned by a breaker that died mid-break protects nothing
+      //       and is cleared here; OR
+      //   (b) its identity is STILL at the lock path but the right is an ORPHAN (its
+      //       breaker is provably gone, or it is over-age). A dead-pid lock plus an
+      //       orphan right would otherwise wedge EVERY later opener forever, because
+      //       the clear in (a) can never fire while the identity is stuck at the path.
+      // A right held by a LIVE breaker matches neither and is respected, not stolen.
+      if (!sameLockIdentity(readExistingLock(), expected) || breakRightIsReclaimable(breakRight)) {
+        rmSync(breakRight, { force: true });
+      }
+      return false;
+    }
+    try {
+      if (!sameLockIdentity(readExistingLock(), expected)) return false;
+      // "No record" is the one judgement that is not an identity: an absent lock
+      // file can become a live claim a microsecond later, where a real identity,
+      // once broken, never returns. So an absent path is not broken at all — the
+      // caller's exclusive create is the correct move against it — and only a file
+      // that is genuinely present and unreadable is removed under this key.
+      if (expected === null && !existsSync(lockPath)) return false;
+      try {
+        renameSync(lockPath, aside);
+      } catch {
+        return false;
+      }
+      const moved = parseLockFile(aside);
+      if (!sameLockIdentity(moved, expected)) {
+        try {
+          linkSync(aside, lockPath); // refuses to displace a claim that already stands
+        } catch {
+          /* a live claim occupies the path: the aside is ours to discard */
+        }
+        rmSync(aside, { force: true });
+        return false;
+      }
+      rmSync(aside, { force: true });
+      return true;
+    } finally {
+      rmSync(breakRight, { force: true });
+    }
+  }
+
+  /**
+   * Take the workspace's single-writer lock, or REFUSE (owner decision D6).
+   *
+   * The claim is published atomically and exclusively by claimLockFile — the OS
+   * decides the winner, so two cold starts cannot both become writers. A foreign
+   * lock is
+   * honored unless its owner is provably gone (dead pid) or it is over-age (a
+   * recycled pid must never wedge a workspace forever); a stale one is broken by
+   * the identity-keyed compare-and-delete above and the claim retried. A LIVE young
+   * holder ends the open: this process gets no store at all, rather than a demoted
+   * one whose write guards cover a fraction of the store's mutating surface
+   * (ISSUE-023).
+   *
+   * A won publication is not yet a held lock. The definitive single-writer check is
+   * the SELF-VERIFY that follows it: the lock file on disk must carry this claim's
+   * own token. Winning the exclusive publication says only that the path was free at
+   * that instant; being the identity the path names is what makes this process the
+   * writer, and any
+   * displacement — a break that judged this claim, a fixture, a stray write — is
+   * caught here rather than one ledger mint later.
+   *
+   * The retry budget is bounded: each pass either claims, refuses, or removes one
+   * identity from play, and a workspace with a handful of racers converges inside
+   * it. Exhausting it is itself a refusal, never a silent claim.
+   */
+  function acquireLock(): LockRecord {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const startMs = now();
+      const record: LockRecord = {
+        pid,
+        startMs,
+        sessionID: opts.sessionID,
+        token: randomBytes(12).toString("hex"),
+      };
+      if (attempt === 0 && opts.onBeforeFreshLockWrite !== undefined) opts.onBeforeFreshLockWrite();
+      const created = claimLockFile(record);
+      if (created) {
+        if (opts.onAfterFreshLockWrite !== undefined) opts.onAfterFreshLockWrite();
+        if (sameLockIdentity(readExistingLock(), record)) {
+          journal.log("info", "state", "lock.acquired", { pid, startMs }, corr);
+          return record;
+        }
+        // The claim was displaced between the create and this read. Whoever the
+        // lock names is the writer; this process re-decides against it.
+        journal.log(
+          "warn",
+          "state",
+          "lock.contended",
+          { pid, startMs, displaced: true },
+          corr,
+        );
+        continue;
+      }
+
+      const existing = readExistingLock();
+      if (existing !== null && existing.pid === pid) {
+        // Our OWN lock (an idempotent re-open): adopt it as it stands. Rewriting it
+        // would move the startMs the over-age rule is measured from.
+        journal.log(
+          "info",
+          "state",
+          "lock.acquired",
+          { pid, startMs: existing.startMs, reopened: true },
+          corr,
+        );
+        return existing;
+      }
+
+      // An unparseable lock file is not evidence of a live holder, and it is not
+      // evidence of a dead one either — it is broken, and breaking it is the only
+      // way the workspace becomes usable again.
+      const alive = existing !== null && pidIsAlive(existing.pid);
+      const overAge = existing !== null && startMs - existing.startMs > staleLockMs;
+      if (existing !== null && alive && !overAge) {
+        journal.log(
+          "warn",
+          "state",
+          "lock.contended",
+          {
+            holderPid: existing.pid,
+            holderStartMs: existing.startMs,
+            ...(existing.sessionID === undefined ? {} : { holderSessionID: existing.sessionID }),
+          },
+          corr,
+        );
+        throw workspaceLockedError(root, existing);
+      }
+
       journal.log(
         "warn",
         "state",
         "lock.stale-break",
-        { brokenPid: existing.pid, brokenStartMs: existing.startMs, reason: alive ? "over-age" : "dead-pid" },
+        existing === null
+          ? { reason: "unreadable" }
+          : {
+              brokenPid: existing.pid,
+              brokenStartMs: existing.startMs,
+              reason: alive ? "over-age" : "dead-pid",
+            },
         corr,
       );
-      // The stale-break REWRITE intentionally replaces a stale lock — overwrite (NOT wx).
-      writeFileAtomicSync(lockPath, JSON.stringify({ pid, startMs }));
-      return false;
+      if (opts.onBeforeStaleClaim !== undefined) opts.onBeforeStaleClaim({ attempt, judged: existing });
+      breakStaleLock(existing);
+      // Whether the break succeeded or a racer got there first, the next iteration
+      // re-decides against what is actually on disk.
     }
-    journal.log(
-      "warn",
-      "state",
-      "lock.contended",
-      { holderPid: existing.pid, holderStartMs: existing.startMs },
-      corr,
-    );
-    return true;
-  }
-
-  function acquireLock(): boolean {
-    const startMs = now();
-    const existing = readExistingLock();
-    if (existing !== null && existing.pid === pid) {
-      // Re-acquiring our OWN lock (an idempotent re-open): overwrite in place.
-      return claimLock(startMs);
-    }
-    if (existing === null) {
-      // FRESH claim: exclusive-create (F4) so two cold starts that both saw no lock
-      // cannot both become writers. The seam lets a test plant a racing lock in the
-      // window between the null-read above and this write.
-      if (opts.onBeforeFreshLockWrite !== undefined) opts.onBeforeFreshLockWrite();
-      try {
-        writeFileSync(lockPath, JSON.stringify({ pid, startMs }), { flag: "wx" });
-        journal.log("info", "state", "lock.acquired", { pid, startMs }, corr);
-        return false;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        // Someone raced us to create the lock. Re-read and decide against it.
-        const raced = readExistingLock();
-        if (raced === null || raced.pid === pid) return claimLock(startMs);
-        return decideForeign(raced, startMs);
-      }
-    }
-    return decideForeign(existing, startMs);
+    // Budget exhausted WITHOUT a claim. This is not the live-young-holder refusal
+    // (that returns from inside the loop above): the lock could not be reclaimed,
+    // which a dead-pid lock behind a stuck break right can cause. Name the real
+    // artifact rather than asserting a possibly-dead pid is a live conductor.
+    const holder = readExistingLock();
+    throw workspaceUnreclaimableError(root, holder);
   }
 
   // --- stale-red registry (§2.11) -----------------------------------------
@@ -499,11 +887,6 @@ export function openWorkspace(opts: OpenOptions): StateStore {
   }
 
   function createRun(input: CreateRunInput, opts?: { onAfterRunJson?: () => void }): Run {
-    if (readOnly) {
-      throw new Error(
-        "state: this conductor is read-only (a live foreign lock holds the workspace); cannot create a run",
-      );
-    }
     // Git provenance (§2.3). No-git mode (§3.9) coerces every absent term to the
     // Run's non-null string/[] types — the HEAD term is simply dropped, no throw.
     let startHead = "";
@@ -603,11 +986,6 @@ export function openWorkspace(opts: OpenOptions): StateStore {
   // same id would RESURRECT, handing the reborn item another run's state, evidence
   // and attempts. Absent is not an error: the caller's job is that the file is gone.
   function removeItem(runId: string, itemId: string): void {
-    if (readOnly) {
-      throw new Error(
-        "state: this conductor is read-only (a live foreign lock holds the workspace); cannot remove an item",
-      );
-    }
     rmSync(itemJsonPath(runId, itemId), { force: true });
   }
 
@@ -740,27 +1118,46 @@ export function openWorkspace(opts: OpenOptions): StateStore {
   }
 
   function release(): void {
-    // Only a writer releases its own lock; a read-only instance never held one,
-    // so it must not delete the live foreign lock it observed.
-    if (readOnly) return;
-    if (existsSync(lockPath)) rmSync(lockPath, { force: true });
+    // ISSUE-025: delete the lock only when it is still OURS. A session whose lock
+    // was legitimately over-age-broken finds a SUCCESSOR's lock at the same path,
+    // and removing that would hand the workspace to a third writer while the
+    // successor is still working in it. Identity is this claim's own token, and
+    // pid+startMs for a lock minted without one: a recycled pid alone would pass
+    // this check, and under an injected clock so would pid+startMs.
+    const current = readExistingLock();
+    if (current === null) return;
+    if (!sameLockIdentity(current, held)) {
+      journal.log(
+        "warn",
+        "state",
+        "lock.contended",
+        { holderPid: current.pid, holderStartMs: current.startMs, releasedBy: pid, retained: true },
+        corr,
+      );
+      return;
+    }
+    rmSync(lockPath, { force: true });
     journal.log("info", "state", "lock.released", { pid }, corr);
   }
 
-  // --- init sequence (§3.8 beacon, §3.9 exclude, single-writer lock) ------
+  // --- init sequence (§3.9 exclude, single-writer lock, §3.8 beacon) ------
 
   mkdirSync(stateDir, { recursive: true });
   mkdirSync(runsDir, { recursive: true });
 
+  registerConductorExclude(root);
+
+  // The lock FIRST, the beacon second (ISSUE-023). §3.8's beacon answers "which
+  // conductor is live in this workspace"; written before the lock is won it named
+  // whichever process opened last, including one that was about to be refused.
+  const held = acquireLock();
+
+  const priorBeacon = readBeacon();
   const beacon: Beacon = { pid, startMs: now(), version: opts.version, sessionID: opts.sessionID };
   writeFileAtomicSync(alivePath, JSON.stringify(beacon, null, 2));
 
-  registerConductorExclude(root);
-
-  readOnly = acquireLock();
-
   return {
-    readOnly,
+    priorBeacon,
     root,
     createRun,
     loadRun,

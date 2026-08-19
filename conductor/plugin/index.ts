@@ -81,11 +81,12 @@ import { isRepo } from "../adapter/gitio.ts";
 import { readQuestions } from "../adapter/questions.ts";
 import { createFailoverState } from "../adapter/router-client.ts";
 import type { FailoverState } from "../adapter/router-client.ts";
-import { openWorkspace } from "../adapter/state.ts";
+import { isWorkspaceLocked, openWorkspace } from "../adapter/state.ts";
 import type { StateStore } from "../adapter/state.ts";
 import {
   classifyTool,
   CONDUCTOR_TOOL_NAMES,
+  ensureTerminalReport,
   gateBeforeToolCall,
   handleAnswer,
   handleClassify,
@@ -459,8 +460,42 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         repoConfigured: loaded.repoConfigured,
         store,
       };
+      // GAP-024: every terminal run leaves the §2.9 artifact. A conductor that was
+      // killed mid-run wrote neither a stop nor a report, so the run directory it
+      // left says nothing about what happened to the work; this sweep writes the
+      // artifact naming the run's disposition the moment the workspace is opened
+      // again. Fail-soft, and never before the store exists: a sweep that threw
+      // here would take down the open it is meant to follow.
+      try {
+        ensureTerminalReport({ store, journal });
+      } catch {
+        // The artifact is a courtesy the open does not depend on.
+      }
       return workspace;
     } catch (err) {
+      // GAP-027 / owner decision D6: a workspace already held by a live conductor
+      // is not an incidental open failure. It gets its own ERROR-level record
+      // naming the holder — the §7.1 console sink's default level is warn, so this
+      // reaches the operator's stderr — rather than being reported as an errno the
+      // reader would have to decode. The session still survives (G5 fail-soft): the
+      // second conductor simply does no conductor-side work in this workspace.
+      if (isWorkspaceLocked(err)) {
+        journal.log(
+          "error",
+          "state",
+          "lock.contended",
+          {
+            hook,
+            root,
+            holderPid: err.holder.pid,
+            holderStartMs: err.holder.startMs,
+            ...(err.holder.sessionID === undefined ? {} : { holderSessionID: err.holder.sessionID }),
+            error: err.message,
+          },
+          { sessionID },
+        );
+        return null;
+      }
       const errno = err as NodeJS.ErrnoException;
       journal.log(
         "error",
@@ -1372,6 +1407,9 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
           classification: null,
           items: [],
           openQuestions: [],
+          // A question can only stand against a run, so a workspace without one
+          // reports an empty list for the same reason the deliveries do.
+          standingQuestions: [],
           // The §6.4 delivery receipts live in the run's own journal, so a
           // workspace with no run has none to report — an empty list, never an
           // absent field, so the answer is "nothing delivered" rather than silence.

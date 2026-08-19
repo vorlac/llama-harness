@@ -257,7 +257,6 @@ test("[G14-lock] a fresh workspace claims the single-writer lock and stamps it f
   const { sink, calls } = makeJournal();
   const store = openWorkspace(freshOpts(root, { pid: 4242, journal: sink }));
 
-  assert.equal(store.readOnly, false, "a fresh workspace is a writer");
   const lock = readLock(root);
   assert.equal(lock.pid, 4242, "the lock carries this instance's pid");
   assert.equal(lock.startMs, START_MS, "the lock startMs is stamped from the injected clock");
@@ -286,7 +285,7 @@ test("[G14-lock] a dead-pid lock is stale-broken and reclaimed (process.kill pro
   const { sink, calls } = makeJournal();
   const store = openWorkspace(freshOpts(root, { pid: 5555, journal: sink }));
 
-  assert.equal(store.readOnly, false, "a dead-pid lock is stale: broken and single-writer claimed");
+  assert.ok(store !== null, "a dead-pid lock is stale: broken and single-writer claimed");
   assert.ok(
     calls.some((c) => c.component === "state" && c.event === "lock.stale-break"),
     "breaking a dead-pid lock is recorded as lock.stale-break",
@@ -305,7 +304,7 @@ test("[G14-lock] an over-age lock is stale-broken even though its owner pid is a
     freshOpts(root, { pid: process.pid + 7, journal: sink, staleLockMs: 60_000 }),
   );
 
-  assert.equal(store.readOnly, false, "an over-age lock is stale even with a live pid: broken and claimed");
+  assert.ok(store !== null, "an over-age lock is stale even with a live pid: broken and claimed");
   assert.ok(
     calls.some((c) => c.component === "state" && c.event === "lock.stale-break"),
     "the over-age break is recorded as lock.stale-break",
@@ -313,25 +312,23 @@ test("[G14-lock] an over-age lock is stale-broken even though its owner pid is a
   assert.equal(readLock(root).pid, process.pid + 7, "single-writer claimed after breaking the over-age lock");
 });
 
-test("[G14-lock] a LIVE foreign lock forces read-only mode and is left intact (never stolen)", () => {
+test("[G14-lock] a LIVE foreign lock REFUSES the second session and is left intact (never stolen)", () => {
   const root = scratchDir("conductor-bun-lock-foreign-");
   // A lock owned by a DIFFERENT, still-alive process (this test process's own pid),
   // young enough that only the liveness probe — not over-age — decides the outcome.
   preWriteLock(root, { pid: process.pid, startMs: START_MS - 1000 });
 
   const { sink, calls } = makeJournal();
-  const store = openWorkspace(freshOpts(root, { pid: process.pid + 1, journal: sink }));
-
-  assert.equal(store.readOnly, true, "a live foreign lock forces read-only mode (§4.1 second-session rule)");
+  assert.throws(
+    () => openWorkspace(freshOpts(root, { pid: process.pid + 1, journal: sink })),
+    /held by another live conductor/,
+    "a live foreign lock refuses the second session under both runtimes (§4.1, owner decision D6)",
+  );
   assert.ok(
     calls.some((c) => c.level === "warn" && c.component === "state"),
     "a live foreign lock emits a LOUD (warn-level) journal record",
   );
   assert.equal(readLock(root).pid, process.pid, "the live foreign lock is left intact — never stolen");
-  assert.throws(
-    () => store.createRun({ prompt: "p", sessionID: "ses", classification: { kind: "work", rationale: "r", check: { agreed: true, note: "" } } }),
-    "a read-only conductor refuses to create a run",
-  );
 });
 
 // ===========================================================================

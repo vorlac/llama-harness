@@ -971,15 +971,6 @@ def evict_model(model: InstalledModel) -> None:
     )
 
 
-def fetch_model(model_id: str) -> bool:
-    proc = subprocess.run(
-        [sys.executable, str(FETCH), "install", model_id, "-y", "--no-config"],
-        check=False,
-    )
-
-    return proc.returncode == 0
-
-
 def render_model_table(model: InstalledModel, rows: Sequence[Dict[str, object]],
                        prog) -> None:
     """Per-model results, shown as soon as that model finishes.

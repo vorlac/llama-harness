@@ -684,6 +684,12 @@ const LEADING_PUNCTUATION = /^["'`([{<“”‘’]+/;
 const TRAILING_PUNCTUATION = /["'`)\]}>,;:!?.“”‘’]+$/;
 // "src/beta/parse.ts's reader" — the possessive is prose, not part of the path.
 const POSSESSIVE = /['’]s$/;
+// "src/beta/parse.ts:118", ":118:14", ":118-140" — the compiler/editor citation
+// form, and the one a reviewer reaches for most because their tools print it.
+// The numbers say WHERE in the file to look; the path half is the citation, and
+// keeping them joined made the whole token stop being file-shaped, so the most
+// precise way of naming a file resolved to nothing at all.
+const LINE_SUFFIX = /:\d+(?:[:-]\d+)?$/;
 
 // A path-shaped token: either it carries a directory separator, or it is a bare
 // dotted filename ("parse.ts"). Everything else in a sentence is a word.
@@ -709,9 +715,9 @@ const WILDCARD = /[*?{[]/;
  *
  * The other half is the opposite failure: the ordinary ways a reviewer cites a
  * file — "./src/x.ts", a bare filename, a markdown link, a comma-joined list, a
- * possessive, smart quotes — all resolved to nothing, so a surviving major
- * blocked no item and the run executed what the review condemned. Each of those
- * shapes is normalised here.
+ * possessive, smart quotes, a "path:line" citation — all resolved to nothing, so
+ * a surviving major blocked no item and the run executed what the review
+ * condemned. Each of those shapes is normalised here.
  */
 export function pathLikeTokens(text: string): string[] {
   // "[the parser](src/beta/parse.ts)" -> the path becomes its own token.
@@ -721,6 +727,7 @@ export function pathLikeTokens(text: string): string[] {
   for (const raw of normalised.split(/[\s,;]+/)) {
     let token = raw.replace(LEADING_PUNCTUATION, "").replace(TRAILING_PUNCTUATION, "");
     token = token.replace(POSSESSIVE, "");
+    token = token.replace(LINE_SUFFIX, ""); // "parse.ts:118" cites parse.ts
     token = token.replace(/^\.\//, ""); // "./src/x.ts" and "src/x.ts" are one path
     if (token.length === 0) continue;
     if (!token.includes("/") && !DOTTED_FILENAME.test(token)) continue;

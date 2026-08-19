@@ -31,12 +31,21 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 
-import { appendLedgerLineRaw, assertSafeId } from "./state.ts";
+import {
+  appendLedgerLineRaw,
+  assertSafeId,
+  assertWorkspaceLockHeld,
+  pidIsAlive,
+  writeFileAtomicSync,
+} from "./state.ts";
+import { readJsonlTolerant } from "./jsonl.ts";
 import { currentBranch, headSha } from "./gitio.ts";
 import type { Journal } from "./journal.ts";
 import { quarantineFiles, replayPendingRestores, restoreQuarantine } from "./quarantine.ts";
@@ -45,7 +54,18 @@ import { classifyFailure } from "../core/freshness.ts";
 import type { RunnerRules } from "../core/freshness.ts";
 import { globMatch } from "../core/shell-parse.ts";
 import { MAIN_TREE, treeSlug, validate } from "../core/types.ts";
-import type { EvidenceRecord, FailureClass, TreeSlug } from "../core/types.ts";
+import type { EvidenceRecord, FailureClass, TreeSlug, WriterIdentity } from "../core/types.ts";
+
+// This process's start, derived once at load: the wall clock minus the runtime's
+// uptime. Paired with the pid it forms the §2.6 writer identity — a pid alone is
+// recyclable, and a recycled pid is precisely the case that makes a foreign record
+// look like one of ours.
+const PROCESS_STARTED_MS = Date.now() - Math.round(process.uptime() * 1000);
+
+// The identity to stamp on a record this process writes.
+function writerIdentity(pid: number, override?: WriterIdentity): WriterIdentity {
+  return override ?? { pid, startedMs: PROCESS_STARTED_MS };
+}
 
 // The verify member of the §2.6 discriminated union, named so a VerifyOutcome can
 // expose the verify-specific fields (scopes/head/startedMs/…) without a re-narrow.
@@ -204,15 +224,20 @@ function isRecordObj(value: unknown): value is Record<string, unknown> {
 
 // Required fields BEYOND the §2 merged-union schema, which requires only the four
 // shared fields. Each kind carries its own contract.
-const RED_REQUIRED = ["command", "exitCode", "failureExcerpt", "failureClass", "targeted"];
-const GREEN_REQUIRED = ["command", "exitCode"];
-const VERIFY_REQUIRED = ["startedMs", "head", "branch", "tree", "excluded", "green", "scopes"];
+const RED_REQUIRED = ["command", "exitCode", "failureExcerpt", "failureClass", "targeted", "writer"];
+const GREEN_REQUIRED = ["command", "exitCode", "writer"];
+const VERIFY_REQUIRED = ["startedMs", "head", "branch", "tree", "excluded", "green", "scopes", "writer"];
 
 /**
  * Validate an EvidenceRecord against BOTH the §2 merged-union schema AND the
  * per-kind required fields the merged schema deliberately omits. A verify record
  * missing startedMs/head/green/scopes passes the merged schema but MUST be
  * rejected here — never silently treated as fresh (phaseGate 1a).
+ *
+ * `writer` is required of every kind: a record nobody can attribute is the record
+ * a foreign session's collision hides inside (ISSUE-026/-027). The §2 schema keeps
+ * it optional so a ledger written before the stamp still READS; the writer keeps
+ * it mandatory so nothing is APPENDED without it.
  */
 export function validateEvidenceRecord(rec: unknown): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -245,30 +270,154 @@ function ledgerPathOf(runDir: string): string {
   return path.join(runDir, "evidence.jsonl");
 }
 
-// The next monotonic seq: max seq already in the ledger, plus one.
-function nextSeq(runDir: string): number {
-  const file = ledgerPathOf(runDir);
-  if (!existsSync(file)) return 1;
+// ---------------------------------------------------------------------------
+// Seq minting (ISSUE-026): single-writer by the workspace lock, collision-proof
+// by a durable reservation
+// ---------------------------------------------------------------------------
+
+// The reservation counter: the highest seq ever ISSUED for this run, which is not
+// the same fact as the highest seq PRESENT on the ledger. A read-max-plus-one mint
+// re-issues its own last number to any caller that has not appended yet, so two
+// records that were minted before either was written collide by construction — the
+// in-process shape of ISSUE-026's cross-process collision.
+const SEQ_COUNTER_NAME = "evidence.seq";
+// The short-lived exclusive-create latch the reservation is taken under, so the
+// read-then-write of the counter is not itself a race.
+const SEQ_LATCH_NAME = "evidence.seq.lock";
+// A latch is held for the duration of one file read and one atomic write. Anything
+// older than this is a killed process's leftover, never live contention.
+const SEQ_LATCH_STALE_MS = 30_000;
+
+interface SeqLatch {
+  pid: number;
+  ms: number;
+}
+
+function counterPathOf(runDir: string): string {
+  return path.join(runDir, SEQ_COUNTER_NAME);
+}
+
+// The highest seq already on the ledger. Torn lines are skipped: an unparseable
+// line cannot advance the counter, and it must not throw either.
+function ledgerMaxSeq(runDir: string): number {
+  const { records } = readJsonlTolerant<{ seq?: unknown }>(ledgerPathOf(runDir));
+  let max = 0;
+  for (const record of records) {
+    if (typeof record.seq === "number" && Number.isFinite(record.seq) && record.seq > max) {
+      max = record.seq;
+    }
+  }
+  return max;
+}
+
+function readIssuedCounter(runDir: string): number {
+  const file = counterPathOf(runDir);
+  if (!existsSync(file)) return 0;
   let raw: string;
   try {
     raw = readFileSync(file, "utf8");
   } catch {
-    return 1;
+    return 0;
   }
-  let max = 0;
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as { seq?: unknown };
-      if (typeof parsed.seq === "number" && Number.isFinite(parsed.seq) && parsed.seq > max) {
-        max = parsed.seq;
-      }
-    } catch {
-      continue; // an unparseable ledger line cannot advance the seq
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  try {
+    const parsed = JSON.parse(raw) as { issued?: unknown };
+    if (typeof parsed.issued === "number" && Number.isFinite(parsed.issued)) return parsed.issued;
+  } catch {
+    return 0; // a torn counter falls back to the ledger's own maximum
+  }
+  return 0;
+}
+
+function readSeqLatch(latchPath: string): SeqLatch | null {
+  if (!existsSync(latchPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(latchPath, "utf8")) as { pid?: unknown; ms?: unknown };
+    if (typeof parsed.pid === "number" && typeof parsed.ms === "number") {
+      return { pid: parsed.pid, ms: parsed.ms };
     }
+  } catch {
+    return null;
   }
-  return max + 1;
+  return null;
+}
+
+// Break a latch by RENAMING it aside and removing the renamed file. rename is
+// atomic, so of two processes that both judged the same latch stale exactly one
+// moves that inode; the loser gets ENOENT and re-enters the acquisition loop
+// against whatever the winner created. A read-then-unlink would let both proceed —
+// the same TOCTOU shape ISSUE-024 names in the workspace lock.
+function breakSeqLatch(latchPath: string, pid: number): void {
+  const aside = `${latchPath}.stale.${pid}.${randomBytes(4).toString("hex")}`;
+  try {
+    renameSync(latchPath, aside);
+  } catch {
+    return; // someone else moved it first: nothing of ours to clean up
+  }
+  rmSync(aside, { force: true });
+}
+
+function acquireSeqLatch(latchPath: string, pid: number, now: () => number): void {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      writeFileSync(latchPath, JSON.stringify({ pid, ms: now() }), { flag: "wx" });
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+    const held = readSeqLatch(latchPath);
+    const stale = held === null || !pidIsAlive(held.pid) || now() - held.ms > SEQ_LATCH_STALE_MS;
+    if (stale) breakSeqLatch(latchPath, pid);
+  }
+  const held = readSeqLatch(latchPath);
+  throw new Error(
+    "evidence: could not reserve a seq in " +
+      path.dirname(latchPath) +
+      " — the mint latch is held" +
+      (held === null ? "" : " by pid " + String(held.pid)) +
+      "; a number issued without the reservation could collide with another writer's (ISSUE-026)",
+  );
+}
+
+function releaseSeqLatch(latchPath: string, pid: number): void {
+  // Delete only OUR latch, for the reason release() checks the workspace lock's
+  // pid: a latch we did not take belongs to whoever broke ours and took it next.
+  const held = readSeqLatch(latchPath);
+  if (held !== null && held.pid !== pid) return;
+  rmSync(latchPath, { force: true });
+}
+
+export interface MintSeqOptions {
+  pid?: number;
+  now?: () => number;
+}
+
+/**
+ * Mint the next §2.6 evidence seq for `runDir`.
+ *
+ * THE LOCK DEPENDENCY, stated where the number is issued: the primary guarantee
+ * that two conductors never mint into one ledger is the workspace single-writer
+ * lock (state.ts) — a second session opening the workspace is refused outright, so
+ * only one process ever reaches this function for a given run. assertWorkspaceLockHeld
+ * makes that dependency executable rather than assumed: minting beside a LIVE
+ * foreign holder throws instead of issuing a number that process is about to issue
+ * too. The durable reservation below closes the remaining in-process hole (two
+ * mints before either append).
+ */
+export function mintEvidenceSeq(runDir: string, opts: MintSeqOptions = {}): number {
+  const pid = opts.pid ?? process.pid;
+  const now = opts.now ?? Date.now;
+  assertWorkspaceLockHeld(runDir, pid, "an evidence seq");
+  mkdirSync(runDir, { recursive: true });
+  const latchPath = path.join(runDir, SEQ_LATCH_NAME);
+  acquireSeqLatch(latchPath, pid, now);
+  try {
+    const next = Math.max(readIssuedCounter(runDir), ledgerMaxSeq(runDir)) + 1;
+    writeFileAtomicSync(counterPathOf(runDir), JSON.stringify({ issued: next }), { pid });
+    return next;
+  } finally {
+    releaseSeqLatch(latchPath, pid);
+  }
 }
 
 // Validate per-kind, append to <runDir>/evidence.jsonl, then journal the kind under
@@ -444,6 +593,10 @@ export interface RunTestOptions {
   workspaceKey?: string;
   runId?: string;
   now?: () => number;
+  // The writing process, for the seq mint's lock guard; defaults to process.pid.
+  pid?: number;
+  // The identity stamped on the appended record; defaults to this process's.
+  writer?: WriterIdentity;
 }
 
 export interface RunTestResult {
@@ -547,12 +700,14 @@ export function runTest(runDir: string, itemId: string, opts: RunTestOptions): R
   const excerpt = boundExcerpt(combinedText);
   const namesTestScopeFile = excerptNamesTestFile(excerpt, testFiles);
 
-  const seq = nextSeq(runDir);
+  const pid = opts.pid ?? process.pid;
+  const writer = writerIdentity(pid, opts.writer);
+  const seq = mintEvidenceSeq(runDir, { pid, now });
   const ts = now();
   let record: EvidenceRecord;
   let failureClass: FailureClass | null = null;
   if (outcome.exitCode === 0) {
-    record = { seq, ts, kind: "green", itemId, command: actualCmd, exitCode: 0, targeted };
+    record = { seq, ts, kind: "green", itemId, command: actualCmd, exitCode: 0, targeted, writer };
   } else {
     failureClass = classifyFailure(
       relStderr,
@@ -571,6 +726,7 @@ export function runTest(runDir: string, itemId: string, opts: RunTestOptions): R
       failureExcerpt: excerpt,
       failureClass,
       targeted,
+      writer,
     };
   }
 
@@ -619,6 +775,8 @@ export interface VerifyOptions {
   tree?: TreeSlug;
   now?: () => number;
   pid?: number;
+  // The identity stamped on the appended verify record; defaults to this process's.
+  writer?: WriterIdentity;
   // Over-age marker threshold (F6); defaults to 24h. A marker older than this is broken
   // even if its pid is alive (a recycled pid must never wedge a tree's verify forever).
   staleMarkerMs?: number;
@@ -876,8 +1034,9 @@ export function runVerify(
 
     const green = Object.values(scopes).every((s) => s.green);
     const record: VerifyRecord = {
-      seq: nextSeq(runDir),
+      seq: mintEvidenceSeq(runDir, { pid, now }),
       ts: now(),
+      writer: writerIdentity(pid, opts.writer),
       kind: "verify",
       itemId,
       startedMs,

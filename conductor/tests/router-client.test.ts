@@ -27,7 +27,6 @@
 // ------------------------------------------------------------------------- //
 // PINNED INTERFACE (plan 2497-2504) + DESIGNED FAILOVER MECHANISM
 // ------------------------------------------------------------------------- //
-//   routerHealthy(routerCfg, failoverState?)            -> Promise<boolean>
 //   fetchMetricsSummary(routerCfg, log?)                -> Promise<MetricsSummary | null>
 //   resolveBaseUrl(routerCfg, upstreamCfg, failoverState) -> string   (SYNC — returns a url)
 //   noteRouterFailure(failoverState, log?)              -> void        (records one failover)
@@ -41,7 +40,8 @@
 //     { failovers: number;        // count of recorded router request failures
 //       useUpstream: boolean;     // latch — once true resolveBaseUrl returns upstream
 //       metricsPartial: boolean;  // the signal Task 9.5b (conductor_report) reads
-//       probingDisabled: boolean; // set after the 2nd failover; routerHealthy short-circuits }
+//       probingDisabled: boolean; // set after the 2nd failover; resolveBaseUrl then
+//                                 // names the upstream unconditionally }
 //     createFailoverState() -> all-zero/false fresh state.
 //
 //   Partial-metrics signal: noteRouterFailure sets failoverState.metricsPartial
@@ -60,7 +60,7 @@
 //     Promise). The fan-out engine, upon observing a router request failure,
 //     records it via noteRouterFailure; the NEXT resolveBaseUrl returns upstream
 //     and keeps doing so. The 2nd noteRouterFailure sets probingDisabled, after
-//     which routerHealthy short-circuits false WITHOUT touching the network.
+//     which resolveBaseUrl names the upstream WITHOUT the router being touched.
 //
 //   Journaling: the two journaling entry points take an optional sink
 //     `(level, event, data) => void` — component is fixed to "router-client" by
@@ -74,18 +74,14 @@
 // ------------------------------------------------------------------------- //
 //   7.2-api             -> "[7.2-api] exports the pinned surface + failover mechanism;
 //                           createFailoverState() yields a fresh unlatched state"
-//   7.2-cases           -> "[7.2-cases] routerHealthy: healthy 200 -> true"
-//                       -> "[7.2-cases] routerHealthy: 404 -> false"
-//                       -> "[7.2-cases] routerHealthy: connection refused -> false (no throw)"
-//                       -> "[7.2-cases] routerHealthy: hang past probeTimeoutMs -> false within bound (no throw)"
-//                       -> "[7.2-cases] fetchMetricsSummary: 200 + JSON body -> summary"
+//   7.2-cases           -> "[7.2-cases] fetchMetricsSummary: 200 + JSON body -> summary"
 //                       -> "[7.2-cases] fetchMetricsSummary: 500 -> null (no throw)"
 //                       -> "[7.2-cases] fetchMetricsSummary: garbage body -> null (no throw)"
 //                       -> "[7.2-cases] fetchMetricsSummary: connection refused -> null (no throw)"
 //                       -> "[7.2-cases] fetchMetricsSummary: hang past probeTimeoutMs -> null within bound (no throw); journals at debug"
 //   7.2-failover        -> "[7.2-failover] refused router request -> resolveBaseUrl latches to upstream (stays latched);
 //                           metrics marked partial; journals failover(warn)"
-//   7.2-second-failover -> "[7.2-second-failover] two failovers disable probing -> routerHealthy short-circuits false with zero network calls"
+//   7.2-second-failover -> "[7.2-second-failover] two failovers disable probing -> the router origin is resolved away with zero network calls"
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -97,7 +93,6 @@ import type { AddressInfo } from "node:net";
 // the types are `import type` so the stripper erases them (a type-only import of
 // a missing module raises nothing, so the value import below carries the red).
 import {
-  routerHealthy,
   fetchMetricsSummary,
   resolveBaseUrl,
   noteRouterFailure,
@@ -229,7 +224,6 @@ function sink(into: CapturedLog[]) {
 // ------------------------------------------------------------------------- //
 
 test("[7.2-api] exports the pinned surface + failover mechanism; createFailoverState() yields a fresh unlatched state", () => {
-  assert.strictEqual(typeof routerHealthy, "function");
   assert.strictEqual(typeof fetchMetricsSummary, "function");
   assert.strictEqual(typeof resolveBaseUrl, "function");
   assert.strictEqual(typeof noteRouterFailure, "function");
@@ -248,42 +242,6 @@ test("[7.2-api] exports the pinned surface + failover mechanism; createFailoverS
     normUrl("http://127.0.0.1:41234"),
   );
 });
-
-// ------------------------------------------------------------------------- //
-// 7.2-cases — routerHealthy
-// ------------------------------------------------------------------------- //
-
-test("[7.2-cases] routerHealthy: healthy 200 -> true", async () => {
-  const stub = await startStub((respond) => respond(200, JSON.stringify({ status: "ok" })));
-  const healthy = await routerHealthy(routerCfgAt(stub.port, 1000));
-  assert.strictEqual(healthy, true);
-});
-
-test("[7.2-cases] routerHealthy: 404 -> false", async () => {
-  const stub = await startStub((respond) => respond(404, "not found", "text/plain"));
-  const healthy = await routerHealthy(routerCfgAt(stub.port, 1000));
-  assert.strictEqual(healthy, false);
-});
-
-test("[7.2-cases] routerHealthy: connection refused -> false (no throw)", async () => {
-  const port = await refusedPort();
-  const healthy = await routerHealthy(routerCfgAt(port, 1000));
-  assert.strictEqual(healthy, false);
-});
-
-test(
-  "[7.2-cases] routerHealthy: hang past probeTimeoutMs -> false within bound (no throw)",
-  { timeout: 5000 },
-  async () => {
-    const stub = await startHangStub();
-    const t0 = Date.now();
-    const healthy = await routerHealthy(routerCfgAt(stub.port, 150));
-    const elapsed = Date.now() - t0;
-    assert.strictEqual(healthy, false);
-    // Proves the INJECTED 150 ms timeout was honoured, not a hard-coded 2 s.
-    assert.ok(elapsed < 1500, `probe should time out fast; took ${elapsed} ms`);
-  },
-);
 
 // ------------------------------------------------------------------------- //
 // 7.2-cases — fetchMetricsSummary (strictly fail-soft: null on ANY failure)
@@ -357,9 +315,10 @@ test(
       normUrl(`http://127.0.0.1:${refused}`),
     );
 
-    // The plugin observes the refused router request (fail-soft: no throw).
-    const healthy = await routerHealthy(routerCfg);
-    assert.strictEqual(healthy, false);
+    // The conductor observes the refused router request through the one call it
+    // actually makes against the router (fail-soft: null, no throw).
+    const summary = await fetchMetricsSummary(routerCfg);
+    assert.strictEqual(summary, null);
 
     // ...and records the failover.
     const logs: CapturedLog[] = [];
@@ -388,7 +347,7 @@ test(
 // ------------------------------------------------------------------------- //
 
 test(
-  "[7.2-second-failover] two failovers disable probing -> routerHealthy short-circuits false with zero network calls",
+  "[7.2-second-failover] two failovers disable probing -> the router origin is resolved away with zero network calls",
   async () => {
     const state = createFailoverState();
 
@@ -397,17 +356,19 @@ test(
     assert.strictEqual(state.failovers, 1);
     assert.strictEqual(state.probingDisabled, false);
 
-    // Second failover in the session: probing is now disabled entirely.
+    // Second failover in the session: probing is disabled entirely.
     noteRouterFailure(state);
     assert.strictEqual(state.failovers, 2);
     assert.strictEqual(state.probingDisabled, true);
 
-    // A stub that WOULD answer 200 if contacted — proves the short-circuit is
-    // real: routerHealthy returns false WITHOUT a network call, so the server
-    // records zero hits.
+    // A stub that WOULD answer 200 if contacted — proof that "stop probing" is
+    // real rather than nominal. resolveBaseUrl is the seam every conductor-issued
+    // router request passes through, and once probing is disabled it names the
+    // upstream, so the router's own port is never dialled: zero hits on a live
+    // server standing at that port.
     const stub = await startStub((respond) => respond(200, JSON.stringify({ status: "ok" })));
-    const healthy = await routerHealthy(routerCfgAt(stub.port, 1000), state);
-    assert.strictEqual(healthy, false);
+    const routerCfg = routerCfgAt(stub.port, 1000);
+    assert.strictEqual(normUrl(resolveBaseUrl(routerCfg, UPSTREAM_CFG, state)), normUrl(UPSTREAM_URL));
     assert.strictEqual(stub.hits(), 0);
   },
 );
