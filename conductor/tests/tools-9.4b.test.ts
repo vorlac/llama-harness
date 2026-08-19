@@ -177,7 +177,9 @@
 //                                       item / stale-red registry from an EARLIER RUN).
 //   9.4b-own-red-still-fails-validate → the same fixture with the failing file's ownership
 //                                       flipped: A's own red is never quarantined.
-//   9.4b-no-template-wave-no-livelock → two no-template items in one wave both reach GREEN.
+//   9.4b-no-template-wave-no-livelock → two no-template items in one wave: each fallback run
+//                                       quarantines the other's red test, and each fallback
+//                                       green is REFUSED as that item's GREEN (GAP-008).
 //   9.4b-debug-entry-on-failure       → debugging + debug.md in the implementer's next
 //                                       dispatch, asserted at the instant of the dispatch.
 //   9.4b-debug-cap-escalates          → the cap blocks + ONE "debug-architecture" question,
@@ -1657,7 +1659,7 @@ test("[9.4b-own-red-still-fails-validate] the quarantine NEVER excludes the item
 // [9.4b-no-template-wave-no-livelock]
 // ===========================================================================
 
-test("[9.4b-no-template-wave-no-livelock] TWO items in one wave whose verify scope has NO §2.1 itemTest template both reach GREEN: each one's no-template FALLBACK run quarantines the OTHER's red test, so neither is blocked by its sibling and the wave does not livelock", async () => {
+test("[9.4b-no-template-wave-no-livelock] TWO items in one wave whose verify scope has NO §2.1 itemTest template: each one's no-template FALLBACK run still quarantines the OTHER's red test, so neither run is contaminated by its sibling — and the whole-suite exit 0 that comes back is REFUSED as the item's GREEN (GAP-008), naming the fallback, blocking the item and raising one §2.11 question rather than advancing on a pass that never shows the item's own test running", async () => {
   const root = committedRepo();
   const stateHome = freshStateHome();
   const witness = path.join(stateHome, "witness.json");
@@ -1710,8 +1712,8 @@ test("[9.4b-no-template-wave-no-livelock] TWO items in one wave whose verify sco
     now: () => START_MS,
   });
 
-  assert.equal(first.ok, true, "item I1 reaches GREEN even though its sibling's test is still red");
-  assert.equal(store.loadItem(runId, "I1").state, "GREEN", "I1's persisted state is GREEN");
+  // The QUARANTINE half is unchanged and still asserted end-to-end: the fallback run is
+  // about THIS item, and the sibling's deliberate red is out of the tree while it runs.
   assert.ok(first.excluded.includes("tests/two.test.mjs"), "I1's fallback run quarantined the sibling's red test");
   assert.equal(first.excluded.includes("tests/one.test.mjs"), false, "I1's own test was never quarantined");
   const afterFirst = readWitness(witness);
@@ -1723,8 +1725,32 @@ test("[9.4b-no-template-wave-no-livelock] TWO items in one wave whose verify sco
   const firstRecord = readEvidence(runDir).at(-1);
   assert.equal(firstRecord?.kind, "green", "the fallback run produced a §2.6 green");
   assert.equal((firstRecord as Extract<EvidenceRecord, { kind: "green" }>).exitCode, 0, "the fallback run exited 0");
+  assert.equal(
+    (firstRecord as Extract<EvidenceRecord, { kind: "green" }>).targeted,
+    false,
+    "the green record itself says the run was NOT targeted at the item (GAP-008: a forensic reader can tell)",
+  );
 
-  // The SECOND item now runs with nothing excluded (its sibling is GREEN) and still passes.
+  // …and the ADMISSION half (GAP-008 / ISSUE-010): that exit 0 is a whole-suite result,
+  // not this item's test passing, so it is refused exactly as the red path refuses its
+  // mirror image. The item does not advance and the §2.6 green pointer is never written.
+  assert.equal(first.ok, false, "a full-suite FALLBACK exit 0 is NOT admitted as item I1's GREEN");
+  assert.equal(first.ranItemTest, true, "the run happened — the refusal is about what it proves, not about running it");
+  assert.equal(first.exitCode, 0, "the refused run really did exit 0");
+  const blockedOne = store.loadItem(runId, "I1");
+  assert.equal(blockedOne.state, "TEST_VETTED", "I1 stays at TEST_VETTED — a fallback green advances nothing");
+  assert.equal(blockedOne.evidence.green, undefined, "no §2.6 green pointer was persisted on the item");
+  assert.equal(blockedOne.blocked?.stage, "GREEN", "the item carries the §2.5 block annotation for this stage");
+  assert.ok(first.questionId !== null, "ONE §2.11 question offers the unblock path");
+  const askedOne = readQuestions(runDir).find((q) => q.id === first.questionId);
+  assert.ok(
+    /fell back to the full verify scope|itemTest template/i.test(askedOne?.question ?? ""),
+    `the refusal NAMES the fallback in redAdmission's vocabulary: ${askedOne?.question ?? "(no question)"}`,
+  );
+
+  // The SIBLING is refused for the same reason, so "ride a fallback green" is closed for
+  // the whole wave and not just for whichever item happened to go first. I1 never reached
+  // GREEN, so its deliberate red is still foreign to I2's run and still quarantined.
   rmSync(ran1, { force: true });
   const wiring2 = makeWiring(runId, config, journal.sink, {
     implementer: [implementerWrites(root, [{ rel: "src/two.mjs", content: SUBJECT_MODULE }])],
@@ -1741,22 +1767,21 @@ test("[9.4b-no-template-wave-no-livelock] TWO items in one wave whose verify sco
     now: () => START_MS,
   });
 
-  assert.equal(second.ok, true, "item I2 reaches GREEN in the same wave — no livelock");
-  assert.equal(store.loadItem(runId, "I2").state, "GREEN", "I2's persisted state is GREEN");
-  assert.equal(
+  assert.equal(second.ok, false, "item I2's fallback green is refused too");
+  assert.equal(store.loadItem(runId, "I2").state, "TEST_VETTED", "I2's persisted state is unchanged");
+  assert.ok(
     second.excluded.includes("tests/one.test.mjs"),
-    false,
-    "I1 is GREEN now, so its test is no longer in the foreign red set",
+    "I1 is still below GREEN, so its test is in I2's foreign red set",
   );
   const afterSecond = readWitness(witness);
   assert.equal(afterSecond.length, 2, "I2's fallback ran the full scope command once more");
   assert.deepEqual(
-    [...afterSecond[1].present].sort(),
-    ["tests/one.test.mjs", "tests/two.test.mjs"],
-    "both tests were present for I2's run",
+    afterSecond[1].present,
+    ["tests/two.test.mjs"],
+    "I1's test was quarantined out of the tree for I2's run",
   );
-  assert.ok(existsSync(ran1) && existsSync(ran2), "both tests executed and both passed");
-  assert.equal(readEvidence(runDir).at(-1)?.kind, "green", "I2's fallback run produced a §2.6 green");
+  assert.ok(existsSync(ran2), "I2's own test executed");
+  assert.equal(readEvidence(runDir).at(-1)?.kind, "green", "I2's fallback run produced a §2.6 green record all the same");
 });
 
 // ===========================================================================

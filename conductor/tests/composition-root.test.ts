@@ -548,8 +548,11 @@ function makeQueueItem(id: string): QueueItem {
     id,
     title: "keep the sign of negative offsets",
     rationale: "the parser drops the sign, so negative offsets read as positive ones",
-    fileScope: ["src/**"],
-    testScope: ["tests/**"],
+    // A scope of the item's OWN, keyed by id: §2.4 refuses a queue whose items claim
+    // overlapping write territory, so a fixture that gave every item "src/**" made
+    // every multi-item queue below illegal for a reason none of those rows is about.
+    fileScope: [`src/${id.toLowerCase()}/**`],
+    testScope: [`tests/${id.toLowerCase()}/**`],
     acceptance: ['parse("-7") returns -7'],
     behavioral: true,
     dependsOn: [],
@@ -2738,23 +2741,29 @@ test("[13.1-cr2-widening-the-scope-goes-red] widening the derived scope to ['**'
 
     // `**` spans separators including the leading one (core/gates-edit.ts:123-127),
     // so each of these paths is matched by the mutation and by NOTHING the item
-    // declared. Each must be a deny, and each deny must name the item's own scope.
-    const widenedButNotOurs = [
-      path.join(tree, "src", "beta", "one.ts"),
-      path.join(tree, "tests", "alpha", "one.test.ts"),
-      path.join(tree, "README.md"),
+    // declared. Each must be a deny, and each deny must name one of the item's OWN
+    // persisted scopes — a permissive constant names neither. The item's own test
+    // path is named by its TESTSCOPE rather than its fileScope: an implementer's
+    // writable set is fileScope minus testScope, so the test file is refused by the
+    // subtraction (the session that must pass the test may not write it) and not by
+    // the ordinary out-of-scope arm. Either way the message quotes what the item
+    // itself declared, which is what this row exists to pin.
+    const widenedButNotOurs: Array<{ filePath: string; named: string[]; which: string }> = [
+      { filePath: path.join(tree, "src", "beta", "one.ts"), named: scope.fileScope, which: "fileScope" },
+      { filePath: path.join(tree, "tests", "alpha", "one.test.ts"), named: scope.testScope, which: "testScope" },
+      { filePath: path.join(tree, "README.md"), named: scope.fileScope, which: "fileScope" },
     ];
-    for (const filePath of widenedButNotOurs) {
+    for (const { filePath, named, which } of widenedButNotOurs) {
       const outcome = await gateOutcome(hooks, editOf(impl.sessionID, filePath));
       assert.equal(
         outcome.denied,
         true,
-        `${filePath} is outside the item's declared fileScope ${JSON.stringify(scope.fileScope)} and must be DENIED. Widening the derived scopes to ["**"] admits it — that is the mutation the phase-13 gate ran against the whole build without turning a single test red, because no production caller could reach core/gates-edit.ts's implementer arm at all`,
+        `${filePath} is outside the item's writable set (fileScope ${JSON.stringify(scope.fileScope)} minus testScope ${JSON.stringify(scope.testScope)}) and must be DENIED. Widening the derived scopes to ["**"] admits it — that is the mutation the phase-13 gate ran against the whole build without turning a single test red, because no production caller could reach core/gates-edit.ts's implementer arm at all`,
       );
       assert.deepEqual(
         scopeNamedInDeny(outcome.reason, `the deny for ${filePath}`),
-        scope.fileScope,
-        `and the deny must NAME the item's own persisted fileScope, so a permissive constant is red by its own message: expected ${JSON.stringify(scope.fileScope)}, and a derivation that returned ["**"] would not have denied this at all`,
+        named,
+        `and the deny must NAME the item's own persisted ${which}, so a permissive constant is red by its own message: expected ${JSON.stringify(named)}, and a derivation that returned ["**"] would not have denied this at all`,
       );
     }
   } finally {

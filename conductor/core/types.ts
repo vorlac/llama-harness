@@ -1,8 +1,12 @@
 // conductor/core/types.ts — every §2 schema of
 // docs/plans/2026-08-07-conductor-harness-plan.md, once (Task 1.1): each schema
 // exists as a TS type AND a hand-written JSON Schema object in SCHEMAS, plus the
-// minimal subset validator `validate` (plan lines 2059-2084). Core module: pure,
-// imports nothing.
+// minimal subset validator `validate` (plan lines 2059-2084). Core module: pure.
+// Its one import is ./vet-criteria.ts, itself a leaf, which owns the §2.10 vet
+// criteria that SCHEMAS.TestVet is built from (GAP-041 single source).
+//
+import { VET_CRITERIA } from "./vet-criteria.ts";
+
 //
 // Schema-subset discipline (plan lines 2070-2075): every schema here restricts
 // itself to the keyword subset the validator implements — type / required / enum
@@ -219,6 +223,16 @@ export interface Config {
     debugFixCap: number;
     maxOverridesPerItem: number;
     maxOverridesPerRun: number;
+    // The §3.2 read-set bound, in estimated tokens: an item whose fileScope
+    // matches more source than this is refused at queue acceptance, because a
+    // model that cannot read the scope cannot be dispatched into it. Absent reads
+    // as core/planning.ts DEFAULT_READ_SET_TOKEN_BUDGET; 0 turns the bound off.
+    readSetTokenBudget?: number;
+    // The §3.3 per-item implementer-attempt budget: how many implementer
+    // sub-sessions one item may spend trying to reach GREEN before the item is
+    // blocked with the exhaustion named. Absent reads as
+    // core/planning.ts DEFAULT_IMPLEMENTER_ATTEMPTS.
+    implementerAttempts?: number;
   };
   parallel: {
     writes: ParallelWriteMode;
@@ -257,6 +271,14 @@ export interface Run {
     rationale: string;
     check: { agreed: boolean; note: string };
   };
+  // Whether conductor_classify has RECORDED this run's classification. The field
+  // above is written provisionally at intake so run.json is a valid §2.3 record
+  // from the moment it exists, which makes its presence useless as the answer to
+  // "has the run been classified?" — and that question is the whole of
+  // conductor_classify's legality (it runs once, before anything is derived from
+  // its answer). Optional in the schema so a run.json written before this field
+  // existed still validates; absent reads as false.
+  classified?: boolean;
   startHead: string;
   startBranch: string;
   startDirty: string[];
@@ -319,6 +341,14 @@ export interface Item {
   deferred: { reason: string; decisionId: string } | null;
   debugging: { sinceMs: number; hypothesis: string } | null;
   evidence: { red?: EvidenceRef; green?: EvidenceRef; validated?: EvidenceRef };
+  // The §2.6 identity of the test files the vet critics actually judged, captured
+  // at the RED->TEST_VETTED transition: one entry per testScope file that existed,
+  // carrying a content digest. `mark_green` re-runs whatever stands at testScope at
+  // the moment it runs, and an item may legally declare colocated scopes, so without
+  // this witness the implementer can overwrite the vetted test with `assert(true)`
+  // and earn a GREEN the critics never approved. Absent on items that never passed
+  // through the vet, which is not a mismatch to report.
+  vettedTests?: Array<{ path: string; sha256: string }>;
   taint: unknown[];
   inlineClaim: { reason: string; decisionId: string } | null;
 }
@@ -343,6 +373,11 @@ export type EvidenceRecord =
       itemId: string;
       command: string[];
       exitCode: number;
+      // The same field the red record carries, for the same reason: a forensic
+      // reader must be able to tell a run that exercised THIS item's test from a
+      // full-scope fallback that happened to exit 0 (GAP-008). `targeted:false`
+      // is precisely the run shape mark_green refuses to admit as a GREEN.
+      targeted: boolean;
     }
   | {
       seq: number;
@@ -675,6 +710,11 @@ const configSchema = {
         debugFixCap: numberSchema,
         maxOverridesPerItem: numberSchema,
         maxOverridesPerRun: numberSchema,
+        // OPTIONAL, deliberately: every config.json written before these knobs
+        // existed is still a valid §2.1 record, and each absent key reads as the
+        // shipped default in core/planning.ts rather than as zero.
+        readSetTokenBudget: numberSchema,
+        implementerAttempts: numberSchema,
       },
       required: [
         "trivialMaxFiles",
@@ -842,6 +882,9 @@ const runSchema = {
       required: ["kind", "rationale", "check"],
       additionalProperties: false,
     },
+    // Not in `required`: a run.json written before this field existed is still a
+    // valid §2.3 record, and an absent value reads as false.
+    classified: booleanSchema,
     startHead: stringSchema,
     startBranch: stringSchema,
     startDirty: stringArraySchema,
@@ -960,6 +1003,15 @@ const itemSchema = {
         validated: evidenceRefSchema,
       },
       additionalProperties: false,
+    },
+    vettedTests: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { path: stringSchema, sha256: stringSchema },
+        required: ["path", "sha256"],
+        additionalProperties: false,
+      },
     },
     taint: { type: "array" },
     inlineClaim: reasonDecisionOrNullSchema,
@@ -1252,26 +1304,18 @@ const classificationCheckSchema = {
   additionalProperties: false,
 };
 
-// §2.10 TEST_VET, plan lines 958-965.
+// §2.10 TEST_VET, plan lines 958-965. The criteria are NOT spelled here: the keys
+// a receipt is validated against are ./vet-criteria.ts's list (GAP-041 single
+// source), which is the same list test-vet.md teaches and both vet prompts carry.
 const testVetSchema = {
   type: "object",
   properties: {
     verdictsByCriterion: {
       type: "object",
-      properties: {
-        observableBehavior: criterionVerdictSchema,
-        wouldCatchWrongImpl: criterionVerdictSchema,
-        rightLevel: criterionVerdictSchema,
-        pinsAcceptance: criterionVerdictSchema,
-        antiPatterns: criterionVerdictSchema,
-      },
-      required: [
-        "observableBehavior",
-        "wouldCatchWrongImpl",
-        "rightLevel",
-        "pinsAcceptance",
-        "antiPatterns",
-      ],
+      properties: Object.fromEntries(
+        VET_CRITERIA.map((criterion) => [criterion.name, criterionVerdictSchema]),
+      ),
+      required: VET_CRITERIA.map((criterion) => criterion.name),
       additionalProperties: false,
     },
     mustFix: stringArraySchema,

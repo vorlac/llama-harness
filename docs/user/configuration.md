@@ -62,6 +62,8 @@ not a fallback applied when the key is missing.
     "vetMaxRounds": 3,
     "testRepairAttempts": 3,
     "debugFixCap": 3,
+    "readSetTokenBudget": 20000,      // 0 = off
+    "implementerAttempts": 3,
     "maxOverridesPerItem": 1,         // the override budget
     "maxOverridesPerRun": 2
   },
@@ -194,6 +196,8 @@ Every round cap and fan-out width in the pipeline.
 | `vetMaxRounds`        | number | `3`     | `RED`: vet → repair → re-vet cap. A distinct knob from `reviewMaxRounds` — different loop, different cost, tuned independently.                                                                                                             |
 | `testRepairAttempts`  | number | `3`     | Illegal-red repair attempts inside `conductor_submit_test`.                                                                                                                                                                                 |
 | `debugFixCap`         | number | `3`     | Failed fixes before the run escalates to an architecture question.                                                                                                                                                                          |
+| `readSetTokenBudget`  | number | `20000` | Read-set ceiling per item, in estimated tokens (`bytes/4`, ~80 KB of source). Queue acceptance refuses an item whose `fileScope` matches more than this — an item a small local model provably cannot read is never dispatched. `0` turns the bound off. Defined in [`core/planning.ts`](../../conductor/core/planning.ts) (`DEFAULT_READ_SET_TOKEN_BUDGET`).                                              |
+| `implementerAttempts` | number | `3`     | Implementer-attempt budget per item (never below 1). Exhaustion takes the item to its blocked path with a disposition naming exhaustion — never a silent retry loop. Defined in [`core/planning.ts`](../../conductor/core/planning.ts) (`DEFAULT_IMPLEMENTER_ATTEMPTS`).                                                                                                                                     |
 | `maxOverridesPerItem` | number | `1`     | Override budget per item.                                                                                                                                                                                                                   |
 | `maxOverridesPerRun`  | number | `2`     | Override budget per run.                                                                                                                                                                                                                    |
 

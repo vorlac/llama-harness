@@ -552,7 +552,7 @@ export function runTest(runDir: string, itemId: string, opts: RunTestOptions): R
   let record: EvidenceRecord;
   let failureClass: FailureClass | null = null;
   if (outcome.exitCode === 0) {
-    record = { seq, ts, kind: "green", itemId, command: actualCmd, exitCode: 0 };
+    record = { seq, ts, kind: "green", itemId, command: actualCmd, exitCode: 0, targeted };
   } else {
     failureClass = classifyFailure(
       relStderr,

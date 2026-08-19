@@ -213,6 +213,44 @@ test("[5.2-implementer] implementer is denied outside its fileScope, and the rea
   assert.ok(reason.includes("src/**"), `the reason names the fileScope it was out of; got: ${reason}`);
 });
 
+// The PREVENTION half of the vetted-test identity rule. Queue acceptance refuses
+// an item whose testScope its own fileScope covers, and mark_green's
+// digest witness catches a rewritten vetted test after the fact — but the witness
+// only speaks once a whole implementer sub-session has been spent, and it is the
+// LAST line rather than the first. The gate is where the question is cheap: the
+// implementer's writable set is fileScope MINUS testScope, so the session that
+// must PASS the test can never be the session that writes it, through whatever
+// residual path a colocated scope reached the gate by.
+test("[5.2-implementer] an implementer edit inside the item's TESTSCOPE is DENIED even when its fileScope covers the same path — the session that must pass the test may not write it", () => {
+  const d = decideEdit(
+    editInput({
+      sessionRole: "implementer",
+      // The colocated shape: fileScope really does cover the test file.
+      fileScope: ["src/**", "tests/**"],
+      testScope: ["tests/beta.test.ts"],
+      path: p("tests/beta.test.ts"),
+    }),
+  );
+  const reason = denyReason(d, "implementer editing its own vetted test");
+  assert.ok(
+    reason.includes("tests/beta.test.ts"),
+    `the reason names the testScope entry it was inside; got: ${reason}`,
+  );
+  assert.match(reason, /test/i, "and names the rule it broke, not a generic scope miss");
+});
+
+test("[5.2-implementer] the subtraction is EXACT: the same implementer with the same scopes is still ALLOWED on a production path", () => {
+  const d = decideEdit(
+    editInput({
+      sessionRole: "implementer",
+      fileScope: ["src/**", "tests/**"],
+      testScope: ["tests/beta.test.ts"],
+      path: p("src/beta.ts"),
+    }),
+  );
+  assertAllow(d, "implementer on a fileScope path outside the testScope");
+});
+
 // ===========================================================================
 // [5.2-test-writer] allowed ONLY inside testScope; denied on a fileScope SOURCE
 // path (which an implementer could edit) WITH THE TESTSCOPE NAMED.

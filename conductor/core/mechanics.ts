@@ -30,6 +30,8 @@ import { legalTools } from "./gates-phase.ts";
 import type { GateItem, GateRun } from "./gates-phase.ts";
 import { ITEM_STATES } from "./fsm-item.ts";
 import { TOOL_BINDINGS } from "./tool-bindings.ts";
+import { TOOL_LEGALITY } from "./tool-legality.ts";
+import { renderVetCriteria } from "./vet-criteria.ts";
 
 // The markers that fence the generated section inside a pack. HTML comments, so
 // they carry no weight in the rendered doctrine a model reads, and greppable, so
@@ -141,26 +143,36 @@ export function metaTools(): string[] {
     .sort();
 }
 
+// The tools a DISPATCHED sub-session may call, sorted — read straight off the
+// §3.5 caller column of the legality table (GAP-006). Derived rather than
+// written out, because a doctrine sentence naming a tool the choke point refuses
+// (or omitting one it allows) sends a sub-session to spend a turn finding out.
+export function subSessionTools(): string[] {
+  return Object.keys(TOOL_LEGALITY)
+    .filter((name) => TOOL_LEGALITY[name].callers.includes("sub-session"))
+    .sort();
+}
+
 // ---------------------------------------------------------------------------
 // The rendered section, per pack.
 // ---------------------------------------------------------------------------
 
-type MechanicsSection = "run" | "item" | "meta";
+type MechanicsSection = "run" | "item" | "meta" | "callers" | "criteria";
 
 // Which derived facts each pack's readers need. A planner never runs an item
 // stage tool and an implementer never runs the run pipeline, so handing every
 // pack every line would spend a 32k context window on mechanics the reader
 // cannot act on. core.md is the orchestrator's pack and gets all three.
 const PACK_SECTIONS: Readonly<Record<string, readonly MechanicsSection[]>> = {
-  "core.md": ["run", "item", "meta"],
-  "decompose.md": ["run"],
-  "plan.md": ["run"],
-  "tdd.md": ["item"],
-  "test-vet.md": ["item"],
-  "debug.md": ["item"],
-  "review.md": ["item"],
-  "skeptic.md": ["run", "item"],
-  "receive-review.md": ["item"],
+  "core.md": ["run", "item", "meta", "callers"],
+  "decompose.md": ["run", "callers"],
+  "plan.md": ["run", "callers"],
+  "tdd.md": ["item", "callers"],
+  "test-vet.md": ["item", "callers", "criteria"],
+  "debug.md": ["item", "callers"],
+  "review.md": ["item", "callers"],
+  "skeptic.md": ["run", "item", "callers"],
+  "receive-review.md": ["item", "callers"],
 };
 
 export function renderMechanics(pack: string): string {
@@ -187,11 +199,27 @@ export function renderMechanics(pack: string): string {
   if (sections.includes("meta")) {
     lines.push("Meta tools, outside the stage order: " + metaTools().join(", ") + ".");
   }
+  if (sections.includes("callers")) {
+    lines.push(
+      "A dispatched sub-session may call only: " +
+        subSessionTools().join(", ") +
+        ". Every other conductor tool belongs to the orchestrator, and a call from a dispatched " +
+        "session is refused by name — a session cannot answer its own question, defer its own " +
+        "item, close its own run or widen its own scope.",
+    );
+  }
   lines.push(
     "",
     "The harness re-derives which of these is legal on every request and names the one it " +
       "recommends. A call out of order is refused, not negotiated.",
   );
+  // GAP-041: the §2.10 vet checklist is derived too, from ./vet-criteria.ts — the
+  // same list SCHEMAS.TestVet validates a critic receipt against and both vet
+  // prompts carry. A pack that taught a checklist of its own prepared its reader
+  // for a different examination than the one the harness scores.
+  if (sections.includes("criteria")) {
+    lines.push("", renderVetCriteria());
+  }
   return lines.join("\n");
 }
 
@@ -220,8 +248,10 @@ export function extractMechanics(text: string): string | null {
  * Returns null when the pack carries no such section — the caller decides whether
  * that is a refusal (a dispatch that needs the doctrine) or a fallback.
  *
- * The section ends at the next `## ` heading or at the generated mechanics block,
- * whichever comes first, so a section adjacent to the block never swallows it.
+ * The section ends at the next `## ` heading or at either marker of the generated
+ * mechanics block, whichever comes first — so a section adjacent to the block
+ * never swallows it, and a section rendered INSIDE it (the §2.10 vet checklist)
+ * reads back without its closing marker.
  */
 export function packSection(text: string, heading: string): string | null {
   const lines = text.split("\n");
@@ -237,7 +267,7 @@ export function packSection(text: string, heading: string): string | null {
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
     const trimmed = lines[i].trim();
-    if (trimmed.startsWith("## ") || trimmed === MECHANICS_BEGIN) {
+    if (trimmed.startsWith("## ") || trimmed === MECHANICS_BEGIN || trimmed === MECHANICS_END) {
       end = i;
       break;
     }

@@ -681,7 +681,15 @@ function harness(root: string, stub: StubHandle, opts?: { routerPort?: number })
   return { input, records, failover };
 }
 
-const ANSWERED_PATHS = ["app-src/**"];
+// The answered (corrected) behavioralPaths every row below supplies. It is
+// deliberately NOT any ecosystem's proposal — the rows that assert "the answered
+// list, not the proposal, is what was written" need the two to be distinguishable
+// — but it MUST cover the source each fixture repo actually contains: the GAP-015
+// floor judges an answered list on the files it matches, and a list matching none
+// of the repo's source is refused as the TDD kill switch it is. So it names every
+// source directory the fixtures here build: src/ (node, cmake, cargo),
+// slugger/ (python) and pkg/ (go).
+const ANSWERED_PATHS = ["src/**", "slugger/**", "pkg/**"];
 
 function answers(over?: Partial<SetupAnswers>): SetupAnswers {
   return { gitMode: "read-only", behavioralPaths: [...ANSWERED_PATHS], ...over };
@@ -1824,13 +1832,16 @@ test("[12.2-partial-answers-write-nothing] one of the two answers is not enough,
     // git.mode is "commit". Answer neither, and the written file must carry the ANSWERS.
     const bothResult = await setup({
       ...harness(bothRoot, stub).input,
-      answers: { gitMode: "commit-and-push", behavioralPaths: ["app-src/**"] },
+      // A corrected list that still covers this fixture's source (src/index.js), so
+      // the GAP-015 floor has real coverage to find, while staying distinguishable
+      // from the node proposal the assertions below must rule out.
+      answers: { gitMode: "commit-and-push", behavioralPaths: ["src/**", "app-src/**"] },
     });
     assert.equal(bothResult.ok, true, failureText(bothResult));
     const written = JSON.parse(readConfigRaw(bothRoot)) as Config;
     assert.equal(written.git.mode, "commit-and-push");
     assert.notEqual(written.git.mode, "commit", "§2.1:582's example is never defaulted in");
-    assert.deepEqual(written.verify.behavioralPaths, ["app-src/**"]);
+    assert.deepEqual(written.verify.behavioralPaths, ["src/**", "app-src/**"]);
     assert.notDeepEqual(
       written.verify.behavioralPaths,
       ["src/**"],

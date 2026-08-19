@@ -17,7 +17,7 @@
 // would spend the one re-prompt on half the truth and then reject the run for a
 // defect the planner was never shown.
 
-import { scopesIntersect } from "./shell-parse.ts";
+import { globMatch, isWildcardHeaded, scopesIntersect } from "./shell-parse.ts";
 import type { Config, Queue, QueueItem } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -28,6 +28,67 @@ export interface QueueValidation {
   ok: boolean;
   violations: string[];
 }
+
+/**
+ * What an item's declared write scope MEASURES OUT TO in the tree the queue will
+ * execute against: the number of existing files its fileScope globs match, and
+ * their total size in bytes. Core cannot look at a filesystem (G3), so the
+ * adapter that owns glob expansion measures and hands this in; a queue judged
+ * without it is judged on its SHAPE alone, which is every rule below that does
+ * not read `measurements`.
+ */
+export interface ScopeMeasurement {
+  files: number;
+  bytes: number;
+}
+
+export type ScopeMeasurements = ReadonlyMap<string, ScopeMeasurement>;
+
+// The read-set estimate's divisor. Four bytes per token is the ordinary
+// English/source rule of thumb; the number exists to be WRONG BY A CONSTANT in a
+// way an operator can compensate for with the budget, not to be exact.
+export const BYTES_PER_TOKEN = 4;
+
+// The shipped read-set ceiling, in estimated tokens (~80 KB of source). Generous
+// on purpose: the mechanism exists to refuse the item that a small local model
+// provably cannot read, not to re-litigate item size, which the file budget above
+// already owns. `workflow.readSetTokenBudget` overrides it, and a configured 0
+// turns the bound off.
+export const DEFAULT_READ_SET_TOKEN_BUDGET = 20000;
+
+// The shipped per-item implementer-attempt budget (§3.3's escalation ladder ends
+// somewhere). `workflow.implementerAttempts` overrides it.
+export const DEFAULT_IMPLEMENTER_ATTEMPTS = 3;
+
+/** The configured read-set token ceiling; 0 (or negative) means "no bound". */
+export function readSetTokenBudget(config: Config): number {
+  const configured = config.workflow.readSetTokenBudget;
+  if (configured === undefined) return DEFAULT_READ_SET_TOKEN_BUDGET;
+  return Math.max(0, Math.floor(configured));
+}
+
+/** The configured per-item implementer-attempt budget, never below one. */
+export function implementerAttemptBudget(config: Config): number {
+  const configured = config.workflow.implementerAttempts;
+  if (configured === undefined) return DEFAULT_IMPLEMENTER_ATTEMPTS;
+  return Math.max(1, Math.floor(configured));
+}
+
+/** The estimated token cost of reading everything an item's fileScope matches. */
+export function readSetTokens(measurement: ScopeMeasurement): number {
+  return Math.ceil(measurement.bytes / BYTES_PER_TOKEN);
+}
+
+// §2.4 ids are model-authored and land in three places that cannot defend
+// themselves: the §3.3 commit SUBJECT (embedded raw, so a newline injects a whole
+// line into the record — ISSUE-071), the item ledger's file name, and the prose
+// scan that maps findings to items. One character class satisfies all three.
+const ITEM_ID_SHAPE = /^[A-Za-z0-9_-]+$/;
+
+// A scope entry is embedded in the commit BODY and handed to a child process as
+// argv. A newline (or any other control character) in one is never a path — it is
+// a line the model wrote into a record it does not own.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 // §3.2's size row budget ("scope > ~5 files"). This is the DECOMPOSITION item
 // budget and it owns its own number: config.workflow.trivialMaxFiles is the
@@ -144,6 +205,21 @@ function rootLevelOnly(glob: string): boolean {
   return !glob.includes("/") && !glob.includes("**");
 }
 
+// Whether a glob rooted in a directory can ALSO name a root-level file. `**`
+// matches zero or more path segments, so a `**`-headed glob with at most one
+// literal segment left over ("**", "**/*.ts", "**/*.go") matches "config.ts" as
+// surely as it matches "src/deep/config.ts". The depth comparison below reads
+// "not root-level-only" as "lives in a directory", which is FALSE for exactly
+// these globs — and they are the safe default (`**`) and the ordinary ecosystem
+// answer (`**/*.ts`), so without this the disjoint-path guard declared a
+// root-level production file disjoint from every behavioral path and let a
+// `behavioral:false` item edit it with no test at all.
+function reachesRootLevel(glob: string): boolean {
+  const segments = glob.split("/");
+  if (segments[0] !== "**") return false;
+  return segments.filter((segment) => segment !== "**").length <= 1;
+}
+
 /**
  * The FIRST (fileScope glob, behavioralPaths glob) pair that overlaps, or null
  * when the two lists are disjoint. Pair-wise so the rejection can NAME the
@@ -158,9 +234,38 @@ export function firstIntersectingGlob(
   for (const scope of fileScope) {
     for (const behavioral of behavioralPaths) {
       // One matches root-level files only and the other is rooted in a
-      // directory: they cannot name the same file.
-      if (rootLevelOnly(scope) !== rootLevelOnly(behavioral)) continue;
+      // directory it cannot climb out of: they cannot name the same file. A
+      // `**`-headed glob DOES climb out (reachesRootLevel), so the pair still
+      // goes to scopesIntersect rather than being called disjoint on depth.
+      if (rootLevelOnly(scope) !== rootLevelOnly(behavioral)) {
+        const nested = rootLevelOnly(scope) ? behavioral : scope;
+        if (!reachesRootLevel(nested)) continue;
+      }
       if (scopesIntersect([scope], [behavioral])) return { scope, behavioral };
+    }
+  }
+  return null;
+}
+
+/**
+ * The first (fileScope glob, testScope entry) pair where the write scope COVERS
+ * the test path, or null when the two scopes are separate territory.
+ *
+ * Two matchers, because the pair can be spelled two ways and only one of them is
+ * a glob-against-path question: `globMatch` answers "does this write glob match
+ * that literal test path" exactly, and `scopesIntersect` catches the glob-against-
+ * glob spelling ("src/*.ts" vs "src/*.test.ts", where the first really does match
+ * what the second names) with the same conservative rule the wave scheduler uses.
+ */
+function firstCoveringGlob(
+  fileScope: readonly string[],
+  testScope: readonly string[],
+): { file: string; test: string } | null {
+  for (const file of fileScope) {
+    for (const test of testScope) {
+      if (globMatch(file, test) || globMatch(test, file) || scopesIntersect([file], [test])) {
+        return { file, test };
+      }
     }
   }
   return null;
@@ -281,7 +386,11 @@ export function acceptanceClusters(acceptance: readonly string[]): string[] {
  * ponytail rung/reuse rule under `full`/`ultra` (§6.3 — `lite` records the
  * ladder but is advisory, so it is not enforced here).
  */
-export function validateQueue(queue: Queue, config: Config): QueueValidation {
+export function validateQueue(
+  queue: Queue,
+  config: Config,
+  measurements?: ScopeMeasurements,
+): QueueValidation {
   const violations: string[] = [];
   const items = queue.items;
 
@@ -304,6 +413,11 @@ export function validateQueue(queue: Queue, config: Config): QueueValidation {
     if (seen.has(item.id)) {
       violations.push(
         `duplicate item id "${item.id}": ids address items in dependsOn and in the item ledger, so they must be unique (§2.4)`,
+      );
+    }
+    if (!ITEM_ID_SHAPE.test(item.id)) {
+      violations.push(
+        `item id ${JSON.stringify(item.id)} is not an addressable id: an id is letters, digits, "_" and "-" only (^[A-Za-z0-9_-]+$) — the §3.3 commit template embeds the id in its subject line, so a space, a separator or a newline in one writes a line into the commit record that nobody authored (§2.4)`,
       );
     }
     seen.add(item.id);
@@ -374,11 +488,82 @@ export function validateQueue(queue: Queue, config: Config): QueueValidation {
       }
     }
 
+    // --- scope SHAPE: no wildcard-headed glob, no control characters --------
+    //
+    // A wildcard-headed entry ("**", "*.ts", "{src,lib}/**") has an empty literal
+    // head, so it prefixes EVERY path in the repository. Two consequences, both
+    // load-bearing: §2.6.1's `missing-subject` class asks whether the unresolved
+    // specifier lives inside fileScope, and `globMatch("**", anything)` says yes —
+    // which makes a test that imports a nonexistent module a harness-blessed legal
+    // RED asserting nothing; and the §3.6 edit gate binds the implementer session
+    // to the same globs, so the item's write grant is the whole tree.
+    for (const glob of item.fileScope) {
+      if (isWildcardHeaded(glob)) {
+        violations.push(
+          `item "${id}" declares the wildcard-headed fileScope entry ${JSON.stringify(glob)}: its literal head is empty, so it names every path in the repository — it grants the item's implementer an edit over the whole tree and makes the §2.6.1 missing-subject class vacuous. Name the directory or file the item actually writes (§3.2)`,
+        );
+      }
+    }
+    for (const [field, entries] of [
+      ["fileScope", item.fileScope],
+      ["testScope", item.testScope],
+    ] as const) {
+      for (const entry of entries) {
+        if (CONTROL_CHARACTER.test(entry)) {
+          violations.push(
+            `item "${id}" declares the ${field} entry ${JSON.stringify(entry)}, which carries a newline or control character: scope entries are embedded in the §3.3 commit body and handed to the test runner as arguments, so a newline in one writes a line into a record it does not own (§2.4)`,
+          );
+        }
+      }
+    }
+
+    // --- scope DISJOINTNESS inside the item ---------------------------------
+    //
+    // The implementer sub-session's edit gate is bound to fileScope. A testScope
+    // the fileScope covers is therefore a licence to rewrite the very test that
+    // proves the item — the escape GAP-007's identity witness had to be built to
+    // catch after the fact, refused here before the item exists.
+    if (item.testScope.length > 0) {
+      const conflict = firstCoveringGlob(item.fileScope, item.testScope);
+      if (conflict !== null) {
+        violations.push(
+          `item "${id}" declares the testScope entry "${conflict.test}" inside its own fileScope glob "${conflict.file}": the implementer is gated to fileScope, so an overlapping test path licenses the session that must PASS the test to rewrite it — keep the two scopes disjoint (§2.4)`,
+        );
+      }
+    }
+
     // --- item size ----------------------------------------------------------
-    if (item.fileScope.length > ITEM_MAX_FILES) {
+    //
+    // Measured on the files the scope MATCHES where the measurement exists, and
+    // never below the entry count: `["src/**"]` is one entry and may be a hundred
+    // files, while a literal path naming a file that does not exist yet measures
+    // zero and is still one file of work.
+    const measured = measurements?.get(id);
+    const matchedFiles = Math.max(item.fileScope.length, measured?.files ?? 0);
+    if (matchedFiles > ITEM_MAX_FILES) {
+      const how =
+        measured !== undefined && measured.files > item.fileScope.length
+          ? `its fileScope (${item.fileScope.join(", ")}) matches ${String(matchedFiles)} files`
+          : `its fileScope names ${String(matchedFiles)} files`;
       violations.push(
-        `item "${id}" is too large: its fileScope names ${String(item.fileScope.length)} files, over the ${String(ITEM_MAX_FILES)}-file item budget — split it into smaller items (§3.2)`,
+        `item "${id}" is too large: ${how}, over the ${String(ITEM_MAX_FILES)}-file item budget — split it into smaller items (§3.2)`,
       );
+    }
+
+    // --- the read-set token bound -------------------------------------------
+    //
+    // The item budget above bounds how much an item WRITES. This bounds how much
+    // it must READ to be written at all: an implementer with a 32k context cannot
+    // be dispatched into a scope whose files do not fit in it, and the dispatch
+    // that tries is spent before it starts.
+    const budget = readSetTokenBudget(config);
+    if (measured !== undefined && budget > 0) {
+      const estimate = readSetTokens(measured);
+      if (estimate > budget) {
+        violations.push(
+          `item "${id}" is too big to read: its fileScope matches ${String(measured.files)} files totalling ${String(measured.bytes)} bytes, an estimated ${String(estimate)} tokens of read set, over the ${String(budget)}-token workflow.readSetTokenBudget — narrow the scope or raise the budget (§3.2)`,
+        );
+      }
     }
     const clusters = acceptanceClusters(item.acceptance);
     if (clusters.length > 1) {
@@ -395,6 +580,37 @@ export function validateQueue(queue: Queue, config: Config): QueueValidation {
     ) {
       violations.push(
         `item "${id}" claims the "minimal-code" ponytail rung with an empty reuse note: under ponytail intensity "${config.ponytail}" you must show you looked before writing new code (§6.3)`,
+      );
+    }
+  }
+
+  // --- inter-item scope disjointness (§4.2's rule, made a refusal) ----------
+  //
+  // Two items whose write scopes overlap are one item wearing two ids: the wave
+  // scheduler can only ever serialize around them, a review finding cannot be
+  // attributed to one of them, and whichever publishes second commits the other's
+  // edits. The rule was ASKED of the planner in doctrine and enforced nowhere;
+  // asked here, at the only point where the answer is still cheap.
+  //
+  // Judged with the same conservative overlap the wave scheduler uses, which
+  // over-approximates deliberately: "src/**" and "src/lex.mjs" overlap because
+  // the first really can write the second.
+  //
+  // Over EVERY pair, whatever each item's `behavioral` flag says. Keying the rule
+  // on behavioral pairs made it a rule about tests rather than about territory:
+  // a behavioral item writing ["src/foo.ts", "docs/x.md"] and a non-behavioral one
+  // writing ["docs/x.md"] are two ids over one file, and the reasons above — a
+  // finding that cannot be attributed, a publish that commits the other's edits —
+  // are indifferent to whether either item owes a test.
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      const a = items[i];
+      const b = items[j];
+      if (a.id === b.id) continue; // a duplicate id is its own violation
+      if (a.fileScope.length === 0 || b.fileScope.length === 0) continue;
+      if (!scopesIntersect(a.fileScope, b.fileScope)) continue;
+      violations.push(
+        `items "${a.id}" (fileScope: ${a.fileScope.join(", ")}) and "${b.id}" (fileScope: ${b.fileScope.join(", ")}) claim overlapping write territory: two items that can edit the same file cannot be reviewed, scheduled or published independently — give each item a scope of its own (§2.4)`,
       );
     }
   }
@@ -562,6 +778,67 @@ export function findingBlocksItems(
     }
   }
   return blocked;
+}
+
+// ---------------------------------------------------------------------------
+// §3.3 review-fix routing — which role a surviving finding's fix is dispatched to
+// ---------------------------------------------------------------------------
+//
+// Pure scope policy, so it lives here rather than inline in the review handler,
+// where it was a second derivation nobody could test against a refusal.
+//
+// The defect that moved it (ISSUE-054): the inline version asked
+// `suggestedFix.includes(scopeEntry)` over RAW scope entries, which are globs. A
+// fix naming a concrete test file does not contain the literal "tests/parser/**",
+// so a test defect routed to the IMPLEMENTER — whose edit gate is bound to
+// fileScope, making the dispatch a guaranteed denial: three wasted rounds and a
+// surfaced question, exactly what §3.3 warns about.
+//
+// The rule here matches PATHS: every file-shaped token in the prose is matched
+// against each scope entry as a glob. The literal containment test is KEPT as a
+// second arm, so a fix that quotes a literal scope entry verbatim routes exactly
+// as it always did — this widens the matcher, it never narrows it.
+
+export interface FixRouting {
+  testWriter: boolean;
+  implementer: boolean;
+}
+
+export interface FixScopes {
+  fileScope: readonly string[];
+  testScope: readonly string[];
+}
+
+/** True when `fix` names a path that `scope` covers, by glob or by quotation. */
+function fixNamesScope(fix: string, scope: readonly string[], tokens: readonly string[]): boolean {
+  for (const entry of scope) {
+    if (entry.length === 0) continue;
+    if (fix.includes(entry)) return true;
+    for (const token of tokens) {
+      if (globMatch(entry, token)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Which write-capable role(s) a surviving §2.10 finding's fix is dispatched to
+ * (§3.3): a test-adequacy finding — and any fix whose prose names a testScope
+ * path — is the test-writer's; a fix that names both scopes goes to both;
+ * everything else is the implementer's.
+ */
+export function routeFix(
+  suggestedFix: string,
+  scopes: FixScopes,
+  opts: { testAdequacyLens: boolean },
+): FixRouting {
+  const tokens = pathLikeTokens(suggestedFix);
+  const namesTest = fixNamesScope(suggestedFix, scopes.testScope, tokens);
+  const namesFile = fixNamesScope(suggestedFix, scopes.fileScope, tokens);
+  if (opts.testAdequacyLens || namesTest) {
+    return { testWriter: true, implementer: namesFile };
+  }
+  return { testWriter: false, implementer: true };
 }
 
 // ---------------------------------------------------------------------------

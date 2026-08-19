@@ -1659,8 +1659,13 @@ async function runFullPipeline(): Promise<FullPipeline> {
     journal: bench.journal.sink,
     sessionID: ORCH,
     itemId: "I1",
-    gate: "publish-freshness",
-    reason: "the operator accepts the stale window for this e2e",
+    // A gate with a CONSUMPTION POINT (§3.6's closed vocabulary is session /
+    // git / edit — the three gateBeforeToolCall can convert). A name outside it
+    // buys a bypass that can never be spent, so it is refused before the budget
+    // is touched, and a scenario that spent one would be asserting over an
+    // override the machine cannot honour.
+    gate: "edit",
+    reason: "the operator accepts one scoped write outside the item's fileScope for this e2e",
     grantedAction: "conductor_publish I1",
     overrideGrants: grants,
     stateHome: bench.stateHome,
@@ -2046,12 +2051,12 @@ describe(
         "exactly one override was spent in this run (SG-9 bounds it at one)",
       );
       assert.match(c.reportMd, /override/i, "the spent override is visible in the report rather than buried in a ledger");
-      // NOT proven here: the override this scenario spends names the
-      // `publish-freshness` gate, NOT the EDIT-SCOPE gate the row (SG-9) names —
-      // so the one-shot edit mechanics the row is about are untouched: that the
+      // NOT proven here: the one-shot EDIT mechanics the grant buys — that the
       // next orchestrator edit inside the item's fileScope is ALLOWED and lands
       // on disk, that the SECOND identical edit is re-DENIED, that the entry is
       // appended to the item's taint[], and that run.counters.overridesUsed is 1.
+      // This scenario spends the grant and asserts the LEDGER trail; the
+      // conversion at the gate is conductor/tests/tools-9.5c.test.ts's subject.
     });
 
     // ---- §4.4 the report document ---------------------------------------

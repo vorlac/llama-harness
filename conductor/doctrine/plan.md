@@ -94,6 +94,7 @@ the failure handling, and the safe-by-default behavior as concrete steps.
 ## Mechanics — generated from the tool vocabulary
 
 Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 
 The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
 <!-- END GENERATED MECHANICS -->

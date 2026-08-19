@@ -22,11 +22,10 @@ that fully covers the request — never one giant item, never busywork slices.
   in the same wave. Overlapping scope means an ordering edge or a merge.
 - Encode real ordering in `dependsOn` (item ids). The graph MUST be acyclic —
   a cycle is a rejection, not a warning.
-- When a change plainly separates into parts with disjoint file scopes, keep
-  them as separate items. Collapsing separable work into one item is itself a
-  decomposition-quality finding.
-- Make each item's `fileScope` as narrow as the work allows; disjoint scopes are
-  what let items run in parallel and what keeps a later quarantine surgical.
+- Keep parts that separate into disjoint file scopes as separate items;
+  collapsing separable work is itself a decomposition-quality finding. Make each
+  `fileScope` as narrow as the work allows: disjoint scopes are what let items
+  run in parallel and what keeps a later quarantine surgical.
 
 ## behavioral vs non-behavioral items
 
@@ -48,18 +47,16 @@ A behavioral item MUST name a non-empty test scope; a non-behavioral item MUST
 NOT claim test paths it will never write.
 
 This is the test-first-skip loophole guard: you cannot declare code untestable
-while editing production code. If you are tempted to mark something
-non-behavioral to dodge writing a test, that is exactly the case the disjoint
-check rejects.
+while editing production code, and marking an item non-behavioral to dodge
+writing a test is the exact case the disjoint check rejects.
 
 ## Prefer a new test file per item
 
-**Prefer a new test file per item.** Give each behavioral item its own test
-file rather than appending assertions into a shared one. If a later item fails
-review or regresses, its tests can be quarantined at file granularity without
-deleting unrelated coverage that happened to share a file. Shared test files
-couple otherwise-independent items and turn one item's quarantine into someone
-else's lost tests.
+Give each behavioral item its own test file rather than appending assertions
+into a shared one. If a later item fails review or regresses, its tests can be
+quarantined at file granularity without deleting unrelated coverage that
+happened to share a file. Shared test files couple otherwise-independent items
+and turn one item's quarantine into someone else's lost tests.
 
 ## The ponytail ladder — cheapest rung first
 
@@ -75,9 +72,7 @@ rung that actually satisfies the requirement:
 6. `one-liner` — a trivial, self-contained line of new code suffices.
 7. `minimal-code` — genuinely new code is required; write the least that works.
 
-Ordering, lowest to highest cost:
-`skip` < `reuse` < `stdlib` < `platform` < `dependency` < `one-liner` <
-`minimal-code`.
+That order, rung 1 to rung 7, is lowest cost to highest.
 
 For every item record two notes: `necessary` (why this must exist at all) and
 `reuse` (what existing code you checked and why it does not cover this). A
@@ -98,13 +93,22 @@ correct and complete, not skipped.
 - [ ] every behavioral item has a non-empty test scope; every non-behavioral
       item's `fileScope` is disjoint from `behavioralPaths`.
 - [ ] acceptance criteria are observable checks, not moods.
-- [ ] each item ≤ ~5 files and one acceptance cluster.
+- [ ] each item ≤ ~5 files and one acceptance cluster, counted by what the scope
+      MATCHES (`["src/**"]` is one entry and may be fifty files) — and what it
+      matches must fit the implementer's read budget.
+- [ ] no `fileScope` entry is wildcard-headed (`**`, `*.ts`): it names every path
+      in the repository. Name the directory or file you write.
+- [ ] scopes are disjoint: an item's `testScope` never sits inside its own
+      `fileScope`, and no two items' `fileScope`s overlap.
+- [ ] ids match `^[A-Za-z0-9_-]+$`; no scope entry carries a newline. Both go
+      verbatim into the commit record.
 - [ ] each item carries its ladder rung plus `necessary` and `reuse` notes.
 
 <!-- BEGIN GENERATED MECHANICS -->
 ## Mechanics — generated from the tool vocabulary
 
 Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 
 The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
 <!-- END GENERATED MECHANICS -->

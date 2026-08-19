@@ -25,6 +25,7 @@
 // allow. Every deny journals its snapshot under gates/deny (§7.4).
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import * as path from "node:path";
@@ -32,14 +33,40 @@ import * as path from "node:path";
 import { decideGit } from "../core/gates-git.ts";
 import { decideEdit, decideSession, writeShapedPaths } from "../core/gates-edit.ts";
 import type { Decision, EditInput, SessionInput } from "../core/gates-edit.ts";
-import { globMatch, isGitCommand, scopesIntersect, shellTokens, splitOnOperators } from "../core/shell-parse.ts";
+import {
+  globMatch,
+  isGitCommand,
+  isWildcardHeaded,
+  scopesIntersect,
+  shellTokens,
+  splitOnOperators,
+} from "../core/shell-parse.ts";
 import { isHumanTerritory, requireTwoOptions } from "../core/decide.ts";
-import { legalRunTransition } from "../core/fsm-run.ts";
+import { advanceRun, legalRunTransition } from "../core/fsm-run.ts";
 import { ITEM_STATES, legalItemTransition } from "../core/fsm-item.ts";
 import { legalTools, settledForReport } from "../core/gates-phase.ts";
 import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts";
+import {
+  callerAllowed,
+  isOverrideGate,
+  legalityRowOf,
+  nonTerminalAllowed,
+  onceAtIntakeAllowed,
+  undeclaredToolWhy,
+  unknownOverrideGateWhy,
+  verdictAllowed,
+} from "../core/tool-legality.ts";
+import type { CallerIdentity } from "../core/tool-legality.ts";
 import { packSection } from "../core/mechanics.ts";
-import { findingBlocksItems, scanPlaceholders, validateQueue } from "../core/planning.ts";
+import { impliedMustFix, renderVetCriteria } from "../core/vet-criteria.ts";
+import {
+  findingBlocksItems,
+  implementerAttemptBudget,
+  routeFix,
+  scanPlaceholders,
+  validateQueue,
+} from "../core/planning.ts";
+import type { ScopeMeasurement } from "../core/planning.ts";
 import { applyAmendOps } from "../core/queue-amend.ts";
 import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { nextWave, readFanout } from "../core/schedule.ts";
@@ -729,11 +756,16 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
   }
 
   // (2) persist: record the final kind + the embedded (normalized) skeptic check.
+  // `classified` is the RECEIPT the legality choke point reads: run.classification
+  // is written provisionally at intake, so only this flag distinguishes "the
+  // classifier has spoken" from "a placeholder is standing in for it" — and
+  // conductor_classify is legal exactly while it is false (§3.2).
   run.classification = {
     kind: finalKind,
     rationale: classification.rationale,
     check: { agreed, note: check.note },
   };
+  run.classified = true;
 
   let itemId: string | null = null;
   if (finalKind === "trivial") {
@@ -744,8 +776,22 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
       // non-null for the synthesis below), never a live throw path.
       throw new Error("conductor_classify: a trivial classification must carry a trivialItem (§2.10)");
     }
-    // Synthesize the §2.4 queue (one item; mint id; dependsOn:[]) and validate it as
-    // any decomposed queue would be validated, then write it at the run dir.
+    // Synthesize the §2.4 queue (one item; mint id; dependsOn:[]) and put it through
+    // the SAME acceptance a decomposed queue passes through, then write it at the
+    // run dir.
+    //
+    // ONE ACCEPTANCE AUTHORITY. The §2.4 schema and the trivial re-check above answer
+    // only "is this a well-formed item within the trivial bounds"; every §3.2
+    // queue-acceptance rule — the wildcard-headed glob that hands the implementer the
+    // whole tree, the matched-file size budget, the read-set token bound, the id
+    // shape and newline rules the §3.3 commit template rests on, the testScope-inside-
+    // fileScope licence — lives in core validateQueue, and was reachable only through
+    // conductor_decompose. A request classified `trivial` instead of `work` therefore
+    // walked past all of it and wrote the scope the §3.6 edit gate binds its
+    // implementer to. Judged here by the same pure function, against the same measured
+    // scope facts (ISSUE-012's entry-count hole is measured, not counted), with no
+    // relaxation: a trivial item is one item, so the inter-item rows are vacuous for
+    // it and every remaining row means for it exactly what it means for a planned one.
     itemId = "I1";
     const queueItem: QueueItem = {
       id: itemId,
@@ -763,6 +809,27 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
     if (!queueResult.ok) {
       throw new Error(
         "conductor_classify: refusing to write an invalid queue.json: " + queueResult.errors.join("; "),
+      );
+    }
+    const verdict = validateQueue(queue, config, measureQueueScopes(store.root, queue));
+    if (!verdict.ok) {
+      // LEGALITY BEFORE PERSIST, and the refusal carries core's own reasons verbatim
+      // — a second spelling here would be a second acceptance rule. Nothing has been
+      // written at this point (run.classified is set on the in-memory run and saved
+      // only below), so the run stays at INTAKE with no classification recorded and
+      // conductor_classify is still legal: the classifier gets another roll, which is
+      // what decompose's bounded re-prompt does for the planner.
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "classify", violations: verdict.violations },
+        { runId, sessionID: input.sessionID },
+      );
+      throw new Error(
+        "conductor_classify: the trivial item is REJECTED — a synthesized queue is admitted by the " +
+          "same §3.2 acceptance a decomposed one is, and this one violates it: " +
+          verdict.violations.join("; "),
       );
     }
     writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(queue, null, 2));
@@ -1478,13 +1545,9 @@ export async function handleDecompose(input: DecomposeInput): Promise<DecomposeR
 
   // (1) legality FIRST, before a single sub-session is spent: only an INTAKE run
   //     classified `work` decomposes (§3.1's classification-selected exit).
-  const edge = legalRunTransition(run.state, "DECOMPOSED", {
-    classification: run.classification.kind,
-  });
+  const edge = advanceRun(run, "DECOMPOSED", { classification: run.classification.kind });
   if (!edge.ok) {
-    throw new Error(
-      "conductor_decompose: " + (edge.why ?? "this run may not advance to DECOMPOSED"),
-    );
+    throw new Error("conductor_decompose: " + edge.why);
   }
 
   // (2) derive: the planner proposes, the §3.2 table disposes.
@@ -1502,7 +1565,10 @@ export async function handleDecompose(input: DecomposeInput): Promise<DecomposeR
           ")",
       );
     }
-    const verdict = validateQueue(candidate, config);
+    // The §3.2 table, judged against the SHAPE of the queue and against what its
+    // scopes measure out to in the tree this run executes in — the entry count
+    // alone says one glob is one file (ISSUE-012).
+    const verdict = validateQueue(candidate, config, measureQueueScopes(store.root, candidate));
     if (verdict.ok) {
       accepted = candidate;
       break;
@@ -1721,9 +1787,9 @@ export async function handlePlan(input: PlanInput): Promise<PlanResult> {
   const run = store.loadRun(runId);
 
   // (1) legality: only a DECOMPOSED run plans, and it plans over its queue.
-  const edge = legalRunTransition(run.state, "PLANNED", {});
+  const edge = advanceRun(run, "PLANNED", {});
   if (!edge.ok) {
-    throw new Error("conductor_plan: " + (edge.why ?? "this run may not advance to PLANNED"));
+    throw new Error("conductor_plan: " + edge.why);
   }
   const queue = readQueueJson(runDir, "conductor_plan");
 
@@ -2267,11 +2333,9 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
   //     exactly the runs that can NEVER reach PLAN_REVIEWED from where they are;
   //     the real exit gate is re-asked below each round with the round's actual
   //     counts, and it — not this handler — owns the clean/cap exit rule.
-  const edge = legalRunTransition(run.state, "PLAN_REVIEWED", { survivingMajors: 0 });
+  const edge = advanceRun(run, "PLAN_REVIEWED", { survivingMajors: 0 });
   if (!edge.ok) {
-    throw new Error(
-      "conductor_plan_review: " + (edge.why ?? "this run may not advance to PLAN_REVIEWED"),
-    );
+    throw new Error("conductor_plan_review: " + edge.why);
   }
   const queue = readQueueJson(runDir, "conductor_plan_review");
   const planPath = path.join(runDir, "plan.md");
@@ -2301,6 +2365,11 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
       nit: outcome.raised.filter((e) => e.finding.severity === "nit").length,
     };
 
+    // The one site that asks the FSM table DIRECTLY rather than through
+    // advanceRun, and deliberately: this is a loop-exit PROBE ("would another
+    // round still be owed?"), not an advance. The run is left where it is either
+    // way, and the transition it probes is performed by the gate above once the
+    // loop ends.
     const exit = legalRunTransition(run.state, "PLAN_REVIEWED", {
       survivingMajors: survivors.length,
       round: run.planReviewRounds,
@@ -2792,6 +2861,149 @@ function requireStageTool(
   return { run, queue, queueItem, item };
 }
 
+// ---------------------------------------------------------------------------
+// GAP-006: the ONE legality choke point every conductor_* call passes through.
+//
+// requireStageTool above answers "may THIS ITEM run this stage tool now?" for the
+// six per-item tools. Nothing answered "may this tool be called at all?" for
+// anything else — legalTools had two production call sites and every meta name
+// routed through neither, so conductor_classify, conductor_report,
+// conductor_answer, conductor_defer, conductor_decide, conductor_queue_amend,
+// conductor_inline_claim and conductor_override reached their handlers with no
+// legality question asked of them (ISSUE-005). This is that question, asked once,
+// for every name, from the composition root's runTool.
+//
+// It reads the DECLARATION TABLE (core/tool-legality.ts) rather than carrying a
+// rule per tool: the table says where a tool is legal and who may call it, this
+// function evaluates those declarations against persisted state, and a tool with
+// no row is refused outright — which is what makes the next tool impossible to
+// add unguarded.
+// ---------------------------------------------------------------------------
+
+export interface ToolLegalityInput {
+  tool: string;
+  // Absent for the ONE tool that runs before a workspace exists (conductor_setup
+  // produces the very Config a store needs to open). Its row is `always`, so the
+  // rule is decided before any state is read; a row that DOES read state and
+  // arrives without a store is refused rather than waved through.
+  store?: StateStore;
+  // "" when no live run exists. Only the `always` rows can reach the choke point
+  // in that state (the composition root's no-run refusal fires first for the rest).
+  runId: string;
+  // The caller as the §3.5 registry holds it — never as the model supplies it.
+  caller: CallerIdentity;
+}
+
+// The run's items for a `verdict` evaluation, over a queue that may not exist
+// yet. An INTAKE or DECOMPOSED run legitimately has no queue.json, and "the file
+// is absent" is not a legality failure here the way it is for conductor_plan —
+// it simply means the run has no items for the gate to reason about.
+function legalityGateItems(store: StateStore, runId: string, runDir: string): GateItem[] {
+  const queuePath = path.join(runDir, "queue.json");
+  if (!existsSync(queuePath)) return [];
+  let queue: Queue;
+  try {
+    queue = readQueueJson(runDir, "conductor legality");
+  } catch {
+    // A torn queue.json is reported by the tool that must READ it (readQueueJson
+    // names the file and the tool). The legality gate treats it as no items:
+    // refusing every tool here would hide that diagnosis behind a phase message.
+    return [];
+  }
+  return gateItemsOf(store, runId, queue);
+}
+
+/**
+ * Adjudicate `tool` for this caller at this run's position, and THROW a named
+ * refusal when it is not legal. Returns nothing on success: the call proceeds.
+ *
+ * Ordering is deliberate. The caller rule is evaluated FIRST, because "you may
+ * not call this at all" and "you may not call this here" are different facts and
+ * telling a dispatched implementer where the run stands invites it to wait for a
+ * position that will never make the call legal for it.
+ */
+export function requireToolLegal(input: ToolLegalityInput): void {
+  const { tool, store, runId, caller } = input;
+
+  const row = legalityRowOf(tool);
+  if (row === undefined) throw new Error(undeclaredToolWhy(tool));
+
+  const byCaller = callerAllowed(tool, caller);
+  if (!byCaller.ok) throw new Error(byCaller.why);
+
+  // `stage` DELEGATES the phase question to the committed path the row names,
+  // and `always` has none to ask. Both are decided without reading the run, so a
+  // runless conductor_status never needs one.
+  if (row.phase === "stage" || row.phase === "always") return;
+
+  if (store === undefined) {
+    throw new Error(
+      tool +
+        ": its legality depends on the run's position, and this call carries no state store to " +
+        "read it from. Conductor refuses rather than assuming a position it cannot see (G5).",
+    );
+  }
+  if (runId.length === 0) {
+    throw new Error(
+      tool +
+        ": there is no live run for this workspace, so the run position this tool's legality " +
+        "depends on does not exist. " +
+        row.why +
+        ".",
+    );
+  }
+
+  const run = store.loadRun(runId);
+  const position = {
+    state: run.state,
+    stop: run.stop === null ? null : { kind: run.stop.kind },
+    classified: run.classified === true,
+  };
+
+  if (row.phase === "non-terminal") {
+    const verdict = nonTerminalAllowed(tool, position);
+    if (!verdict.ok) throw new Error(verdict.why);
+    return;
+  }
+
+  if (row.phase === "once-at-intake") {
+    const verdict = onceAtIntakeAllowed(tool, position);
+    if (!verdict.ok) throw new Error(verdict.why);
+    return;
+  }
+
+  // `verdict`: the gate's own offer for this position, from the SAME derivation
+  // the injection and the continuation engine read (§3.2 — one derivation, three
+  // consumers), including its §3.9 publish-availability input.
+  const runDir = handlerRunDir(store, runId);
+  const gateRun: GateRun = {
+    state: run.state,
+    stop: position.stop,
+    classification: { kind: run.classification.kind },
+  };
+  let questions: Array<{ id: string; answeredIso: string | null }>;
+  try {
+    questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
+  } catch (error) {
+    throw new Error(
+      tool +
+        ": cannot read questions.jsonl in " +
+        runDir +
+        " (a torn or invalid §2.11 record — repair the file to resume): " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
+  const offer = legalTools(
+    gateRun,
+    legalityGateItems(store, runId, runDir),
+    questions,
+    true,
+    isRepo(store.root),
+  );
+  const verdict = verdictAllowed(tool, offer);
+  if (!verdict.ok) throw new Error(verdict.why);
+}
+
 // Every declared path must be repo-relative and resolve INSIDE the run's tree. A
 // ".." or absolute entry is refused by name — never normalised away silently, since
 // the queue that produced it is model-authored and a caller that meant to reach
@@ -2972,6 +3184,42 @@ function redAdmission(
   return { ok: true, why: edge.why ?? "", repairable: false };
 }
 
+// Whether a run's outcome is admissible as THIS item's green (GAP-008, owner
+// decision D10: REFUSE). The red path has refused an untargeted run since §2.1 —
+// "a collection failure elsewhere is NOT this item's red" — and the green path had
+// no counterpart at all, so exactly the run the red path throws out could be ridden
+// past a test that provably executed zero times: runTest's zero-test guard re-runs
+// the FULL scope, and any exit 0 out of THAT was admitted as the item's GREEN.
+//
+// `targeted` is the complete witness. runTest sets it false in exactly the two
+// fallback shapes (zero-test guard, absent §2.1 itemTest template) and true
+// otherwise, so `fellBack === !targeted` always holds; the RunTestResult's own
+// flags are read here only to say WHICH shape it was, in redAdmission's vocabulary.
+function greenAdmission(
+  outcome: RunTestResult,
+  queueItem: QueueItem,
+): { ok: boolean; why: string } {
+  if (outcome.record.kind !== "green") {
+    return { ok: false, why: "the run did not exit 0, so it is not a green" };
+  }
+  if (outcome.targeted) return { ok: true, why: "" };
+  const reasons: string[] = [];
+  if (outcome.ranZeroTests) reasons.push("the targeted run executed zero tests");
+  if (outcome.fellBack) reasons.push("the run fell back to the full verify scope (no §2.1 itemTest template)");
+  if (reasons.length === 0) reasons.push("the run was not targeted at this item");
+  return {
+    ok: false,
+    why:
+      "the pass is not this item's: " +
+      reasons.join(", ") +
+      ", so it is a suite result elsewhere impersonating a green — item " +
+      queueItem.id +
+      "'s own test (" +
+      queueItem.testScope.join(", ") +
+      ") is not shown to have run at all (§2.1, §3.3)",
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The sub-session prompts (§3.3 roles testWriter + reviewer)
 // ---------------------------------------------------------------------------
@@ -3009,6 +3257,40 @@ function testScopeContent(root: string, queueItem: QueueItem): string {
     parts.push("--- " + rel + " ---\n" + readFileSync(abs, "utf8"));
   }
   return parts.join("\n");
+}
+
+// The §2.6 IDENTITY of the item's test files as they stand in `root`: one entry per
+// testScope file that EXISTS, carrying a sha256 of its bytes (GAP-007). Read as
+// bytes, not text, so a re-encoding is a different file — which it is.
+//
+// A testScope entry with no file behind it contributes no entry: at vet time the
+// critics judged only what was there, and a witness naming a file that never
+// existed would refuse every later green for a reason nobody can act on.
+function vettedTestDigests(root: string, queueItem: QueueItem): Array<{ path: string; sha256: string }> {
+  const digests: Array<{ path: string; sha256: string }> = [];
+  for (const rel of queueItem.testScope) {
+    const abs = path.join(root, rel);
+    if (!existsSync(abs)) continue;
+    digests.push({ path: rel, sha256: createHash("sha256").update(readFileSync(abs)).digest("hex") });
+  }
+  return digests;
+}
+
+// The FIRST vetted test file whose bytes no longer match the witness the vet
+// captured, or null when every one of them still does. A file the witness names
+// and the tree no longer holds counts as broken identity too — deleting the vetted
+// test is the same escape as rewriting it, one byte shorter.
+function brokenTestIdentity(
+  root: string,
+  witness: readonly { path: string; sha256: string }[],
+): { path: string; vetted: string; now: string } | null {
+  for (const entry of witness) {
+    const abs = path.join(root, entry.path);
+    if (!existsSync(abs)) return { path: entry.path, vetted: entry.sha256, now: "(absent)" };
+    const now = createHash("sha256").update(readFileSync(abs)).digest("hex");
+    if (now !== entry.sha256) return { path: entry.path, vetted: entry.sha256, now };
+  }
+  return null;
 }
 
 // The captured red, rendered for a prompt: the command, the exit code, the §2.6.1
@@ -3102,19 +3384,11 @@ function vetCriticPrompt(
     "). You are given the item's spec, the test as written, and the captured red output — and " +
     "deliberately NOT the implementation: none exists yet, and that is the point, since a critic " +
     "shown code that already passes is anchored by it.\n" +
-    "Judge the test on exactly these criteria (§2.10 TEST_VET):\n" +
-    "- observableBehavior: it asserts observable behaviour through the subject's public surface, " +
-    "not internals.\n" +
-    "- wouldCatchWrongImpl: a subtly WRONG implementation would still fail it — it is not a " +
-    "tautology and it is not testing a mock.\n" +
-    "- rightLevel: it is at the right level (unit vs integration) for what it pins.\n" +
-    "- pinsAcceptance: it pins THIS item's acceptance criteria, not a neighbouring concern.\n" +
-    "- antiPatterns: no anti-patterns — no sleep-based timing, no assertion-free run, no " +
-    "snapshot of everything, no test that cannot fail.\n" +
-    "Reply with a single JSON object matching the TestVet schema: a verdict {pass, note} for each " +
-    "criterion, plus `mustFix` — the concrete changes this test MUST have before it can be " +
-    "vetted. An EMPTY mustFix is the approval; never invent a fix to look thorough, and never " +
-    "ask for a change that only restates a criterion." +
+    "The criteria (§2.10 TEST_VET), as doctrine test-vet.md teaches them:\n\n" +
+    renderVetCriteria() +
+    "\n\nReply with a single JSON object matching the TestVet schema: a verdict {pass, note} for " +
+    "each criterion, plus `mustFix` — the concrete changes this test MUST have before it can be " +
+    "vetted." +
     itemSpecBlock(queueItem) +
     "\n\nTHE TEST AS WRITTEN:\n" +
     testText +
@@ -3902,7 +4176,11 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
         if (verdict !== undefined && verdict.pass) row.passed += 1;
         else row.failed += 1;
       }
-      for (const entry of vet.mustFix) {
+      // ISSUE-013: the criteria BITE. A receipt that fails a criterion and names
+      // no repair is self-contradictory, and advancing on its empty mustFix
+      // resolved that against the critic's own written verdict. The failure it
+      // wrote down becomes the repair it did not spell, naming the criterion.
+      for (const entry of [...vet.mustFix, ...impliedMustFix(vet)]) {
         if (!union.includes(entry)) union.push(entry);
       }
     }
@@ -3921,6 +4199,11 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       item.state = "TEST_VETTED";
       item.attempts.vetRounds += rounds;
       item.evidence.red = { ledger: "evidence.jsonl", seq: red.seq };
+      // GAP-007: WHICH test the critics approved, not just that they approved one.
+      // Captured from the tree they read (`testText` above came from the same place),
+      // at the instant the approval is persisted, so `mark_green` can prove the file
+      // it re-runs is the file that was vetted.
+      item.vettedTests = vettedTestDigests(tree.root, queueItem);
       store.saveItem(runId, item);
 
       journal.log(
@@ -4396,18 +4679,19 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
   // edited hand the item its GREEN.
   const tree = itemTreeOf(store, runId, stage.item);
 
-  // (2) derive. The implementer runs for BOTH kinds of item: a non-behavioral item
-  //     still needs its production change written, it just owes no test.
-  const writer = await dispatchImplementer(
-    MARK_GREEN_TOOL,
-    fanout,
-    itemId,
-    sessionTreeOf(store, stage.item),
-    implementerPrompt(queueItem),
-  );
-  const attempts = 1;
+  // Implementer sub-sessions SPENT by this call (0 until one is dispatched, which
+  // the exhaustion refusal below returns before doing).
+  let attempts = 0;
 
-  const stuck = (why: string): MarkGreenResult => {
+  // The one stuck exit: block the item, mint the §2.11 question that offers the
+  // human the unblock path, and journal it. Takes the asking session explicitly
+  // because it is reached both AFTER an implementer ran (the sub-session asks) and
+  // BEFORE one is dispatched (the budget refusal, where no sub-session exists).
+  const blockWithQuestion = (
+    why: string,
+    askedBySessionID: string,
+    over: Partial<Pick<MarkGreenResult, "ranItemTest" | "exitCode" | "excluded">> = {},
+  ): MarkGreenResult => {
     const questionText =
       MARK_GREEN_TOOL +
       ' could not take item "' +
@@ -4420,7 +4704,7 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
       {
         runId,
         question: questionText,
-        askedBy: { role: "implementer", sessionID: writer.sessionID },
+        askedBy: { role: "implementer", sessionID: askedBySessionID },
         humanTerritory: isHumanTerritory(questionText),
         origin: "implementer-blocked",
         blocksItems: [itemId],
@@ -4447,8 +4731,58 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
       attempts,
       excluded: [],
       questionId: question.id,
+      ...over,
     };
   };
+
+  // (1b) THE ATTEMPT BUDGET (§3.3's ladder has to end somewhere). This stage spends
+  //      exactly one implementer per call and the ORCHESTRATOR decides how often to
+  //      call it, so an item the model cannot finish was an unbounded loop: every
+  //      failed attempt returned "not yet", nothing counted, and nothing ever said
+  //      stop. The count is persisted BEFORE the dispatch, so a sub-session that
+  //      crashes the handler still costs an attempt — a budget that only counts
+  //      tidy failures bounds nothing.
+  const attemptBudget = implementerAttemptBudget(config);
+  const beforeDispatch = store.loadItem(runId, itemId);
+  if (beforeDispatch.attempts.green >= attemptBudget) {
+    journal.log(
+      "warn",
+      "fsm",
+      "guard-reject",
+      { stage: "GREEN", itemId, attemptsSpent: beforeDispatch.attempts.green, attemptBudget },
+      { runId, itemId },
+    );
+    return blockWithQuestion(
+      "the implementer attempt budget is EXHAUSTED: " +
+        String(beforeDispatch.attempts.green) +
+        " of workflow.implementerAttempts=" +
+        String(attemptBudget) +
+        " attempts were spent and the item never reached GREEN. Re-shape the item, answer what " +
+        "the implementer is missing, or raise the budget — a further attempt is refused rather " +
+        "than spent (§3.3)",
+      // No sub-session asked this one: the handler refused before dispatching, which
+      // is the whole point of the budget.
+      "",
+    );
+  }
+  beforeDispatch.attempts.green += 1;
+  store.saveItem(runId, beforeDispatch);
+
+  // (2) derive. The implementer runs for BOTH kinds of item: a non-behavioral item
+  //     still needs its production change written, it just owes no test.
+  const writer = await dispatchImplementer(
+    MARK_GREEN_TOOL,
+    fanout,
+    itemId,
+    sessionTreeOf(store, stage.item),
+    implementerPrompt(queueItem),
+  );
+  attempts = 1;
+
+  const stuck = (
+    why: string,
+    over: Partial<Pick<MarkGreenResult, "ranItemTest" | "exitCode" | "excluded">> = {},
+  ): MarkGreenResult => blockWithQuestion(why, writer.sessionID, over);
 
   // The two CONSTRUCTIBLE rungs of §3.3's escalation ladder. "Stronger model" and
   // "item re-split" need a §2.1 knob that does not exist, so they are raised at the
@@ -4475,8 +4809,10 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
     if (!edge.ok) {
       throw new Error(MARK_GREEN_TOOL + ": " + (edge.why ?? from + "->GREEN is not legal for this item"));
     }
+    // `attempts.green` counts the implementer sub-sessions this item has SPENT and
+    // is incremented at the dispatch above, not here: a counter that only moved on
+    // the way out counted successes, and a budget cannot be built on those.
     item.state = "GREEN";
-    item.attempts.green += 1;
     store.saveItem(runId, item);
     journal.log(
       "info",
@@ -4495,6 +4831,31 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
       excluded: [],
       questionId: null,
     };
+  }
+
+  // (3a1) GAP-007: the test this stage is about to re-run must BE the test the vet
+  //       critics approved. An item may legally declare a testScope file inside its
+  //       own fileScope, and the implementer sub-session that just ran was write-
+  //       capable there, so "the critics approved a test" and "this run exercised
+  //       that test" are two different facts — and only this one is checked here.
+  //       The witness is read from the PERSISTED item (the vet wrote it; nothing a
+  //       sub-session can reach rewrites it), and an item that never passed through
+  //       the vet carries none, which is not a mismatch to report.
+  const vetted = store.loadItem(runId, itemId).vettedTests;
+  if (vetted !== undefined && vetted.length > 0) {
+    const broken = brokenTestIdentity(tree.root, vetted);
+    if (broken !== null) {
+      return stuck(
+        "the vetted test no longer has the identity the critics approved: " +
+          broken.path +
+          " was sha256 " +
+          broken.vetted.slice(0, 12) +
+          " when RED->TEST_VETTED was persisted and is " +
+          (broken.now === "(absent)" ? "ABSENT from the tree now" : "sha256 " + broken.now.slice(0, 12) + " now") +
+          ". A green earned by re-running a test the vet never saw is not this item's GREEN " +
+          "(§2.6/§3.3); re-vet the test that is there, or restore the one that was.",
+      );
+    }
   }
 
   // (3b) a behavioral item: THE HANDLER runs the test, under the §4.2 foreign red
@@ -4527,6 +4888,17 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
   }
   const record: ItemTestEvidence = outcome.record;
 
+  // GAP-008: green-admission symmetry. A green the red path would have thrown out
+  // is refused here rather than persisted as the item's GREEN. Refused, not
+  // re-attempted: no edit the implementer can make to production code turns a
+  // full-scope fallback into a targeted run — that takes a §2.1 itemTest template
+  // (or a test the runner can actually collect), which is a config/queue answer,
+  // so the stage stops with the one unblock path the other stuck exits use.
+  const admission = greenAdmission(outcome, queueItem);
+  if (record.kind === "green" && !admission.ok) {
+    return stuck(admission.why, { ranItemTest: true, exitCode: record.exitCode, excluded });
+  }
+
   // The §3.3 annotation rule reads the item AS IT IS AT THE PERSIST. `stage.item` was
   // loaded before the implementer sub-session ran, so judging the block against it would
   // let a GREEN be written over an item something blocked during that window.
@@ -4557,7 +4929,6 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
   }
 
   item.state = "GREEN";
-  item.attempts.green += 1;
   item.evidence.green = { ledger: "evidence.jsonl", seq: record.seq };
   store.saveItem(runId, item);
 
@@ -4915,7 +5286,7 @@ export function handleQueueAmend(input: QueueAmendInput): QueueAmendResult {
   }
 
   // (1b) the RESULT against §2.4, through the same pure function 9.2 planning uses.
-  const verdict = validateQueue(applied.queue, config);
+  const verdict = validateQueue(applied.queue, config, measureQueueScopes(store.root, applied.queue));
   if (!verdict.ok) {
     throw new Error(
       QUEUE_AMEND_TOOL +
@@ -5423,13 +5794,11 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
     const max = config.workflow.planReviewMaxRounds;
     const context =
       run.planReviewRounds < max ? { survivingMajors: 0 } : { round: run.planReviewRounds, max };
-    const edge = legalRunTransition(run.state, "EXECUTING", context);
+    const edge = advanceRun(run, "EXECUTING", context);
     if (!edge.ok) {
-      throw new Error(
-        DISPATCH_WAVE_TOOL + ": " + (edge.why ?? "this run may not advance to EXECUTING"),
-      );
+      throw new Error(DISPATCH_WAVE_TOOL + ": " + edge.why);
     }
-    const from = run.state;
+    const from = edge.from;
     run.state = "EXECUTING";
     store.saveRun(run);
     journal.log(
@@ -6073,17 +6442,10 @@ function reviewRevetPrompt(
     " INDEPENDENT test-vet critics judging ONE test that was CHANGED during item review " +
     "(§3.3: a changed test re-enters the test discipline). You are given the item's spec, " +
     "the test as it stands, and the handler's own re-run outcome.\n" +
-    "Judge the test on exactly these criteria (§2.10 TEST_VET):\n" +
-    "- observableBehavior: it asserts observable behaviour through the subject's public " +
-    "surface, not internals.\n" +
-    "- wouldCatchWrongImpl: a subtly WRONG implementation would still fail it.\n" +
-    "- rightLevel: it is at the right level (unit vs integration) for what it pins.\n" +
-    "- pinsAcceptance: it pins THIS item's acceptance criteria, not a neighbouring concern.\n" +
-    "- antiPatterns: no anti-patterns — no sleep-based timing, no assertion-free run, no " +
-    "test that cannot fail.\n" +
-    "Reply with a single JSON object matching the TestVet schema: a verdict {pass, note} for " +
-    "each criterion, plus `mustFix` — the concrete changes this test MUST have. An EMPTY " +
-    "mustFix is the approval; never invent a fix to look thorough." +
+    "The criteria (§2.10 TEST_VET), as doctrine test-vet.md teaches them:\n\n" +
+    renderVetCriteria() +
+    "\n\nReply with a single JSON object matching the TestVet schema: a verdict {pass, note} for " +
+    "each criterion, plus `mustFix` — the concrete changes this test MUST have." +
     itemSpecBlock(queueItem) +
     "\n\nTHE TEST AS IT STANDS:\n" +
     testText +
@@ -6448,20 +6810,17 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
     return { reply, sessionID: result.sessionID };
   };
 
-  // §3.3 routing by the paths the fix touches, not by a fixed recipient: a
-  // test-adequacy finding — and any finding whose suggestedFix names a testScope
-  // path — goes to the testWriter (the implementer is gated to fileScope, so
-  // routing it there is a guaranteed edit-gate denial); a fix naming both scopes
-  // goes to both; everything else is the implementer's.
-  const routeOf = (entry: ItemRaisedFinding): { testWriter: boolean; implementer: boolean } => {
-    const fix = entry.finding.suggestedFix;
-    const namesTest = queueItem.testScope.some((rel) => rel.length > 0 && fix.includes(rel));
-    const namesFile = queueItem.fileScope.some((rel) => rel.length > 0 && fix.includes(rel));
-    if (entry.lens === LENS_TEST_ADEQUACY || namesTest) {
-      return { testWriter: true, implementer: namesFile };
-    }
-    return { testWriter: false, implementer: true };
-  };
+  // §3.3 routing by the paths the fix touches, not by a fixed recipient — core
+  // policy (routeFix), asked here rather than re-derived: the inline derivation
+  // this replaced compared raw scope STRINGS against the fix prose, so a glob
+  // scope routed every test finding to the implementer, whose edit gate then
+  // denied it (ISSUE-054).
+  const routeItemFix = (entry: ItemRaisedFinding): { testWriter: boolean; implementer: boolean } =>
+    routeFix(
+      entry.finding.suggestedFix,
+      { fileScope: queueItem.fileScope, testScope: queueItem.testScope },
+      { testAdequacyLens: entry.lens === LENS_TEST_ADEQUACY },
+    );
 
   // The §3.3 "where cheap" reverted-behavior probe. Attempted iff the item's
   // fileScope is non-empty AND its working-tree changes round-trip through
@@ -6541,7 +6900,9 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
             ")",
         );
       }
-      for (const entry of vet.mustFix) {
+      // ISSUE-013, at the §3.3 changed-test re-vet: the same rule, since the same
+      // receipt shape decides the same question.
+      for (const entry of [...vet.mustFix, ...impliedMustFix(vet)]) {
         if (!union.includes(entry)) union.push(entry);
       }
     }
@@ -6645,7 +7006,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
           "dispatch a review fix without the doctrine that governs receiving one (§3.3/C-028)",
       );
     }
-    const routed = roundSurvivors.map((entry) => ({ entry, route: routeOf(entry) }));
+    const routed = roundSurvivors.map((entry) => ({ entry, route: routeItemFix(entry) }));
     const writerSet = routed.filter((r) => r.route.testWriter).map((r) => r.entry);
     const implSet = routed.filter((r) => r.route.implementer).map((r) => r.entry);
     const deadIds = new Set<string>();
@@ -6962,6 +7323,49 @@ function trackedPaths(treeRoot: string, rels: string[]): Set<string> {
 // under the publish tree, because `git add` takes paths, not this glob dialect.
 // The walk skips the trees that are never publishable content.
 const GLOB_META = /[*?[\]{]/;
+
+/**
+ * What each item's declared write scope MEASURES OUT TO in `treeRoot`: the files
+ * its fileScope globs actually match, and their total size. This is the half of
+ * the §3.2 item budget core cannot compute (G3 forbids core a filesystem), and it
+ * is measured HERE, at queue acceptance, because this module is the one that owns
+ * glob expansion.
+ *
+ * A literal path naming a file that does not exist yet measures zero files and
+ * zero bytes — greenfield work costs nothing to read, and core takes the entry
+ * count as the floor of the file budget precisely so that item is still counted.
+ *
+ * A wildcard-headed entry is NOT expanded: core refuses it on shape, and walking
+ * an entire repository to measure a scope that is already rejected is the one
+ * thing this measurement must never do.
+ */
+function measureQueueScopes(treeRoot: string, queue: Queue): Map<string, ScopeMeasurement> {
+  const measured = new Map<string, ScopeMeasurement>();
+  for (const item of queue.items) {
+    const rels = new Set<string>();
+    for (const entry of item.fileScope) {
+      const rel = normalizeRepoRel(entry);
+      if (isWildcardHeaded(rel)) continue;
+      for (const found of expandScopeEntry(treeRoot, rel)) rels.add(found);
+    }
+    let files = 0;
+    let bytes = 0;
+    for (const rel of rels) {
+      let info;
+      try {
+        info = statSync(path.join(treeRoot, rel));
+      } catch {
+        continue; // a path that is not there yet costs nothing to read
+      }
+      if (!info.isFile()) continue;
+      files += 1;
+      bytes += info.size;
+    }
+    measured.set(item.id, { files, bytes });
+  }
+  return measured;
+}
+
 function expandScopeEntry(treeRoot: string, rel: string): string[] {
   if (!GLOB_META.test(rel)) return [rel];
   const found: string[] = [];
@@ -7211,7 +7615,14 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
     {
       stagedMtimes: mtimes,
       indexMtimeMs: indexMtimeMs(treeRoot),
-      hasStagedDeletion: false,
+      // ISSUE-046: a staged entry with no file behind it is a DELETION this publish
+      // deliberately ships (the `tracked` half of `staged` above is exactly that
+      // set), and a deletion moves no worktree mtime — so with this hardcoded false
+      // the surviving files' stamps alone decided freshness and a change whose only
+      // post-validate edit removed a file committed a tree state no verify ever
+      // described. `behavioral` is `staged` minus what still exists, so the two
+      // differing in length IS the staged-deletion fact, derived where it is known.
+      hasStagedDeletion: behavioral.length !== staged.length,
       currentHead,
       noGit: false,
       // What the record's OWN stamp can order (GAP-035): a verify started under the
@@ -7844,11 +8255,13 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
 
   // ---- close the run -----------------------------------------------------
   const target: RunState = trivial ? "TRIVIAL_DONE" : "REPORTED";
-  const edge = legalRunTransition("EXECUTING", target, {
-    classification: trivial ? "trivial" : "work",
-  });
+  // The from-state is READ off the run, never asserted (MACRO-004): this handler
+  // used to hand the FSM the literal "EXECUTING", which made the edge legal for a
+  // run it merely described — and the journal then recorded the same claim. A run
+  // that reached this writer from DECOMPOSED closed `done` on that fiction.
+  const edge = advanceRun(run, target, { classification: trivial ? "trivial" : "work" });
   if (!edge.ok) {
-    throw new Error(REPORT_TOOL + ": " + (edge.why ?? "the run FSM denies EXECUTING->" + target));
+    throw new Error(REPORT_TOOL + ": " + edge.why);
   }
 
   const stop: { kind: "done"; reasonDisplay: string; tsMs: number } = {
@@ -7868,7 +8281,7 @@ export async function handleReport(input: ReportInput): Promise<ReportResult> {
     "info",
     "fsm",
     "transition",
-    { from: "EXECUTING", to: target, stop: stop.kind, why: edge.why },
+    { from: edge.from, to: target, stop: stop.kind, why: edge.why },
     { runId },
   );
 
@@ -8083,6 +8496,18 @@ export async function handleOverride(input: OverrideInput): Promise<OverrideResu
   const now = input.now ?? Date.now;
   const runDir = handlerRunDir(store, runId);
 
+  // (0) legality, and BEFORE the budget check because this refusal must cost
+  // nothing (ISSUE-007): only "session", "git" and "edit" have a consumption
+  // point in gateBeforeToolCall, so a grant for any other name can never be
+  // converted — yet at HEAD it still tainted the item, appended the anomaly and
+  // spent BOTH §2.1 meters. Two honest misspellings then exhausted the default
+  // budget and the third recorded an `env` stop and ended the run. The hatch is
+  // documented with a `phase-order` example it cannot serve, so the misspelling
+  // is the DOCUMENTED use.
+  if (!isOverrideGate(input.gate)) {
+    throw new Error(unknownOverrideGateWhy(OVERRIDE_TOOL, input.gate));
+  }
+
   // (1) legality: the item must exist...
   let item: Item;
   try {
@@ -8283,6 +8708,11 @@ export interface SetupAnswers {
   gitMode?: GitMode;
   behavioralPaths?: string[];
   initRepo?: boolean;
+  // The §2.1 TDD law's kill switch, made explicit. A behavioralPaths list that
+  // names none of the source this repo actually has turns RED-before-GREEN off
+  // for every item; setup refuses it unless the caller says so in this word, and
+  // the word is journaled with the rest of the answered values.
+  acknowledgeNoTdd?: boolean;
 }
 
 // One §6.2:1875 sanctioned interactive ask. These are the handler's RESULT, not
@@ -8356,6 +8786,7 @@ export interface SetupInput {
     gitMode?: GitMode;
     behavioralPaths?: string[];
     initRepo?: boolean;
+    acknowledgeNoTdd?: boolean;
   };
   // The session's served model id when the caller knows it (Task 12.1 does).
   modelId?: string;
@@ -8465,12 +8896,22 @@ function setupPyprojectPackage(text: string): string | null {
 interface SetupDetection {
   scopes: ProposedScope[];
   notes: string[];
+  // Each detected ecosystem's OWN source glob — the extension set that ecosystem
+  // owns — captured before setupCoverEveryPath widens scope.sourceGlob into the
+  // brace union that routes uncovered kinds. Two different questions read these:
+  // "which scope must run when this path changes" is answered by the widened
+  // pattern, and "is this path this repo's SOURCE" only ever by these.
+  detectedSourceGlobs: string[];
 }
 
 // The directories a coverage walk never descends into: version control, the
 // conductor state dir the config being written lives in, and the dependency and
 // build trees an ecosystem regenerates. expandScopeEntry skips the first three
 // for the same reason — nothing an item declares as its scope lives inside them.
+//
+// Every setup judgment that needs a file list reads it through setupWalkRepoFiles,
+// so the requiredScopes widening and the GAP-015 coverage floor share ONE universe:
+// setup never accepts an answer on the strength of a tree it does not itself walk.
 const SETUP_UNWALKED_DIRS = new Set([
   ".git",
   ".conductor",
@@ -8729,6 +9170,11 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
     });
   }
 
+  // Captured BEFORE the widening, because the widening destroys it: once
+  // setupCoverEveryPath has folded **/README.md and **/*.toml into every scope's
+  // sourceGlob there is no longer any record of which extensions an ecosystem
+  // actually owns, and the GAP-015 coverage clause needs exactly that record.
+  const detectedSourceGlobs = scopes.map((scope) => scope.sourceGlob);
   setupCoverEveryPath(root, scopes, notes);
 
   for (const scope of scopes) {
@@ -8737,7 +9183,7 @@ function setupDetect(root: string, smoked: SmokeProbe[]): SetupDetection {
         `${detectRunner(scope.command).runner} runner profile (§2.6.1)`,
     );
   }
-  return { scopes, notes };
+  return { scopes, notes, detectedSourceGlobs };
 }
 
 // One requiredScopes entry per detected scope. With exactly one ecosystem the
@@ -8775,6 +9221,68 @@ function setupNoCoverageFailure(root: string): string {
     ".conductor/config.json by hand with a verify.scopes entry and a verify.requiredScopes entry " +
     "whose pattern covers the paths that scope verifies"
   );
+}
+
+// How many uncovered files the refusal quotes back. Enough to recognise what was
+// missed, not enough to bury the remedy sentence under a file listing.
+const SETUP_COVERAGE_NAMED = 5;
+
+// What the answered behavioralPaths list actually covers, judged on MATCHED FILES.
+//
+// `covered`/`uncovered` are real repository paths that the detected ecosystems'
+// source globs match; `sourceFilesFound` says whether there was any evidence to
+// judge on at all.
+//
+// The evidence is setupWalkRepoFiles — the SAME walk detection itself ran, honouring
+// SETUP_UNWALKED_DIRS — and every file it yields is judged. Both halves are the
+// clause, not implementation taste:
+//
+//   ONE UNIVERSE. Judged instead against a walk that skips only .git/.conductor/
+//   node_modules, a repo's generated or vendored trees are evidence detection never
+//   saw: `["dist/**"]` against a bundled dist/ "covered" a repo whose actual sources
+//   are all under src/, and the repo-wide TDD kill walked through the floor wearing
+//   a path this very function had just refused to walk into.
+//
+//   NO TRUNCATION. Judged against a bounded slice of a SORTED expansion, every
+//   source sorting past the bound is invisible, and invisibility reads as
+//   uncovered: a repo with a few hundred files under aaa/ refused the honest answer
+//   `["zzz/**"]` for the one source at zzz/late.mjs. Matching answered globs against
+//   a file list is string work — the walk's own SETUP_WALK_FILE_CAP is the only
+//   bound this needs, and it bounds the WALK rather than the judgment.
+//
+// The globs are the DETECTED ones (SetupDetection.detectedSourceGlobs), never
+// scope.sourceGlob. On a multi-ecosystem repo setupCoverEveryPath has already
+// rewritten every scope.sourceGlob into a brace union folding in the kinds no
+// ecosystem owns — **/README.md, **/*.toml, **/*.json — so that no path is left
+// without a requiredScopes entry. That union answers a ROUTING question. Read as
+// the definition of "source file" it made a doc file count as coverage, and
+// `["README.md"]` bought a config in which every item under src/ was legally
+// behavioral:false: the repo-wide TDD kill again, through the clause written to
+// refuse it. The single-ecosystem repo, whose glob is never widened, refused the
+// same answer all along — which is why the hole was multi-ecosystem-only.
+interface SetupBehavioralCoverage {
+  covered: string[];
+  uncovered: string[];
+  sourceFilesFound: boolean;
+}
+
+function setupBehavioralCoverage(
+  root: string,
+  detectedSourceGlobs: readonly string[],
+  answeredPaths: readonly string[],
+): SetupBehavioralCoverage {
+  const sourceGlobs = detectedSourceGlobs.map((glob) => normalizeRepoRel(glob));
+  const covered: string[] = [];
+  const uncovered: string[] = [];
+  for (const rel of setupWalkRepoFiles(root)) {
+    if (!sourceGlobs.some((glob) => globMatch(glob, rel))) continue;
+    if (answeredPaths.some((glob) => globMatch(glob, rel))) covered.push(rel);
+    else uncovered.push(rel);
+  }
+  // The judgment above is already complete; this orders only the handful of names
+  // the refusal quotes, so the same repo always reports the same ones.
+  uncovered.sort();
+  return { covered, uncovered, sourceFilesFound: covered.length + uncovered.length > 0 };
 }
 
 function setupMergedBehavioralPaths(scopes: ProposedScope[]): string[] {
@@ -9335,6 +9843,65 @@ export async function handleSetup(input: SetupInput): Promise<SetupResult> {
     return unconfigured({ failures: [setupNoCoverageFailure(root)] });
   }
 
+  // (4c) THE DEGENERATE-CONFIG FLOOR (GAP-015). `behavioralPaths` is the whole
+  // reach of the §2.1 TDD law: `behavioral:false` is legal for an item exactly
+  // when its fileScope is disjoint from this list, and the ∅-intersection is
+  // vacuously true — so an empty list (or one naming nothing this repo's detected
+  // ecosystems own) makes EVERY item legally non-behavioral and skips RED→vet→GREEN
+  // repo-wide in a single tool call. The only gate before this was
+  // `answers.behavioralPaths === undefined`, which `[]` walks straight through.
+  //
+  // Coverage is judged on MATCHED FILES, and it has to be. The obvious spelling —
+  // ask core scopesIntersect whether the answered list intersects each detected
+  // sourceGlob — is VACUOUS here, because every sourceGlob detection produces
+  // ("**/*.{js,…,ts,…}", "**/*.py", "**/*.go", …) is wildcard-headed: its literal
+  // head is empty, so the conservative head-prefix rule calls it an intersection
+  // with any non-empty list whatsoever. ["docs/**"] on a repo whose only source is
+  // src/index.mjs passed that clause, which left `[]` as the only degeneracy the
+  // floor could actually see. Asked against the files the globs really match, the
+  // clause states what it always meant to: is there ANY source file in this repo
+  // that this list would make behavioral.
+  //
+  // A repo with a detected ecosystem but no source file YET (a fresh scaffold) has
+  // no evidence to judge on, and refusing it would wedge exactly the greenfield case
+  // conductor exists to work in — so with no source files found the clause falls back
+  // to "the list must at least be non-empty", which is the degeneracy the floor was
+  // written for. The escape is a WORD, not a silence: `acknowledgeNoTdd:true` is a
+  // deliberate answer, and it rides into the journal with the rest of them below.
+  //
+  // The evidence globs are the ones DETECTION produced, not the ones
+  // setupCoverEveryPath left on the scopes: the widened brace union exists to route
+  // a change to a doc or a build file at some scope, and reading it as "source"
+  // let ["README.md"] cover a multi-ecosystem repo whose sources are all under
+  // src/. Routing keeps the widened patterns (requiredScopes below is built from
+  // them); this clause keeps the detected extension sets.
+  const answeredPaths = answers.behavioralPaths ?? [];
+  const coverage = setupBehavioralCoverage(root, detection.detectedSourceGlobs, answeredPaths);
+  const covers = coverage.sourceFilesFound ? coverage.covered.length > 0 : answeredPaths.length > 0;
+  if (!covers && answers.acknowledgeNoTdd !== true) {
+    const missed = coverage.uncovered.slice(0, SETUP_COVERAGE_NAMED);
+    return unconfigured({
+      failures: [
+        "setup: verify.behavioralPaths " +
+          JSON.stringify(answeredPaths) +
+          (answeredPaths.length === 0
+            ? " is EMPTY, so no path in this repo requires a behavioral test"
+            : " matches no source file this repo has: it covers none of " +
+              missed.join(", ") +
+              (coverage.uncovered.length > missed.length
+                ? " (and " + String(coverage.uncovered.length - missed.length) + " more)"
+                : "") +
+              ", which is what the detected ecosystems own (" +
+              detection.detectedSourceGlobs.join(", ") +
+              ")") +
+          " — every item would be legally behavioral:false and the whole repo would run " +
+          "PENDING->GREEN with no test at all (§2.1/§2.4). Supply a list that covers this " +
+          "repo's source, or pass answers.acknowledgeNoTdd:true to configure it anyway; " +
+          "setup will not turn the TDD law off by accident.",
+      ],
+    });
+  }
+
   // (5) the candidate config, built from task-let 5.4a's single exported default
   // rather than a second literal (two defaults that drift are invisible to both
   // tasks' tests). Only what setup detected or the human answered is overwritten.
@@ -9436,15 +10003,29 @@ export async function handleSetup(input: SetupInput): Promise<SetupResult> {
   // (8) journal. A reconfigure records its DIFF — the changed keys with their old
   // and new values, and an empty change set when nothing changed, because "the
   // config was rewritten and nothing moved" is itself a fact replay needs.
-  if (diff !== null) {
-    input.journal.log(
-      "info",
-      "state",
-      "config.updated",
-      { path: configPath(root), changes: diff, tsMs: now() },
-      {},
-    );
-  }
+  //
+  // The ANSWERED VALUES ride along on every write, first setup included (GAP-015).
+  // The written config records what the answers produced; only the record says what
+  // was answered — and `acknowledgeNoTdd` in particular has no config field to land
+  // in, so without this the one call that turns the TDD law off would leave no trace
+  // anywhere. A first setup has no diff to state, hence `changes: []`.
+  input.journal.log(
+    "info",
+    "state",
+    "config.updated",
+    {
+      path: configPath(root),
+      changes: diff ?? [],
+      answers: {
+        behavioralPaths: [...answeredPaths],
+        ...(answers.gitMode === undefined ? {} : { gitMode: answers.gitMode }),
+        ...(answers.initRepo === undefined ? {} : { initRepo: answers.initRepo }),
+        acknowledgeNoTdd: answers.acknowledgeNoTdd === true,
+      },
+      tsMs: now(),
+    },
+    {},
+  );
 
   return {
     ok: true,

@@ -452,6 +452,21 @@ function literalHead(glob: string): string[] {
   return head;
 }
 
+/**
+ * True when a glob's FIRST path segment carries a wildcard construct (`*`, `?`,
+ * `{`, `[`) — i.e. its literal head is empty, so it prefixes every path in the
+ * tree. An entry with no segments at all ("", "/") is wildcard-headed by the same
+ * measure: it names no directory to be bounded by.
+ *
+ * One definition, three consumers: the wave scheduler's degenerate-scope rule,
+ * the §3.2 queue-acceptance shape rule, and anything else that has to ask whether
+ * a scope names a bounded territory. A second spelling of this vocabulary was how
+ * two of them once disagreed about what "wildcard-headed" means.
+ */
+export function isWildcardHeaded(glob: string): boolean {
+  return literalHead(glob).length === 0;
+}
+
 // Segment-wise prefix overlap: true when one head is a path prefix of the
 // other (an empty head prefixes everything). Segment-wise, not string-wise,
 // so `src` does not overlap `src2/...`. Segments compare case-INSENSITIVELY:

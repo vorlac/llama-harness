@@ -20,7 +20,7 @@
 // degenerate-scope item as conflicting with all others so it never shares a wave,
 // explicitly, rather than trusting scopesIntersect on the empty case.
 
-import { scopesIntersect } from "./shell-parse.ts";
+import { isWildcardHeaded, scopesIntersect } from "./shell-parse.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal structural param shapes (the pure scheduler consumes only these
@@ -79,24 +79,12 @@ const PUBLISHED = "PUBLISHED";
 // an empty list (no files named — scopesIntersect reads it as disjoint, the trap
 // this guards) OR any glob whose literal head is empty (a wildcard-headed first
 // path segment prefixes every path). A degenerate-scope item never shares a wave.
-// Same wildcard-construct vocabulary as shell-parse's literalHead (`*`,`?`,`{`,`[`)
-// so the two agree on what "wildcard-headed" means.
+// The wildcard-construct vocabulary is shell-parse's own isWildcardHeaded, so the
+// scheduler and the §3.2 queue-acceptance rule cannot disagree about what
+// "wildcard-headed" means.
 function isDegenerateScope(fileScope: string[]): boolean {
   if (fileScope.length === 0) return true;
-  for (const glob of fileScope) {
-    const segments = glob.split("/").filter((seg) => seg.length > 0);
-    if (segments.length === 0) return true;
-    const head = segments[0];
-    if (
-      head.includes("*") ||
-      head.includes("?") ||
-      head.includes("{") ||
-      head.includes("[")
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return fileScope.some((glob) => isWildcardHeaded(glob));
 }
 
 // ---------------------------------------------------------------------------

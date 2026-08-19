@@ -1007,6 +1007,9 @@ interface ScriptOpts {
   fix?: (req: RespondReq, findingIds: string[]) => Canned;
   // The TEST-VET critics' mustFix union.
   vetMustFix?: string[];
+  // The whole TEST-VET receipt, for a row that needs verdict fields `vetMustFix`
+  // cannot express (ISSUE-013: a pass:false beside an EMPTY mustFix).
+  vetReply?: Canned;
   // Every finding id this script can mint — how a skeptic/fix prompt is bound to its
   // finding (P3). Ids are distinctive, so substring matching is unambiguous.
   findingIds: string[];
@@ -1037,6 +1040,7 @@ function scripted(opts: ScriptOpts): Responder {
       return { kind: "reply", text: implJson() };
     }
     // A reviewer prompt with no LENSES line is a §2.10 TEST-VET critic (P2).
+    if (opts.vetReply !== undefined) return opts.vetReply;
     return { kind: "reply", text: vetJson(opts.vetMustFix ?? []) };
   };
 }
@@ -1681,6 +1685,71 @@ test("[9.5a-route-testwriter-test-discipline] routing by path (§3.3 table row 2
       vetCritics: 3,
     });
   });
+});
+
+// ===========================================================================
+// [9.5a-revet-criteria-bite]
+// ===========================================================================
+
+test("[9.5a-revet-criteria-bite] ISSUE-013 at the §3.3 changed-test re-vet: a schema-valid critic receipt that fails a §2.10 criterion with an EMPTY mustFix does NOT clear the re-vet — the item is BLOCKED on a question naming the failed criterion, and no re-review follows the test it never approved", async () => {
+  const F_TADQ = "F-TADQ-9552";
+  // THE ESCAPE, in one receipt: a written-down failure with no repair asked for.
+  // Reading the empty mustFix as the approval is what lets a changed test the
+  // critic condemned carry the item on to re-validate and re-review.
+  const contradictoryReceipt = JSON.stringify({
+    verdictsByCriterion: {
+      observableBehavior: { pass: true, note: "asserts the returned value" },
+      wouldCatchWrongImpl: { pass: false, note: "the tightened assertion holds for any implementation" },
+      rightLevel: { pass: true, note: "unit level is right for a pure function" },
+      pinsAcceptance: { pass: true, note: "pins this item's acceptance criterion" },
+      antiPatterns: { pass: true, note: "no mock-testing, no tautology" },
+    },
+    mustFix: [],
+  });
+  assert.equal(
+    validate("TestVet", JSON.parse(contradictoryReceipt) as unknown).ok,
+    true,
+    "premise: the contradictory receipt is SCHEMA-VALID — the schema cannot be what refuses it",
+  );
+
+  const bench = seedBench({
+    itemReviewers: 6,
+    skepticsPerFinding: 1,
+    reviewMaxRounds: 2,
+    vetCritics: 1,
+    respond: scripted({
+      sessionsPerRound: 6,
+      findingIds: [F_TADQ],
+      perRound: [
+        {
+          [TEST_ADEQUACY]: [
+            { id: F_TADQ, lens: TEST_ADEQUACY, suggestedFix: "tighten the assertion so it pins the sign" },
+          ],
+        },
+        {},
+      ],
+      vetReply: { kind: "reply", text: contradictoryReceipt },
+    }),
+  });
+
+  const res: ItemReviewResultShape = await review(bench);
+
+  // The re-vet did not clear, so the item goes no further.
+  assert.equal(res.ok, false, "a failed §2.10 criterion refuses the changed test");
+  assert.notEqual(persistedItem(bench).state, "REVIEWED", "the item did NOT reach REVIEWED");
+  assert.notEqual(persistedItem(bench).blocked, null, "the item is BLOCKED on the re-vet it failed");
+  assert.notEqual(res.questionId, null, "a §2.11 question was minted");
+
+  const question = readQuestions(bench.runDir).find((q) => q.id === res.questionId);
+  assert.notEqual(question, undefined, "the question is on disk");
+  assert.ok(
+    (question?.question ?? "").includes("wouldCatchWrongImpl"),
+    `the question NAMES the criterion the critic failed: ${question?.question ?? "(none)"}`,
+  );
+
+  // And nothing downstream ran on a test the critics never approved.
+  const round2 = bench.wiring.lensPrompts().filter((p) => Math.floor(p.lensOrdinal / 6) === 1);
+  assert.equal(round2.length, 0, "no re-review followed a re-vet that did not clear");
 });
 
 // ===========================================================================

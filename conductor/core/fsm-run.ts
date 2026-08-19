@@ -47,6 +47,17 @@ const RUN_SUCCESSORS: Record<RunState, readonly RunState[]> = {
   ANSWERED: [],
 };
 
+/**
+ * §2.3 terminality, derived from the diagram itself rather than restated: a run
+ * state is terminal exactly when the §3.1 forward diagram gives it no successor.
+ * A second hand-written list of terminal states is a place for the two to drift,
+ * and the drift is always in the direction of a mutation reaching a finished run.
+ */
+export function isTerminalRunState(state: string): boolean {
+  const successors = RUN_SUCCESSORS[state as RunState];
+  return successors !== undefined && successors.length === 0;
+}
+
 // A transition off the §3.1 diagram entirely. The `why` names the legal
 // successors of `from` so the caller is told where the run CAN go next.
 function illegalRun(from: RunState, to: RunState): TransitionResult {
@@ -172,4 +183,64 @@ export function legalRunTransition(
       // Unreachable: RUN_STATES is closed and every member is handled above.
       return illegalRun(from, to);
   }
+}
+
+// The persisted run position an advance is judged from — the §2.3 fields and
+// nothing else, so a real run.json and a minimal fixture both assign.
+export interface RunPosition {
+  state: string;
+  stop: { kind: string } | null;
+}
+
+export interface AdvanceResult {
+  ok: boolean;
+  // The position that was READ. Reported back so the caller's journal records
+  // where the run actually was, not where the call believed it to be.
+  from: string;
+  why: string;
+}
+
+/**
+ * Advance a run to `to`, deriving the from-state FROM THE RUN ITSELF.
+ *
+ * legalRunTransition takes `from` as an argument, which is right for a pure FSM
+ * table and wrong for every caller: a handler that passes a literal is asserting
+ * a position rather than reading one, and the FSM then adjudicates a fiction.
+ * That is exactly how a run reached REPORTED from DECOMPOSED — handleReport fed
+ * the table the literal "EXECUTING", the edge was legal for the run the literal
+ * described, and the journal recorded the same lie back (MACRO-004).
+ *
+ * Two rules beyond the diagram, both properties of the run rather than the edge:
+ *   - a recorded §2.9 stop makes the run terminal for every subsystem at once
+ *     (§2.3), so it advances nowhere — least of all to `done`;
+ *   - a state outside RUN_STATES advances nowhere either. A run.json carrying an
+ *     unknown position is damaged, and guessing an edge for it is worse than
+ *     refusing one.
+ */
+export function advanceRun(
+  run: RunPosition,
+  to: RunState,
+  context: RunTransitionContext,
+): AdvanceResult {
+  const from = run.state;
+  if (run.stop !== null) {
+    return {
+      ok: false,
+      from,
+      why:
+        `run at ${from} carries a stop of kind "${run.stop.kind}": a stopped run is terminal for ` +
+        `every subsystem at once (§2.3) and advances to no state, ${to} included`,
+    };
+  }
+  if (!(RUN_STATES as readonly string[]).includes(from)) {
+    return {
+      ok: false,
+      from,
+      why:
+        `run position "${from}" is not one of the §3.1 states (${RUN_STATES.join(", ")}); ` +
+        "no edge can be adjudicated from it",
+    };
+  }
+  const edge = legalRunTransition(from as RunState, to, context);
+  return { ok: edge.ok, from, why: edge.why ?? `${from}->${to}` };
 }

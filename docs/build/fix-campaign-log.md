@@ -65,6 +65,46 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase II — GAP-006 + the scope/TDD pass + GAP-041 (the trust floor)
+- **Landed (II.1, GAP-006):** `core/tool-legality.ts` — one declaration table (phase rule from
+  a closed vocabulary + caller allowlist) through which EVERY `conductor_*` call passes via
+  `requireToolLegal`; caller identity read from the §3.5 registry, never from arguments;
+  sub-session allowlist = status/surface/override only; `advanceRun` derives position from
+  persisted state (the hardcoded `legalRunTransition("EXECUTING",…)` sites are gone);
+  `Run.classified` receipt closes classify re-entry; `OVERRIDE_GATES` closed vocabulary with
+  unknown names refused at zero budget cost. Growth: an undeclared tool fails a guard test
+  AND is refused at runtime. One pre-existing e2e test corrected (it spent its override on a
+  gate with no consumption point — encoded ISSUE-007's defect).
+- **Landed (II.2a):** setup floor (GAP-015), rootLevelOnly hole (ISSUE-009), vetted-test
+  identity witness (GAP-007), green-admission REFUSE per D10 (GAP-008), real staged-deletion
+  fact at publish freshness (ISSUE-046).
+- **Landed (II.2b):** validateQueue refuses wildcard-headed globs, matched-file size budget,
+  read-set token bound (`workflow.readSetTokenBudget`, default 20000, 0=off), id shape +
+  newline folding (ISSUE-071), inter-item write-territory overlap for ANY kind pair;
+  per-item attempt cap (`workflow.implementerAttempts`, default 3). Both knobs documented in
+  docs/user/configuration.md (this commit).
+- **Landed (II.3, GAP-041):** test-vet.md and §2.10 are one list; a critic verdict failing a
+  load-bearing criterion refuses advancement naming the criterion (ISSUE-013 closed).
+- **Fix rounds (4):** round 1 verdict PARTIAL → F1 (trivial-classification path bypassed ALL
+  queue acceptance — closed: one acceptance authority, trivial routes through validateQueue),
+  F3 (implementer's writable set now fileScope MINUS testScope — prevention before the spent
+  sub-session), F6 (overlap refusal kind-blind), F7 (caller rule answered before argument
+  shape). Round 3: GAP-015 coverage judged on ONE evidence universe (the detection walk) with
+  complete judgment (no sorted 200-slice); decompose.md trimmed 6498→6319 bytes. Round 4:
+  multi-ecosystem escape (coverage judged on PRE-widening per-ecosystem source globs; widened
+  unions stay for requiredScopes routing) — verifier re-performed six doc-shaped answers, all
+  refused.
+- **Escape gauntlet (fresh verifier, own probes through real handlers):** defer-all→report
+  refused from four positions; classify re-entry refused incl. deleted-receipt variant;
+  eleven orchestrator-only tools refused from a real dispatched sub-session; misspelled
+  override gate costs nothing; root-level TDD skip refused; '**' trivial fileScope refused;
+  zero-test/fallback greens refused. Gate 1476/1476; orchestrator re-ran the round-4
+  load-bearing mutation (red observed, restore hash-identical).
+- **Residuals routed/accepted:** template-less ecosystems (cargo/cmake) now block at
+  mark_green until an itemTest template is configured — loud, recoverable, a consequence of
+  the owner's D10 REFUSE (accepted). Multi-ecosystem greenfield scaffolds take the
+  non-empty fallback (deliberate). decompose.md headroom now 181 bytes — watch at Phase 16.
+
 ## Phase I.4 — ISSUE-001 (CRITICAL) + GAP-001 + GAP-003 + GAP-005 + GAP-039
 - **Landed (wiring):** plugin registers `experimental.chat.system.transform` / `chat.params` /
   `chat.headers` (names verified against the SDK's own d.ts); one pure `composeDelivery`

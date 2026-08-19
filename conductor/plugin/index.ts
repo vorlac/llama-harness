@@ -109,6 +109,7 @@ import {
   handleValidate,
   handleVetTest,
   readQueueJson,
+  requireToolLegal,
   verifyInFlightTreeFor,
 } from "../adapter/tools.ts";
 import type {
@@ -123,6 +124,7 @@ import type {
 } from "../adapter/tools.ts";
 import type { GateItem, GateQuestion } from "../core/gates-phase.ts";
 import { AMEND_OP_KINDS, parseAmendOps } from "../core/queue-amend.ts";
+import { callerAllowed } from "../core/tool-legality.ts";
 import { NO_TREE } from "../core/types.ts";
 import type { Config, Item, LogLevel, TreePath, TreeSlug } from "../core/types.ts";
 
@@ -643,6 +645,13 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
           initRepo: S.boolean()
             .optional()
             .describe("§3.9:1500 — true initializes a repo here, false runs in no-git mode"),
+          acknowledgeNoTdd: S.boolean()
+            .optional()
+            .describe(
+              "GAP-015 — configure a behavioralPaths list that covers none of this repo's " +
+                "detected source anyway; without it setup refuses such a list, because it " +
+                "turns RED-before-GREEN off for every item",
+            ),
         })
           .optional()
           .describe("the human's answers to setup's interactive asks (§6.2:1875)"),
@@ -1412,13 +1421,40 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     return handleSetup(setupInput);
   }
 
-  // The ONE body every registered tool executes. Argument legality first (a
-  // refusal, never a default), then the bundle, then the committed handler.
+  // The ONE body every registered tool executes. Caller legality first, then
+  // argument legality (a refusal, never a default), then the bundle, then the
+  // committed handler.
   async function runTool(name: string, rawArgs: unknown, context: unknown): Promise<string> {
     const args = argsOf(rawArgs);
     const sessionID = sessionIdOf(context);
+
+    // GAP-006, the choke point's CALLER half. Identity comes from the §3.5
+    // registry — the same map the gate hook reads — and never from an argument,
+    // because an identity the model supplies is an identity the model can forge.
+    // Asked here, ahead of everything, so it holds for conductor_setup too (the
+    // one name that returns before the bundle is assembled).
+    const callerEntry = registry.get(sessionID);
+    const caller = {
+      ...(callerEntry?.role === undefined ? {} : { role: callerEntry.role }),
+      ...(callerEntry?.itemId === undefined ? {} : { itemId: callerEntry.itemId }),
+    };
+
+    // WHO before WHAT, through core's own predicate (the same one requireToolLegal
+    // asks below, so this is an ordering and not a second rule). Asking the argument
+    // question first answers a sub-session that may not call this tool at all with a
+    // shape complaint — "re-issue the call with the missing field set" — which invites
+    // exactly the retry §3.5 exists to refuse and never names the rule it broke.
+    const byCaller = callerAllowed(name, caller);
+    if (!byCaller.ok) throw refuse(byCaller.why);
+
     requireDeclaredArgs(name, args);
-    if (name === "conductor_setup") return JSON.stringify(await runSetup(args));
+
+    if (name === "conductor_setup") {
+      // No store: setup is the one tool that runs before a workspace can be
+      // opened at all (§2.3's OpenOptions needs the Config setup produces).
+      requireToolLegal({ tool: name, runId: "", caller });
+      return JSON.stringify(await runSetup(args));
+    }
 
     const run = bound[name];
     if (run === undefined) {
@@ -1429,6 +1465,17 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     }
     const assembled = assemble(name, sessionID, !RUNLESS_TOOLS.includes(name));
     try {
+      // The PHASE half, after the bundle because it reads the run the bundle
+      // resolved. Every §3.4 name passes through here: a tool guarded by its own
+      // handler declares that delegation in the table, and a tool that declares
+      // nothing is refused rather than run (which is the growth property — the
+      // next tool cannot be born unguarded).
+      requireToolLegal({
+        tool: name,
+        store: assembled.deps.store,
+        runId: assembled.deps.runId,
+        caller,
+      });
       return JSON.stringify(await run(args, assembled));
     } finally {
       assembled.release();

@@ -74,9 +74,14 @@ export const EVENTS: Record<Component, readonly string[]> = {
   //                       No gate/fsm/state name states that fact — the call was
   //                       not adjudicated, no transition was attempted, and
   //                       nothing was persisted.
-  //   config.updated    — §2.1/§3.4: conductor_setup rewrote .conductor/config.json
-  //                       on a reconfigure, and data.changes carries the diff (the
-  //                       changed keys with their old and new values). Setup
+  //   config.updated    — §2.1/§3.4: conductor_setup wrote .conductor/config.json.
+  //                       data.changes carries the reconfigure diff (the changed keys
+  //                       with their old and new values; empty on a first setup, which
+  //                       has nothing to diff against) and data.answers carries the
+  //                       §2.1:622 values the call was answered with — including the
+  //                       `acknowledgeNoTdd` word, which has no config field to land in
+  //                       and would otherwise leave the one call that can turn the TDD
+  //                       law off with no trace anywhere (GAP-015). Setup
   //                       precedes every run, writes no item and records no
   //                       decision, so item.updated and decision.recorded would
   //                       both LIE about what happened; the widening follows the

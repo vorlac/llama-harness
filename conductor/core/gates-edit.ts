@@ -229,6 +229,20 @@ export function decideEdit(input: EditInput): Decision {
   }
 
   if (sessionRole === "implementer") {
+    // The implementer's writable set is fileScope MINUS testScope, and the
+    // subtraction is checked FIRST so a scope that covers both answers the same
+    // way a scope that covers only the test does. Queue acceptance refuses an item
+    // whose fileScope covers its own testScope, and mark_green's digest witness
+    // catches a rewritten vetted test afterwards — but the witness speaks only
+    // once a whole sub-session has been spent, and a session gated to write the
+    // test it must PASS is a licence to make the proof agree with the code
+    // (§2.4 / §4.2). Denied here, where the question costs nothing.
+    const covering = testScope.filter((glob) => globMatch(glob, normalized));
+    if (covering.length > 0) {
+      return deny(
+        `this path is inside the item's testScope [${covering.join(", ")}] — an implementer may never edit the test that proves its own item, whatever its fileScope also covers; the test is the test-writer's territory`,
+      );
+    }
     if (scopeMatches(fileScope, normalized)) {
       return ALLOW;
     }

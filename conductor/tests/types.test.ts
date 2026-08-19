@@ -379,6 +379,7 @@ const evidenceGreenExample: EvidenceRecord = {
   itemId: "I1",
   command: ["node", "--test", "tests/parser.test.ts"],
   exitCode: 0,
+  targeted: true,
 };
 
 const evidenceVerifyExample: EvidenceRecord = {
