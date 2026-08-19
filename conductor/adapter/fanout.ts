@@ -17,7 +17,7 @@
 // only decision help it borrows is the pure core validator.
 
 import { validate } from "../core/types.ts";
-import type { Config } from "../core/types.ts";
+import type { Config, TreePath } from "../core/types.ts";
 import type { Corr, Journal } from "./journal.ts";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +33,9 @@ import type { Corr, Journal } from "./journal.ts";
 export interface RegistryEntry {
   role: string;
   itemId: string;
-  tree: string;
+  // The tree PATH the gates judge this session's writes against — never the
+  // evidence layer's slug (core/types.ts brands the two apart; ISSUE-002).
+  tree: TreePath;
   receivingReview?: boolean;
 }
 
@@ -50,8 +52,8 @@ export interface SessionRegistry {
 // subscribes to marker-clear notifications (returning an unsubscribe) so a held
 // write-capable job is released deterministically — no timers, no polling.
 export interface TreeState {
-  isFrozen(tree: string): boolean;
-  onClear(listener: (tree: string) => void): () => void;
+  isFrozen(tree: TreePath): boolean;
+  onClear(listener: (tree: TreePath) => void): () => void;
 }
 
 // One unit of fan-out work. `writeCapable` is the freeze-admission discriminator: a
@@ -59,7 +61,10 @@ export interface TreeState {
 export interface FanoutJob {
   role: string;
   itemId: string;
-  tree: string;
+  // The tree PATH this sub-session is dispatched into, which the engine writes
+  // verbatim onto the §3.5 registry entry the gates read. NO_TREE for a job that
+  // works no tree of its own.
+  tree: TreePath;
   writeCapable: boolean;
   prompt: string;
   schemaName: string;

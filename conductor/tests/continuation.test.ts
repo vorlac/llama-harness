@@ -213,7 +213,7 @@
 //
 //   // (G8)/(G9) the two ONE-derivation helpers BOTH seams read.
 //   export function activeInlineClaimScope(store: StateStore, runId: string): string[] | null;
-//   export function resolveSessionTree(store: StateStore, entry: RegistryEntry | undefined): string;
+//   export function resolveSessionTree(store: StateStore, entry: RegistryEntry | undefined): TreePath;
 // ---------------------------------------------------------------------------
 //
 // Assertion id -> test (each test name carries its id as its FIRST token):
@@ -279,7 +279,7 @@ import type { GateItem, GateRun, LegalToolsResult } from "../core/gates-phase.ts
 import { isHumanTerritory } from "../core/decide.ts";
 import { isTerminal } from "../core/stops.ts";
 import { isKnownEvent } from "../core/journal-events.ts";
-import { validate } from "../core/types.ts";
+import { treePath, validate } from "../core/types.ts";
 import type {
   AnomalyRecord,
   Config,
@@ -290,6 +290,7 @@ import type {
   Queue,
   QueueItem,
   Run,
+  TreePath,
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -459,7 +460,7 @@ function git(dir: string, args: string[]): string {
 
 // A committed fixture repo: <root> IS the workspace root, so .conductor/ lands beside
 // src/ and tests/ exactly as it does in production.
-function scratchRepo(): string {
+function scratchRepo(): TreePath {
   const dir = mkdtempSync(path.join(tmpdir(), "conductor-cont-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -469,7 +470,7 @@ function scratchRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "."]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function freshStateHome(): string {
@@ -889,7 +890,7 @@ function makeFanoutWiring(
 ): FanoutWiring {
   // adapter/fanout.ts's own registry entry shape (itemId and tree REQUIRED there, unlike
   // adapter/tools.ts's gate-side RegistryEntry) — the 9.4a wiring's exact declaration.
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const counted: string[] = [];
   const sessionIdx = new Map<string, number>();
@@ -2218,9 +2219,9 @@ test("[10.1-archive-removes-worktrees] C-037 ruling 6 / the 9.6 binding: on the 
   const stateHome = freshStateHome();
   const workspaceKey = "wk-archive";
   const ctx = { stateHome, workspaceKey };
-  const treePaths: Record<string, string> = {};
+  const treePaths: Record<string, TreePath> = {};
   for (const itemId of ["I1", "I2"]) {
-    treePaths[itemId] = createWorktree(root, runId, itemId, ctx);
+    treePaths[itemId] = treePath(createWorktree(root, runId, itemId, ctx));
     const item = store.loadItem(runId, itemId);
     item.worktree = treePaths[itemId];
     store.saveItem(runId, item);
@@ -2280,7 +2281,7 @@ test("[10.1-archive-removes-worktrees] C-037 ruling 6 / the 9.6 binding: on the 
   seedExecuting(store2, runId2, queue, { I1: "PUBLISHED", I2: "PUBLISHED", I3: "PUBLISHED" });
   for (const itemId of ["I1", "I2"]) {
     const item = store2.loadItem(runId2, itemId);
-    item.worktree = path.join(stateHome, "conductor", workspaceKey, "worktrees", runId2, itemId);
+    item.worktree = treePath(path.join(stateHome, "conductor", workspaceKey, "worktrees", runId2, itemId));
     store2.saveItem(runId2, item);
   }
   const run2 = store2.loadRun(runId2);

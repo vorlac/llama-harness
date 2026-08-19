@@ -84,8 +84,10 @@ import type { ScopeSpec, VerifyConfig, VerifyOutcome, RunTestResult } from "../a
 import { createJournal } from "../adapter/journal.ts";
 import type { Journal } from "../adapter/journal.ts";
 import { classifyFailure, type RunnerRules } from "../core/freshness.ts";
-import { validate } from "../core/types.ts";
-import type { Config, EvidenceRecord } from "../core/types.ts";
+import { MAIN_TREE, validate } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
+import type { TreePath } from "../core/types.ts";
+import type { Config, EvidenceRecord, TreeSlug } from "../core/types.ts";
 // Directly exercised in the healing test to plant an orphaned quarantine.
 import { quarantineFiles } from "../adapter/quarantine.ts";
 
@@ -105,7 +107,7 @@ import { quarantineFiles } from "../adapter/quarantine.ts";
 //   runVerify(runDir, itemId, config: VerifyConfig, scopePattern: string, {
 //     cwd: string; excludeTestFiles?: string[]; journal: Journal;
 //     stateHome: string; workspaceKey: string; runId: string;
-//     tree?: string /* "main" | itemId, default "main" */;
+//     tree?: TreeSlug /* "main" | itemId, default MAIN_TREE */;
 //     now?: () => number; pid?: number;
 //   }): VerifyOutcome
 //     VerifyConfig { verify: { scopes: Record<string, VerifyScopeSpec>;
@@ -153,14 +155,14 @@ function git(dir: string, args: string[]): void {
 }
 
 // A committed fixture repo (so runVerify records a real HEAD sha + branch "main").
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = mkdtempSync(path.join(tmpdir(), "conductor-evi-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 // The <runDir> where evidence.jsonl / journal.jsonl / the verify marker live.
@@ -374,7 +376,7 @@ test("[6.1-per-kind] validateEvidenceRecord rejects a verify record missing star
     startedMs: 1754560300000,
     head: "3f9a1c7",
     branch: "main",
-    tree: "main",
+    tree: MAIN_TREE,
     excluded: [] as string[],
     green: true,
     scopes: { unit: { green: true, exitCode: 0, durationMs: 41876 } },
@@ -683,7 +685,7 @@ test("[6.1-runverify] runVerify: start-stamp <= mid-run mtime; HEAD/branch recor
     stateHome,
     workspaceKey: "wkey",
     runId: "r-verify",
-    tree: "main",
+    tree: MAIN_TREE,
   });
   journal.flushSync();
 
@@ -749,7 +751,7 @@ test("[6.1-build-witness] build-fail => the test is provably NOT run (witness fi
     stateHome,
     workspaceKey: "wkey",
     runId: "r-build",
-    tree: "main",
+    tree: MAIN_TREE,
   });
 
   assert.equal(
@@ -789,7 +791,7 @@ test("[6.1-marker] verify marker created-during / removed-after; live marker ref
       stateHome,
       workspaceKey: "wkey",
       runId: "r-live",
-      tree: "main",
+      tree: MAIN_TREE,
     });
     assert.equal(outcome.refused, true, "a second runVerify against a LIVE marker for the same tree REFUSES (plan 2421, §4.3)");
     if (outcome.refused) {
@@ -817,7 +819,7 @@ test("[6.1-marker] verify marker created-during / removed-after; live marker ref
       stateHome,
       workspaceKey: "wkey",
       runId: "r-other",
-      tree: "main",
+      tree: MAIN_TREE,
     });
     assert.equal(outcome.refused, false, "a live marker for a DIFFERENT tree does not block this tree (per-tree markers)");
     assert.equal(readEvidence(runDir).length, 1, "the unblocked verify ran and appended its record");
@@ -838,7 +840,7 @@ test("[6.1-marker] verify marker created-during / removed-after; live marker ref
       stateHome,
       workspaceKey: "wkey",
       runId: "r-stale",
-      tree: "main",
+      tree: MAIN_TREE,
     });
     assert.equal(outcome.refused, false, "a stale marker (dead pid) is BROKEN and the run proceeds (plan 2427-2428)");
     if (!outcome.refused) {
@@ -878,7 +880,7 @@ test("[6.1-timeout] a scope that never exits is KILLED at timeoutMs (its post-ti
     stateHome,
     workspaceKey: "wkey",
     runId: "r-timeout",
-    tree: "main",
+    tree: MAIN_TREE,
   });
 
   assert.equal(
@@ -934,7 +936,7 @@ test("[6.1-quarantine] excludeTestFiles moved OUT of the repo before the start-s
       stateHome,
       workspaceKey: "wkey",
       runId: "r-control",
-      tree: "main",
+      tree: MAIN_TREE,
     });
     assert.ok(existsSync(witness), "control: the whole-tree walker DOES collect an in-repo foreign red");
     const scopes = verifyScopes(outcome);
@@ -955,7 +957,7 @@ test("[6.1-quarantine] excludeTestFiles moved OUT of the repo before the start-s
       stateHome,
       workspaceKey: "wkey",
       runId: "r-quar",
-      tree: "main",
+      tree: MAIN_TREE,
       excludeTestFiles: ["tests/foreign.suite.js"],
     });
 
@@ -1022,7 +1024,7 @@ test("[6.1-heal] a mid-verify kill's orphaned quarantine is healed on the next r
     stateHome,
     workspaceKey: "wkey",
     runId: "r-next",
-    tree: "main",
+    tree: MAIN_TREE,
   });
 
   assert.equal(outcome.refused, false, "the healing run proceeds");
@@ -1124,7 +1126,10 @@ test("[6.1-marker-tree-safeid] runVerify rejects a traversing tree key (markerPa
         stateHome,
         workspaceKey: "wkey",
         runId: "r-evil",
-        tree: "../../tmp/evil",
+        // A poisoned slug that got PAST the type — core/types.ts treeSlug would
+        // refuse it at construction — so what is asserted here is the evidence
+        // layer's OWN runtime guard: assertSafeId, which is not relaxed.
+        tree: "../../tmp/evil" as unknown as TreeSlug,
       }),
     /escape|separator|slug/i,
     "a tree key that would climb out of runDir must be rejected before any marker is written",
@@ -1139,7 +1144,7 @@ test("[6.1-marker-tree-safeid] runVerify rejects a traversing tree key (markerPa
     stateHome,
     workspaceKey: "wkey",
     runId: "r-ok",
-    tree: "main",
+    tree: MAIN_TREE,
   });
   assert.equal(ok.refused, false, "a valid tree key still runs");
 });
@@ -1168,7 +1173,7 @@ test("[6.1-marker-overage] an over-age verify marker is broken even if its pid i
     stateHome,
     workspaceKey: "wkey",
     runId: "r-overage",
-    tree: "main",
+    tree: MAIN_TREE,
   });
 
   assert.equal(outcome.refused, false, "an over-age marker is BROKEN and the verify proceeds (F6)");
@@ -1193,7 +1198,7 @@ test("[6.1-marker-overage] an over-age verify marker is broken even if its pid i
       stateHome,
       workspaceKey: "wkey",
       runId: "r-overage2",
-      tree: "main",
+      tree: MAIN_TREE,
       staleMarkerMs: 1000,
     });
     assert.equal(out2.refused, false, "opts.staleMarkerMs makes the over-age threshold injectable (F6)");
@@ -1242,7 +1247,7 @@ test("[6.1-timeout-sigkill] a scope that TRAPS SIGTERM and exits 0 is still kill
     stateHome,
     workspaceKey: "wkey",
     runId: "r-sigkill",
-    tree: "main",
+    tree: MAIN_TREE,
   });
 
   const scopes = verifyScopes(outcome);

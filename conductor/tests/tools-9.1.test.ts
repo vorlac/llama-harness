@@ -146,6 +146,7 @@ import type {
   Item,
   RunState,
   TrivialItem,
+  TreePath,
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -337,7 +338,7 @@ function makeClassifyFanout(
   classification: Classification,
   check: ClassificationCheck,
 ): { fanout: Fanout; sdk: ReturnType<typeof makeFakeSdk>; promptedRoles: string[] } {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const promptedRoles: string[] = [];
   sdk.setResponder((req) => {

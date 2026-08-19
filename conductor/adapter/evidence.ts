@@ -44,8 +44,8 @@ import type { QuarantineHandle } from "./quarantine.ts";
 import { classifyFailure } from "../core/freshness.ts";
 import type { RunnerRules } from "../core/freshness.ts";
 import { globMatch } from "../core/shell-parse.ts";
-import { validate } from "../core/types.ts";
-import type { EvidenceRecord, FailureClass } from "../core/types.ts";
+import { MAIN_TREE, treeSlug, validate } from "../core/types.ts";
+import type { EvidenceRecord, FailureClass, TreeSlug } from "../core/types.ts";
 
 // The verify member of the §2.6 discriminated union, named so a VerifyOutcome can
 // expose the verify-specific fields (scopes/head/startedMs/…) without a re-narrow.
@@ -614,7 +614,9 @@ export interface VerifyOptions {
   stateHome: string;
   workspaceKey: string;
   runId: string;
-  tree?: string;
+  // The evidence layer's tree SLUG, defaulting to the shared tree: it composes
+  // the per-tree marker filename, so a PATH can never be one.
+  tree?: TreeSlug;
   now?: () => number;
   pid?: number;
   // Over-age marker threshold (F6); defaults to 24h. A marker older than this is broken
@@ -629,7 +631,7 @@ interface Marker {
 
 export type VerifyOutcome =
   | { refused: false; record: VerifyRecord; staleMarkerBroken?: Marker }
-  | { refused: true; reason: string; tree: string; heldBy: Marker };
+  | { refused: true; reason: string; tree: TreeSlug; heldBy: Marker };
 
 // The over-age marker threshold: a verify marker older than this is stale even if its
 // pid is still alive (a crashed run whose pid was recycled by an unrelated process).
@@ -643,7 +645,7 @@ const DEFAULT_STALE_MARKER_MS = 24 * 60 * 60 * 1000;
 const MARKER_PREFIX = "verify-running-";
 const MARKER_SUFFIX = ".json";
 
-function markerPathOf(runDir: string, tree: string): string {
+function markerPathOf(runDir: string, tree: TreeSlug): string {
   // F3 trust boundary: tree ("main" or a worktree item id) composes the marker filename
   // AND is later rmSync'd — a traversing tree ("../../tmp/evil") would let a poisoned key
   // write/delete outside runDir. Reject anything that is not a conservative slug.
@@ -679,7 +681,7 @@ export interface LiveMarkerOptions {
  * READ-ONLY: a broken marker is omitted, never deleted. Breaking one is runVerify's
  * move under §4.3, which does it deliberately and reports the anomaly on its outcome.
  */
-export function liveVerifyTrees(runDir: string, opts: LiveMarkerOptions = {}): string[] {
+export function liveVerifyTrees(runDir: string, opts: LiveMarkerOptions = {}): TreeSlug[] {
   let names: string[];
   try {
     names = readdirSync(runDir);
@@ -688,13 +690,15 @@ export function liveVerifyTrees(runDir: string, opts: LiveMarkerOptions = {}): s
   }
   const now = opts.now ?? Date.now;
   const staleMarkerMs = opts.staleMarkerMs ?? DEFAULT_STALE_MARKER_MS;
-  const trees: string[] = [];
+  const trees: TreeSlug[] = [];
   for (const name of names) {
     if (!name.startsWith(MARKER_PREFIX) || !name.endsWith(MARKER_SUFFIX)) continue;
     const tree = name.slice(MARKER_PREFIX.length, name.length - MARKER_SUFFIX.length);
     if (tree.length === 0) continue;
+    let slug: TreeSlug;
     try {
       assertSafeId(tree, "tree");
+      slug = treeSlug(tree);
     } catch {
       continue;
     }
@@ -702,7 +706,7 @@ export function liveVerifyTrees(runDir: string, opts: LiveMarkerOptions = {}): s
     if (marker === null) continue;
     if (!pidAlive(marker.pid)) continue;
     if (now() - marker.startMs > staleMarkerMs) continue;
-    trees.push(tree);
+    trees.push(slug);
   }
   return trees.sort();
 }
@@ -801,7 +805,7 @@ export function runVerify(
 ): VerifyOutcome {
   const now = opts.now ?? Date.now;
   const pid = opts.pid ?? process.pid;
-  const tree = opts.tree ?? "main";
+  const tree = opts.tree ?? MAIN_TREE;
   const cwd = opts.cwd;
   const exclude = opts.excludeTestFiles ?? [];
   const staleMarkerMs = opts.staleMarkerMs ?? DEFAULT_STALE_MARKER_MS;

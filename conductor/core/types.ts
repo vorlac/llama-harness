@@ -128,6 +128,67 @@ const PONYTAIL_LEVELS = ["lite", "full", "ultra"] as const;
 export type PonytailLevel = (typeof PONYTAIL_LEVELS)[number];
 
 // ---------------------------------------------------------------------------
+// The two tree types (§3.5 / §4.2 / §2.6; C-037 ruling 5)
+// ---------------------------------------------------------------------------
+
+// A "tree" is two different things and the difference decides whether a gate
+// fires:
+//
+//   * the EVIDENCE layer names a tree by SLUG — "main" for the shared tree, an
+//     itemId for a §4.2 worktree. adapter/evidence.ts composes
+//     verify-running-<slug>.json out of it under assertSafeId, which rejects a
+//     separator, so a path can never be one;
+//   * the GATE layer names a tree by PATH — core/gates-edit.ts strips it off the
+//     front of an absolute edit path by string equality, so a slug can never be
+//     one: a session whose tree is "main" is denied every edit it attempts.
+//
+// The two were one `string` for four authorship events running, each of which fed
+// one where the other belonged. They are branded here so the compiler carries the
+// distinction the names alone could not (fix-campaign GAP-004), and the
+// constructors validate so the guarantee survives the plugin runtime's type
+// stripping too, where the compile-time half does not exist (G5).
+declare const TREE_SLUG_BRAND: unique symbol;
+declare const TREE_PATH_BRAND: unique symbol;
+
+export type TreeSlug = string & { readonly [TREE_SLUG_BRAND]: "tree-slug" };
+export type TreePath = string & { readonly [TREE_PATH_BRAND]: "tree-path" };
+
+// The evidence layer's tree name. Refuses a separator (the marker filename is
+// composed from it) and refuses the empty string (it names no tree at all).
+export function treeSlug(value: string): TreeSlug {
+  if (value.length === 0) {
+    throw new Error("tree slug: the empty string names no tree");
+  }
+  if (value.includes("/") || value.includes("\\")) {
+    throw new Error(
+      `tree slug: "${value}" is a PATH, not a tree slug — the evidence layer's tree is "main" or an itemId, and a marker filename is composed from it`,
+    );
+  }
+  return value as TreeSlug;
+}
+
+// The gate layer's tree root. Refuses a bare slug — the ISSUE-002 misfeed, where
+// the registry handed the edit gate "main" and every write in that session was
+// denied. The empty string is admitted: it is NO_TREE, the registry's "this
+// session has no tree of its own", which adapter/continuation.ts resolves against
+// the workspace root before any gate reads it.
+export function treePath(value: string): TreePath {
+  if (value.length > 0 && !value.includes("/")) {
+    throw new Error(
+      `tree path: "${value}" is a SLUG, not a tree path — the edit gate strips this value off the front of an absolute path, so a bare name matches nothing and denies every edit`,
+    );
+  }
+  return value as TreePath;
+}
+
+// The shared tree's evidence slug, once.
+export const MAIN_TREE: TreeSlug = treeSlug("main");
+
+// "No tree of this session's own", once. The §3.5 registry carries it for a
+// sub-session that works no item (a classifier, a planner, a plan reviewer).
+export const NO_TREE: TreePath = treePath("");
+
+// ---------------------------------------------------------------------------
 // TS types (one per §2 schema, plus their shared shapes)
 // ---------------------------------------------------------------------------
 
@@ -232,7 +293,10 @@ export interface Item {
   id: string;
   state: ItemState;
   assignee: string | null;
-  worktree: string | null;
+  // §4.2: the item's own tree when worktree mode gave it one, else null — the
+  // shared tree is not spelled here. A PATH: it is what the §3.5 registry hands
+  // the edit gate.
+  worktree: TreePath | null;
   attempts: {
     green: number;
     reviewRounds: number;
@@ -288,7 +352,9 @@ export type EvidenceRecord =
       startedMs: number;
       head: string;
       branch: string;
-      tree: string;
+      // The evidence layer's tree SLUG — the same name the per-tree verify marker
+      // carries, never a path.
+      tree: TreeSlug;
       excluded: string[];
       green: boolean;
       scopes: Record<string, { green: boolean; exitCode: number; durationMs: number }>;

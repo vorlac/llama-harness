@@ -121,7 +121,7 @@
 //
 //   // adapter/worktrees.ts (NEW module)
 //   interface WorktreeContext { stateHome: string; workspaceKey: string; }
-//   createWorktree(workspace: string, runId: string, itemId: string, ctx: WorktreeContext): string
+//   createWorktree(workspace: string, runId: string, itemId: string, ctx: WorktreeContext): string  // a tree PATH
 //     // prune-first; `git worktree add -b conductor/<runId>/<itemId>
 //     //   <stateHome>/conductor/<workspaceKey>/worktrees/<runId>/<itemId>`; returns the path
 //   mergeBack(workspace: string, runId: string, itemId: string, ctx: WorktreeContext):
@@ -229,6 +229,8 @@ import { loadPacks } from "../adapter/inject.ts";
 import { buildCommitMessage } from "../core/commit-message.ts";
 import { decideGit } from "../core/gates-git.ts";
 import { validate } from "../core/types.ts";
+import { MAIN_TREE, treePath, treeSlug } from "../core/types.ts";
+import type { TreePath, TreeSlug } from "../core/types.ts";
 import type { Config, EvidenceRecord, Item, ItemState, ParallelWriteMode, Queue, QueueItem } from "../core/types.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 
@@ -251,7 +253,7 @@ interface MergeBackResult {
 type CreateWorktreeFn = (workspace: string, runId: string, itemId: string, ctx: WorktreeContext) => string;
 type MergeBackFn = (workspace: string, runId: string, itemId: string, ctx: WorktreeContext) => MergeBackResult;
 type RemoveWorktreeFn = (workspace: string, runId: string, itemId: string, ctx: WorktreeContext) => void;
-type VerifyInFlightTreeForFn = (store: StateStore, runId: string, markerTree: string) => string | null;
+type VerifyInFlightTreeForFn = (store: StateStore, runId: string, markerTree: TreeSlug) => TreePath | null;
 
 const createWorktreeFn: CreateWorktreeFn = createWorktree;
 const mergeBackFn: MergeBackFn = mergeBack;
@@ -300,8 +302,8 @@ const PACKS: Record<string, string> = loadPacks(DOCTRINE_DIR);
 
 // The expected out-of-repo worktree path and branch — THIS FILE'S OWN restatement of the
 // spec literals, never derived from the subject module.
-function wtPathOf(stateHome: string, runId: string, itemId: string): string {
-  return path.join(stateHome, "conductor", WKEY, "worktrees", runId, itemId);
+function wtPathOf(stateHome: string, runId: string, itemId: string): TreePath {
+  return treePath(path.join(stateHome, "conductor", WKEY, "worktrees", runId, itemId));
 }
 
 function wtBranchOf(runId: string, itemId: string): string {
@@ -352,7 +354,7 @@ function gitOut(dir: string, args: string[]): string {
 // A committed fixture repo. The shared file is COMMITTED so every linked worktree checks it
 // out; repo-LOCAL identity is configured so the SUBJECT's own git children (merge commits)
 // never depend on the runner's global config.
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = mkdtempSync(path.join(REAL_TMP, "conductor-96-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -363,7 +365,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, SHARED_REL), SHARED_BASE);
   git(dir, ["add", "."]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function freshStateHome(): string {
@@ -823,7 +825,7 @@ interface PublishBench {
   sdk: ReturnType<typeof makeFakeSdk>;
   fanout: Fanout;
   h0: string;
-  worktreeOf: Map<string, string>;
+  worktreeOf: Map<string, TreePath>;
 }
 
 function buildPublishBench(specs: PublishItemSpec[]): PublishBench {
@@ -859,12 +861,12 @@ function buildPublishBench(specs: PublishItemSpec[]): PublishBench {
   writeFileSync(path.join(runDir, "queue.json"), JSON.stringify(queue, null, 2));
 
   const evJournal: Journal = createJournal(runDir, config, {});
-  const worktreeOf = new Map<string, string>();
+  const worktreeOf = new Map<string, TreePath>();
   const h0 = mustHead(workspace);
 
   for (const spec of specs) {
     store.saveItem(runId, makeRuntimeItem(spec.id, "PENDING"));
-    const wt = createWorktreeFn(workspace, runId, spec.id, ctxFor(stateHome));
+    const wt = treePath(createWorktreeFn(workspace, runId, spec.id, ctxFor(stateHome)));
     const rels = relsOf(spec.id);
     mkdirSync(path.join(wt, rels.srcDir), { recursive: true });
     mkdirSync(path.join(wt, "tests"), { recursive: true });
@@ -879,7 +881,7 @@ function buildPublishBench(specs: PublishItemSpec[]): PublishBench {
     // committed machinery with cwd = the worktree and tree = the item id.
     const outcome = runVerify(runDir, spec.id, config, [rels.implRel], {
       cwd: wt,
-      tree: spec.id,
+      tree: treeSlug(spec.id),
       journal: evJournal,
       stateHome,
       workspaceKey: WKEY,
@@ -946,11 +948,11 @@ interface EditAttempt {
   sessionID: string;
   role: string;
   itemId: string;
-  tree: string;
+  tree: TreePath;
   editPath: string;
   fileScope: string[];
   testScope: string[];
-  verifyInFlightTree: string | null;
+  verifyInFlightTree: TreePath | null;
 }
 
 function attemptEdit(a: EditAttempt): { allowed: boolean; reason: string } {
@@ -1025,7 +1027,7 @@ test("[9.6-create-worktree-path-and-branch] createWorktree(workspace, runId, ite
   const runId = "r-96-create";
   const h0 = mustHead(workspace);
 
-  const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
 
   assert.equal(wt, wtPathOf(stateHome, runId, "I1"), "the returned path is the spec's out-of-repo location, exactly");
   assert.equal(existsSync(wt), true, "the worktree directory exists");
@@ -1086,7 +1088,7 @@ test("[9.6-remove-worktree-and-branch] removeWorktree removes the worktree AND d
   const h0 = mustHead(workspace);
 
   // (a) the ordinary removal, with an untracked artifact in the tree (pins --force).
-  const wt1 = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt1 = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   writeFileSync(path.join(wt1, "build-artifact-9006.txt"), "untracked build output\n");
 
   removeWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
@@ -1101,7 +1103,7 @@ test("[9.6-remove-worktree-and-branch] removeWorktree removes the worktree AND d
 
   // (b) the prune fallback: the directory vanished (a crash, a manual rm) but the
   // administrative entry survived.
-  const wt2 = createWorktreeFn(workspace, runId, "I2", ctxFor(stateHome));
+  const wt2 = treePath(createWorktreeFn(workspace, runId, "I2", ctxFor(stateHome)));
   rmSync(wt2, { recursive: true, force: true });
   assert.equal(
     worktreeListPaths(workspace).includes(wt2),
@@ -1136,7 +1138,7 @@ test("[9.6-outside-repo-witness] the worktree path is OUTSIDE the repo (not a pr
   const config = makeConfig({ command: TREE_RUNNER_CMD });
   const journal = createJournal(runDir, config, {});
 
-  const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
 
   // Geometry first: the worktree lives under the state home, never under the repo.
   assert.notEqual(wt, workspace, "the worktree is not the workspace");
@@ -1151,7 +1153,7 @@ test("[9.6-outside-repo-witness] the worktree path is OUTSIDE the repo (not a pr
   // The MAIN tree's whole-tree verify: green, and the worktree's red copy provably never ran.
   const mainOutcome = runVerify(runDir, "I1", config, "src/anything.mjs", {
     cwd: workspace,
-    tree: "main",
+    tree: MAIN_TREE,
     journal,
     stateHome,
     workspaceKey: WKEY,
@@ -1175,7 +1177,7 @@ test("[9.6-outside-repo-witness] the worktree path is OUTSIDE the repo (not a pr
   // Without this half, 'the witness is absent' would also pass on a runner that runs nothing.
   const wtOutcome = runVerify(runDir, "I1", config, "src/anything.mjs", {
     cwd: wt,
-    tree: "I1",
+    tree: treeSlug("I1"),
     journal,
     stateHome,
     workspaceKey: WKEY,
@@ -1196,7 +1198,7 @@ test("[9.6-c021-linked-worktree-exclude] DEFERRED BINDING (C-021): registerCondu
   const stateHome = freshStateHome();
   const runId = "r-96-c021";
 
-  const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   assert.equal(statSync(path.join(wt, ".git")).isFile(), true, "premise: a linked worktree's .git is a FILE");
   assert.equal(isRepo(wt), true, "premise: rev-parse reports inside-work-tree, so the isRepo guard passes");
 
@@ -1394,7 +1396,7 @@ test("[9.6-verify-in-worktree] evidence.runVerify for a worktree item runs with 
   const obsHome = freshDir("conductor-96-obs-");
   const runId = "r-96-verify";
 
-  const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
 
   // Advance the WORKTREE's HEAD so its head/branch are distinguishable from the workspace's.
   writeFileSync(path.join(wt, "tweak.txt"), "worktree-local change\n");
@@ -1410,7 +1412,7 @@ test("[9.6-verify-in-worktree] evidence.runVerify for a worktree item runs with 
 
   const outcome = runVerify(runDir, "I1", config, "src/anything.mjs", {
     cwd: wt,
-    tree: "I1",
+    tree: treeSlug("I1"),
     journal,
     stateHome,
     workspaceKey: WKEY,
@@ -1452,23 +1454,23 @@ test("[9.6-tree-identity-slug-to-path] C-037 ruling 5, the slug/path bridge: ver
   const runId = createRunFor(store);
   const runDir = runDirOf(store, runId);
 
-  const wt1 = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt1 = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   const i1 = makeRuntimeItem("I1", "RED");
   i1.worktree = wt1;
   store.saveItem(runId, i1);
   store.saveItem(runId, makeRuntimeItem("I3", "PENDING")); // worktree null
 
   // The derivation, all three arms.
-  assert.equal(treeForFn(store, runId, "main"), workspace, '"main" translates to the workspace root');
-  assert.equal(treeForFn(store, runId, "I1"), wt1, "an item slug translates to the item's persisted worktree path");
-  assert.equal(treeForFn(store, runId, "I3"), null, "an item with no worktree yields null — no path can be frozen for it");
+  assert.equal(treeForFn(store, runId, MAIN_TREE), workspace, '"main" translates to the workspace root');
+  assert.equal(treeForFn(store, runId, treeSlug("I1")), wt1, "an item slug translates to the item's persisted worktree path");
+  assert.equal(treeForFn(store, runId, treeSlug("I3")), null, "an item with no worktree yields null — no path can be frozen for it");
 
   // End-to-end through the committed gate. The slug is read OFF THE LEDGER (the marker
   // filename), exactly as the wiring layer will read it.
   writeFileSync(markerFileOf(runDir, "I1"), JSON.stringify({ pid: process.pid, startMs: Date.now() }));
   const slugs = liveMarkerSlugs(runDir);
   assert.deepEqual(slugs, ["I1"], "premise: exactly one live marker, and its slug is the item id");
-  const translated = treeForFn(store, runId, slugs[0]);
+  const translated = treeForFn(store, runId, treeSlug(slugs[0]));
   assert.equal(translated, wt1, "the live marker's slug translates to I1's worktree path");
 
   const base: Omit<EditAttempt, "editPath" | "verifyInFlightTree" | "role" | "testScope"> = {
@@ -1521,7 +1523,9 @@ test("[9.6-tree-identity-slug-to-path] C-037 ruling 5, the slug/path bridge: ver
     role: "implementer",
     testScope: ["tests/**"],
     editPath: srcEdit,
-    verifyInFlightTree: slugs[0],
+    // The raw SLUG, forced past the type that separates the two (core/types.ts):
+    // this row exists to show what happens when the wiring does NOT translate.
+    verifyInFlightTree: slugs[0] as unknown as TreePath,
   });
   assert.equal(
     rawSlug.allowed,
@@ -1535,7 +1539,9 @@ test("[9.6-tree-identity-slug-to-path] C-037 ruling 5, the slug/path bridge: ver
     () =>
       runVerify(runDir, "I1", config, "src/anything.mjs", {
         cwd: workspace,
-        tree: wt1,
+        // A path-shaped tree forced past the type, so what is asserted is the
+        // evidence layer's OWN guard (assertSafeId inside markerPathOf).
+        tree: wt1 as unknown as TreeSlug,
         journal: createJournal(runDir, config, {}),
         stateHome,
         workspaceKey: WKEY,
@@ -1561,8 +1567,8 @@ test("[9.6-cross-tree-freeze-independence] a LIVE verify marker in tree A does n
   const runId = createRunFor(store);
   const runDir = runDirOf(store, runId);
 
-  const wt1 = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
-  const wt2 = createWorktreeFn(workspace, runId, "I2", ctxFor(stateHome));
+  const wt1 = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
+  const wt2 = treePath(createWorktreeFn(workspace, runId, "I2", ctxFor(stateHome)));
   const i1 = makeRuntimeItem("I1", "RED");
   i1.worktree = wt1;
   store.saveItem(runId, i1);
@@ -1572,7 +1578,7 @@ test("[9.6-cross-tree-freeze-independence] a LIVE verify marker in tree A does n
 
   // A's verify is in flight.
   writeFileSync(markerFileOf(runDir, "I1"), JSON.stringify({ pid: process.pid, startMs: Date.now() }));
-  const frozenPath = treeForFn(store, runId, liveMarkerSlugs(runDir)[0]);
+  const frozenPath = treeForFn(store, runId, treeSlug(liveMarkerSlugs(runDir)[0]));
   assert.equal(frozenPath, wt1, "premise: the live marker translates to A's worktree path");
 
   // Gate half: A frozen (source AND test), B free.
@@ -1624,12 +1630,12 @@ test("[9.6-cross-tree-freeze-independence] a LIVE verify marker in tree A does n
   const registry = new Map<string, FanoutRegistryEntry>();
   const sdk = makeFakeSdk({ registry });
   sdk.setResponder(() => ({ kind: "reply", text: JSON.stringify(IMPL_RESULT) }));
-  const listeners: Array<(tree: string) => void> = [];
+  const listeners: Array<(tree: TreePath) => void> = [];
   const treeState: TreeState = {
-    isFrozen(tree: string): boolean {
-      return liveMarkerSlugs(runDir).some((slug) => treeForFn(store, runId, slug) === tree);
+    isFrozen(tree: TreePath): boolean {
+      return liveMarkerSlugs(runDir).some((slug) => treeForFn(store, runId, treeSlug(slug)) === tree);
     },
-    onClear(listener: (tree: string) => void): () => void {
+    onClear(listener: (tree: TreePath) => void): () => void {
       listeners.push(listener);
       return (): void => {
         const idx = listeners.indexOf(listener);
@@ -1645,7 +1651,7 @@ test("[9.6-cross-tree-freeze-independence] a LIVE verify marker in tree A does n
     treeState,
     runId,
   );
-  const jobFor = (itemId: string, tree: string): FanoutJob => ({
+  const jobFor = (itemId: string, tree: TreePath): FanoutJob => ({
     role: "implementer",
     itemId,
     tree,
@@ -1797,7 +1803,7 @@ test("[9.6-mergeback-branch-identity] mergeBack recomposes conductor/<runId>/<it
   const runId = "r-96-ident";
   const h0 = mustHead(workspace);
 
-  const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   writeFileSync(path.join(wt, "delta.txt"), "worktree change\n");
   git(wt, ["add", "delta.txt"]);
   git(wt, ["commit", "-m", "worktree change"]);
@@ -1832,7 +1838,7 @@ test("[9.6-mergeback-ff-first-else-merge] ff-only is attempted FIRST and a norma
   const ffState = freshStateHome();
   const ffRun = "r-96-ff";
   const ffH0 = mustHead(ffWorkspace);
-  const ffWt = createWorktreeFn(ffWorkspace, ffRun, "I1", ctxFor(ffState));
+  const ffWt = treePath(createWorktreeFn(ffWorkspace, ffRun, "I1", ctxFor(ffState)));
   writeFileSync(path.join(ffWt, "one.txt"), "one\n");
   git(ffWt, ["add", "one.txt"]);
   git(ffWt, ["commit", "-m", "one"]);
@@ -1851,7 +1857,7 @@ test("[9.6-mergeback-ff-first-else-merge] ff-only is attempted FIRST and a norma
   const mgWorkspace = committedRepo();
   const mgState = freshStateHome();
   const mgRun = "r-96-merge";
-  const mgWt = createWorktreeFn(mgWorkspace, mgRun, "I1", ctxFor(mgState));
+  const mgWt = treePath(createWorktreeFn(mgWorkspace, mgRun, "I1", ctxFor(mgState)));
   writeFileSync(path.join(mgWt, "one.txt"), "one\n");
   git(mgWt, ["add", "one.txt"]);
   git(mgWt, ["commit", "-m", "one"]);
@@ -1894,7 +1900,7 @@ test("[9.6-mergeback-ff-first-else-merge] ff-only is attempted FIRST and a norma
   assert.equal(gitOut(ffcWorkspace, ["config", "merge.ff"]), "false", "premise: this repo forbids implicit fast-forwards");
 
   const ffcH0 = mustHead(ffcWorkspace);
-  const ffcWt = createWorktreeFn(ffcWorkspace, ffcRun, "I1", ctxFor(ffcState));
+  const ffcWt = treePath(createWorktreeFn(ffcWorkspace, ffcRun, "I1", ctxFor(ffcState)));
   writeFileSync(path.join(ffcWt, "one.txt"), "one\n");
   git(ffcWt, ["add", "one.txt"]);
   git(ffcWt, ["commit", "-m", "one"]);
@@ -1988,7 +1994,7 @@ test("[9.6-mergeback-handler-argv] every worktree/merge git operation is HANDLER
   process.env.GIT_DIR = bogus;
   process.env.GIT_WORK_TREE = bogus;
   try {
-    const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+    const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
     writeFileSync(path.join(wt, "delta.txt"), "scrubbed\n");
     git(wt, ["add", "delta.txt"]);
     git(wt, ["commit", "-m", "scrubbed"]);
@@ -2131,9 +2137,9 @@ test("[9.6-conflict-merge-abort-clean] the conflicting merge leaves the workspac
   // ALL worktrees branch from the same base commit BEFORE any merge-back runs — the wave
   // shape. A worktree created after I1's merge would branch from the post-merge HEAD and
   // its shared edit would never conflict (a bug this fixture's own stub run caught).
-  const wt1 = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
-  const wt2 = createWorktreeFn(workspace, runId, "I2", ctxFor(stateHome));
-  const wt3 = createWorktreeFn(workspace, runId, "I3", ctxFor(stateHome));
+  const wt1 = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
+  const wt2 = treePath(createWorktreeFn(workspace, runId, "I2", ctxFor(stateHome)));
+  const wt3 = treePath(createWorktreeFn(workspace, runId, "I3", ctxFor(stateHome)));
 
   // I1 and I2 rewrite the SAME committed line; I3 is disjoint.
   writeFileSync(path.join(wt1, SHARED_REL), "abort fixture: I1's line\n");
@@ -2186,7 +2192,7 @@ test("[9.6-archive-does-not-remove] C-037 ruling 6, pinned as a regression: arch
   const store = openStore(workspace, journal.sink, config);
   const runId = createRunFor(store);
 
-  const wt = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const wt = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   const item = makeRuntimeItem("I1", "RED");
   item.worktree = wt;
   store.saveItem(runId, item);
@@ -2218,7 +2224,7 @@ test("[9.6-crash-prune] a crashed run that left its worktree DIRECTORY deleted b
   const stateHome = freshStateHome();
 
   // The crashed run: its directory vanishes without removeWorktree ever running.
-  const crashedWt = createWorktreeFn(workspace, "r-96-crashed", "I1", ctxFor(stateHome));
+  const crashedWt = treePath(createWorktreeFn(workspace, "r-96-crashed", "I1", ctxFor(stateHome)));
   rmSync(crashedWt, { recursive: true, force: true });
   assert.equal(
     worktreeListPaths(workspace).includes(crashedWt),
@@ -2227,7 +2233,7 @@ test("[9.6-crash-prune] a crashed run that left its worktree DIRECTORY deleted b
   );
 
   // The LATER run's first worktree operation heals it.
-  const nextWt = createWorktreeFn(workspace, "r-96-next", "I2", ctxFor(stateHome));
+  const nextWt = treePath(createWorktreeFn(workspace, "r-96-next", "I2", ctxFor(stateHome)));
 
   const listed = worktreeListPaths(workspace);
   assert.equal(listed.includes(crashedWt), false, "the stale entry was pruned BEFORE the add");
@@ -2281,7 +2287,7 @@ test("[9.6-recreate-after-crash-reuses-branch] a crashed run's item can be RESUM
   const RESUME_REL = "crashed-item-work-9006.txt";
 
   // The run's first attempt: the item does real work and COMMITS it on its branch.
-  const first = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const first = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   assert.equal(first, wtPathOf(stateHome, runId, "I1"), "premise: the worktree is at the §4.2 path");
   writeFileSync(path.join(first, RESUME_REL), `${RESUME_MARKER}\n`);
   git(first, ["add", "."]);
@@ -2306,7 +2312,7 @@ test("[9.6-recreate-after-crash-reuses-branch] a crashed run's item can be RESUM
   assert.ok(branchesBefore.includes(branch), "premise: the branch inventory is readable and names it");
 
   // THE RESUME. This is the call that throws at HEAD ("a branch named ... already exists").
-  const second = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const second = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
 
   assert.equal(second, first, "the resumed worktree is at the same §4.2 path");
   assert.equal(isRepo(second), true, "and it is a live git work tree again");
@@ -2344,7 +2350,7 @@ test("[9.6-recreate-after-crash-reuses-branch] a crashed run's item can be RESUM
   assert.equal(currentBranch(workspace), "main", "and it is still on its own branch");
 
   // IDEMPOTENCE: calling again while the worktree is LIVE is a no-op.
-  const third = createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome));
+  const third = treePath(createWorktreeFn(workspace, runId, "I1", ctxFor(stateHome)));
   assert.equal(third, second, "a repeat call on a live worktree returns the same path");
   assert.equal(mustHead(third), itemSha, "with HEAD still at the item's commit");
   assert.equal(

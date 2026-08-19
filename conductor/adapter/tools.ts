@@ -43,7 +43,7 @@ import { applyAmendOps } from "../core/queue-amend.ts";
 import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { nextWave, readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
-import { SCHEMAS, validate } from "../core/types.ts";
+import { MAIN_TREE, NO_TREE, SCHEMAS, treePath, treeSlug, validate } from "../core/types.ts";
 import type {
   AnomalyRecord,
   Classification,
@@ -66,6 +66,8 @@ import type {
   Run,
   RunState,
   TestVet,
+  TreePath,
+  TreeSlug,
   TrivialItem,
   Verdict,
 } from "../core/types.ts";
@@ -173,7 +175,10 @@ export interface GateJournal {
 export interface RegistryEntry {
   role: string;
   itemId?: string;
-  tree?: string;
+  // The tree PATH the §3.5 gates judge this session against (adapter/fanout.ts's
+  // entry, read here through the shape this gate needs). Absent on an entry the
+  // chat-message layer registered before any tree was resolved onto it.
+  tree?: TreePath;
 }
 
 // Fail-closed injection seam (dependency injection): a test overrides a core
@@ -221,7 +226,9 @@ export interface GateHookInput {
   branchPolicy: BranchPolicy;
   fileScope: string[];
   testScope: string[];
-  verifyInFlightTree: string | null;
+  // The tree a live verify has frozen, as the PATH core/gates-edit.ts compares
+  // it against — the composition root translates the marker slug (§3.5).
+  verifyInFlightTree: TreePath | null;
   inlineClaimScope: string[] | null;
   // §3.6: the caller-owned map handleOverride writes one-shot grants into. A
   // grant bypasses exactly ONE otherwise-denied decision of its named gate.
@@ -342,7 +349,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
   const entry = input.registry.get(input.sessionID);
   const registered = entry !== undefined;
   const role = entry?.role ?? null;
-  const sessionTree = entry?.tree ?? "";
+  const sessionTree = entry?.tree ?? NO_TREE;
 
   const command = input.command;
   const gitSegmentPresent = command !== undefined && hasGitSegment(command);
@@ -658,7 +665,7 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
   const classifierJob: FanoutJob = {
     role: "mechanical",
     itemId: "",
-    tree: "",
+    tree: NO_TREE,
     writeCapable: false,
     prompt: classifierPrompt(run.prompt),
     schemaName: "Classification",
@@ -677,7 +684,7 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
   const skepticJob: FanoutJob = {
     role: "skeptic",
     itemId: "",
-    tree: "",
+    tree: NO_TREE,
     writeCapable: false,
     prompt: skepticPrompt(run.prompt, classification.kind),
     schemaName: "ClassificationCheck",
@@ -1223,7 +1230,7 @@ function plannerJob(prompt: string, schemaName: string): FanoutJob {
   return {
     role: "planner",
     itemId: "",
-    tree: "",
+    tree: NO_TREE,
     writeCapable: false,
     prompt,
     schemaName,
@@ -1947,7 +1954,7 @@ async function planReviewRound(
   const lensJobs: FanoutJob[] = lenses.map((lens) => ({
     role: "reviewer",
     itemId: "",
-    tree: "",
+    tree: NO_TREE,
     writeCapable: false,
     prompt: lensPrompt(lens, userPrompt, planMd, queue),
     schemaName: "Findings",
@@ -2003,7 +2010,7 @@ async function planReviewRound(
       skepticJobs.push({
         role: "skeptic",
         itemId: "",
-        tree: "",
+        tree: NO_TREE,
         writeCapable: false,
         prompt: skepticRefutePrompt(major.finding, major.lens, k, userPrompt, planMd, queue),
         schemaName: "Verdict",
@@ -2351,17 +2358,21 @@ export async function handlePlanReview(input: PlanReviewInput): Promise<PlanRevi
 // §7.4 vocabulary (core/journal-events.ts EVENTS).
 // ===========================================================================
 
-// Until Task 9.6 lands worktrees, every write-capable sub-session works the main
-// tree (§3.5) — named once so the two dispatch sites cannot drift.
-const STAGE_TREE = "main";
+// The shared tree's EVIDENCE slug (§2.6): the name the per-tree verify marker
+// carries when the work is not isolated in a worktree. It is not a path and no
+// gate may ever be handed it — that misfeed is ISSUE-002; core/types.ts brands
+// it out of every path-typed seam.
+const STAGE_TREE = MAIN_TREE;
 
-// The §3.5 tree an item's sub-sessions dispatch into: the item's persisted
-// worktree path under parallel.writes "worktrees" (set by the wave driver at wave
-// setup), else the main tree. The registry entry's tree is a PATH the edit gate
-// compares by string equality, which is what scopes a worktree implementer's
-// edits to its own tree.
-function sessionTreeOf(item: Item): string {
-  return item.worktree ?? STAGE_TREE;
+// The §3.5 tree an item's sub-sessions dispatch into, as the PATH the edit gate
+// compares by string equality: the item's persisted worktree under
+// parallel.writes "worktrees" (set by the wave driver at wave setup), else the
+// WORKSPACE ITSELF — which is the tree those sessions really work when the item
+// has no tree of its own. The shared tree's marker slug is a separate derivation
+// (verifyInFlightTreeFor's, below); handing this one the slug denied every write
+// the shipped default ever dispatched.
+function sessionTreeOf(store: StateStore, item: Item): TreePath {
+  return item.worktree ?? store.root;
 }
 
 /**
@@ -2374,7 +2385,11 @@ function sessionTreeOf(item: Item): string {
  * (null when the item has no worktree — no path can be frozen for it).
  * assertSafeId is NOT relaxed: the slug stays authoritative for the marker.
  */
-export function verifyInFlightTreeFor(store: StateStore, runId: string, markerTree: string): string | null {
+export function verifyInFlightTreeFor(
+  store: StateStore,
+  runId: string,
+  markerTree: TreeSlug,
+): TreePath | null {
   if (markerTree === STAGE_TREE) return store.root;
   return store.loadItem(runId, markerTree).worktree;
 }
@@ -2388,17 +2403,17 @@ export function verifyInFlightTreeFor(store: StateStore, runId: string, markerTr
 // Conflating them is how a worktree freeze silently never fires, which is why they are
 // derived together, once, and never re-derived at a call site.
 //
-// Neither half is a new derivation: whether the item has a tree of its own is
-// sessionTreeOf's answer (item.worktree ?? the shared tree), and slug->path is
-// verifyInFlightTreeFor's. With item.worktree null both collapse to the shared tree and
-// store.root, which is why the non-worktree behaviour is bit-for-bit unchanged.
+// Neither half is a new derivation: whether the item has a tree of its own is the
+// §2.5 worktree field, and slug->path is verifyInFlightTreeFor's. With
+// item.worktree null both collapse to the shared tree's slug and the workspace
+// root, which is the tree those sessions work.
 interface ItemTree {
-  slug: string;
-  root: string;
+  slug: TreeSlug;
+  root: TreePath;
 }
 
 function itemTreeOf(store: StateStore, runId: string, item: Item): ItemTree {
-  const slug = sessionTreeOf(item) === STAGE_TREE ? STAGE_TREE : item.id;
+  const slug = item.worktree === null ? STAGE_TREE : treeSlug(item.id);
   return { slug, root: verifyInFlightTreeFor(store, runId, slug) ?? store.root };
 }
 
@@ -2987,7 +3002,7 @@ function vetRepairPrompt(
 // Every testWriter dispatch in this stage: write-capable, on the item's own tree
 // (its worktree under §4.2 worktree mode, else main), with the already-registered
 // ImplementerResult schema (9.4a authors NO schema).
-function testWriterJob(itemId: string, tree: string, prompt: string): FanoutJob {
+function testWriterJob(itemId: string, tree: TreePath, prompt: string): FanoutJob {
   return {
     role: "testWriter",
     itemId,
@@ -3005,7 +3020,7 @@ async function dispatchTestWriter(
   tool: string,
   fanout: Fanout,
   itemId: string,
-  tree: string,
+  tree: TreePath,
   prompt: string,
 ): Promise<{ reply: ImplementerResult; sessionID: string }> {
   const result = await fanout.dispatch(testWriterJob(itemId, tree, prompt));
@@ -3183,7 +3198,7 @@ export async function handleSubmitTest(input: SubmitTestInput): Promise<SubmitTe
   };
 
   for (;;) {
-    const writer = await dispatchTestWriter(SUBMIT_TEST_TOOL, fanout, itemId, sessionTreeOf(stage.item), prompt);
+    const writer = await dispatchTestWriter(SUBMIT_TEST_TOOL, fanout, itemId, sessionTreeOf(store, stage.item), prompt);
     const reply = writer.reply;
     dispatches += 1;
     writerSessionID = writer.sessionID;
@@ -3695,7 +3710,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       jobs.push({
         role: "reviewer",
         itemId,
-        tree: sessionTreeOf(stage.item),
+        tree: sessionTreeOf(store, stage.item),
         writeCapable: false,
         prompt: vetCriticPrompt(queueItem, testText, red, critics, rounds, max),
         schemaName: "TestVet",
@@ -3859,7 +3874,7 @@ export async function handleVetTest(input: VetTestInput): Promise<VetTestResult>
       VET_TEST_TOOL,
       fanout,
       itemId,
-      sessionTreeOf(stage.item),
+      sessionTreeOf(store, stage.item),
       vetRepairPrompt(queueItem, testText, red, union, rounds, max),
     );
     if (writer.reply.status === "BLOCKED") {
@@ -3914,7 +3929,7 @@ const QUEUE_AMEND_TOOL = "conductor_queue_amend";
 // The §3.3 write-capable implementer: doctrine tdd.md's minimal-code section, the
 // item's fileScope, the SAME ImplementerResult receipt every other write-capable
 // role replies with (9.4b registers no schema).
-function implementerJob(itemId: string, tree: string, prompt: string): FanoutJob {
+function implementerJob(itemId: string, tree: TreePath, prompt: string): FanoutJob {
   return {
     role: "implementer",
     itemId,
@@ -3930,7 +3945,7 @@ async function dispatchImplementer(
   tool: string,
   fanout: Fanout,
   itemId: string,
-  tree: string,
+  tree: TreePath,
   prompt: string,
 ): Promise<{ reply: ImplementerResult; sessionID: string }> {
   const result = await fanout.dispatch(implementerJob(itemId, tree, prompt));
@@ -4237,7 +4252,7 @@ export async function handleMarkGreen(input: MarkGreenInput): Promise<MarkGreenR
     MARK_GREEN_TOOL,
     fanout,
     itemId,
-    sessionTreeOf(stage.item),
+    sessionTreeOf(store, stage.item),
     implementerPrompt(queueItem),
   );
   const attempts = 1;
@@ -4634,7 +4649,7 @@ export async function handleValidate(input: ValidateInput): Promise<ValidateResu
       VALIDATE_TOOL,
       fanout,
       itemId,
-      sessionTreeOf(stage.item),
+      sessionTreeOf(store, stage.item),
       debugFixPrompt(queueItem, packs, failure, debugFixes, cap),
     );
     fixerSessionID = fixer.sessionID;
@@ -4931,7 +4946,7 @@ export type StageExecutor = (ctx: StageExecutorContext) => Promise<StageOutcome>
 // The §3.5 tree view the driver drives: the one the Fanout was built over, plus
 // the release notification the driver owns.
 export interface WaveTreeState extends TreeState {
-  notifyClear: (tree: string) => void;
+  notifyClear: (tree: TreePath) => void;
 }
 
 export interface DispatchWaveInput {
@@ -5303,7 +5318,7 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
         stateHome: input.stateHome,
         workspaceKey: input.workspaceKey,
       });
-      item.worktree = worktree;
+      item.worktree = treePath(worktree);
       store.saveItem(runId, item);
       journal.log(
         "info",
@@ -5374,7 +5389,7 @@ export async function handleDispatchWave(input: DispatchWaveInput): Promise<Disp
     // that merely takes a long time. The tree is the MEMBER's own — its worktree
     // under §4.2 worktree mode, else main — so a worktree implementer is never
     // held by another tree's validate.
-    const memberTree = sessionTreeOf(store.loadItem(runId, member.itemId));
+    const memberTree = sessionTreeOf(store, store.loadItem(runId, member.itemId));
     const frozen = SERIAL_STAGES.includes(tool) && treeState.isFrozen(memberTree);
     if (frozen) {
       member.anomaly =
@@ -5919,7 +5934,7 @@ function reviewRevetPrompt(
   );
 }
 
-function itemLensJob(itemId: string, tree: string, group: readonly string[], prompt: string): FanoutJob {
+function itemLensJob(itemId: string, tree: TreePath, group: readonly string[], prompt: string): FanoutJob {
   return {
     role: "reviewer",
     itemId,
@@ -5932,7 +5947,7 @@ function itemLensJob(itemId: string, tree: string, group: readonly string[], pro
   };
 }
 
-function itemSkepticJob(itemId: string, tree: string, prompt: string): FanoutJob {
+function itemSkepticJob(itemId: string, tree: TreePath, prompt: string): FanoutJob {
   return {
     role: "skeptic",
     itemId,
@@ -5947,7 +5962,7 @@ function itemSkepticJob(itemId: string, tree: string, prompt: string): FanoutJob
 // Every review-fix dispatch carries the C-028 delivery signal: the fan-out engine
 // copies it onto the §3.5 registry entry, and buildSystemAppend keys the
 // receive-review.md secondary pack on exactly that mark.
-function reviewFixJob(role: "implementer" | "testWriter", itemId: string, tree: string, prompt: string): FanoutJob {
+function reviewFixJob(role: "implementer" | "testWriter", itemId: string, tree: TreePath, prompt: string): FanoutJob {
   return {
     role,
     itemId,
@@ -5960,7 +5975,7 @@ function reviewFixJob(role: "implementer" | "testWriter", itemId: string, tree: 
   };
 }
 
-function reviewRevetJob(itemId: string, tree: string, prompt: string): FanoutJob {
+function reviewRevetJob(itemId: string, tree: TreePath, prompt: string): FanoutJob {
   return {
     role: "reviewer",
     itemId,
@@ -6020,7 +6035,7 @@ export async function handleItemReview(input: ItemReviewInput): Promise<ItemRevi
   // the wave: a reviewer would have judged a tree without the change it was
   // convened for, and a write-capable fix would have edited outside the isolation
   // §4.2 created.
-  const itemTree = sessionTreeOf(stage.item);
+  const itemTree = sessionTreeOf(store, stage.item);
 
   // C-055. The same tree as an EXECUTION target: the prompts' git diff and testScope
   // read, the reverted-behavior probe's stash, the re-run of the item test and the
@@ -7062,7 +7077,7 @@ export async function handlePublish(input: PublishInput): Promise<PublishResult>
       runId,
       // Per-tree marker + honest record identity (§2.6): the tree the verify
       // judges is the item's own worktree in worktree mode, else main.
-      tree: worktreeMode ? itemId : STAGE_TREE,
+      tree: worktreeMode ? treeSlug(itemId) : STAGE_TREE,
       now,
     });
     if (outcome.refused) {

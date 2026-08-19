@@ -108,7 +108,7 @@ import { fetchMetricsSummary } from "../adapter/router-client.ts";
 import type { MetricsSummary, RouterClientConfig } from "../adapter/router-client.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 import { validate } from "../core/types.ts";
-import type { Config, EvidenceRecord, Item, Run } from "../core/types.ts";
+import type { Config, EvidenceRecord, Item, Run, TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
 // Structural mirrors of the opencode hook shapes (the composition.test.ts
@@ -627,7 +627,7 @@ interface Wiring {
   fanout: Fanout;
   sdk: ReturnType<typeof makeFakeSdk>;
   prompted: RespondCtx[];
-  treeState: { isFrozen: (t: string) => boolean; onClear: (f: (t: string) => void) => () => void; notifyClear: (t: string) => void };
+  treeState: { isFrozen: (t: TreePath) => boolean; onClear: (f: (t: TreePath) => void) => () => void; notifyClear: (t: TreePath) => void };
   byRole: (role: string) => RespondCtx[];
   // The parked sub-sessions, in the fake SDK's own order, and the release that
   // lets them all answer at once.
@@ -647,7 +647,7 @@ function makeWiring(
   journal: JournalCapture,
   script: Script,
 ): Wiring {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: RespondCtx[] = [];
   const counts = new Map<string, number>();
@@ -685,17 +685,17 @@ function makeWiring(
     return { kind: "reply", text };
   });
 
-  const listeners: Array<(t: string) => void> = [];
+  const listeners: Array<(t: TreePath) => void> = [];
   const treeState = {
     isFrozen: (): boolean => false,
-    onClear: (listener: (t: string) => void): (() => void) => {
+    onClear: (listener: (t: TreePath) => void): (() => void) => {
       listeners.push(listener);
       return (): void => {
         const i = listeners.indexOf(listener);
         if (i >= 0) listeners.splice(i, 1);
       };
     },
-    notifyClear: (t: string): void => {
+    notifyClear: (t: TreePath): void => {
       for (const l of [...listeners]) l(t);
     },
   };

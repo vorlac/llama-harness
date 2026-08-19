@@ -88,7 +88,7 @@ import { createFanout } from "../adapter/fanout.ts";
 import type { Fanout, TreeState } from "../adapter/fanout.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateItem, GateRun } from "../core/gates-phase.ts";
-import type { Config, EvidenceRecord, Item, ItemState, Queue, QueueItem } from "../core/types.ts";
+import type { Config, EvidenceRecord, Item, ItemState, Queue, QueueItem, TreePath } from "../core/types.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 
 // ---------------------------------------------------------------------------
@@ -383,7 +383,7 @@ interface Wiring {
   byRole: (role: string) => PromptedRecord[];
 }
 function makeWiring(runId: string, config: Config, journal: JournalSink, script: RoleScript): Wiring {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: PromptedRecord[] = [];
   const sessionIdx = new Map<string, number>();

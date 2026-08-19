@@ -76,7 +76,7 @@
 //     branchPolicy: "pin" | "check-only";
 //     fileScope: string[];                // the session's item source scope
 //     testScope: string[];                // the session's item test scope
-//     verifyInFlightTree: string | null;
+//     verifyInFlightTree: TreePath | null;
 //     inlineClaimScope: string[] | null;
 //     journal: { log: (level, component, event, data, corr) => void };
 //     corr: { runId: string; itemId?: string; sessionID?: string };
@@ -115,6 +115,8 @@ import {
   CONDUCTOR_TOOL_NAMES,
 } from "../adapter/tools.ts";
 import { ConductorPlugin } from "../plugin/index.ts";
+import { treePath } from "../core/types.ts";
+import type { TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
 // Local structural mirrors of the subjects' param/return shapes. Kept local (not
@@ -152,7 +154,7 @@ interface GateJournal {
 interface RegistryEntry {
   role: string;
   itemId?: string;
-  tree?: string;
+  tree?: TreePath;
 }
 type Registry = Map<string, RegistryEntry>;
 
@@ -174,8 +176,8 @@ interface EditInput {
   fileScope: string[];
   testScope: string[];
   path: string;
-  verifyInFlightTree: string | null;
-  sessionTree: string;
+  verifyInFlightTree: TreePath | null;
+  sessionTree: TreePath;
   inlineClaimScope: string[] | null;
 }
 
@@ -203,7 +205,7 @@ interface GateHookInput {
   branchPolicy: "pin" | "check-only";
   fileScope: string[];
   testScope: string[];
-  verifyInFlightTree: string | null;
+  verifyInFlightTree: TreePath | null;
   inlineClaimScope: string[] | null;
   journal: GateJournal;
   corr: Corr;
@@ -245,7 +247,7 @@ const INVENTORY: readonly string[] = [
 // Fixtures + helpers.
 // ---------------------------------------------------------------------------
 
-const TREE = "/repo";
+const TREE = treePath("/repo");
 const REG_SESSION = "ses_registered";
 const UNREG_SESSION = "ses_unregistered";
 

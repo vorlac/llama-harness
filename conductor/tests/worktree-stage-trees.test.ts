@@ -45,10 +45,10 @@
 // unverifiable, and every "the wrong tree's marker is absent" claim is paired with a
 // positive "the right tree's marker is present" claim so an empty scan is RED.
 //
-// The non-worktree behaviour is UNCHANGED and is pinned here too: with item.worktree
-// null, sessionTreeOf returns the shared tree, the execution root is store.root and the
-// marker slug is "main" — the last row asserts exactly that, so a fix that simply moved
-// everything into a worktree would fail.
+// The non-worktree behaviour is pinned here too: with item.worktree null, sessionTreeOf
+// returns the shared tree — the workspace itself — the execution root is store.root and
+// the marker slug is "main" — the last row asserts exactly that, so a fix that simply
+// moved everything into a worktree would fail.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -66,7 +66,8 @@ import { createFanout } from "../adapter/fanout.ts";
 import type { Fanout, TreeState } from "../adapter/fanout.ts";
 import { loadPacks } from "../adapter/inject.ts";
 import { validate } from "../core/types.ts";
-import type { Config, EvidenceRecord, Item, ItemState, Queue, QueueItem } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
+import type { Config, EvidenceRecord, Item, ItemState, Queue, QueueItem, TreePath } from "../core/types.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 
 // ---------------------------------------------------------------------------
@@ -122,7 +123,7 @@ function headOf(repo: string): string {
 }
 
 // The MAIN workspace: a real committed repo, so a §2.6 record carries a real HEAD.
-function committedRepo(seed: Array<{ rel: string; content: string }> = []): string {
+function committedRepo(seed: Array<{ rel: string; content: string }> = []): TreePath {
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "conductor-wt-main-")));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -136,13 +137,13 @@ function committedRepo(seed: Array<{ rel: string; content: string }> = []): stri
   }
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 // A REAL `git worktree` on its own branch — what the §4.2 wave driver creates and
 // persists onto the item as `item.worktree`. `extraCommit` gives the worktree a HEAD
 // of its own, which is how a §2.6 record proves which tree it was produced in.
-function addWorktree(repo: string, itemId: string, extraCommit = false): string {
+function addWorktree(repo: string, itemId: string, extraCommit = false): TreePath {
   const parent = realpathSync(mkdtempSync(path.join(tmpdir(), "conductor-wt-tree-")));
   tmpDirs.push(parent);
   const wt = path.join(parent, itemId);
@@ -157,7 +158,7 @@ function addWorktree(repo: string, itemId: string, extraCommit = false): string 
     git(wt, ["add", "worktree-only.txt"]);
     git(wt, ["commit", "-m", "worktree commit"]);
   }
-  return realpathSync(wt);
+  return treePath(realpathSync(wt));
 }
 
 // The OUT-OF-REPO §4.2 state home — also where every witness file lives, so no witness
@@ -361,7 +362,7 @@ function runDirOf(store: StateStore, runId: string): string {
   return path.join(store.root, ".conductor", "runs", runId);
 }
 
-function makeRuntimeItem(id: string, state: ItemState, worktree: string | null): Item {
+function makeRuntimeItem(id: string, state: ItemState, worktree: TreePath | null): Item {
   return {
     id,
     state,
@@ -402,7 +403,7 @@ function seedExecuting(
   runId: string,
   queue: Queue,
   states: Record<string, ItemState>,
-  worktrees: Record<string, string>,
+  worktrees: Record<string, TreePath>,
 ): void {
   const run = store.loadRun(runId);
   run.state = "EXECUTING";
@@ -459,7 +460,7 @@ function makeWiring(
   journal: JournalSink,
   respond: (req: PromptedRecord) => string,
 ): Wiring {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: PromptedRecord[] = [];
   sdk.setResponder((req) => {

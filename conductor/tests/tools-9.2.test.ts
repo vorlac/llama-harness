@@ -105,7 +105,7 @@ import type { OpenOptions, StateStore } from "../adapter/state.ts";
 import { createFanout } from "../adapter/fanout.ts";
 import type { Fanout, TreeState } from "../adapter/fanout.ts";
 import { SCHEMAS, validate } from "../core/types.ts";
-import type { Config, DecisionRecord, Item, Queue, QueueItem } from "../core/types.ts";
+import type { Config, DecisionRecord, Item, Queue, QueueItem, TreePath } from "../core/types.ts";
 import { acceptanceClusters, scanPlaceholders, vagueAcceptance, validateQueue } from "../core/planning.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -336,7 +336,7 @@ function makePlannerFanout(
   journal: JournalSink,
   replies: string[],
 ): { fanout: Fanout; sdk: ReturnType<typeof makeFakeSdk>; promptedRoles: string[] } {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const promptedRoles: string[] = [];
   const assigned = new Map<string, number>();

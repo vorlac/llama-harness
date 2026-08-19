@@ -26,8 +26,8 @@
 //     fileScope: string[];                 // the item's source globs
 //     testScope: string[];                 // the item's test globs
 //     path: string;                        // ABSOLUTE path being edited
-//     verifyInFlightTree: string | null;   // the tree with a live verify marker
-//     sessionTree: string;                 // this session's tree root (prefix)
+//     verifyInFlightTree: TreePath | null; // the tree with a live verify marker
+//     sessionTree: TreePath;               // this session's tree root (prefix)
 //     inlineClaimScope: string[] | null;   // the orchestrator's active claim globs
 //   }) -> Decision
 //
@@ -65,6 +65,8 @@ import { decideEdit, writeShapedPaths, decideSession } from "../core/gates-edit.
 // The matcher the gate itself uses — imported so [5.2-out-of-tree-escape] can assert
 // its PREMISE rather than assume it.
 import { globMatch } from "../core/shell-parse.ts";
+import { treePath } from "../core/types.ts";
+import type { TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
 // Local structural mirrors of the subject's param + return shapes. Kept local
@@ -83,8 +85,11 @@ interface EditInput {
   fileScope: string[];
   testScope: string[];
   path: string;
-  verifyInFlightTree: string | null;
-  sessionTree: string;
+  // Both trees are PATHS (core/types.ts TreePath): the normalization and freeze
+  // rules below are string-prefix and string-equality tests against an absolute
+  // edit path, so the evidence layer's tree SLUG cannot be one of these.
+  verifyInFlightTree: TreePath | null;
+  sessionTree: TreePath;
   inlineClaimScope: string[] | null;
 }
 
@@ -101,10 +106,10 @@ interface SessionInput {
 // TREE_A / TREE_B are two distinct trees for the per-tree freeze proof.
 // ---------------------------------------------------------------------------
 
-const TREE = "/repo";
-const WT_UNDER_STATE = "/home/dev/.conductor/state/worktrees/run1/I2";
-const TREE_A = "/state/worktrees/run1/I1";
-const TREE_B = "/state/worktrees/run1/I9";
+const TREE = treePath("/repo");
+const WT_UNDER_STATE = treePath("/home/dev/.conductor/state/worktrees/run1/I2");
+const TREE_A = treePath("/state/worktrees/run1/I1");
+const TREE_B = treePath("/state/worktrees/run1/I9");
 
 // Build an absolute path inside the default TREE.
 const p = (rel: string): string => `${TREE}/${rel}`;
@@ -550,7 +555,7 @@ const TRAVERSALS: ReadonlyArray<{ path: string; fileScope: string[]; note: strin
 for (const { path, fileScope, note } of TRAVERSALS) {
   test(`[5.2-path-traversal] a '..' segment is denied before scope matching (${note})`, () => {
     const d = decideEdit(
-      editInput({ sessionRole: "implementer", fileScope, sessionTree: "/wt", path }),
+      editInput({ sessionRole: "implementer", fileScope, sessionTree: treePath("/wt"), path }),
     );
     const reason = denyReason(d, `traversal: ${note}`);
     assert.match(reason, /traversal|\.\./, "the reason names the path traversal");
@@ -562,7 +567,7 @@ test("[5.2-path-traversal] a normal in-scope path without '..' is unchanged (all
     editInput({
       sessionRole: "implementer",
       fileScope: ["src/a/**"],
-      sessionTree: "/wt",
+      sessionTree: treePath("/wt"),
       path: "/wt/src/a/x.ts",
     }),
   );

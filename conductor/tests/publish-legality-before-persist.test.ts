@@ -49,6 +49,9 @@ import type { Fanout, TreeState } from "../adapter/fanout.ts";
 import { currentBranch, headSha, isRepo } from "../adapter/gitio.ts";
 import { legalTools } from "../core/gates-phase.ts";
 import type { GateItem, GateRun } from "../core/gates-phase.ts";
+import { MAIN_TREE } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
+import type { TreePath } from "../core/types.ts";
 import type { Config, EvidenceRecord, Item, ItemState, Queue, QueueItem } from "../core/types.ts";
 
 const PUBLISH_TOOL = "conductor_publish";
@@ -93,7 +96,7 @@ function tmpDir(tag: string): string {
   return dir;
 }
 
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = tmpDir("repo");
   git(dir, ["init", "-b", "main"]);
   git(dir, ["config", "user.name", "Conductor Test"]);
@@ -103,7 +106,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function commitCount(dir: string): number {
@@ -249,7 +252,7 @@ function makeFanout(config: Config, journal: JournalSink, runId: string): Fanout
 }
 
 interface Bench {
-  root: string;
+  root: TreePath;
   stateHome: string;
   store: StateStore;
   runId: string;
@@ -313,7 +316,7 @@ function buildBench(): Bench {
     startedMs: Date.now() + 60_000,
     head: headSha(root) ?? "",
     branch: currentBranch(root) ?? "",
-    tree: "main",
+    tree: MAIN_TREE,
     excluded: [],
     green: true,
     scopes: { [SCOPE]: { green: true, exitCode: 0, durationMs: 5 } },

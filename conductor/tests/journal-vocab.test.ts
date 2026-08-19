@@ -64,7 +64,9 @@ import type {
   ReportInput,
 } from "../adapter/tools.ts";
 import { EVENTS, isKnownEvent } from "../core/journal-events.ts";
-import { SCHEMAS } from "../core/types.ts";
+import { MAIN_TREE, SCHEMAS } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
+import type { TreePath } from "../core/types.ts";
 import type {
   Config,
   EvidenceRecord,
@@ -341,7 +343,7 @@ function scratch(prefix: string): string {
   return dir;
 }
 
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = scratch("conductor-vocab-repo-");
   git(dir, ["init", "-b", "main"]);
   mkdirSync(path.join(dir, "src"), { recursive: true });
@@ -350,7 +352,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "tests", "beta.test.mjs"), "import test from 'node:test';\ntest('t', () => {});\n");
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function headSha(dir: string): string {
@@ -517,7 +519,7 @@ const NEVER_FROZEN: TreeState = {
 };
 
 interface Bench {
-  root: string;
+  root: TreePath;
   stateHome: string;
   store: StateStore;
   runId: string;
@@ -816,7 +818,7 @@ test('[vocab-live-publish-refuse] handlePublish under git.preexistingDirty "refu
     startedMs: START_MS + 60_000,
     head: headSha(bench.root),
     branch: "main",
-    tree: "main",
+    tree: MAIN_TREE,
     excluded: [],
     green: true,
     scopes: { [SCOPE]: { green: true, exitCode: 0, durationMs: 5 } },

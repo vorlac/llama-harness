@@ -6,7 +6,8 @@
 // §3.5:1356-1360), and the edit-scope gate decides which files a registered
 // session may write, tree-relative, with the per-tree verify FREEZE on top.
 //
-// Core module: pure. Imports ONLY its core sibling shell-parse.ts (G3) — no
+// Core module: pure. Imports ONLY its core siblings shell-parse.ts and the two
+// tree types of types.ts (G3) — no
 // filesystem, no subprocesses, no runtime globals, no network, no wall clock.
 // The bash write-shape extractor reuses the SAME hardened quote-aware tokenizer
 // and operator segmentation the git gate uses, so a write hidden behind an
@@ -14,6 +15,7 @@
 // phaseGate1 binding).
 
 import { shellTokens, splitOnOperators, globMatch } from "./shell-parse.ts";
+import type { TreePath } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Return contract (signature pinned by conductor/tests/gates-edit.test.ts). A
@@ -96,8 +98,11 @@ export interface EditInput {
   fileScope: string[];
   testScope: string[];
   path: string;
-  verifyInFlightTree: string | null;
-  sessionTree: string;
+  // Both are tree PATHS: the tree comparison below is string equality against an
+  // absolute edit path, so an evidence-layer slug here denies everything (the
+  // C-037 ruling 5 misfeed; core/types.ts brands the two apart).
+  verifyInFlightTree: TreePath | null;
+  sessionTree: TreePath;
   inlineClaimScope: string[] | null;
 }
 

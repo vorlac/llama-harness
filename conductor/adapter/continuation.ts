@@ -71,7 +71,7 @@ import { legalTools } from "../core/gates-phase.ts";
 import type { GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { isHumanTerritory } from "../core/decide.ts";
 import { isTerminal, shouldTerminate } from "../core/stops.ts";
-import type { Config, Item, Queue, QuestionRecord, Run, StopKind } from "../core/types.ts";
+import type { Config, Item, Queue, QuestionRecord, Run, StopKind, TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
 // The injected surfaces
@@ -296,7 +296,7 @@ export interface PluginEventInput {
  * registration boundary precisely so a per-session fact recorded here cannot leak
  * through adapter/chat-message.ts's shared orchestrator constant.
  */
-export function resolveSessionTree(store: StateStore, entry: RegistryEntry | undefined): string {
+export function resolveSessionTree(store: StateStore, entry: RegistryEntry | undefined): TreePath {
   if (entry === undefined) return store.root;
   if (entry.tree !== undefined && entry.tree.length > 0) return entry.tree;
   entry.tree = store.root;

@@ -30,8 +30,8 @@ import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { currentBranch, dirtyFiles, gitCommonDir, headSha, isRepo } from "./gitio.ts";
-import { validate } from "../core/types.ts";
-import type { Config, Item, Run, StaleRedRegistry } from "../core/types.ts";
+import { treePath, validate } from "../core/types.ts";
+import type { Config, Item, Run, StaleRedRegistry, TreePath } from "../core/types.ts";
 
 // The over-age lock threshold: a lock older than this is stale even if its owner
 // pid is still alive (a crashed-then-reused pid, or an abandoned process). 24h.
@@ -91,7 +91,9 @@ export interface CreateRunInput {
 
 export interface StateStore {
   readonly readOnly: boolean;
-  readonly root: string;
+  // The workspace root, as the tree PATH the §3.5 gates compare an edit path
+  // against: it IS the tree of every session working an item with no worktree.
+  readonly root: TreePath;
   createRun(input: CreateRunInput, opts?: { onAfterRunJson?: () => void }): Run;
   loadRun(runId: string): Run;
   saveRun(run: Run): void;
@@ -242,7 +244,7 @@ export function registerConductorExclude(root: string): boolean {
 // ---------------------------------------------------------------------------
 
 export function openWorkspace(opts: OpenOptions): StateStore {
-  const root = opts.root;
+  const root = treePath(opts.root);
   const config = opts.config;
   const journal = opts.journal;
   const now = opts.now ?? Date.now;

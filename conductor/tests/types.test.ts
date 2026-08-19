@@ -26,7 +26,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CONDUCTOR_NAME, SCHEMAS, validate } from "../core/types.ts";
+import { CONDUCTOR_NAME, MAIN_TREE, SCHEMAS, validate } from "../core/types.ts";
 import type {
   Config,
   RouterConfig,
@@ -389,7 +389,7 @@ const evidenceVerifyExample: EvidenceRecord = {
   startedMs: 1754560300000,
   head: "3f9a1c7",
   branch: "main",
-  tree: "main",
+  tree: MAIN_TREE,
   excluded: ["tests/i2.test.ts"],
   green: true,
   scopes: { unit: { green: true, exitCode: 0, durationMs: 41876 } },

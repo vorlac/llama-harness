@@ -86,6 +86,7 @@ import type { GateRun, GateItem, GateQuestion } from "../core/gates-phase.ts";
 // Reuse the EXISTING registry-entry shape (chat-message.ts §3.5 orchestrator entry;
 // fanout.ts writes the sub-session entries) — a third shape is not invented here.
 import type { SessionRegistryEntry } from "../adapter/chat-message.ts";
+import { treePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
 // Doctrine packs on disk (read relative to THIS test file, not cwd — matches the
@@ -430,7 +431,7 @@ test("8.2-headers: role + priority per §4.1, group when a tree is known, schema
   }
 
   // X-Conductor-Group: present + non-empty when a tree/group is known...
-  const reviewer: SessionRegistryEntry = { role: "reviewer", itemId: "I3", tree: "reviews/I3" };
+  const reviewer: SessionRegistryEntry = { role: "reviewer", itemId: "I3", tree: treePath("/repo/reviews/I3") };
   const withTree = headersFor(reviewer);
   assert.ok(Object.hasOwn(withTree, "X-Conductor-Group"), "a tree-bearing entry gets X-Conductor-Group");
   assert.ok(withTree["X-Conductor-Group"].length > 0, "the group id is non-empty");

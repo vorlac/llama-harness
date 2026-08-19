@@ -185,7 +185,7 @@ import { readFanout } from "../core/schedule.ts";
 import { findingSurvives } from "../core/verdict.ts";
 import { legalItemTransition } from "../core/fsm-item.ts";
 import { isKnownEvent } from "../core/journal-events.ts";
-import { validate } from "../core/types.ts";
+import { MAIN_TREE, treePath, validate } from "../core/types.ts";
 import type {
   Config,
   EvidenceRecord,
@@ -194,6 +194,7 @@ import type {
   LogLevel,
   Queue,
   QueueItem,
+  TreePath,
   Verdict,
 } from "../core/types.ts";
 
@@ -288,8 +289,10 @@ const SCOPE = "unit9507";
 // A fixed injected clock: every stamped value the handler mints reads it.
 const START_MS = 1_754_990_000_000;
 
-// The §4.2 shared tree under parallel.writes "off".
-const TREE = "main";
+// The §4.2 shared tree under parallel.writes "off", as the evidence layer's marker
+// SLUG. The same tree's gate-side PATH is the workspace itself — bench.root — and
+// the two are different types (core/types.ts); a dispatch tree is always the path.
+const TREE = MAIN_TREE;
 
 // This file's home (conductor/tests/) — the doctrine packs are read RELATIVE to it.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -366,7 +369,7 @@ const ITEM_TEST_SOURCE =
 // `trackSubject:false` leaves src/a.mjs UNTRACKED, which is exactly what makes
 // `git stash push -- src/a.mjs` fail ("pathspec … did not match any file(s) known to
 // git") — the SKIP branch of the probe, produced by real git rather than by a stub.
-function reviewRepo(trackSubject: boolean): string {
+function reviewRepo(trackSubject: boolean): TreePath {
   const dir = mkdtempSync(path.join(tmpdir(), "conductor-tools95a-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -389,19 +392,19 @@ function reviewRepo(trackSubject: boolean): string {
   git(dir, ["commit", "-m", "seed"]);
   // The item's own (uncommitted) change.
   writeFileSync(path.join(dir, SUBJECT_REL), FIXED_SUBJECT);
-  return dir;
+  return treePath(dir);
 }
 
 // A REAL `git worktree` on its own branch — the §4.2 isolation the wave driver
 // creates and persists onto the item as `item.worktree`. Real rather than a made-up
 // path because the handler EXECUTES in it (the re-validate's cwd), not just dispatches
 // into it.
-function worktreeFor(repo: string, itemId: string): string {
+function worktreeFor(repo: string, itemId: string): TreePath {
   const parent = mkdtempSync(path.join(tmpdir(), "conductor-tools95a-wt-"));
   tmpDirs.push(parent);
   const wt = path.join(parent, itemId);
   git(repo, ["worktree", "add", "-b", `conductor/${itemId}`, wt]);
-  return wt;
+  return treePath(wt);
 }
 
 function subjectOnDisk(root: string): string {
@@ -918,7 +921,7 @@ function makeWiring(
 // ---------------------------------------------------------------------------
 
 interface Bench {
-  root: string;
+  root: TreePath;
   stateHome: string;
   store: StateStore;
   runId: string;
@@ -1573,7 +1576,11 @@ test("[9.5a-route-implementer-filescope] routing by path (§3.3 table row 1): a 
   const implementers = bench.wiring.byRole("implementer");
   assert.equal(implementers.length, 1, "EXACTLY one implementer dispatch for the one fileScope-only finding");
   assert.ok(implementers[0].text.includes(F_IMPL), "the implementer dispatch names the finding it must fix");
-  assert.equal(implementers[0].tree, TREE, "the fix runs in the §4.2 shared tree");
+  assert.equal(
+    implementers[0].tree,
+    bench.root,
+    "the fix runs in the §4.2 shared tree — as the PATH the edit gate normalizes an edit against, which is the workspace itself when the item has no worktree",
+  );
   assert.equal(bench.wiring.byRole("testWriter").length, 0, "a fileScope-only fix NEVER reaches the test-writer");
 
   // ORDER: fix → re-validate → re-review, read off the witness counts each prompt saw.
@@ -1945,7 +1952,7 @@ test("[9.5a-receive-review-pack-delivered] MANDATORY DEFERRED BINDING (Phase 8 g
 
   // THE CONTROL: an implementer session with no such signal gets NOTHING extra, so the
   // delivery above is signal-driven and not a blanket addition to every implementer.
-  const control: SessionRegistryEntry = { role: "implementer", itemId: ITEM_ID, tree: TREE };
+  const control: SessionRegistryEntry = { role: "implementer", itemId: ITEM_ID, tree: bench.root };
   const controlAppend = buildSystemAppend(control, run, items, questions, PACKS, ctx);
   assert.equal(controlAppend[0], PACKS["tdd.md"], "the control implementer still gets tdd.md as its primary pack");
   assert.equal(
@@ -2175,9 +2182,9 @@ test('[9.5a-skeptics-cover-non-major] a finding below "major" severity is adjudi
 //
 // Every other stage already derives its tree from the item via sessionTreeOf
 // (submit_test, vet, mark_green, validate). Item review was the one that did
-// not, which is why the committed row above can assert tree "main" and stay
-// correct: with item.worktree null, sessionTreeOf RETURNS "main". This row pins
-// the other half of that same function.
+// not, which is why the row above can assert the SHARED tree and stay correct:
+// with item.worktree null, sessionTreeOf answers the workspace itself. This row
+// pins the other half of that same function.
 // ===========================================================================
 
 test("[9.5a-worktree-scopes-review-sessions] under worktree mode every session conductor_item_review dispatches — lens reviewers, skeptics AND the write-capable fix — is bound to the ITEM'S worktree, never the shared tree: a reviewer pointed at main would judge a tree without the change, and a fix pointed at main would write outside the isolation §4.2 created", async () => {

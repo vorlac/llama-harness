@@ -119,7 +119,8 @@ import type {
   WaveTreeState,
 } from "../adapter/tools.ts";
 import { AMEND_OP_KINDS, parseAmendOps } from "../core/queue-amend.ts";
-import type { Config, LogLevel } from "../core/types.ts";
+import { NO_TREE } from "../core/types.ts";
+import type { Config, LogLevel, TreePath, TreeSlug } from "../core/types.ts";
 
 // The harness version stamped into the §3.8 liveness beacon openWorkspace writes,
 // so a `conductor doctor` reading alive.json can tell which harness left it.
@@ -711,18 +712,22 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
 
   function createTreeState(store: StateStore, runId: string): PluginTreeState {
     const runDir = runDirOf(store.root, runId);
-    const listeners = new Set<(tree: string) => void>();
+    const listeners = new Set<(tree: TreePath) => void>();
     let timer: ReturnType<typeof setInterval> | null = null;
 
-    const snapshot = (): Set<string> =>
-      runId.length === 0 ? new Set<string>() : new Set(liveVerifyTrees(runDir));
+    const snapshot = (): Set<TreeSlug> =>
+      runId.length === 0 ? new Set<TreeSlug>() : new Set(liveVerifyTrees(runDir));
 
     // `live` is owned by the poll alone. isFrozen deliberately does NOT refresh
     // it: a marker whose disappearance were absorbed by an admission check would
     // never be announced, and the held job it was holding would wait forever.
     let live = snapshot();
 
-    const pathOf = (slug: string): string | null => {
+    // The ONE direction this view ever speaks in: a job's tree is a PATH, so a
+    // marker's SLUG is translated before it is compared to one or announced as
+    // one. A slug that translates to nothing freezes no path and releases none —
+    // an item with no worktree has no tree of its own to hold.
+    const pathOf = (slug: TreeSlug): TreePath | null => {
       try {
         return verifyInFlightTreeFor(store, runId, slug);
       } catch {
@@ -730,21 +735,19 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       }
     };
 
-    const namesOf = (slug: string): string[] => {
-      const translated = pathOf(slug);
-      return translated === null || translated === slug ? [slug] : [slug, translated];
-    };
-
-    const announce = (tree: string): void => {
+    const announce = (tree: TreePath): void => {
       for (const listener of [...listeners]) listener(tree);
     };
 
     const poll = (): void => {
       const next = snapshot();
-      const cleared: string[] = [];
+      const cleared: TreeSlug[] = [];
       for (const slug of live) if (!next.has(slug)) cleared.push(slug);
       live = next;
-      for (const slug of cleared) for (const name of namesOf(slug)) announce(name);
+      for (const slug of cleared) {
+        const treePath = pathOf(slug);
+        if (treePath !== null) announce(treePath);
+      }
     };
 
     const stopTimer = (): void => {
@@ -755,13 +758,13 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     };
 
     return {
-      isFrozen: (tree: string): boolean => {
+      isFrozen: (tree: TreePath): boolean => {
         for (const slug of snapshot()) {
-          if (slug === tree || pathOf(slug) === tree) return true;
+          if (pathOf(slug) === tree) return true;
         }
         return false;
       },
-      onClear: (listener: (tree: string) => void): (() => void) => {
+      onClear: (listener: (tree: TreePath) => void): (() => void) => {
         listeners.add(listener);
         if (timer === null) {
           timer = setInterval(poll, MARKER_POLL_MS);
@@ -775,7 +778,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       },
       // The DRIVER's own release: a stage that finished has done whatever it was
       // going to do to its tree, so the view is told without waiting for a poll.
-      notifyClear: (tree: string): void => {
+      notifyClear: (tree: TreePath): void => {
         live = snapshot();
         announce(tree);
       },
@@ -860,8 +863,8 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   function freezeTreeFor(
     ws: Workspace | null,
     sessionID: string,
-    sessionTree: string,
-  ): string | null {
+    sessionTree: TreePath,
+  ): TreePath | null {
     if (ws === null || sessionTree.length === 0) return null;
     let runId: string;
     try {
@@ -872,7 +875,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       return null;
     }
     for (const slug of liveVerifyTrees(runDirOf(ws.store.root, runId))) {
-      let treePath: string | null;
+      let treePath: TreePath | null;
       try {
         treePath = verifyInFlightTreeFor(ws.store, runId, slug);
       } catch {
@@ -1366,7 +1369,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       // through the same one helper, so neither seam can judge a path against a
       // different tree than the other.
       let inlineClaimScope: string[] | null = null;
-      let sessionTree = "";
+      let sessionTree: TreePath = NO_TREE;
       if (ws !== null) {
         sessionTree = resolveSessionTree(ws.store, registry.get(hook.sessionID));
         try {

@@ -73,7 +73,10 @@ import type {
   ItemState,
   Queue,
   QueueItem,
+  TreePath,
 } from "../core/types.ts";
+import { MAIN_TREE } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 
 // ---------------------------------------------------------------------------
@@ -85,7 +88,7 @@ const SCOPE = "unitPCI";
 const GREEN_CMD = [process.execPath, "-e", "0"];
 const START_MS = 1_754_990_000_000;
 const WORKSPACE_KEY = "wkeyPCI";
-const TREE = "main";
+const TREE = MAIN_TREE;
 const RED_MARKER = "CAPTURED-RED-MARKER-PCI";
 const TITLE_MARKER = "ITEM-TITLE-MARKER-PCI";
 const OUTSIDE_MARKER = "OUT-OF-SCOPE-WORKTREE-MARKER-PCI";
@@ -149,7 +152,7 @@ function tmpDir(tag: string): string {
 // A committed fixture repo. The identity is written into the repo's own config as
 // well as GIT_ENV, because the handler's own git calls run under adapter/gitio's
 // environment rather than this file's.
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = tmpDir("repo");
   git(dir, ["init", "-b", "main"]);
   git(dir, ["config", "user.name", "Conductor Test"]);
@@ -159,7 +162,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 // The name-status lines of ONE commit ("M\tsrc/a.mjs"), i.e. what actually shipped.
@@ -292,7 +295,7 @@ const OPEN_TREE: TreeState = {
 };
 
 interface Bench {
-  root: string;
+  root: TreePath;
   stateHome: string;
   store: StateStore;
   runId: string;
@@ -346,7 +349,7 @@ function makeBench(opts: BenchOpts): Bench {
     store.saveItem(runId, makeRuntimeItem(qi.id, opts.states[qi.id] ?? "PENDING"));
   }
 
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   sdk.setResponder(() => ({ kind: "reply", text: "{}" }));
   const fanout = createFanout(

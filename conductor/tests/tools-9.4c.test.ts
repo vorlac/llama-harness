@@ -209,6 +209,7 @@ import { nextWave, readFanout } from "../core/schedule.ts";
 import { legalRunTransition } from "../core/fsm-run.ts";
 import { isKnownEvent } from "../core/journal-events.ts";
 import { validate } from "../core/types.ts";
+import { MAIN_TREE, treePath } from "../core/types.ts";
 import type {
   Config,
   EvidenceRecord,
@@ -218,6 +219,7 @@ import type {
   Queue,
   QueueItem,
   RunState,
+  TreePath,
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -312,7 +314,7 @@ const SCOPE = "unit4471";
 const START_MS = 1_754_990_000_000;
 
 // The §4.2 shared tree under parallel.writes "off".
-const TREE = "main";
+const TREE = MAIN_TREE;
 
 // This file's home (conductor/tests/) — the doctrine packs are read RELATIVE to it.
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -350,7 +352,7 @@ function git(dir: string, args: string[]): void {
 }
 
 // A committed fixture repo, so runVerify records a REAL HEAD sha and branch "main".
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = mkdtempSync(path.join(tmpdir(), "conductor-tools94c-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -360,7 +362,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function freshStateHome(): string {
@@ -640,8 +642,16 @@ function itemFileBytes(runDir: string, itemId: string): string {
   return readFileSync(path.join(runDir, "items", `${itemId}.json`), "utf8");
 }
 
-function markerPathOf(runDir: string, tree = TREE): string {
+function markerPathOf(runDir: string, tree: string = TREE): string {
   return path.join(runDir, `verify-running-${tree}.json`);
+}
+
+// The tree PATH a member with NO worktree is dispatched into: the workspace
+// itself (runDir is <root>/.conductor/runs/<runId>). TREE above is that same
+// tree's evidence-layer marker SLUG — the two are different types and the
+// translation between them is adapter/tools.ts verifyInFlightTreeFor's.
+function treeRootOf(runDir: string): TreePath {
+  return treePath(path.resolve(runDir, "..", "..", ".."));
 }
 
 // The gate's view of the SAME persisted fixture.
@@ -765,20 +775,22 @@ function makeTreeState(runDir: string, sdk: ReturnType<typeof makeFakeSdk>): {
 } {
   const frozenChecks: string[] = [];
   const clears: Array<{ tree: string; callsAt: number }> = [];
-  const listeners: Array<(tree: string) => void> = [];
+  const listeners: Array<(tree: TreePath) => void> = [];
   const tree: WaveTreeState = {
-    isFrozen(name: string): boolean {
+    isFrozen(name: TreePath): boolean {
       frozenChecks.push(name);
-      return existsSync(markerPathOf(runDir, name));
+      // The engine asks about a tree PATH; the marker file is named by SLUG.
+      const slug = name === treeRootOf(runDir) ? TREE : path.basename(name);
+      return existsSync(markerPathOf(runDir, slug));
     },
-    onClear(listener: (t: string) => void): () => void {
+    onClear(listener: (t: TreePath) => void): () => void {
       listeners.push(listener);
       return (): void => {
         const idx = listeners.indexOf(listener);
         if (idx >= 0) listeners.splice(idx, 1);
       };
     },
-    notifyClear(name: string): void {
+    notifyClear(name: TreePath): void {
       clears.push({ tree: name, callsAt: sdk.calls.length });
       for (const listener of [...listeners]) listener(name);
     },
@@ -787,7 +799,7 @@ function makeTreeState(runDir: string, sdk: ReturnType<typeof makeFakeSdk>): {
 }
 
 function makeWiring(runId: string, runDir: string, config: Config, journal: JournalSink, respond: Responder): Wiring {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: PromptedRecord[] = [];
   const counts = new Map<string, number>();
@@ -1783,10 +1795,14 @@ test("[9.4c-writes-serialize] writes SERIALIZE per tree (the §4.2 ordering guar
       wiring.frozenChecks.length >= 2,
       "the engine's freeze admission was consulted for each write-capable job (the §3.5 mechanism is reused, not reimplemented)",
     );
-    assert.deepEqual([...new Set(wiring.frozenChecks)], [TREE], "every freeze-admission check named the ONE shared tree");
+    assert.deepEqual(
+      [...new Set(wiring.frozenChecks)],
+      [treeRootOf(runDir)],
+      "every freeze-admission check named the ONE shared tree — as the PATH the gates compare, which is the workspace itself when the item has no worktree",
+    );
     assert.deepEqual(
       wiring.byRole("implementer").map((p) => p.tree),
-      [TREE, TREE],
+      [treeRootOf(runDir), treeRootOf(runDir)],
       "both write-capable jobs claimed the SAME shared tree (parallel.writes 'off')",
     );
     assert.equal(store.loadItem(runId, "I1").state, "GREEN", "I1's write stage completed");
@@ -2142,7 +2158,7 @@ test("[9.4c-binding-p7-stale-marker-onclear] MANDATORY DEFERRED BINDING (P7, fro
     assert.equal(existsSync(markerPathOf(runDir)), true, "premise: the shared tree carries a leaked verify marker");
 
     const wiring = makeWiring(runId, runDir, config, journal.sink, () => ({ kind: "reply", text: implJson() }));
-    assert.equal(wiring.treeState.isFrozen(TREE), true, "premise: the marker-backed TreeState reports the shared tree FROZEN");
+    assert.equal(wiring.treeState.isFrozen(treeRootOf(runDir)), true, "premise: the marker-backed TreeState reports the shared tree FROZEN");
 
     const result: DispatchWaveResult = await handleDispatchWave({
       store,
@@ -2161,7 +2177,7 @@ test("[9.4c-binding-p7-stale-marker-onclear] MANDATORY DEFERRED BINDING (P7, fro
     const holds = journal.records.filter((r) => r.component === "fanout" && r.event === "subsession.hold");
     assert.equal(holds.length, 1, "exactly ONE write-capable job was HELD by the fan-out engine");
     assert.equal(holds[0].data["itemId"], "I1", "…the wave-order-first member's implementer");
-    assert.equal(holds[0].data["tree"], TREE, "…on the shared tree");
+    assert.equal(holds[0].data["tree"], treeRootOf(runDir), "…on the shared tree, named as the PATH the job carries");
     assert.equal(isKnownEvent("fanout", "subsession.hold"), true, "the hold is journaled in the CLOSED §7.4 vocabulary");
 
     // (2) The evidence layer broke the marker, and the DRIVER's TreeState fired onClear.
@@ -2169,7 +2185,7 @@ test("[9.4c-binding-p7-stale-marker-onclear] MANDATORY DEFERRED BINDING (P7, fro
     assert.equal(verifies.length, 1, "the sibling's REAL verify ran (runVerify's staleMarkerBroken path)");
     assert.equal(existsSync(markerPathOf(runDir)), false, "the leaked marker is gone");
     assert.ok(wiring.clears.length > 0, "the driver fired notifyClear on its TreeState (P6) — the held job is released deterministically");
-    const clearAt = wiring.clears.find((c) => c.tree === TREE);
+    const clearAt = wiring.clears.find((c) => c.tree === treeRootOf(runDir));
     assert.ok(clearAt !== undefined, "…for the shared tree");
 
     // (3) The released job actually ran — and only AFTER the clear.
@@ -2197,7 +2213,7 @@ test("[9.4c-binding-p7-stale-marker-onclear] MANDATORY DEFERRED BINDING (P7, fro
     const d1 = dispositionOf(result, "I1");
     assert.ok(typeof d1.anomaly === "string" && d1.anomaly.length > 0, "the held member's disposition carries an ANOMALY");
     assert.match(d1.anomaly as string, /marker|freeze|frozen|held|hold/i, "…describing the freeze/marker hold");
-    assert.ok((d1.anomaly as string).includes(TREE), "…and naming the tree it was held on");
+    assert.ok((d1.anomaly as string).includes(treeRootOf(runDir)), "…and naming the tree it was held on");
     // The anomaly is MEMBER-SPECIFIC, not a blanket wave-level string stamped on every row.
     // (Whether the sibling whose verify broke the marker carries an anomaly of its own is
     // left open — only "the same string on both" is refused.)
@@ -2389,7 +2405,7 @@ test("[9.4c-abandoned-stage-cannot-write] a stage the driver ABANDONS on the hel
   // freeze the member's tree, which is what puts the stage on the held-job budget.
   writeFileSync(markerPathOf(runDir), JSON.stringify({ pid: deadPid(), startMs: START_MS - 1_000 }));
   const wiring = makeWiring(runId, runDir, config, journal.sink, () => ({ kind: "reply", text: implJson() }));
-  assert.equal(wiring.treeState.isFrozen(TREE), true, "premise: the marker-backed TreeState reports the member's tree FROZEN");
+  assert.equal(wiring.treeState.isFrozen(treeRootOf(runDir)), true, "premise: the marker-backed TreeState reports the member's tree FROZEN");
 
   // The abandoned stage, under the test's control. It is still running when the
   // driver's budget expires, and only afterwards does it try to advance the item

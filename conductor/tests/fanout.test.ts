@@ -65,6 +65,8 @@ import type { Config } from "../core/types.ts";
 import { isKnownEvent } from "../core/journal-events.ts";
 import type { Journal, Corr } from "../adapter/journal.ts";
 
+import { treePath } from "../core/types.ts";
+import type { TreePath } from "../core/types.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 import type { FakeSdk, PromptReply } from "./fixtures/fake-sdk.ts";
 
@@ -114,23 +116,30 @@ function makeRecordingJournal(): { journal: Journal; records: LoggedRecord[] } {
   return { journal, records };
 }
 
+// The trees these rows dispatch into. A job's tree is a PATH (core/types.ts
+// TreePath) — the value the §3.5 gates normalize an edit path against — so the
+// fixtures name real paths rather than the evidence layer's marker slugs.
+const TREE_MAIN = treePath("/repo");
+const TREE_X = treePath("/repo/wt/x");
+const TREE_SYNC = treePath("/repo/wt/sync");
+
 // A controllable §3.5 freeze view. `isFrozen`/`onClear` satisfy the engine's TreeState;
 // `setFrozen(tree,false)` clears the marker AND notifies subscribers, which is how the
 // held write-capable job is released deterministically (no timers, no polling).
-function makeFakeTreeState(): TreeState & { setFrozen(tree: string, frozen: boolean): void } {
-  const frozen = new Set<string>();
-  const listeners = new Set<(tree: string) => void>();
+function makeFakeTreeState(): TreeState & { setFrozen(tree: TreePath, frozen: boolean): void } {
+  const frozen = new Set<TreePath>();
+  const listeners = new Set<(tree: TreePath) => void>();
   return {
-    isFrozen(tree: string): boolean {
+    isFrozen(tree: TreePath): boolean {
       return frozen.has(tree);
     },
-    onClear(listener: (tree: string) => void): () => void {
+    onClear(listener: (tree: TreePath) => void): () => void {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    setFrozen(tree: string, isFrozen: boolean): void {
+    setFrozen(tree: TreePath, isFrozen: boolean): void {
       const was = frozen.has(tree);
       if (isFrozen) {
         frozen.add(tree);
@@ -235,7 +244,7 @@ function readJob(over: Partial<FanoutJob> = {}): FanoutJob {
   return {
     role: "reviewer",
     itemId: "i1",
-    tree: "main",
+    tree: TREE_MAIN,
     writeCapable: false,
     prompt: "review the change",
     schemaName: PROBE,
@@ -373,11 +382,11 @@ test("[7.1-freeze-hold] a writeCapable job into a frozen tree is HELD (not dispa
   const treeState = makeFakeTreeState();
   const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, treeState);
 
-  treeState.setFrozen("treeX", true);
+  treeState.setFrozen(TREE_X, true);
   sdk.setResponder(() => ({ kind: "reply", text: VALID }));
 
-  const writeJob = readJob({ role: "implementer", writeCapable: true, tree: "treeX", itemId: "w", prompt: "edit" });
-  const readForSameTree = readJob({ role: "reviewer", writeCapable: false, tree: "treeX", itemId: "r", prompt: "read" });
+  const writeJob = readJob({ role: "implementer", writeCapable: true, tree: TREE_X, itemId: "w", prompt: "edit" });
+  const readForSameTree = readJob({ role: "reviewer", writeCapable: false, tree: TREE_X, itemId: "r", prompt: "read" });
 
   const wave = fanout.dispatchWave([writeJob, readForSameTree]);
   await settle();
@@ -386,7 +395,7 @@ test("[7.1-freeze-hold] a writeCapable job into a frozen tree is HELD (not dispa
   assert.equal(sdk.creates.length, 1, "only the read job is dispatched into the frozen tree");
   const holdEvents = records.filter((r) => r.event === "subsession.hold");
   assert.equal(holdEvents.length, 1, "the held write-capable job is journaled as a hold");
-  assert.equal(holdEvents[0].data["tree"], "treeX", "the hold names the frozen tree");
+  assert.equal(holdEvents[0].data["tree"], TREE_X, "the hold names the frozen tree");
   // Held, not DENIED: no abort, no completion for the write job yet.
   assert.ok(!sdk.aborts.length, "a held job is not aborted");
   assert.ok(
@@ -395,7 +404,7 @@ test("[7.1-freeze-hold] a writeCapable job into a frozen tree is HELD (not dispa
   );
 
   // Clear the marker — the held job must now be released and dispatched.
-  treeState.setFrozen("treeX", false);
+  treeState.setFrozen(TREE_X, false);
   await settle();
   assert.equal(sdk.creates.length, 2, "the held write-capable job dispatches after the marker clears");
 
@@ -413,17 +422,17 @@ test("[7.1-freeze-hold] a writeCapable job into a frozen tree is HELD (not dispa
 // listener SYNCHRONOUSLY from inside onClear (not on a later macrotask). An engine that
 // only records the hold's unsubscribe AFTER subscribing would find nothing registered
 // when the synchronous listener runs and would STRAND the job — the wave would hang.
-function makeSyncClearOnSubscribeTreeState(tree: string): TreeState {
+function makeSyncClearOnSubscribeTreeState(tree: TreePath): TreeState {
   let admissionsLeft = 1;
   return {
-    isFrozen(t: string): boolean {
+    isFrozen(t: TreePath): boolean {
       if (t === tree && admissionsLeft > 0) {
         admissionsLeft -= 1;
         return true; // the admission check sees the live marker → the job is held
       }
       return false; // by subscribe time the marker has already cleared
     },
-    onClear(listener: (t: string) => void): () => void {
+    onClear(listener: (t: TreePath) => void): () => void {
       listener(tree); // synchronous notification DURING subscribe — the F3 race
       return () => {
         /* nothing to unsubscribe: this fake fires exactly once, synchronously */
@@ -436,7 +445,7 @@ test("[7.1-freeze-hold] a SYNCHRONOUS onClear during subscribe still releases th
   const registry = makeRegistry();
   const sdk = makeFakeSdk({ registry });
   const { journal, records } = makeRecordingJournal();
-  const treeState = makeSyncClearOnSubscribeTreeState("treeSync");
+  const treeState = makeSyncClearOnSubscribeTreeState(TREE_SYNC);
   const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, treeState);
 
   sdk.setResponder(() => ({ kind: "reply", text: VALID }));
@@ -444,7 +453,7 @@ test("[7.1-freeze-hold] a SYNCHRONOUS onClear during subscribe still releases th
   const writeJob = readJob({
     role: "implementer",
     writeCapable: true,
-    tree: "treeSync",
+    tree: TREE_SYNC,
     itemId: "ws",
     prompt: "edit",
   });
@@ -472,7 +481,7 @@ test("[7.1-registry-first] the registry entry (sessionID -> {role,itemId,tree}) 
   const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
 
   sdk.setResponder(() => ({ kind: "reply", text: VALID }));
-  const result = await fanout.dispatch(readJob({ role: "reviewer", itemId: "i7", tree: "main" }));
+  const result = await fanout.dispatch(readJob({ role: "reviewer", itemId: "i7", tree: TREE_MAIN }));
 
   assert.equal(sdk.prompts.length, 1);
   const rec = sdk.prompts[0];
@@ -482,7 +491,7 @@ test("[7.1-registry-first] the registry entry (sessionID -> {role,itemId,tree}) 
   assert.ok(rec.entryAtStart !== undefined, "the registry entry was present at prompt time");
   assert.equal(rec.entryAtStart?.role, "reviewer");
   assert.equal(rec.entryAtStart?.itemId, "i7");
-  assert.equal(rec.entryAtStart?.tree, "main");
+  assert.equal(rec.entryAtStart?.tree, TREE_MAIN);
   // Task 0.2 DRIFT: no native `format` body field — structured output is prompt-shaped.
   assert.equal(rec.hasFormatField, false, "the engine must not lean on the non-existent format field");
 
@@ -725,7 +734,7 @@ test("[7.1-cleanup] the registry is populated during flight then cleaned; journa
     const entry = registry.get(sid);
     assert.ok(entry !== undefined, "every in-flight session has a registry entry");
     assert.equal(entry?.role, "reviewer");
-    assert.equal(entry?.tree, "main");
+    assert.equal(entry?.tree, TREE_MAIN);
   }
 
   resolveAllEchoingItem(sdk, registry);

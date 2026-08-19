@@ -47,7 +47,7 @@
 //
 //   // The §3.5 session-registry the gate also consults. chat.message writes the
 //   // orchestrator's entry; the fan-out engine (elsewhere) writes sub-session entries.
-//   interface SessionRegistryEntry { role: string; itemId?: string; tree?: string }
+//   interface SessionRegistryEntry { role: string; itemId?: string; tree?: TreePath }
 //   interface SessionRegistry {
 //     register(sessionID: string, entry: SessionRegistryEntry): void;
 //     get(sessionID: string): SessionRegistryEntry | undefined;
@@ -131,7 +131,7 @@ import * as path from "node:path";
 // The store the hook composes over — this DOES exist (Task 4.1).
 import { openWorkspace } from "../adapter/state.ts";
 import type { OpenOptions } from "../adapter/state.ts";
-import type { Config } from "../core/types.ts";
+import type { Config, TreePath } from "../core/types.ts";
 
 // The subject under test — absent at red time (the missing-subject red names THIS path).
 import { handleChatMessage } from "../adapter/chat-message.ts";
@@ -208,7 +208,8 @@ function bareDir(): string {
 interface RegistryEntry {
   role: string;
   itemId?: string;
-  tree?: string;
+  // The §3.5 tree PATH (core/types.ts TreePath) — never the evidence layer's slug.
+  tree?: TreePath;
 }
 interface TestRegistry {
   register(sessionID: string, entry: RegistryEntry): void;

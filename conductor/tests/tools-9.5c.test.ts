@@ -191,6 +191,7 @@ import type { MetricsSummary } from "../adapter/router-client.ts";
 import { requireTwoOptions } from "../core/decide.ts";
 import { STOP_KINDS } from "../core/stops.ts";
 import { validate } from "../core/types.ts";
+import { MAIN_TREE, treePath } from "../core/types.ts";
 import type {
   AnomalyRecord,
   Config,
@@ -201,6 +202,7 @@ import type {
   Queue,
   QueueItem,
   StopKind,
+  TreePath,
 } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -310,7 +312,7 @@ const SENTINEL_REL = "verify-sentinel-9-5-c.txt";
 const START_MS = 1_755_100_000_000;
 
 // The §4.2 shared tree under parallel.writes "off".
-const TREE = "main";
+const TREE = MAIN_TREE;
 
 // The §2.9 kinds this task's stop-report path must serve — the five NON-`done` kinds, drawn
 // from core/stops.ts's CLOSED vocabulary rather than typed out as literals, so a widened (or
@@ -345,7 +347,7 @@ function git(dir: string, args: string[]): void {
 }
 
 // A committed fixture repo, so run creation records a REAL HEAD sha and branch "main".
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = mkdtempSync(path.join(tmpdir(), "conductor-tools95c-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -356,7 +358,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function freshStateHome(): string {
@@ -594,7 +596,7 @@ const NEVER_FROZEN: TreeState = {
 // A Fanout that CAN answer anything, so a "dispatched nothing" assertion is about
 // the handler declining to ask rather than the fixture being unable to reply.
 function makeReportFanout(runId: string, config: Config, journal: JournalSink): Fanout {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   sdk.setResponder(() => ({ kind: "reply", text: "{}" }));
   return createFanout(
@@ -608,7 +610,7 @@ function makeReportFanout(runId: string, config: Config, journal: JournalSink): 
 }
 
 interface Bench {
-  root: string;
+  root: TreePath;
   fanout: Fanout;
   stateHome: string;
   store: StateStore;

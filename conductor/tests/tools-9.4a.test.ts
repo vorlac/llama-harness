@@ -212,6 +212,7 @@ import type {
   Queue,
   QueueItem,
   QuestionRecord,
+  TreePath,
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -689,7 +690,7 @@ interface Wiring {
   byRole: (role: string) => PromptedRecord[];
 }
 function makeWiring(runId: string, config: Config, journal: JournalSink, script: RoleScript): Wiring {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: PromptedRecord[] = [];
   const sessionIdx = new Map<string, number>();
@@ -861,10 +862,14 @@ test("[9.4a-submit-legal-red] handleSubmitTest dispatches the test-writer, THE H
     assert.equal(wiring.sdk.promptsFor(writers[0].sessionID).length, 1, "one prompt, no schema retry");
     assert.equal(writers[0].role, "testWriter", "the §3.3 role is testWriter");
     assert.equal(writers[0].itemId, "I1", "the dispatch is correlated to the item");
-    assert.equal(writers[0].tree, "main", "the writer works the main tree (worktrees land in 9.6)");
+    assert.equal(
+      writers[0].tree,
+      root,
+      "the writer works the shared tree — as the PATH the §3.5 gates normalize an edit against, which is the workspace itself when the item has no worktree",
+    );
     // writeCapable:true is observable ONLY through the freeze-admission check, which the
     // engine performs for a write-capable job and skips for a reader.
-    assert.deepEqual(wiring.frozenChecks, ["main"], "the writer dispatch is write-capable (freeze-admission consulted once, for tree main)");
+    assert.deepEqual(wiring.frozenChecks, [root], "the writer dispatch is write-capable (freeze-admission consulted once, for the shared tree)");
     assert.ok(
       wiring.sdk.prompts.every((p) => p.hasFormatField === false),
       "structured output is prompt-shaped + independently validated (no native `format` field — Task 0.2 DRIFT)",
@@ -1043,7 +1048,7 @@ test("[9.4a-submit-error-repair-loop] failureClass 'error' is REJECTED as a red 
     );
     assert.equal(wiring.prompted.length, 3, "no other role was dispatched");
     assert.equal(new Set(writers.map((w) => w.sessionID)).size, 3, "each repair is a dispatch of its own");
-    assert.deepEqual(wiring.frozenChecks, ["main", "main", "main"], "every writer dispatch is write-capable on the main tree");
+    assert.deepEqual(wiring.frozenChecks, [root, root, root], "every writer dispatch is write-capable on the shared tree");
 
     // Three evidence records: two rejected 'error' runs and the accepted 'assertion'.
     const evidence = readEvidence(runDir);
@@ -1579,7 +1584,7 @@ test("[9.4a-vet-mustfix-loop] a round with non-empty mustFix routes the UNION ba
     assert.equal(reviewers.length, 4, "exactly TWO vet rounds of two critics each");
     assert.equal(writers.length, 1, "exactly ONE test-writer re-dispatch carried the mustFix list");
     assert.equal(wiring.prompted.length, 5, "nothing else was dispatched");
-    assert.deepEqual(wiring.frozenChecks, ["main"], "the ONE writer re-dispatch is write-capable; the critics are not");
+    assert.deepEqual(wiring.frozenChecks, [root], "the ONE writer re-dispatch is write-capable; the critics are not");
 
     // The re-dispatch carries the UNION of both critics' mustFix items…
     assert.ok(writers[0].text.includes(MUSTFIX_A), "the writer re-dispatch carries the first critic's mustFix item");

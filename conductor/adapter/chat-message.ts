@@ -20,6 +20,7 @@
 // under both the opencode runtime and Node type-stripping.
 
 import { isTerminal } from "../core/stops.ts";
+import type { TreePath } from "../core/types.ts";
 import type { CreateRunInput, StateStore } from "./state.ts";
 
 // The §3.5 session-registry the gate also consults. chat.message writes the
@@ -29,7 +30,11 @@ import type { CreateRunInput, StateStore } from "./state.ts";
 export interface SessionRegistryEntry {
   role: string;
   itemId?: string;
-  tree?: string;
+  // The tree PATH the §3.5 gates judge the session against (core/types.ts brands
+  // it apart from the evidence layer's marker slug). Absent until
+  // adapter/continuation.ts resolveSessionTree records the workspace root onto
+  // the orchestrator's own entry.
+  tree?: TreePath;
   receivingReview?: boolean;
 }
 export interface SessionRegistry {

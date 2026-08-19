@@ -118,6 +118,7 @@ import type {
   QuestionRecord,
   RunState,
   Verdict,
+  TreePath,
 } from "../core/types.ts";
 import { findingSurvives } from "../core/verdict.ts";
 import { nextWave, readFanout } from "../core/schedule.ts";
@@ -453,7 +454,7 @@ function makeReviewFanout(
   prompted: PromptedRecord[];
   byRole: (role: string) => PromptedRecord[];
 } {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: PromptedRecord[] = [];
   const sessionIdx = new Map<string, number>();

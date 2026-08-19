@@ -244,6 +244,7 @@ import { legalItemTransition } from "../core/fsm-item.ts";
 import { legalRunTransition } from "../core/fsm-run.ts";
 import { verifyFreshFor } from "../core/freshness.ts";
 import { validate } from "../core/types.ts";
+import { MAIN_TREE, treePath } from "../core/types.ts";
 import type {
   ClassificationKind,
   Config,
@@ -254,6 +255,7 @@ import type {
   Queue,
   QueueItem,
   RunState,
+  TreePath,
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -369,7 +371,7 @@ const BROKEN_SCOPE = "tree9512";
 const START_MS = 1_754_990_000_000;
 
 // The §4.2 shared tree under parallel.writes "off".
-const TREE = "main";
+const TREE = MAIN_TREE;
 
 const WORKSPACE_KEY = "wkey9512";
 
@@ -415,7 +417,7 @@ function tmpDir(tag: string): string {
 // GIT_ENV: the handler's commit runs under adapter/gitio.ts's environment (which inherits
 // process.env and strips only the repo-location overrides), so a machine with no global
 // identity would otherwise fail the commit for a reason that has nothing to do with 9.5b.
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = tmpDir("repo");
   git(dir, ["init", "-b", "main"]);
   git(dir, ["config", "user.name", "Conductor Test"]);
@@ -425,16 +427,16 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 // A workspace that is NOT a git repository (§3.9 no-git mode).
-function plainDir(): string {
+function plainDir(): TreePath {
   const dir = tmpDir("nogit");
   mkdirSync(path.join(dir, "src"), { recursive: true });
   mkdirSync(path.join(dir, "tests"), { recursive: true });
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
-  return dir;
+  return treePath(dir);
 }
 
 function commitCount(dir: string): number {
@@ -656,7 +658,7 @@ function makeQueueItem(
 }
 
 interface Bench {
-  root: string;
+  root: TreePath;
   stateHome: string;
   store: StateStore;
   runId: string;
@@ -692,7 +694,7 @@ function makeWiring(
   config: Config,
   journal: JournalSink,
 ): { sdk: ReturnType<typeof makeFakeSdk>; fanout: Fanout } {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   // A responder that would answer ANY prompt: the "zero dispatches" rows are then about the
   // handler never asking, not about the fixture being unable to reply.

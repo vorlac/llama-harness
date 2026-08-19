@@ -84,7 +84,8 @@ import { AMEND_OP_KINDS, parseAmendOps } from "../core/queue-amend.ts";
 import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
 import { SCHEMAS } from "../core/types.ts";
-import type { Config, Item, ItemState, Queue, QueueItem, RunState } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
+import type { Config, Item, ItemState, Queue, QueueItem, RunState, TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
 // Structural mirrors of the opencode hook shapes. Kept LOCAL (not imported from
@@ -960,10 +961,30 @@ test("[13.1-cr-fanout-is-real-and-registers] the bundle's fanout is a REAL creat
       /no conductor item assignment/,
       `the fan-out must write its sub-session entry into the PLUGIN's ONE registry (plugin/index.ts:178-191), so the gate hook reads it: ${subSession} is still unregistered as far as the gate is concerned`,
     );
+    // And the entry carries a TREE — the PATH core/gates-edit.ts normalizeUnderTree
+    // judges an edit path against. Under the shipped parallel.writes:"off" that tree
+    // is the WORKSPACE itself (ISSUE-002), so an in-workspace path gets PAST
+    // normalization and is refused by the per-role scope rule instead, while a path
+    // outside the workspace is refused by the tree rule. Both halves are asserted:
+    // one alone cannot tell a real tree from a value that admits or denies everything.
     assert.match(
       after,
+      /may edit only its item's/,
+      "the in-workspace path reaches the per-role SCOPE rule, which it can only do if the entry's tree is the workspace PATH — the evidence layer's slug \"main\" is the prefix of no path and would have been refused one rule earlier",
+    );
+    const outsideTheTree = await gateDeny(
+      hooks,
+      {
+        tool: "edit",
+        sessionID: subSession,
+        args: { filePath: path.join(tmpdir(), "conductor-13.1-cr-not-the-tree", "src", "beta.ts") },
+      },
+      "a path outside the session's tree",
+    );
+    assert.match(
+      outsideTheTree,
       /outside this session's tree/,
-      "and the entry carries a TREE, which is what core/gates-edit.ts normalizeUnderTree judges the path against — an entry with no tree would fall through to the per-role scope deny instead",
+      "and the tree rule still BITES: a path outside the registered tree is refused by normalization, so the tree is a real comparison rather than a formality any absolute path satisfies",
     );
 
     await waitFor(
@@ -2375,14 +2396,14 @@ test("[13.1-cr-runless-status-shape-not-a-second-shape] conductor_status returns
 // of these five rows drive the real plugin instead of auditing its text.
 //
 // THE TREE THESE ROWS USE. A registry entry's `tree` is the value
-// adapter/tools.ts:2362 sessionTreeOf produced for the item: its persisted §4.2
-// worktree PATH when it has one, else the STAGE_TREE SLUG "main". The edit gate
-// compares that value to the edit path by string equality
+// adapter/tools.ts sessionTreeOf produced for the item — always a PATH: its
+// persisted §4.2 worktree when it has one, else the workspace itself. The edit
+// gate compares that value to the edit path by string equality
 // (core/gates-edit.ts:128-134 normalizeUnderTree), so these rows give each item a
-// worktree of its own — the configuration in which the per-role scope arms are
-// reachable at all, and the one in which the freeze row's slug->path translation
-// is observable, because verifyInFlightTreeFor("<itemId>") IS that item's
-// persisted worktree (adapter/tools.ts:2376-2379).
+// worktree of its own — the configuration in which the freeze row's slug->path
+// translation is observable, because verifyInFlightTreeFor("<itemId>") IS that
+// item's persisted worktree. The shipped no-worktree default has its own row at
+// the end of this file (ISSUE-002).
 //
 // C-077 THROUGHOUT: every expected scope is read back OFF DISK from the queue.json
 // this file wrote, never from anything the plugin reports.
@@ -2418,11 +2439,15 @@ const ENV_DOCTRINE_DIR = "LLAMA_HARNESS_DOCTRINE_DIR";
 
 // A §4.2 tree of an item's own: a real directory, because a stage handler runs the
 // item's test with this as its cwd once its sub-session replies.
-function itemTreeDir(tag: string): string {
+//
+// `null` where one of these is asked for is the SHIPPED default (§4.2
+// parallel.writes:"off"): the item has no tree of its own and its sub-sessions work
+// the workspace itself. That configuration has its own row at the end of this file.
+function itemTreeDir(tag: string): TreePath {
   const dir = plainRoot(tag);
   mkdirSync(path.join(dir, "src"), { recursive: true });
   mkdirSync(path.join(dir, "tests"), { recursive: true });
-  return dir;
+  return treePath(dir);
 }
 
 interface ItemScopes {
@@ -2440,7 +2465,7 @@ function scopeItemOnDisk(
   runId: string,
   itemId: string,
   scopes: ItemScopes,
-  worktree: string,
+  worktree: TreePath | null,
 ): void {
   const queuePath = path.join(runDirOf(store.root, runId), "queue.json");
   const queue = JSON.parse(readFileSync(queuePath, "utf8")) as Queue;
@@ -2829,6 +2854,135 @@ test("[13.1-cr2-freeze-denies-only-its-own-tree] verifyInFlightTree is derived f
     await drain(sdk, runI1, 15_000);
     await drain(sdk, runI2, 15_000);
     if (existsSync(markerPath)) rmSync(markerPath);
+  }
+});
+
+// The row above holds ONE marker on disk at a time, and a single-marker world
+// cannot tell "the live marker for THIS session's tree" apart from "the first
+// live marker in the run". Both answers agree while there is only one. A
+// selection loosened to the second — first-marker-wins, or a comparison widened
+// to "any live tree" — survives that row green while a session whose OWN tree is
+// frozen is let through, which is the FAIL-OPEN direction the freeze exists to
+// prevent. Two concurrent markers separate the two answers.
+
+test("[13.1-cr2-freeze-denies-only-its-own-tree] with TWO trees frozen AT ONCE the freeze is selected PER SESSION, not first-marker-wins: both frozen trees' implementers are DENIED in their own scope while a third session in an unfrozen tree is ALLOWED, and lifting one marker thaws ONLY that tree — a single-marker row cannot tell a per-session selection from a run-wide one, and the loose answer lets a frozen tree's own edit through", async () => {
+  const root = gitRoot("conductor-13.1-cr2-freeze2-");
+  const config = makeConfig({ subSessionTimeoutMs: 30_000 });
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "TEST_VETTED", I2: "TEST_VETTED", I3: "TEST_VETTED" });
+
+  const treeI1 = itemTreeDir("conductor-13.1-cr2-freeze2-i1-");
+  const treeI2 = itemTreeDir("conductor-13.1-cr2-freeze2-i2-");
+  const treeI3 = itemTreeDir("conductor-13.1-cr2-freeze2-i3-");
+  scopeItemOnDisk(store, runId, "I1", { fileScope: ["src/alpha/**"], testScope: ["tests/alpha/**"] }, treeI1);
+  scopeItemOnDisk(store, runId, "I2", { fileScope: ["src/beta/**"], testScope: ["tests/beta/**"] }, treeI2);
+  scopeItemOnDisk(store, runId, "I3", { fileScope: ["src/gamma/**"], testScope: ["tests/gamma/**"] }, treeI3);
+
+  const sdk = makeFakeSdk({
+    registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+    idPrefix: "ses_cr2_freeze2_",
+  });
+  const hooks = await startPlugin(root, sdk.client);
+
+  // Registered BEFORE any marker exists, for the same reason the row above does
+  // it: the fan-out's own §3.5 freeze admission holds a write-capable job out of a
+  // frozen tree, so a marker written first prevents the registration these
+  // assertions need.
+  const runI1 = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I1" }, root));
+  const runI2 = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I2" }, root));
+  const runI3 = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I3" }, root));
+
+  const editI1 = path.join(treeI1, "src", "alpha", "one.ts");
+  const editI2 = path.join(treeI2, "src", "beta", "one.ts");
+  const editI3 = path.join(treeI3, "src", "gamma", "one.ts");
+  const markerI1 = path.join(runDir, "verify-running-I1.json");
+  const markerI2 = path.join(runDir, "verify-running-I2.json");
+  const liveMarker = (): string => JSON.stringify({ pid: process.pid, startMs: Date.now() });
+
+  try {
+    const implI1 = await awaitDispatch(runDir, "I1", 20_000);
+    const implI2 = await awaitDispatch(runDir, "I2", 20_000);
+    const implI3 = await awaitDispatch(runDir, "I3", 20_000);
+
+    // Anti-vacuity: every edit below is inside its own item's fileScope, so with
+    // no marker on disk all three are allowed. A deny asserted against a session
+    // that could never edit anything means nothing.
+    for (const [label, session, filePath] of [
+      ["I1", implI1.sessionID, editI1],
+      ["I2", implI2.sessionID, editI2],
+      ["I3", implI3.sessionID, editI3],
+    ] as const) {
+      const outcome = await gateOutcome(hooks, editOf(session, filePath));
+      assert.equal(
+        outcome.denied,
+        false,
+        `premise: with NO marker on disk, ${label}'s implementer may edit inside its own scope — the gate refused with: ${outcome.reason}`,
+      );
+    }
+
+    // TWO trees frozen at once. Which of the two the run's marker enumeration
+    // yields first is a filesystem-order accident, so BOTH are asserted: a
+    // selection that stops at the first live marker lets the other frozen tree's
+    // own session through whichever way the order falls.
+    writeFileSync(markerI1, liveMarker());
+    writeFileSync(markerI2, liveMarker());
+
+    const frozenI1 = await gateOutcome(hooks, editOf(implI1.sessionID, editI1));
+    assert.equal(
+      frozenI1.denied,
+      true,
+      `I1's tree has a LIVE marker, so I1's implementer is denied even though the path is inside I1's own fileScope — while ${path.basename(markerI2)} is live too. A derivation that answers with the FIRST live marker in the run, or one whose comparison is loosened to "some tree is verifying", hands the gate ${treeI2} here, and core/gates-edit.ts:196-198 compares that to ${treeI1}, finds them different and ALLOWS the edit — a freeze that fails OPEN on the tree it was written for`,
+    );
+    assert.match(
+      frozenI1.reason,
+      /verify marker is live for this tree/,
+      `and the refusal is the FREEZE, not a scope deny (${editI1} is inside I1's own fileScope): ${frozenI1.reason}`,
+    );
+
+    const frozenI2 = await gateOutcome(hooks, editOf(implI2.sessionID, editI2));
+    assert.equal(
+      frozenI2.denied,
+      true,
+      `and symmetrically for I2, whose tree carries the OTHER live marker — asserting only one of the two would leave the fail-open half of a first-marker-wins selection green half the time, decided by readdir order`,
+    );
+    assert.match(
+      frozenI2.reason,
+      /verify marker is live for this tree/,
+      `and I2's refusal is the freeze as well: ${frozenI2.reason}`,
+    );
+
+    // The allow half, now under TWO live markers: still a tree comparison, still
+    // not "something is verifying somewhere in this run".
+    const neighbour = await gateOutcome(hooks, editOf(implI3.sessionID, editI3));
+    assert.equal(
+      neighbour.denied,
+      false,
+      `I3's tree has NO marker, so its implementer stays ALLOWED while BOTH other trees are frozen — the gate refused with: ${neighbour.reason}. Two live markers must not add up to a run-wide freeze`,
+    );
+
+    // And a lift is per tree: I1 thaws, I2 stays frozen.
+    rmSync(markerI1);
+    const thawedI1 = await gateOutcome(hooks, editOf(implI1.sessionID, editI1));
+    assert.equal(
+      thawedI1.denied,
+      false,
+      `once I1's marker clears, I1's edit is allowed again even though I2's verify is still running — the gate refused with: ${thawedI1.reason}`,
+    );
+    const stillFrozenI2 = await gateOutcome(hooks, editOf(implI2.sessionID, editI2));
+    assert.equal(
+      stillFrozenI2.denied,
+      true,
+      "and I2 stays frozen while its OWN marker is live — one tree's verify finishing does not release another's",
+    );
+  } finally {
+    await drain(sdk, runI1, 15_000);
+    await drain(sdk, runI2, 15_000);
+    await drain(sdk, runI3, 15_000);
+    if (existsSync(markerI1)) rmSync(markerI1);
+    if (existsSync(markerI2)) rmSync(markerI2);
   }
 });
 
@@ -3232,4 +3386,126 @@ test("[13.1-cr2-one-role-vocabulary] the roles the EDIT GATE dispatches on and t
       `  and OBSERVED on this run's own fanout/subsession.dispatched records: ${JSON.stringify(observed)}\n` +
       `A session registered as one of ${JSON.stringify(observed)} matches none of ${JSON.stringify(unregistered)}, so it falls past every arm to ${gatesEditLabel}'s unknown-role fail-safe and is DENIED EVERY EDIT — the arm written for it has never once been reachable from production. Resolve it by RENAMING one side so the two files spell one fact one way; a table at the composition root that translates ${JSON.stringify(unregistered)} into what the fan-out registers (plugin/index.ts's EDIT_GATE_ROLES) is a THIRD site for the same fact and is deleted, not extended`,
   );
+});
+
+// ===========================================================================
+// ISSUE-002 (CRITICAL) + GAP-004's missing composition row — THE SHIPPED DEFAULT
+//
+// Every row above gives its items a §4.2 worktree, which is the mode
+// parallel.writes:"worktrees" produces. The mode this build SHIPS is
+// parallel.writes:"off": an item has NO worktree, and its write-capable
+// sub-sessions work the workspace itself. That configuration was composed by no
+// test, and under it every dispatched write was DENIED:
+//
+//   adapter/tools.ts sessionTreeOf answered `item.worktree ?? "main"` — the
+//   EVIDENCE layer's tree SLUG — the fan-out registered that verbatim as the
+//   §3.5 entry's tree, and core/gates-edit.ts normalizeUnderTree compares the
+//   entry's tree to the edit path as a PATH by string equality. "main" is the
+//   prefix of no absolute path, so normalizeUnderTree returned null and the gate
+//   refused the first write of the pipeline — edit tool and bash write shape
+//   alike. Fail-closed, so not a security hole; the pipeline simply could not
+//   move.
+//
+// This row composes that mode end to end: the tree the fan-out registers must be
+// the PATH the gate normalizes against (the workspace root, since the item has no
+// tree of its own), an in-scope write must be ALLOWED, and an out-of-scope one
+// must still be DENIED. BOTH directions, because a derivation that returns
+// nothing denies everything and would sail through a deny-only row — the same
+// trap 13.1-cr2-gate-scope-derived-from-registry names.
+// ===========================================================================
+
+test("[issue-002-default-main-tree-composition] under the SHIPPED default parallel.writes:\"off\" — an item with NO worktree — a registered implementer's in-scope write is ALLOWED end to end through the real composed gate, edit tool and bash write shape alike, and an out-of-scope write is still DENIED: the tree the fan-out registers is the workspace PATH the edit gate normalizes against, never the evidence layer's slug \"main\"", async () => {
+  const root = gitRoot("conductor-i2-main-tree-");
+  const config = makeConfig({ subSessionTimeoutMs: 30_000 });
+  assert.equal(
+    config.parallel.writes,
+    "off",
+    "premise: this row drives the SHIPPED default — the one §4.2 mode every committed composition row skipped by giving its items a worktree",
+  );
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "TEST_VETTED", I2: "PENDING" });
+
+  // Scopes on disk, NO worktree: the §2.5 runtime field stays null, which is what
+  // the wave driver leaves it as when worktree mode is off. I2 exists so that
+  // "the union of every item's scope" is a different answer from "this session's
+  // item's scope".
+  scopeItemOnDisk(store, runId, "I1", { fileScope: ["src/alpha/**"], testScope: ["tests/alpha/**"] }, null);
+  scopeItemOnDisk(store, runId, "I2", { fileScope: ["src/beta/**"], testScope: ["tests/beta/**"] }, null);
+  assert.equal(
+    store.loadItem(runId, "I1").worktree,
+    null,
+    "premise: the item has NO tree of its own — that is what parallel.writes:\"off\" means, and it is the configuration ISSUE-002 lived in",
+  );
+
+  const scopeI1 = persistedScopes(store, runId, "I1");
+
+  const sdk = makeFakeSdk({
+    registry: new Map<string, { role?: string; itemId?: string; tree?: string }>(),
+    idPrefix: "ses_i2_main_",
+  });
+  const hooks = await startPlugin(root, sdk.client);
+
+  const implRun = kick(() => callTool(hooks, "conductor_mark_green", { itemId: "I1" }, root));
+  try {
+    const impl = await awaitDispatch(runDir, "I1", 20_000);
+
+    assert.equal(
+      impl.tree,
+      root,
+      `the §3.5 entry's tree must be the WORKSPACE PATH — the value core/gates-edit.ts normalizeUnderTree strips off the front of an absolute edit path. It was the evidence layer's slug "main" (adapter/tools.ts sessionTreeOf's \`item.worktree ?? STAGE_TREE\`), which is the prefix of no path, so every write in this session was denied. The marker slug is a SEPARATE derivation (verifyInFlightTreeFor's), not this one`,
+    );
+
+    // ALLOW — the half a deny-only row cannot see, and the half the shipped
+    // default failed: the first write the pipeline attempts.
+    const inScope = await gateOutcome(hooks, editOf(impl.sessionID, path.join(root, "src", "alpha", "one.ts")));
+    assert.equal(
+      inScope.denied,
+      false,
+      `an implementer registered to I1 must be ALLOWED to edit inside I1's OWN persisted fileScope ${JSON.stringify(scopeI1.fileScope)} in the shipped default mode — the gate refused with: ${inScope.reason}`,
+    );
+
+    // The bash write shape, denied by the same seam for the same reason
+    // (core/gates-edit.ts writeShapedPaths feeds decideEdit the same tree).
+    const bashWrite = await gateOutcome(hooks, {
+      tool: "bash",
+      sessionID: impl.sessionID,
+      args: { command: `echo "export const x = 1;" > ${path.join(root, "src", "alpha", "two.ts")}` },
+    });
+    assert.equal(
+      bashWrite.denied,
+      false,
+      `and a bash write shape into the same in-scope path must be ALLOWED too — ISSUE-002 denied both, because both are judged against the ONE session tree — the gate refused with: ${bashWrite.reason}`,
+    );
+
+    // DENY — still scoped. src/beta/** is I2's fileScope, so a fix that widened
+    // the tree by widening the scope is caught here rather than mistaken for a pass.
+    const outOfScope = await gateOutcome(hooks, editOf(impl.sessionID, path.join(root, "src", "beta", "one.ts")));
+    assert.equal(
+      outOfScope.denied,
+      true,
+      "an implementer must still be DENIED outside its own item's fileScope in the shipped default: making the default mode writable must not make it unscoped",
+    );
+    assert.deepEqual(
+      scopeNamedInDeny(outOfScope.reason, "the implementer's out-of-scope edit in the shipped default"),
+      scopeI1.fileScope,
+      `and the scope the gate judged against must be I1's OWN persisted fileScope (read back off queue.json: ${JSON.stringify(scopeI1.fileScope)}) — not another item's, not a union, not a constant`,
+    );
+
+    // And the tree deny still bites: a path OUTSIDE the workspace is refused by
+    // normalizeUnderTree, which is the check that was rejecting everything.
+    const outsideTree = await gateOutcome(
+      hooks,
+      editOf(impl.sessionID, path.join(tmpdir(), "conductor-i2-not-the-tree", "src", "alpha", "one.ts")),
+    );
+    assert.equal(
+      outsideTree.denied,
+      true,
+      "a path outside the session's tree is still denied — the tree comparison must remain a real comparison, not a formality satisfied by any absolute path",
+    );
+  } finally {
+    await drain(sdk, implRun, 15_000);
+  }
 });

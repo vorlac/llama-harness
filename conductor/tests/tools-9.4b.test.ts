@@ -223,6 +223,7 @@ import { validateQueue } from "../core/planning.ts";
 import { AMENDABLE_ITEM_STATES, applyAmendOps, parseAmendOps } from "../core/queue-amend.ts";
 import type { QueueAmendOp } from "../core/queue-amend.ts";
 import { validate } from "../core/types.ts";
+import { treePath } from "../core/types.ts";
 import type {
   Config,
   DecisionRecord,
@@ -233,6 +234,7 @@ import type {
   Queue,
   QueueItem,
   QuestionRecord,
+  TreePath,
 } from "../core/types.ts";
 
 import { makeFakeSdk } from "./fixtures/fake-sdk.ts";
@@ -335,7 +337,7 @@ function git(dir: string, args: string[]): void {
 }
 
 // A committed fixture repo, so runVerify records a REAL HEAD sha and branch "main".
-function committedRepo(): string {
+function committedRepo(): TreePath {
   const dir = mkdtempSync(path.join(tmpdir(), "conductor-tools94b-repo-"));
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
@@ -344,7 +346,7 @@ function committedRepo(): string {
   writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   git(dir, ["add", "seed.txt"]);
   git(dir, ["commit", "-m", "seed"]);
-  return dir;
+  return treePath(dir);
 }
 
 function headOf(repo: string): string {
@@ -794,7 +796,7 @@ function makeRecordingTree(): { tree: TreeState; frozenChecks: string[] } {
 }
 
 function makeWiring(runId: string, config: Config, journal: JournalSink, script: RoleScript): Wiring {
-  const registry = new Map<string, { role: string; itemId: string; tree: string }>();
+  const registry = new Map<string, { role: string; itemId: string; tree: TreePath }>();
   const sdk = makeFakeSdk({ registry });
   const prompted: PromptedRecord[] = [];
   const sessionIdx = new Map<string, number>();
@@ -942,8 +944,12 @@ test("[9.4b-green-requires-passing-test] conductor_mark_green re-runs the ITEM T
   assert.equal(implementers.length, 1, "exactly ONE implementer dispatch for a DONE receipt whose test still fails");
   assert.equal(wiring.prompted.length, 1, "no other role was dispatched");
   assert.equal(implementers[0].itemId, "I1", "the dispatch is correlated to the item");
-  assert.equal(implementers[0].tree, "main", "the implementer works the main tree (worktrees land in 9.6)");
-  assert.deepEqual(wiring.frozenChecks, ["main"], "the implementer dispatch is write-capable (freeze admission consulted once)");
+  assert.equal(
+    implementers[0].tree,
+    root,
+    "the implementer works the shared tree — as the PATH the §3.5 gates normalize an edit against, which is the workspace itself when the item has no worktree",
+  );
+  assert.deepEqual(wiring.frozenChecks, [root], "the implementer dispatch is write-capable (freeze admission consulted once)");
   assert.ok(implementers[0].text.includes(TITLE_MARKER), "the implementer prompt carries the item spec");
   assert.ok(implementers[0].text.includes("src/a.mjs"), "the implementer prompt names the fileScope it may edit");
 
@@ -1161,7 +1167,7 @@ test("[9.4b-green-nonbehavioral-from-pending] conductor_mark_green from PENDING 
 // ---------------------------------------------------------------------------
 
 interface ValidateBench {
-  root: string;
+  root: TreePath;
   stateHome: string;
   witness: string;
   ownWitness: string;
@@ -1413,7 +1419,7 @@ test("[9.4b-validate-freeze-denies-edits] while the verify is in flight the free
     ["ses_writer", { role: "testWriter", itemId: "I1", tree: bench.root }],
   ]);
   const gateJournal = makeJournal();
-  const callGate = (sessionID: string, rel: string, verifyInFlightTree: string | null): void => {
+  const callGate = (sessionID: string, rel: string, verifyInFlightTree: TreePath | null): void => {
     gateBeforeToolCall({
       sessionID,
       toolName: "edit",
@@ -1808,7 +1814,7 @@ test("[9.4b-debug-entry-on-failure] a failing validate enters the DEBUG protocol
     "the implementer's next dispatch carries doctrine debug.md VERBATIM (§4.1 delivers packs verbatim)",
   );
   assert.ok(implementers[0].text.includes(SCOPE), "the dispatch also carries the failing scope from the captured verify");
-  assert.deepEqual(wiring.frozenChecks, ["main"], "the debug dispatch is WRITE-capable on the main tree");
+  assert.deepEqual(wiring.frozenChecks, [bench.root], "the debug dispatch is WRITE-capable on the shared tree");
   assert.equal(implementers[0].itemId, "I1", "the debug dispatch is correlated to the item");
 
   // The item did NOT advance, and the DEBUG annotation survives on disk.
@@ -1920,7 +1926,7 @@ test("[9.4b-debug-cap-escalates] at config.workflow.debugFixCap failed fixes the
 // ---------------------------------------------------------------------------
 
 interface AmendBench {
-  root: string;
+  root: TreePath;
   config: Config;
   store: StateStore;
   runId: string;
