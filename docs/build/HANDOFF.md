@@ -1,14 +1,32 @@
 # HANDOFF — read this first on every start
 
-## Position — 2026-08-18 (late): step 5 is COMPLETE; the fix campaign is planned
-The step-5 delegation-design session ran with the repo owner. Every agenda decision and D1–D15 is
-decided or deliberately parked: the decision record is
-**`docs/reviews/conductor-review/step5-decisions.md`** (design premise: trust lives in the harness,
-not the orchestrator — any prompter, human or LLM, gets a self-defending result from local models
-only). The executable ordering is **`docs/build/fix-campaign-plan.md`** — seven phases, hard
-sequencing constraints, parks with re-open conditions. **The "Do these in this order" list below is
-SUPERSEDED** (its items are mapped into the plan's "Absorbed queue" section — CR-2 now rides plan
-Phase I.2). **Next action: plan Phase 0 (the D14 addendum amendment), then Phase I.1 (GAP-035).**
+## Position — 2026-08-19: the fix campaign's NON-LIVE work is COMPLETE; the next action is LIVE (owner-run)
+Every code/doc phase of the plan (`docs/build/fix-campaign-plan.md`) that does not need a live model
+is landed and committed — 17 commits from step-5 (`6a55d33`) through MACRO-021 (`464c840`); a
+per-item record with evidence and residuals is **`docs/build/fix-campaign-log.md`**. HEAD gate:
+**node 1811/1811, typecheck OK, bun 8, python 86, schema export OK, GATE PASS; router-tests 94/94**.
+Design premise (governs everything): trust lives in the harness, not the orchestrator — any prompter
+gets a self-defending result from local models only (`docs/reviews/conductor-review/step5-decisions.md`).
+Both CRITICALs are closed (ISSUE-001 injection wired with a 3-layer delivery witness + a manifest that
+catches its recurrence; ISSUE-002 default-mode writes via branded tree types). Phases done: 0 (D14
+addendum amendment), I (GAP-035 clock, ISSUE-002/GAP-004/CR-2, ISSUE-088 canary, ISSUE-001 wiring),
+II (trust floor — legality choke point + scope/TDD seams + vet criteria; every reproduced escape
+gauntlet-verified closed), III (review witnesses + D5-strict disposition + human-file provenance),
+IV (security XS + N-party single-writer lock + honesty), V.1/V.2 (doctrine content + pre-live
+checkers + ISSUE-042 router key-bound), VII-A/VII-B (build floor: wiring manifest, cross-language
+vocab registry, unreachable-exports/inversion/discrimination audits, standing mutation suite,
+record-completeness checks, dashboard read = sound), MACRO-021 doc honesty.
+
+**NEXT ACTION IS YOURS (live / attended / decisions):** (1) **Phase V.3 — 13.2 attended live smoke**,
+now instrumented (GAP-046 probes, deny-rate, competence-outcome and briefing-bottleneck recording);
+run the GAP-032 preflight (`core/preflight.ts`) as the go/no-go first. (2) **Phase VI (13.2-data-gated):**
+the GAP-025 gate-posture flip + GAP-038 deny-recovery doctrine (D7 = measure first), then the **14.2**
+campaign. (3) **Decisions:** the D2 tools.ts-split (Phase-16 planning), and the plan-immutability
+collision on HONEST-LIMITS limits 8 & 11 (verbatim-pinned to the IMMUTABLE plan §9, now superseded by
+D6/MACRO-021 — see fix-campaign-log.md). (4) **Serve.py live-launch items** (ISSUE-105 signal trap,
+ISSUE-106 main-launch test) and the **deliberately-not-fabricated record backfill** (12 GATES.json
+records, ~795 spec-row dispositions — tracked in KNOWN_MISSING allowlists, NOT faked). **The "Do these
+in this order" list below is SUPERSEDED** (mapped into the plan's "Absorbed queue"; CR-2 landed in I.2).
 Review steps 2–4 remain the evidence authority: three merged registers under
 `docs/reviews/conductor-review/` — ISSUE-001…-142, MACRO-001…-034, GAP-001…-048 — with
 `step5-preflight-review.md`'s corrections applied in place. Everything below this block is kept
