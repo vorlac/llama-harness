@@ -267,9 +267,6 @@ const PRODUCERS = {
   interrupt: "halt handling",
 } as const satisfies Record<StopKind, string>;
 
-/** The producing branch for each §2.9 kind, exported so consumers can render it. */
-export const STOP_KIND_PRODUCERS: Readonly<Record<StopKind, string>> = PRODUCERS;
-
 export interface StopVerdict {
   kind: StopKind;
   why: string;

@@ -39,6 +39,7 @@ import { fileURLToPath } from "node:url";
 // is shared with journal-vocab.test.ts and pinned by strip-comments.test.ts, whose
 // canaries fail if either audit's view of a shipped file narrows again.
 import { stripComments } from "./fixtures/strip-comments.ts";
+import { productionTsUniverse, uncovered } from "./fixtures/scan-universe.ts";
 
 const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const conductorDir = path.resolve(testsDir, "..");
@@ -152,4 +153,34 @@ test("[C-048-callsites] the fifth argument is DERIVED, never a bare `true` — a
       "derived it there. A literal satisfies the arity check while restoring exactly the bug it " +
       "was added to prevent — which is the failure mode this whole guard exists to catch.",
   );
+});
+
+// GAP-017 (inverted subject selection). PRODUCTION_DIRS is an ENUMERATION — this
+// guard scans exactly the three directories it names. MACRO-016's class is the day
+// a fourth shipped directory appears (or PRODUCTION_DIRS is narrowed) and the scan
+// reports full coverage of a tree it no longer walks. The universe is defined by
+// INVERSION instead — every tracked conductor .ts minus the two non-production
+// trees (scan-universe.ts) — and this asserts the scanned file-set covers it. An
+// uncovered tracked file is a RED, not a silent omission.
+test("[C-048-callsites-covers-universe] the production file-set this guard scans covers every tracked shipped .ts (INVERSION over git ls-files) — a new production directory outside PRODUCTION_DIRS surfaces here as an uncovered file, never as a silent gap in a scan that still reports success", () => {
+  const scanned = productionFiles();
+  const universe = productionTsUniverse();
+  assert.ok(universe.length >= 40, `the tracked production universe is only ${universe.length} files — git ls-files is not resolving`);
+
+  const missed = uncovered(scanned, universe).map((f) => path.relative(conductorDir, f));
+  assert.deepEqual(
+    missed,
+    [],
+    "a tracked shipped .ts is not in this guard's scanned set. Its legalTools call sites (if any) go " +
+      "unchecked. Widen PRODUCTION_DIRS to cover the new tree, or add it to PRODUCTION_EXEMPT_PREFIXES " +
+      "in scan-universe.ts on purpose.",
+  );
+});
+
+test("[C-048-callsites-coverage-discrimination] the coverage check proves it CAN fail: a scanned set with one universe file removed is reported uncovered — a coverage assertion that cannot go red is decorative (GAP-019)", () => {
+  const universe = productionTsUniverse();
+  assert.ok(universe.length > 1, "premise: the universe has files to drop");
+  const holed = universe.slice(1); // drop the first tracked file from the scan
+  const missed = uncovered(holed, universe);
+  assert.deepEqual(missed, [universe[0]], "dropping a tracked file from the scan must be reported as uncovered");
 });

@@ -20,7 +20,7 @@
 // An ADAPTER (G14): node:fs / node:path only. The path derivation and the
 // provenance rule live in core/provenance.ts; this file reads and lists.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { ANSWERS_DIRNAME, answerFileNameOf } from "../core/provenance.ts";
@@ -76,25 +76,4 @@ export function pendingAnswers(runDir: string, openQuestionIds: readonly string[
     if (answer !== null) found.push({ questionId, answer });
   }
   return found;
-}
-
-/**
- * The answer files present under the run dir, by question id. Read-only, for
- * surfaces that report what the operator has dropped; the ingest path uses
- * pendingAnswers, which cannot be fooled by a file for a question this run does
- * not have.
- */
-export function answerFilesOnDisk(runDir: string): string[] {
-  const dir = path.join(runDir, ANSWERS_DIRNAME);
-  if (!existsSync(dir)) return [];
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  return names
-    .filter((name) => name.endsWith(".md"))
-    .map((name) => name.slice(0, -".md".length))
-    .sort();
 }

@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { textSourceUniverse, uncovered } from "./fixtures/scan-universe.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -116,4 +117,33 @@ test("[hygiene-no-control-bytes] no source file carries a NUL or other forbidden
     [],
     "a source file carrying a control byte is treated as BINARY by grep and is skipped whole, so every text search that appears to cover the tree silently does not; write the byte as an escape instead",
   );
+});
+
+// GAP-017 (inverted subject selection). The control-byte walk above already selects
+// its subject by INVERSION — the whole tree MINUS SKIP_DIRS — which is the correct
+// shape. Its one remaining gap is that it trusts the FILESYSTEM walk to have reached
+// every file: a tracked source file the walk never visited (a stat that silently
+// failed, a directory the recursion skipped) would drop out with no signal. This
+// proves the walked set covers the tracked TEXT universe (git ls-files, same
+// extension and skip-dir exemptions), so a tracked source file the walk misses is a
+// RED rather than a file quietly outside the control-byte check.
+test("[hygiene-covers-tracked-universe] the control-byte walk reaches every tracked text-source file (INVERSION over git ls-files, same TEXT_EXTENSIONS and SKIP_DIRS exemptions) — a tracked source file the walk never visits is an uncovered file here, not a silent hole in the audit that keeps every grep-based check honest", () => {
+  const scanned = sourceFiles(REPO_ROOT, []);
+  const universe = textSourceUniverse(TEXT_EXTENSIONS, SKIP_DIRS);
+  assert.ok(universe.length > 100, `the tracked text universe is only ${universe.length} files — git ls-files is not resolving`);
+
+  const missed = uncovered(scanned, universe).map((f) => path.relative(REPO_ROOT, f));
+  assert.deepEqual(
+    missed,
+    [],
+    "a tracked text-source file was not reached by the control-byte walk, so it is exempt from the guard " +
+      "that makes every other text-based audit trustworthy. Fix the walk, or exempt the path on purpose.",
+  );
+});
+
+test("[hygiene-coverage-discrimination] the coverage check proves it CAN fail: a scanned set missing one tracked file is reported uncovered — a coverage assertion that cannot go red is decorative (GAP-019)", () => {
+  const universe = textSourceUniverse(TEXT_EXTENSIONS, SKIP_DIRS);
+  assert.ok(universe.length > 1, "premise: the universe has files to drop");
+  const holed = universe.slice(1);
+  assert.deepEqual(uncovered(holed, universe), [universe[0]], "dropping a tracked file from the scan must be reported uncovered");
 });

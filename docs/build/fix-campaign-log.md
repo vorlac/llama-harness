@@ -65,6 +65,30 @@ before commit (zero-glob red preserved evidence + exited 1; scoped green cleaned
   (pid noted in session) now pins the machine awake for the campaign's remainder; the
   wiring stage resumes from the workflow cache.
 
+## Phase VII-A — the build floor (audit/structural layer)
+- **Landed (VII.1):** `core/wiring-manifest.ts` + test — declares all six composition-root
+  hooks + the tool binding + module wires; two-way parity asserts every declared wire is
+  registered and every registered hook is declared, and every CONDUCTOR_TOOL_NAMES member has
+  a non-fallback ToolSpec (MACRO-025b). This is the mechanism that catches ISSUE-001 (dead
+  injection) on day one — verified: unregistering a hook turns it red. `core/vocab-registry.ts`
+  + test — pins stopKinds/runStates/itemStates/roles and parity-checks the TS, JSON-schema, and
+  Python copies (D15c: pins the plan-frozen spellings, does not replace them); a cross-language
+  drift (python STOP_KINDS rename) goes red (ISSUE-113 class).
+- **Landed (VII.2):** GAP-020 unreachable-exports audit (`export-graph.ts` fixture +
+  `unreachable-exports.test.ts`) — flags any conductor/{core,adapter,plugin} value export with
+  no non-test importer; it found and DELETED two genuinely dead exports (STOP_KIND_PRODUCERS,
+  answerFilesOnDisk). GAP-017 full inversion (`scan-universe.ts` — every scanner asserts its
+  walked file-set covers the git-tracked universe minus explicit exemptions, so a shipped file
+  outside the enumerated dirs is a red not a blind spot); journal-vocab/legaltools-callsites/
+  source-hygiene converted. GAP-019 discrimination witnesses — every converted/new check feeds
+  a known-bad fixture and asserts it reports the violation (no decorative checkers).
+- **Evidence:** gate 1770 → 1788/1788; verifier CONFIRMED, no defects, all mutations
+  reproduced red + restored; orchestrator re-ran the ISSUE-001-shape hook-unregister mutation
+  (manifest red, restore hash-identical).
+- **Deferred (owner):** M5 scanner lives in scripts/conductor-gate.sh (off-limits; already
+  git-ls-files-based with count floors — reported, unedited). tools.ts split stays a
+  Phase-16-planning decision (D2).
+
 ## Phase V (non-live) — doctrine content + pre-live readiness
 - **Landed (V.1, committed f33b95b):** GAP-037 generated run-shape playbook in core.md (no
   hand-listed tools); GAP-042 generated "measured limits" in decompose.md derived from

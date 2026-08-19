@@ -51,6 +51,7 @@ import { fileURLToPath } from "node:url";
 // a file's tail, and both audits then report full coverage of a file they stopped
 // reading part way through.
 import { stripComments } from "./fixtures/strip-comments.ts";
+import { productionTsUniverse, uncovered } from "./fixtures/scan-universe.ts";
 import { createJournal } from "../adapter/journal.ts";
 import type { Journal } from "../adapter/journal.ts";
 import { openWorkspace } from "../adapter/state.ts";
@@ -843,4 +844,32 @@ test('[vocab-live-publish-refuse] handlePublish under git.preexistingDirty "refu
     [],
     "and every PERSISTED record — read back off journal.jsonl, not off the tee — is in the vocabulary",
   );
+});
+
+// GAP-017 (inverted subject selection). The SOURCE audit above walks the three
+// directories PRODUCTION_DIRS enumerates. That enumeration is MACRO-016's failure
+// shape: a journal call site in a fourth shipped directory would name any event it
+// liked, unseen by a guard still reporting full coverage. The universe is defined
+// by INVERSION (every tracked conductor .ts minus the non-production trees,
+// scan-universe.ts); this asserts the walked file-set covers it, so a shipped file
+// outside the enumeration is a RED, not a blind spot.
+test("[vocab-callsites-covers-universe] the shipped file-set the source audit walks covers every tracked conductor .ts (INVERSION over git ls-files) — a journal call site in a production directory outside PRODUCTION_DIRS surfaces as an uncovered file here, never as an unaudited event name", () => {
+  const scanned = productionFiles();
+  const universe = productionTsUniverse();
+  assert.ok(universe.length >= 40, `the tracked production universe is only ${universe.length} files — git ls-files is not resolving`);
+
+  const missed = uncovered(scanned, universe).map((f) => path.relative(conductorDir, f));
+  assert.deepEqual(
+    missed,
+    [],
+    "a tracked shipped .ts is not walked by the journal-vocabulary source audit, so its .log() call " +
+      "sites are unchecked. Widen PRODUCTION_DIRS, or exempt the tree in scan-universe.ts on purpose.",
+  );
+});
+
+test("[vocab-callsites-coverage-discrimination] the coverage check proves it CAN fail: a scanned set missing one universe file is reported uncovered — a coverage assertion that cannot go red is decorative (GAP-019)", () => {
+  const universe = productionTsUniverse();
+  assert.ok(universe.length > 1, "premise: the universe has files to drop");
+  const holed = universe.slice(1);
+  assert.deepEqual(uncovered(holed, universe), [universe[0]], "dropping a tracked file from the scan must be reported uncovered");
 });
