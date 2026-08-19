@@ -19,7 +19,24 @@ set -u
 # so the standing rule was "run gates SERIALLY", i.e. the wrapper was correct only
 # while nobody did the obvious thing. Cleaned up on every exit path.
 LEG_TMP="$(mktemp -d "${TMPDIR:-/tmp}/conductor-legs.XXXXXX")"
-trap 'rm -rf "$LEG_TMP"' EXIT
+# On a failing exit the scratch dir is preserved (moved to a durable path printed on
+# stdout) instead of deleted — a red gate must leave inspectable evidence behind, not
+# clean it up (GAP-035). A green exit still removes it.
+cleanup() {
+  ec=$?
+  if [ "$ec" -ne 0 ]; then
+    DEST="${TMPDIR:-/tmp}/conductor-gate-failed.$(date +%Y%m%d-%H%M%S).$$"
+    printf '%s\n' "${OUT:-}" >"$LEG_TMP/node-tap.out" 2>/dev/null || true
+    if mv "$LEG_TMP" "$DEST" 2>/dev/null; then
+      echo "gate FAIL evidence preserved: $DEST"
+    else
+      rm -rf "$LEG_TMP"
+    fi
+  else
+    rm -rf "$LEG_TMP"
+  fi
+}
+trap cleanup EXIT
 BUN_OUT="$LEG_TMP/bun-smoke.out"
 PY_OUT="$LEG_TMP/python-leg.out"
 
@@ -29,7 +46,9 @@ if [ -d "$GLOB" ]; then
   GLOB="${GLOB%/}/**/*.test.ts"
 fi
 
-OUT="$(node --test --test-reporter=tap "$GLOB" 2>&1)"
+# --test-timeout: a hang-shaped regression must become a diagnosable red, never a
+# wedged gate (ISSUE-032 / GAP-035). 120s is ~6x the slowest recorded suite.
+OUT="$(node --test --test-timeout=120000 --test-reporter=tap "$GLOB" 2>&1)"
 EC=$?
 
 count() { printf '%s\n' "$OUT" | awk -v k="$1" '$1=="#" && $2==k {v=$3} END{print v+0}'; }
