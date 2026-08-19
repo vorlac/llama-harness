@@ -81,4 +81,8 @@ Reply statuses, and what each one commits you to:
 - NEEDS_CONTEXT: you cannot proceed without something you were not given — name exactly what, in neededContext.
 - BLOCKED: the work cannot be done in this scope at all — name the blocker in blockReason.
 A concern that names no finding as `finding:<id>` is not a pushback: it is read as agreement, and the receipt still has to show the fix in the tree.
+
+## When you are stuck
+
+Stuck — a probe you cannot run, a claim you cannot evidence, a gate you keep hitting, input you cannot evaluate — is a report, not a dead end. Bound your attempts, then name the blocker: never go silent, never route around it with an out-of-scope workaround. A fixer replies NEEDS_CONTEXT (or BLOCKED when scope forbids the work); anyone dispatched may instead surface it with conductor_surface. A silent stall reads the same as a faked success.
 <!-- END GENERATED MECHANICS -->

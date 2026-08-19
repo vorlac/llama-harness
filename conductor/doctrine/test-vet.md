@@ -4,9 +4,9 @@ A test earns trust only when it exercises real behavior. Mocks isolate; they are
 never the thing under test. Test what the code does, not what the mocks do.
 
 Your verdict scores the §2.10 criteria generated at the foot of this pack — the
-same list the harness validates it against, and a criterion you fail there sends
-the test back to its writer. The five mock lenses below are that checklist's
-depth where mocks reach: any hit is a fix.
+same list the harness validates it against; a criterion you fail sends the test
+back to its writer. The five mock lenses below are that checklist's depth where
+mocks reach.
 
 ## The Iron Laws
 
@@ -20,30 +20,27 @@ depth where mocks reach: any hit is a fix.
 
 **Spot it:** the assertion checks a mock's existence — a `*-mock` test id, or
 that a stubbed function "was called" — instead of an observable result.
-**Avoid it:** assert on the real output or rendered role the user would see; if a
-thing must be mocked for isolation, do not assert on the mock — assert on the
-behavior of the code around it. If you are checking the mock, delete the
-assertion or stop mocking that piece.
+**Avoid it:** assert on the real output the user would see; if a thing must be
+mocked for isolation, assert on the behavior of the code around it, not the mock.
+If you are checking the mock, delete the assertion or stop mocking that piece.
 
 ## 2. Test-Only Methods in Production
 
 **Spot it:** a method on a production class is called only from test files
-(a `destroy()`, a `reset()`, a back-door setter), or the class is reaching past
-the lifecycle it actually owns.
+(a `destroy()`, a `reset()`, a back-door setter), or reaching past the lifecycle
+it owns.
 **Avoid it:** move the helper into test utilities. Production code carries only
-what production calls. Test cleanup and setup live in the test harness, never in
-the shipped class.
+what production calls; test cleanup and setup live in the harness, not the class.
 
 ## 3. Mocking Without Understanding
 
-**Spot it:** you mocked a method "to be safe" or "because it might be slow"
-without knowing its side effects — and the test now passes for the wrong reason
-(or the behavior it should catch can no longer happen).
+**Spot it:** you mocked a method "to be safe" without knowing its side effects —
+and the test now passes for the wrong reason, or can no longer catch the behavior
+it should.
 **Avoid it:** before mocking, name the real method's side effects and whether the
-test depends on any of them. If unsure, run the test against the real
-implementation first, observe what it truly needs, then mock at the lowest level
-(the slow or external operation) — never the high-level method the test depends
-on.
+test depends on any. If unsure, run against the real implementation first, then
+mock at the lowest level (the slow or external operation) — never the high-level
+method the test depends on.
 
 ## 4. Incomplete Mocks
 
@@ -52,23 +49,21 @@ downstream code reads a field you omitted and fails silently, or passes in the
 test while real integration breaks.
 **Avoid it:** mirror the COMPLETE structure the real dependency returns — every
 field the system may consume downstream, checked against docs or a real example.
-If you build a mock, you own understanding its whole shape. When uncertain,
+If you build a mock, you own understanding its whole shape; when uncertain,
 include all documented fields.
 
 ## 5. Integration Tests as Afterthought
 
 **Spot it:** "implementation complete, ready for testing" — code first, tests
-promised later, or the seams between components never exercised together.
+promised later, or the seams never exercised together.
 **Avoid it:** testing is part of implementation, not a follow-up. Write the
-failing test first, implement to pass, then claim complete. You cannot call work
-done without the tests that prove it.
+failing test first, implement to pass, then claim complete.
 
 ## When mocks get complicated
 
 Mock setup longer than the test, mocks missing methods the real object has, tests
-that break when the mock changes — these are signals, not chores. A real
-component is often simpler than an elaborate mock. Ask whether you need the mock
-at all.
+that break when the mock changes — these are signals, not chores: a real component
+is often simpler than an elaborate mock, so ask whether you need it.
 
 <!-- BEGIN GENERATED MECHANICS -->
 ## Mechanics — generated from the tool vocabulary
@@ -98,4 +93,8 @@ Judge a test on exactly these criteria, in this order, scoring each one `{pass, 
    Wait on a condition rather than a clock, assert rather than merely execute, and pin the fields that carry the behaviour rather than snapshotting the world. test-vet.md's five mock lenses are this criterion's long form.
 
 A `pass:false` IS a must-fix. The harness reads the verdicts a critic returns: a criterion failed with no `mustFix` entry beside it becomes one naming that criterion, and the test goes back to its writer for repair. An EMPTY `mustFix` with every criterion passing is the approval; never invent a fix to look thorough, and never ask for a change that only restates a criterion.
+
+## When you are stuck
+
+Stuck — a probe you cannot run, a claim you cannot evidence, a gate you keep hitting, input you cannot evaluate — is a report, not a dead end. Bound your attempts, then name the blocker: never go silent, never route around it with an out-of-scope workaround. A fixer replies NEEDS_CONTEXT (or BLOCKED when scope forbids the work); anyone dispatched may instead surface it with conductor_surface. A silent stall reads the same as a faked success.
 <!-- END GENERATED MECHANICS -->

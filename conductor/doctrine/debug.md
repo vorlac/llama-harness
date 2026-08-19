@@ -75,4 +75,8 @@ Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conduc
 A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 
 The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.
+
+## When you are stuck
+
+Stuck — a probe you cannot run, a claim you cannot evidence, a gate you keep hitting, input you cannot evaluate — is a report, not a dead end. Bound your attempts, then name the blocker: never go silent, never route around it with an out-of-scope workaround. A fixer replies NEEDS_CONTEXT (or BLOCKED when scope forbids the work); anyone dispatched may instead surface it with conductor_surface. A silent stall reads the same as a faked success.
 <!-- END GENERATED MECHANICS -->

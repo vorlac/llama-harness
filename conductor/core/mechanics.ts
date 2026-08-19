@@ -33,6 +33,7 @@ import { TOOL_BINDINGS } from "./tool-bindings.ts";
 import { TOOL_LEGALITY } from "./tool-legality.ts";
 import { renderReplyProtocol } from "./reply-protocol.ts";
 import { renderVetCriteria } from "./vet-criteria.ts";
+import { BYTES_PER_TOKEN, DEFAULT_READ_SET_TOKEN_BUDGET, ITEM_MAX_FILES } from "./planning.ts";
 
 // The markers that fence the generated section inside a pack. HTML comments, so
 // they carry no weight in the rendered doctrine a model reads, and greppable, so
@@ -158,22 +159,70 @@ export function subSessionTools(): string[] {
 // The rendered section, per pack.
 // ---------------------------------------------------------------------------
 
-type MechanicsSection = "run" | "item" | "meta" | "callers" | "criteria" | "replies";
+// GAP-042: the measured caps the DECOMPOSED queue gate enforces, derived from the
+// same core/planning.ts constants validateQueue reads — so the pack teaches the
+// number the gate checks, and a change to a cap regenerates the pack rather than
+// leaving a hand-typed figure to drift (ISSUE-012: the pack once said "~5 files …
+// rejected outright" while the gate counted something else).
+export function renderLimits(): string {
+  return [
+    "## Measured limits — what the queue gate counts",
+    "",
+    "- fileScope size is capped at " +
+      String(ITEM_MAX_FILES) +
+      " files, counted as the greater of its entry count and the files its globs match — a `**` " +
+      "entry matching forty files counts as forty, a not-yet-created literal path counts as one.",
+    "- The read set is capped at a default " +
+      String(DEFAULT_READ_SET_TOKEN_BUDGET) +
+      " tokens (matched-file bytes / " +
+      String(BYTES_PER_TOKEN) +
+      "); `workflow.readSetTokenBudget` overrides it, 0 disables it. A scope too big to read is refused.",
+    "- acceptance must resolve to one cluster; more than one is a rejection, not a warning.",
+  ].join("\n");
+}
+
+// GAP-043: the uniform stuck-state protocol every pack carries. Generated so the
+// nine copies cannot drift apart, and phrased around the channels the machine
+// admits — conductor_surface (the escape every dispatched session may call) and the
+// NEEDS_CONTEXT / BLOCKED reply statuses a fixer returns.
+export function renderStuckProtocol(): string {
+  return [
+    "## When you are stuck",
+    "",
+    "Stuck — a probe you cannot run, a claim you cannot evidence, a gate you keep hitting, input " +
+      "you cannot evaluate — is a report, not a dead end. Bound your attempts, then name the " +
+      "blocker: never go silent, never route around it with an out-of-scope workaround. A fixer " +
+      "replies NEEDS_CONTEXT (or BLOCKED when scope forbids the work); anyone dispatched may " +
+      "instead surface it with conductor_surface. A silent stall reads the same as a faked success.",
+  ].join("\n");
+}
+
+type MechanicsSection =
+  | "run"
+  | "item"
+  | "meta"
+  | "callers"
+  | "criteria"
+  | "replies"
+  | "limits"
+  | "stuck";
 
 // Which derived facts each pack's readers need. A planner never runs an item
 // stage tool and an implementer never runs the run pipeline, so handing every
 // pack every line would spend a 32k context window on mechanics the reader
 // cannot act on. core.md is the orchestrator's pack and gets all three.
+// Every pack carries "stuck" (GAP-043's uniform protocol); decompose.md alone
+// carries "limits" (GAP-042's derived caps — it is the pack that writes the queue).
 const PACK_SECTIONS: Readonly<Record<string, readonly MechanicsSection[]>> = {
-  "core.md": ["run", "item", "meta", "callers"],
-  "decompose.md": ["run", "callers"],
-  "plan.md": ["run", "callers"],
-  "tdd.md": ["item", "callers"],
-  "test-vet.md": ["item", "callers", "criteria"],
-  "debug.md": ["item", "callers"],
-  "review.md": ["item", "callers"],
-  "skeptic.md": ["run", "item", "callers"],
-  "receive-review.md": ["item", "callers", "replies"],
+  "core.md": ["run", "item", "meta", "callers", "stuck"],
+  "decompose.md": ["run", "callers", "limits", "stuck"],
+  "plan.md": ["run", "callers", "stuck"],
+  "tdd.md": ["item", "callers", "stuck"],
+  "test-vet.md": ["item", "callers", "criteria", "stuck"],
+  "debug.md": ["item", "callers", "stuck"],
+  "review.md": ["item", "callers", "stuck"],
+  "skeptic.md": ["run", "item", "callers", "stuck"],
+  "receive-review.md": ["item", "callers", "replies", "stuck"],
 };
 
 export function renderMechanics(pack: string): string {
@@ -227,6 +276,15 @@ export function renderMechanics(pack: string): string {
   // fixer to push back while naming no channel to push back ON.
   if (sections.includes("replies")) {
     lines.push("", renderReplyProtocol());
+  }
+  // GAP-042: the derived queue caps, on the pack that writes the queue.
+  if (sections.includes("limits")) {
+    lines.push("", renderLimits());
+  }
+  // GAP-043: the uniform stuck-state protocol, last so it reads as the closing
+  // instruction on every pack.
+  if (sections.includes("stuck")) {
+    lines.push("", renderStuckProtocol());
   }
   return lines.join("\n");
 }
