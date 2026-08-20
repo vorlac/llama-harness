@@ -26,6 +26,8 @@ is for, with one line saying what it answers.
   anything else.
 - [Life of a single prompt](prompt-lifecycle.md) — one prompt followed from the keystroke to
   the commit, naming the mechanism at each step and what it costs in wall-clock.
+- [The prompt atlas](atlas.md) — the same journey as an interactive map of all 101 nodes:
+  every hook, gate, fork, state and log line, pinned to the code by a test.
 
 ## User guide
 
