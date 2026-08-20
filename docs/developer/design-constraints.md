@@ -14,22 +14,22 @@ Conductor's own thesis (G9) is that an instruction nobody checks is not a rule, 
 the harness's authors as much as to the model it drives. So each constraint below says what failure
 it prevents, what bites when it is violated, and what breaks if the bite is removed.
 
-| Id  | Constraint                                           | Enforced by                                                                                                                             |
-| --- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| G1  | Zero runtime dependencies in the plugin              | [`conductor/package.json`](../../conductor/package.json) has no `dependencies` block; no build step                                     |
-| G2  | Erasable TypeScript only                             | `erasableSyntaxOnly` in [`conductor/tsconfig.json`](../../conductor/tsconfig.json), checked by the M3 typecheck leg                     |
-| G3  | Pure-core / thin-adapter                             | The purity guard, [`purity.test.ts`](../../conductor/tests/purity.test.ts) (`1.4-core-imports`, `1.4-core-forbidden`)                   |
-| G4  | TDD for the harness itself, no exceptions            | [`test-conductor.sh`](../../scripts/test-conductor.sh) TAP rejection + [`conductor-gate.sh`](../../scripts/conductor-gate.sh) stub scan |
-| G5  | Fail-closed on enforcement, fail-open on convenience | The guard in [`adapter/tools.ts`](../../conductor/adapter/tools.ts); tests `5.3-fail-closed` / `5.3-fail-open`                          |
-| G6  | Records over assertions                              | Handlers re-derive their own evidence; [`single-source.test.ts`](../../conductor/tests/single-source.test.ts)                           |
-| G7  | Detection over prevention, honestly documented       | Written-down bypass list; [`honest-limits-pending.md`](../build/honest-limits-pending.md)                                               |
-| G8  | The orchestrator does not write code by default      | `edit: "ask"` plus the orchestrator branch of [`core/gates-edit.ts`](../../conductor/core/gates-edit.ts)                                |
-| G9  | Local models are assumed weak at prose compliance    | Schemas, tools, and gates carry every obligation; handlers are the only state writers                                                   |
-| G10 | Naming                                               | Tests hardcode the names (`5.3-tool-inventory`)                                                                                         |
-| G11 | Wire contracts verified at build time                | `WIRE_CONTRACT_VERIFIED` stamps + [`wire-contract.test.ts`](../../conductor/tests/wire-contract.test.ts) against the installed binary   |
-| G12 | Token cost accepted, wall-clock engineered           | The mandatory review lens set is not configurable                                                                                       |
-| G13 | One model, many roles                                | Every sub-session resolves `config.models.default`                                                                                      |
-| G14 | Dual-runtime adapters                                | The dual-runtime guard (`1.4-adapter-guard`, `1.4-subprocess`) + the Bun smoke leg                                                      |
+| Id  | Constraint                                           | Enforced by                                                                                                                                                                                             |
+| --- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | Zero runtime dependencies in the plugin              | [`conductor/package.json`](../../conductor/package.json) has no `dependencies` block; no build step                                                                                                     |
+| G2  | Erasable TypeScript only                             | `erasableSyntaxOnly` in [`conductor/tsconfig.json`](../../conductor/tsconfig.json), checked by the M3 typecheck leg                                                                                     |
+| G3  | Pure-core / thin-adapter                             | The purity guard, [`purity.test.ts`](../../conductor/tests/purity.test.ts) (`1.4-core-imports`, `1.4-core-forbidden`)                                                                                   |
+| G4  | TDD for the harness itself, no exceptions            | [`test-conductor.sh`](../../scripts/test-conductor.sh) TAP rejection + [`conductor-gate.sh`](../../scripts/conductor-gate.sh) stub scan                                                                 |
+| G5  | Fail-closed on enforcement, fail-open on convenience | The guard in [`adapter/tools.ts`](../../conductor/adapter/tools.ts); tests `5.3-fail-closed` / `5.3-fail-open`                                                                                          |
+| G6  | Records over assertions                              | Handlers re-derive their own evidence; [`single-source.test.ts`](../../conductor/tests/single-source.test.ts)                                                                                           |
+| G7  | Detection over prevention, honestly documented       | Written-down bypass list; [`honest-limits-pending.md`](../build/honest-limits-pending.md)                                                                                                               |
+| G8  | The orchestrator does not write code by default      | `edit: "ask"` plus the orchestrator branch of [`core/gates-edit.ts`](../../conductor/core/gates-edit.ts)                                                                                                |
+| G9  | Local models are assumed weak at prose compliance    | Schemas, tools, and gates carry every obligation; handlers are the only state writers                                                                                                                   |
+| G10 | Naming                                               | Tests hardcode the names (`5.3-tool-inventory`)                                                                                                                                                         |
+| G11 | Wire contracts verified at build time                | `WIRE_CONTRACT_VERIFIED` ledger lines in [`wire-notes.md`](../../conductor/adapter/wire-notes.md) + [`wire-contract.test.ts`](../../conductor/tests/wire-contract.test.ts) against the installed binary |
+| G12 | Token cost accepted, wall-clock engineered           | The mandatory review lens set is not configurable                                                                                                                                                       |
+| G13 | One model, many roles                                | `conductor_setup` writes an empty `models.roles`, so every dispatch resolves `config.models.default`                                                                                                    |
+| G14 | Dual-runtime adapters                                | The dual-runtime guard (`1.4-adapter-guard`, `1.4-subprocess`) + the Bun smoke leg                                                                                                                      |
 
 ## G1 — Zero runtime dependencies in the plugin
 
@@ -124,10 +124,15 @@ discipline it does not practice, and its own defects would be indistinguishable 
   every TAP point line for a `# SKIP` or `# TODO` directive at any subtest depth, because a skipped
   `describe` is invisible to the trailer counts. That closes the "turn a hard test into a skip"
   erosion route.
-- [`scripts/conductor-gate.sh`](../../scripts/conductor-gate.sh) is the mechanical stub scan:
-  `TODO|FIXME|XXX|not implemented|placeholder` and the bare word `stub` in production source, plus
-  `test.skip` / `it.skip` / `describe.skip` / `.todo(`, trivially-true assertions, and empty catch
-  blocks everywhere including tests.
+- [`scripts/conductor-gate.sh`](../../scripts/conductor-gate.sh) is the mechanical stub scan. It
+  looks for marker shapes rather than bare words, because several of those words are the product's
+  own vocabulary: `TODO`/`FIXME`/`XXX` followed by a colon or opening a comment, `not implemented`,
+  bracketed or qualified `placeholder` forms, and stub phrasings such as "is a stub" or "stubbed
+  out" — both groups in production source only, since test files carry those tokens as data and as
+  the subject of anti-stub enforcement, and an unfinished test is caught instead by
+  `test-conductor.sh`'s skip/todo/TAP-directive gate. It also refuses `test.skip` / `it.skip` /
+  `describe.skip` / `t.skip` / `.todo(`, trivially-true assertions, and empty catch blocks,
+  everywhere including tests.
 
 The per-task gate then re-derives the red from the commit itself, so "the test was observed to
 fail" is a reproduced fact. The same law applies to the C++ layer (doctest, through the
@@ -195,8 +200,12 @@ during a phase gate are recorded as residuals in
 `HONEST-LIMITS.md`. The known ones include: a second plain `opencode` session in the same repo is
 ungated and invisible; `node -e` and `python -c` bypass the write-shape extractor; verify trusts
 the target repo's own test command, so vacuous tests get vacuous protection; and conductor cannot
-detect its own absence — which is why the liveness beacon and the orchestrator's banner exist, and
-why the first rule of operations is *no banner, no conductor*.
+detect its own absence — which is why the §3.8 liveness beacon at `.conductor/state/alive.json`
+exists and why the first check in the operations guide is whether that file is there and names a
+live pid. The plan's visible session banner ("no banner, no conductor") is the intended
+at-a-glance form of that check; the plugin does not emit one, and
+[`conductor/docs/OPERATIONS.md`](../../conductor/docs/OPERATIONS.md) says so where an operator
+will read it.
 
 **If violated.** A bypass that is not written down is a bypass the reader assumes is closed. The
 honest-limits list is what makes the rest of the claims credible.
@@ -254,7 +263,11 @@ in the continuation re-prompt that names the exact next call, and in tests.
 `CONDUCTOR_TOOL_NAMES` is exactly the 22-tool inventory and that the plugin's `tool` hook registers
 exactly those names — a renamed or added tool fails the suite immediately. The `.gitignore` rule is
 a matter of not dirtying a target repo's tracked files with the harness's presence; the exclude
-file is per-clone and untracked.
+file is per-clone and untracked. `registerConductorExclude` resolves that file through
+`git rev-parse --git-common-dir` rather than composing `<root>/.git/info`: in a linked worktree
+`<root>/.git` is a file, so the literal path errors, and an exclude written into the per-worktree
+gitdir has no effect — only the common directory's `info/exclude` does. In no-git mode the
+registration is simply skipped.
 
 **If violated.** A rename silently orphans the doctrine text that tells the model what to call, and
 the run stalls with a model asking for a tool that no longer exists.
@@ -269,13 +282,15 @@ verification is stamped in the file.**
 at 1.18.15, and four further discoveries reshaped later tasks. Without re-verification, the
 adapter would have been built on the false ones.
 
-**Enforced by.** `WIRE_CONTRACT_VERIFIED: <date> <what>` comments at the top of every affected
-file, and [`wire-contract.test.ts`](../../conductor/tests/wire-contract.test.ts), which starts
+**Enforced by.** A ledger of `WIRE_CONTRACT_VERIFIED: <date> <what>` lines — one per verified
+claim, all of them in [`conductor/adapter/wire-notes.md`](../../conductor/adapter/wire-notes.md) —
+paired with [`wire-contract.test.ts`](../../conductor/tests/wire-contract.test.ts), which starts
 `opencode serve` headless against a throwaway fixture directory, stands up a fake
-OpenAI-compatible server in place of llama-server, and asserts every row against *observed* binary
-behavior rather than the hoped-for specification text. Findings live in
-[`conductor/adapter/wire-notes.md`](../../conductor/adapter/wire-notes.md); the router's side is
-the same discipline against llama-server's `/v1` contract, recorded in
+OpenAI-compatible server in place of llama-server, and checks each row of
+`docs/build/specs/task-0.2.assertions.json` against *observed* binary behavior rather than the
+hoped-for specification text. A line tagged `[observed]` in wire-notes is one no test pins,
+which is the honest record of where the net has holes. The router's side is the same
+discipline against llama-server's `/v1` contract, recorded in
 [`router/UPSTREAM_CONTRACT.md`](../../router/UPSTREAM_CONTRACT.md). The rule that keeps
 drift contained is: **any drift updates the adapter constants, never the core.** The two recorded
 drifts are the missing prompt-level `format` field and the permission adjudication endpoint
@@ -295,33 +310,39 @@ scheduler and llama-router, never in skipping process.**
 it costs. A run that skipped a stage to save tokens measures a different system, and the number it
 produces is not the number anyone wanted.
 
-**Enforced by.** The review lens set is not configurable downward: the mandatory lenses —
-spec/contract, correctness, guardrail, test-adequacy, minimality — are never truncated by
-configuration or by trivial-mode compression. Session count is `clamp(itemReviewers, 3, 6)`, and
-below six the lenses *merge pairwise from the tail* rather than being dropped, so a smaller budget
-buys less depth per lens, never fewer subjects. Guardrails are intensity-independent. The
-wall-clock levers are elsewhere: dependency-ready parallel waves in
-[`core/schedule.ts`](../../conductor/core/schedule.ts), and admission control plus prefix affinity
-in llama-router.
+**Enforced by.** The review lens set is not configurable downward: the five mandatory item-review
+lenses — spec/contract, correctness, guardrail, test-adequacy, minimality — are never truncated by
+configuration or by trivial-mode compression. Session count is three for a trivial-classified run
+and `clamp(floor(min(workflow.itemReviewers, parallel.maxReaders)), 3, 6)` otherwise, and below six
+the lenses *merge pairwise from the tail* rather than being dropped, so a smaller budget buys less depth per lens,
+never fewer subjects; the sixth session, when there is one, adds the perf lens. `parallel.maxReaders`
+is a wall-clock ceiling the fan-out engine enforces internally, never a coverage truncation, and a
+pre-clamp fan-out below three is journaled at warn naming both the configured and the clamped
+value. Guardrails are intensity-independent. The wall-clock levers are elsewhere: dependency-ready
+parallel waves in [`core/schedule.ts`](../../conductor/core/schedule.ts), and admission control plus
+prefix affinity in llama-router.
 
 **If violated.** The measurement is gone, and with it the only reason the POC exists.
 
 ## G13 — One model, many roles
 
-**Every sub-session and the orchestrator run the same served model (`config.models.default`,
-`qwen3.6-27b`). Roles select doctrine pack, sampling temperature, priority tag, and gate posture —
-never weights.**
+**Every sub-session and the orchestrator run the same served model, `config.models.default`. Roles
+select doctrine pack, sampling temperature, priority tag, and gate posture — never weights.**
 
 **Why.** Two reasons, recorded in [`DECISIONS.md`](../../conductor/DECISIONS.md) entry (d).
 Mechanically, role-tiered routing costs four to six weight reloads per item per review round under
 `--models-max 1`. Scientifically, mixing model sizes confounds the quality delta the POC is trying
 to measure with model size, which destroys the measurement.
 
-**Enforced by.** The role table resolves everything except weights. The fan-out engine still groups
-jobs by resolved model, so a future multi-model config is a config change rather than a redesign —
-under the default config that grouping is the identity function. G13 is also a design filter: any
-design that only pays off under multi-model routing is either inert by construction here or lives
-in the stretch section.
+**Enforced by.** The role table resolves everything except weights. The fan-out engine picks a
+dispatch's model as `config.models.roles[role] ?? config.models.default`, and `conductor_setup`
+writes `models.roles` as an empty object, which the setup suite asserts — so the per-role override
+is a real seam that is empty by construction. `models.default` is not hardcoded either: setup
+derives it from what the origin actually serves and refuses to guess among several, and a test pins
+that the plan's example weight is not used as a default. The engine groups jobs by resolved model,
+so a future multi-model config is a config change rather than a redesign — under the shipped config
+that grouping is the identity function. G13 is also a design filter: any design that only pays off
+under multi-model routing is either inert by construction here or lives in the stretch section.
 
 **If violated.** Weight thrash on a 20 GB model, and a benchmark result that cannot separate
 "process helped" from "we used a bigger model for the reviews".
@@ -331,7 +352,7 @@ in the stretch section.
 **Adapter code runs under opencode's Bun runtime in production and under Node type-stripping in
 tests, so adapters use only Node-compatible built-ins (`node:fs`, `node:child_process`,
 `node:path`, `node:crypto`). The Bun-only shell `$` is never used; every subprocess goes through
-`execFile` with `shell:false`.**
+`node:child_process` with `shell:false`.**
 
 **Why.** The shell tag is the dangerous case: it works silently in production and cannot run in any
 Node test at all. A divergence discovered at integration time, with thirty modules already built on
@@ -465,11 +486,17 @@ Only five categories are legal asks:
 - genuine ladder-5 ties on consequential choices
 
 `isHumanTerritory(question)` in [`core/decide.ts`](../../conductor/core/decide.ts) is a
-conservative keyword and shape classifier over exactly those categories; every derivable technical
-question returns `false`. Misclassification fails toward surfacing — but only at run boundaries,
-batched into the report or raised as surfaced questions. Mid-run interactive interruption is
-reserved for the interactive session's explicit prompts (the user typing) and for `git.mode`
-first-run setup.
+conservative set of word-boundary *phrase* patterns over four of them — taste, money, irreversible
+commitments, secrets. They are shapes only a human-territory question has, never bare topic nouns,
+so a derivable technical question that merely mentions "security" or "cost" stays machine
+territory. The fifth is not a text shape at all: a genuine ladder-5 tie is what `scoreOptions`
+reports as `{winner: null, tie: true}`.
+Misclassification fails toward surfacing.
+
+A legal ask is surfaced the moment it blocks an item, not banked for a run boundary. Batching is
+how the human reads the surfaced questions — `conductor_status` lists them, each with the file path
+an answer can be dropped at, and the report carries them — not permission for the run to sit on one
+it already has.
 
 Three questions are never asked:
 
@@ -502,7 +529,7 @@ the part that is expensive to reconstruct.
 | (b)   | Three-layer enforcement split: TS plugin (all gates) + C++ router (wall-clock, metrics) + `serve.py` wiring | A single plugin layer; pushing enforcement into the router  |
 | (c)   | Gates hard-deny, with the budgeted `conductor_override` hatch                                               | An uncapped hatch; no hatch; a human-approved hatch         |
 | (d)   | One model for every role (G13)                                                                              | Role-tiered routing; a two-tier judge/worker split          |
-| (e)   | The stock `myprogram`/`router/main.cpp` target is replaced by the router targets                               | Keeping the stock example alongside                         |
+| (e)   | The stock `myprogram`/`router/main.cpp` target is replaced by the router targets                            | Keeping the stock example alongside                         |
 | (f)   | Plugin tests run under Node type-stripping, with one Bun smoke test (G14)                                   | All-Bun tests; Node-only tests                              |
 | (g)   | `.conductor/` excluded via `.git/info/exclude`; quarantine and worktrees live outside the repo              | In-repo placement with per-runner discovery exclusion flags |
 
@@ -533,19 +560,19 @@ So a deviation is *recorded*, not merged into the specification. Three files car
 
 ### Worked examples
 
-| Deviation                                            | Recorded as                               | What changed                                                                                                                                                                                                                                                           |
-| ---------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Progress tracking moved out of the plan's checkboxes | C-001                                     | The plan file became immutable; task status moved to `STATE.json`, because checkbox state dies under `git restore`, conflicts across workers, and makes the spec mutable                                                                                               |
-| Bun installed at preflight                           | C-002                                     | Task 2.2 authorized skipping the Bun leg if Bun were absent; it was installed instead, so the G14 leg is active and §11 acceptance runs for real                                                                                                                       |
-| The canonical test command                           | C-005                                     | `node --test` was wrapped in `scripts/test-conductor.sh` after the raw command was observed producing both a bogus red and a vacuous green                                                                                                                             |
+| Deviation                                            | Recorded as                               | What changed                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Progress tracking moved out of the plan's checkboxes | C-001                                     | The plan file became immutable; task status moved to `STATE.json`, because checkbox state dies under `git restore`, conflicts across workers, and makes the spec mutable                                                                                                                                                                                                                                                                               |
+| Bun installed at preflight                           | C-002                                     | Task 2.2 authorized skipping the Bun leg if Bun were absent; it was installed instead, so the G14 leg is active and §11 acceptance runs for real                                                                                                                                                                                                                                                                                                       |
+| The canonical test command                           | C-005                                     | `node --test` was wrapped in `scripts/test-conductor.sh` after the raw command was observed producing both a bogus red and a vacuous green                                                                                                                                                                                                                                                                                                             |
 | C++ source layout                                    | HANDOFF "C++ / src layout", user-directed | The C++ tree is `router/` (sources plus its own `tests/`) with `tools/` beside it at the top level, where the plan's §1.1 says `src/` and `src/router-tests/`. The CMake *target* is still named `router-tests`, because that is the ctest name every gate row cites. The include root is the repo root, so a header is still spelled `#include "router/config.hpp"` exactly as before. The plan's §1.1 tree is stale on this point and stays unedited |
-| Task ordering                                        | `STATE.json` `meta.orderingOverrides`     | `0.3 before 0.2`, `4.2 before 4.1`, `2.2 after 4.1`, and `12.1 split into 12.1-core + 12.1-G5`                                                                                                                                                                         |
+| Task ordering                                        | `STATE.json` `meta.orderingOverrides`     | `0.3 before 0.2`, `4.2 before 4.1`, `2.2 after 4.1`, and `12.1 split into 12.1-core + 12.1-G5`                                                                                                                                                                                                                                                                                                                                                         |
 
-The pattern in that list is the point. Every recorded deviation so far concerns layout, ordering,
-tooling, or a defect a gate caught — none of them relaxes one of the fourteen. The closest any
-comes is C-002, which *strengthened* G14 by converting an authorized skip into an active test leg.
-That is what "load-bearing" means in practice: the constraints have absorbed thirty-one recorded
-corrections without moving.
+The pattern in that list is the point. Every recorded deviation concerns layout, ordering, tooling,
+or a defect a gate caught — none of them relaxes one of the fourteen. The closest any comes is
+C-002, which *strengthened* G14 by converting an authorized skip into an active test leg. That is
+what "load-bearing" means in practice: the ledger runs to more than ninety corrections and the
+constraints have absorbed all of them without moving.
 
 ## See also
 

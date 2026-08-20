@@ -55,7 +55,9 @@ than trusting node's exit code.
 
 ### The wrapper's legs
 
-The script runs five legs in order and stops at the first failure.
+The script runs five legs in order and stops at the first failure, printing one result line per
+leg. The first leg — the node suite — is guarded by two independent checks, so the numbered
+steps below run to six.
 
 **1. TAP trailer thresholds.** The counts are parsed out of the TAP trailer and the run
 fails unless all of these hold:
@@ -102,8 +104,27 @@ exact objects the fan-out engine uses. This is a *generation* step, not an asser
 correctness is covered by `conductor/tests/export-schemas.test.ts`, and a nonzero exit here
 means the exporter itself is broken.
 
-On success the script prints `GATE PASS` and exits 0. On failure it prints the non-`ok`
-lines from the TAP output so the red is visible without a second run.
+**6. The Python leg.** `/usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py'` — the
+pinned interpreter, not whatever is on `PATH`. It runs after the schema export so
+`router/tests/schemas/RouterConfig.schema.json` is fresh when the Python-side parity test
+reads it, and it starts no server, opens no socket and writes nothing under `.data/` or
+`.out/`. Two things are checked beyond the exit code: `unittest discover` exits 0 on "Ran 0
+tests" — the same vacuous-green hole the node leg exists to close — so the leg asserts the
+discovered count is at least one; and a trailer reporting skipped or expected-failure tests
+is a hard fail, because skips are forbidden in every language here.
+
+On success the script prints `GATE PASS` and exits 0.
+
+**A red gate leaves evidence behind.** The wrapper works in a per-invocation `mktemp -d`
+scratch directory rather than fixed `/tmp` paths, so two gates running at once cannot
+overwrite each other's leg output. On a failing exit that directory is *preserved* — moved
+to a durable path the script prints — rather than deleted, and the node TAP output is
+written into it. A green exit removes it. The failure excerpt (the non-`ok` lines) is also
+printed inline, so the red is visible without a second run.
+
+**A hang is a red, not a wedge.** The node leg runs with `--test-timeout=120000`, roughly six
+times the slowest recorded suite, so a hang-shaped regression becomes a diagnosable
+`cancelled` count instead of a gate that never returns.
 
 ## The stub scan
 
@@ -114,8 +135,18 @@ bash scripts/conductor-gate.sh path/to/file.ts
 
 This is a separate mechanical scan for the G4-forbidden *shapes* — the things a test run
 cannot see because the code compiles, typechecks, and passes. With no arguments it scans
-every tracked file under `conductor/` (TypeScript) and `router/` (C++). Markdown files
-are skipped; documentation is governed by anchor tests, not by this scan.
+every tracked `.ts` under `conductor/`, everything tracked under `router/` and `tools/`, and
+every `scripts/*.py`. Markdown files are skipped; documentation is governed by anchor tests,
+not by this scan.
+
+**Each language half carries a file-count floor**, and a glob that falls below it fails the
+scan rather than reporting a clean tree: 40 TypeScript files, 10 C++ files, 5 Python files.
+The floors are deliberately loose — they catch a path that has *moved*, not a file that was
+deleted. They exist because a glob that stops matching reports "PASS over an empty set" and
+reads exactly like a clean tree; the C++ half went unscanned for two commits that way when
+the tree moved out from under the pattern, and the Python half was missing entirely while
+Phase 12 and Phase 14 were being written — so "M5 PASS (N files scanned)" through those
+phases described a set containing none of the code the phase had just produced.
 
 | Pattern                                                     | Scope                  | Rationale                                                                    |
 | ----------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
@@ -136,6 +167,16 @@ independently and does not rely on this scan at all: `test-conductor.sh` hard-fa
 skipped or todo test and any SKIP/TODO directive at any depth, and the skip patterns above
 still apply to test files. `XXX` is word-bounded so a genuine `XXX` marker trips while a
 longer `XXXX` random-suffix token in an example path does not.
+
+**Exemptions are per line, and a stale one fails the scan.** Three modules in this repo are
+*about* unfinished-work markers — `core/planning.ts` is the placeholder detector,
+`adapter/tools.ts` writes the prompts that forbid stubbing — so a textual scan reads their
+subject matter as their content. Each exemption names a file, a scan, and a substring that
+must appear on the matched line; any *other* marker in the same file still fails. On a
+whole-tree run the script then re-checks every exemption, and an exemption whose anchor line
+trips nothing is itself a failure, because an unexamined exemption is exactly how
+a scan quietly stops enforcing. The success line reports both counts:
+`M5 PASS (N file(s) scanned, K line exemption(s) all live)`.
 
 Two checks G4 implies are deliberately **not** in this script:
 
@@ -159,7 +200,7 @@ four tests. It enforces G3, the pure-core rule:
 | `1.4-core-imports`   | Every import under `conductor/core/` is a relative `./` or `../` specifier ending in `.ts` that resolves inside `conductor/core/`            | Core reaching into an adapter, or into `node_modules`                                                                                     |
 | `1.4-core-forbidden` | No core file mentions `node:fs`, `node:child_process`, `Bun`, `fetch(`, `process.env`, or `Date.now`                                         | Core acquiring I/O, network, environment, or a wall clock — core takes `nowMs` as an input, which is what makes gate decisions replayable |
 | `1.4-adapter-guard`  | No file under `conductor/adapter/` or `conductor/plugin/` mentions `Bun`, uses the ``$` `` shell tag, or imports the `bun:` module namespace | Code that works in opencode's runtime and cannot run under Node type-stripping — G14                                                      |
-| `1.4-subprocess`     | Any adapter file containing a subprocess-shaped call must import `node:child_process`                                                        | A subprocess spawned through a single-runtime API instead of `execFile` with `shell:false`                                                |
+| `1.4-subprocess`     | Any adapter file containing a subprocess-shaped call must import `node:child_process`                                                        | A subprocess spawned through a single-runtime API instead of `node:child_process` with `shell:false`                                      |
 
 The file is written to be immune to itself: every token it scans *for* is assembled by
 string concatenation, and match extraction never uses a call-shaped method token, so the
@@ -171,12 +212,13 @@ stripped — a commented-out forbidden call is still a smell.
 single-runtime API is *referenced*; the smoke proves the adapters actually *behave* the same
 under both runtimes. It re-drives the state store, the journal, and gitio through throwaway
 temp directories and asserts four runtime-observable behaviors: an atomic write surviving an
-injected mid-commit throw; the single-writer lock claim, its stale-break, and the live-foreign
-read-only path (both branches of the `process.kill(pid, 0)` liveness probe); JSONL append
-ordering plus the torn-trailing-line heal; and one `execFile` round trip through gitio. It is
-written with `node:test` and `node:assert/strict` only — the subset confirmed to run under
-both runtimes. Catching a divergence here, at three adapters, is why Phase 13 will not have
-to find it under thirty modules.
+injected mid-commit throw; the single-writer lock claim, its stale-break on both branches of
+the `process.kill(pid, 0)` liveness probe, and the live-foreign refusal that leaves the
+holder's lock intact rather than stealing it; JSONL append ordering plus the
+torn-trailing-line heal; and one `execFile` round trip through gitio. It is written with
+`node:test` and `node:assert/strict` only — the subset confirmed to run under both runtimes.
+Catching a divergence at three adapters is cheaper than finding it under thirty modules once
+the whole pipeline is running.
 
 **The single-source test** —
 [`single-source.test.ts`](../../conductor/tests/single-source.test.ts) — enforces G6 for the
@@ -199,6 +241,55 @@ client-agnostic (no pack may name opencode, Claude, or Cursor), and none may car
 placeholder marker. This is what makes doctrine drift detectable: reword a pack and remove an
 anchor, and the suite names the missing phrase.
 
+## The audit tests
+
+A second family of guards asserts properties of the *wiring* and of the build's own record,
+rather than of a function or of the source tree's shape. They exist because the build's
+single largest defect family was code that was built, exported, typechecked, unit-tested —
+and wired to nothing, shipping green because every test proved its own helper instead of the
+wire.
+
+| Test                                                                                         | What it asserts                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`wiring-manifest.test.ts`](../../conductor/tests/wiring-manifest.test.ts)                   | Constructs the **real** plugin and asserts, in both directions, that the wires it registers equal the wires [`core/wiring-manifest.ts`](../../conductor/core/wiring-manifest.ts) declares. Drop a hook and it reds; add one past the ledger and it reds. It also refuses any registered tool still carrying the argument-free fallback `ToolSpec`.                                                             |
+| [`unreachable-exports.test.ts`](../../conductor/tests/unreachable-exports.test.ts)           | Every value export under `core/`, `adapter/` and `plugin/` is referenced somewhere in the shipped tree outside its own declaration, or is on one of two explicit registers: `ENTRY_POINTS` (invoked from outside the repo) and `TEST_SURFACE` (a pure helper exposed for its own unit test, production-unwired). Both registers are self-cleaning — a listed symbol that gets wired or deleted fails the test. |
+| [`vocab-registry.test.ts`](../../conductor/tests/vocab-registry.test.ts)                     | Every restatement of a shared closed vocabulary equals the pin in [`core/vocab-registry.ts`](../../conductor/core/vocab-registry.ts), in both directions, across TypeScript arrays, exported JSON-Schema enums, record-literal keys, and Python tuples. A stop-kind change touches six files in three languages, none derivable from the others, and the copies are findable only by grepping the value.       |
+| [`journal-vocab.test.ts`](../../conductor/tests/journal-vocab.test.ts)                       | Two independent guards over the closed event vocabulary: a source audit of every `.log(` call site under `core/`, `adapter/` and `plugin/` — which covers paths no test drives — and live drives of the repaired paths through the *real* `createJournal`, with no capturing sink anywhere.                                                                                                                    |
+| [`legaltools-callsites.test.ts`](../../conductor/tests/legaltools-callsites.test.ts)         | Every production `legalTools` call site passes `publishEnabled` explicitly, so an optional parameter's default can never silently govern a gate verdict.                                                                                                                                                                                                                                                       |
+| [`gate-record-completeness.test.ts`](../../conductor/tests/gate-record-completeness.test.ts) | The build's own record is a checkable object: every task `STATE.json` calls `COMMITTED` has a `GATES.json` gate record or an explicit "owed" registration, every record carries a stamp and all nine checks, and recorded obligations are tracked rather than lost.                                                                                                                                            |
+| [`row-title-bijection.test.ts`](../../conductor/tests/row-title-bijection.test.ts)           | Assertion-spec rows and test titles are a bijection for the specs that tag their tests with row ids. A row proven by nothing and a row proven by a test are indistinguishable to a count; only a bijection separates them.                                                                                                                                                                                     |
+| [`source-hygiene.test.ts`](../../conductor/tests/source-hygiene.test.ts)                     | Source files are actually text. One committed NUL byte once made a 109 KB test file classify as binary — and `grep` silently skips binary files, so twenty-six committed tests became invisible to every grep-based audit at once.                                                                                                                                                                             |
+| [`comment-hygiene.test.ts`](../../conductor/tests/comment-hygiene.test.ts)                   | Comment text under `core/`, `adapter/` and `plugin/` carries none of the change/temporal words the repo's documentation rules forbid.                                                                                                                                                                                                                                                                          |
+
+### The standing mutation suite
+
+[`conductor/tools/audit-mutation-suite.ts`](../../conductor/tools/audit-mutation-suite.ts) is
+a corpus of machine-applicable mutations over the audit layer, each with the test glob that
+must go red and the outcome expected. It answers a question a green suite cannot: does this
+check *bite*, or does it merely pass? A gate check no mutation ever challenged is
+indistinguishable from a decorative one — it ships green because a test proves the happy
+path, never because anything proved it can fail.
+
+```bash
+node conductor/tools/audit-mutation-suite.ts            # the whole corpus
+node conductor/tools/audit-mutation-suite.ts --only vocab-stopkinds-drift
+```
+
+The corpus holds seven entries: six positive mutations expected to be **caught**, plus one
+negative control — a comment-only edit no test asserts on — expected to **survive**. The
+control is what proves the runner distinguishes; a runner that rubber-stamped everything as
+caught would fail it and fail the whole run. Each mutation edits a real source file
+transiently and always restores it in a `finally`; nothing outside the mutated files is
+written, no server starts, no socket opens.
+
+It is deliberately **not** a gate leg. `scripts/test-conductor.sh` is the canonical gate, and
+wiring a per-mutation source-rewrite loop into every gate run would make the gate mutate the
+tree it is meant to read. Instead [`audit-mutation-suite.test.ts`](../../conductor/tests/audit-mutation-suite.test.ts)
+keeps the *runner* honest inside the ordinary suite: it proves against fixtures that the
+runner tells `caught` from `survives`, and that every corpus find-string still resolves to
+exactly one site in its target file — so a mutation whose target moved is caught at gate
+time rather than the next time someone runs the tool by hand.
+
 ## Fixtures
 
 Fixtures live in [`conductor/tests/fixtures/`](../../conductor/tests/fixtures/). Each exists
@@ -211,6 +302,10 @@ to make one thing testable without a model, a server, or a network.
 | [`recorder-plugin.ts`](../../conductor/tests/fixtures/recorder-plugin.ts) | The plugin hook surface. Loaded by a real `opencode serve` via an absolute path in a throwaway config, it exports every hook the wire contract names and appends one JSONL record per firing to `CONDUCTOR_RECORDER_FILE`, so assertions run against observed binary behavior rather than hoped-for documentation.                                                                                                                                                                                                                                                                                                                                    |
 | [`crashing-plugin.ts`](../../conductor/tests/fixtures/crashing-plugin.ts) | Plugin-init failure. Its factory throws, and a dedicated `opencode serve` run records what the runtime does — the answer (log and continue, completely ungated) is what scopes the liveness beacon.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | [`wire-markers.ts`](../../conductor/tests/fixtures/wire-markers.ts)       | Shared marker constants for the above. It is a separate module for a load-bearing reason: the 1.18.15 plugin loader walks **every** export of a plugin file and throws when one is not a plugin function, so a plugin module may export its factory and nothing else.                                                                                                                                                                                                                                                                                                                                                                                 |
+| [`review-witness.ts`](../../conductor/tests/fixtures/review-witness.ts)   | An honest reviewer. Every fake lens session has to return a read witness, and it must be produced the way a real reviewer produces one — by reading the prompt it was handed — rather than by a literal typed beside the assertion, which would pass whether or not the handler checked anything. So it reads the nonce off the prompt and re-derives citable ranges from the diff the prompt carries, through the same core derivation the handler checks against.                                                                                                                                                                                   |
+| [`strip-comments.ts`](../../conductor/tests/fixtures/strip-comments.ts)   | The lens the source audits read shipped code through. Comments are **blanked** rather than deleted — every character a comment occupied becomes a space and newlines survive — so the stripped text keeps the file's length and line numbering, and prose that merely *mentions* a call is never scanned as one.                                                                                                                                                                                                                                                                                                                                      |
+| [`scan-universe.ts`](../../conductor/tests/fixtures/scan-universe.ts)     | The inverted subject selection the text audits share. A scanner that walks a hand-named set of directories is blind to any file landing elsewhere while reporting full coverage; this defines the subject as the whole `git ls-files` universe **minus** an explicit exemption list, so a file added outside the enumerated set is a red rather than a silent omission.                                                                                                                                                                                                                                                                               |
+| [`export-graph.ts`](../../conductor/tests/fixtures/export-graph.ts)       | The pure analyzer behind the unreachable-exports audit: it walks the shipped tree and reports every value export whose identifier is referenced nowhere outside its own declaration.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 The integration test that uses them,
 [`wire-contract.test.ts`](../../conductor/tests/wire-contract.test.ts), starts `opencode serve`
@@ -234,11 +329,44 @@ Quote the glob so the shell hands it to node intact. A directory argument is con
 Remember what a subset run does *not* tell you: a glob matching zero files exits 0 under raw
 node, and that is a vacuous green, not a pass. The wrapper's `tests > 0` check is the only
 thing standing between a mistyped glob and a false all-clear — and it is why a subset run
-still ends in a real `GATE PASS` line rather than silence. The typecheck, Bun, and schema
-export legs run regardless of the glob, so a subset run still catches a cross-module
-signature break.
+still ends in a real `GATE PASS` line rather than silence. The typecheck, Bun, schema-export
+and Python legs run regardless of the glob, so a subset run still catches a cross-module
+signature break — and costs more than the glob alone suggests.
 
 A subset is for iterating. **No gate decision is ever made on a subset.**
+
+## Acceptance
+
+The gate says the suite is green. Acceptance says the *project* is done, and it is an
+executable artifact rather than a recitation:
+
+```bash
+bash scripts/verify-acceptance.sh          # run this in a clean worktree of HEAD
+bash scripts/verify-acceptance.sh --quick  # skips the two slow legs; NEVER counts as acceptance
+```
+
+[`scripts/verify-acceptance.sh`](../../scripts/verify-acceptance.sh) turns each row of the
+plan's §11 checklist into a command with a PASS/FAIL verdict — twelve rows, several split
+into an `a` and a `b` half — and adds six **hollowness detectors** for the failure modes a
+green suite cannot see:
+
+| Detector | What it catches                                                                                      |
+| -------- | ---------------------------------------------------------------------------------------------------- |
+| A        | A module named in the §1.1 layout that is missing, empty, or imported by no test                     |
+| B        | A doctrine pack missing or trivial                                                                   |
+| C        | A router module missing or empty                                                                     |
+| D        | The M5 stub scan failing                                                                             |
+| E        | Any of the five live artifacts absent                                                                |
+| F        | `router/UPSTREAM_CONTRACT.md` carrying a `WIRE_CONTRACT_VERIFIED` stamp that still reads `<pending>` |
+
+The strictest rule in the script governs live artifacts. `check_artifact` refuses one of 20
+lines or fewer, and refuses one with no command transcript at all — a `$ ` line or a fenced block —
+because a live artifact a model can fabricate more cheaply than it can measure is the single
+worst outcome available. Prose-only claims are a FAIL by construction.
+
+Completion may be claimed only on exit 0, and `--quick` says so in its own output whatever
+its exit code. Run it in a clean `git worktree` of HEAD: that is what catches work which
+passes only because of uncommitted files or paths baked into a local tree.
 
 ## The C++ suite
 
@@ -249,14 +377,20 @@ registered with ctest by [`CMakeLists.txt`](../../CMakeLists.txt):
 add_executable(router-tests
   "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/scaffold_test.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/router/tests/config_test.cpp"
+  # ... proxy, admission, affinity, schema_observer, metrics, cli, dashboard
 )
 add_test(NAME router-tests COMMAND router-tests)
 ```
 
-Sources grow one file per task. The target keeps the name `router-tests` even though the
-directory is `router/tests/` — the target name is what every gate record cites. `src/` is the
-only user-code include root, so a test includes a header by its full path relative to `src/`:
+Nine test files are in that list today. The target keeps the name `router-tests` even though
+the directory is `router/tests/` — the target name is what every gate record cites. Note that
+CMake registers exactly **one** ctest test: the whole doctest binary. A count like "94/94"
+is doctest *cases*, not ctest tests, and `ctest` itself reports `1/1`. The **repo root** is
+the only user-code include root, so a test includes a header by its full path from the root:
 `#include "router/config.hpp"`, never `#include "config.hpp"`.
+
+`router/tests/dashboard_test.cpp` is in this target too, which is how the optional
+dashboard's pure aggregation header stays covered without anyone building the ftxui binary.
 
 ```bash
 cmake --preset clang-relwdebinfo
@@ -265,8 +399,8 @@ ctest --test-dir .out/build/clang-relwdebinfo --output-on-failure
 ```
 
 **Build only named targets.** A bare `cmake --build` also compiles the whole vendored
-`extern/llama-cpp` tree, which no target here links. The three legal targets are
-`llama-router`, `router-tests`, and `membench`. See
+`extern/llama-cpp` tree, which no target here links. The legal targets are `llama-router`,
+`router-tests`, `membench`, and `conductor-dashboard` when it has been configured on. See
 [build-system.md](build-system.md) for the full picture.
 
 The C++ red shape is a **compile failure**, not an assertion failure: a test file is written
@@ -286,7 +420,7 @@ review at all. Every result is recorded in [`GATES.json`](../build/GATES.json).
 | **M2 — Pass-count monotonicity** | Compare `# pass` against the previous task; it must not decrease, and must strictly increase for a task that adds tests                                                       | A weakened or deleted assertion. Weakening is invisible in a red/green signal and obvious in a count. A decrease halts the build until explained in `CORRECTIONS.md`, naming the tests removed and why.                                                                                                                                             |
 | **M3 — Typecheck**               | `tsc --noEmit` over the conductor project                                                                                                                                     | Invented SDK shapes, cross-module signature drift.                                                                                                                                                                                                                                                                                                  |
 | **M4 — Red re-derivation**       | From the **commit**, in a detached scratch worktree: remove or revert the task's implementation paths, run the task's tests there, then remove the worktree                   | The heart of the gate. Catches tests written after the implementation, tests that assert the mock, tests that would pass against an empty file, and implementations that quietly landed earlier. The failure must classify as `assertion` or `missing-subject`, never `error`, and its text must name a symbol or path inside the task's own scope. |
-| **M5 — Stub scan**               | `bash scripts/conductor-gate.sh` plus the eyeball checks it cannot regex                                                                                                      | Stub markers, skipped tests, trivially-true assertions, empty catch blocks, empty function bodies, and any new source file no test imports.                                                                                                                                                                                                         |
+| **M5 — Stub scan**               | `bash scripts/conductor-gate.sh` plus the eyeball checks it cannot regex                                                                                                      | Stub markers, skipped tests, trivially-true assertions, empty catch blocks, empty function bodies, and any new source file no test imports. The scan covers TypeScript, C++ and Python, each with its own file-count floor.                                                                                                                         |
 | **M6 — Diff scope**              | `git diff --name-only HEAD` ⊆ the task's declared files ∪ `docs/build/*`                                                                                                      | Scope creep. **Any edit to a file first added by an earlier task is a hard stop** requiring written justification — that is the exact mechanism by which a subagent "fixes" an earlier test to make its own work pass, and by which a long suite silently erodes.                                                                                   |
 | **M7 — Assertion coverage**      | Every row in `docs/build/specs/task-<id>.assertions.json` maps to a named test that exists in the diff                                                                        | Built-something-else. An unmapped row is a gate failure, not a note.                                                                                                                                                                                                                                                                                |
 | **M8 — Live-artifact integrity** | Live tasks only: the artifact exists, carries the required fields, records **verbatim command lines and raw output**, and at least one of those commands is re-run and diffed | A measurement claim backed only by prose.                                                                                                                                                                                                                                                                                                           |

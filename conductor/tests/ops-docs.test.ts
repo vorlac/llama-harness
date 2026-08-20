@@ -644,8 +644,42 @@ test("[15.1-replay-usage-crosschecked] every replay flag the doc shows is one re
   );
   requireMatch(replay.body, /swimlane/i, "the replay section must state that replay renders per-item swimlanes");
   requireMatch(replay.body, /gate denial/i, "the replay section must state that replay highlights gate denials");
-  requireMatch(replay.body, /fan-?out duration/i, "the replay section must state that replay prints the fan-out duration table");
-  requireMatch(replay.body, /review[- ]verdict/i, "the replay section must state that replay prints the review verdict table");
+  requireMatch(replay.body, /fan-?out/i, "the replay section must state that replay prints the fan-out table");
+  requireMatch(replay.body, /duration/i, "the replay section must state that the fan-out table carries each sub-session's duration");
+
+  // The review table is named by what replay.ts labels it, and its column set is
+  // read from ReviewRoundRow — so the doc cannot promise a verdict replay does
+  // not render. Both derivations live in the tool, never in the document.
+  const reviewLabel = /const SEC_REVIEW\s*=\s*"([^"]+)"/.exec(replaySrc);
+  assert.ok(reviewLabel !== null, "replay.ts must label its review section (SEC_REVIEW)");
+  const reviewWords = (reviewLabel as RegExpExecArray)[1]
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((word) => word.length > 0)
+    .map((word) => word.replace(/s$/, "") + "s?");
+  requireMatch(
+    replay.body,
+    new RegExp(reviewWords.join("[- ]"), "i"),
+    "the replay section must name replay's review table by what it renders: " + (reviewLabel as RegExpExecArray)[1],
+  );
+
+  const reviewRow = /export interface ReviewRoundRow \{([\s\S]*?)\n\}/.exec(replaySrc);
+  assert.ok(reviewRow !== null, "replay.ts must declare ReviewRoundRow (the review table's columns)");
+  const reviewFields = Array.from((reviewRow as RegExpExecArray)[1].matchAll(/^\s*([A-Za-z][A-Za-z0-9]*)\??\s*:/gm)).map(
+    (m) => m[1],
+  );
+  assert.ok(reviewFields.length > 0, "ReviewRoundRow must declare columns; found none");
+  assert.equal(
+    reviewFields.includes("verdict"),
+    false,
+    "ReviewRoundRow declares no verdict column at HEAD; if one is added, this row and the doc both change together",
+  );
+  assert.ok(
+    !/review[- ]verdict/i.test(replay.body),
+    "the replay section must not call replay's review table a review-VERDICT table: ReviewRoundRow has no verdict column (columns: " +
+      reviewFields.join(", ") +
+      ")",
+  );
 
   // conductor_status is a real tool binding, so the doc may point at it by name.
   const bindings = readRepo("conductor/core/tool-bindings.ts");
@@ -1021,10 +1055,28 @@ test("[15.1-envelope-tool-deny] the envelope section describes the thrown gate d
   }
   requireAll(envelopes.body, ["gates", "deny", "gate-crash"], "the gate-deny envelope's journal pointers");
   requireMatch(envelopes.body, /snapshot/i, "the envelope section must say the deny carries its input snapshot");
-  requireMatch(envelopes.body, /\bdebug\b/i, "the envelope section must say the input snapshot is journaled at debug level");
+
+  const toolsSrc = readRepo("conductor/adapter/tools.ts");
+
+  // The LEVEL of the deny record is read out of denyThrow, never taken from the
+  // doc: a deny carries its snapshot as the record's own data, so the level the
+  // snapshot is readable at IS the level the deny is logged at.
+  const denyLog = /journal\.log\(\s*"([a-z]+)",\s*"gates",\s*"deny",\s*denySnapshot\(/.exec(toolsSrc);
+  assert.ok(denyLog !== null, "adapter/tools.ts's denyThrow must journal gates/deny with denySnapshot as its data");
+  const denyLevel = (denyLog as RegExpExecArray)[1];
+  requireMatch(
+    envelopes.body,
+    new RegExp("`deny` record[^.]{0,80}\\b" + denyLevel + "\\b", "i"),
+    "the envelope section must state the `deny` record's journal level as " +
+      denyLevel +
+      " (adapter/tools.ts denyThrow), in the same sentence that names the record",
+  );
+  assert.ok(
+    !/snapshot[^.]{0,160}\bdebug\b/i.test(envelopes.body) && !/\bdebug\b[^.]{0,160}snapshot/i.test(envelopes.body),
+    "the envelope section must not put the deny snapshot at debug level: denyThrow logs it at " + denyLevel,
+  );
 
   // The fail-closed prefix is pinned by adapter/tools.ts, quoted verbatim.
-  const toolsSrc = readRepo("conductor/adapter/tools.ts");
   const crash = /"(a security gate crashed[^"]*)"/.exec(toolsSrc);
   assert.ok(crash !== null, "adapter/tools.ts must define the fail-closed gate-crash reason prefix");
   const prefix = (crash as RegExpExecArray)[1].replace(/:\s*$/, "").trim();
@@ -1245,7 +1297,7 @@ test("[15.1-degraded-modes] OPERATIONS.md documents no-git mode and the OS-level
   assert.ok(lockFile !== null, "state.ts must build the run.lock path");
   assert.ok(
     text.includes(".conductor/state/" + (lockFile as RegExpExecArray)[1]),
-    "OPERATIONS.md must name .conductor/state/" + (lockFile as RegExpExecArray)[1] + " as the advisory single-writer lock",
+    "OPERATIONS.md must name .conductor/state/" + (lockFile as RegExpExecArray)[1] + " as the OS-level single-writer lock",
   );
   requireMatch(text, /single-writer/i, "the second-session description must call run.lock a single-writer lock");
   requireMatch(text, /OS-level|linkSync/i, "the second-session description must call run.lock an OS-level lock, not merely advisory");

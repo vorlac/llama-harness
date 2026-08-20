@@ -13,7 +13,8 @@ per runner:
 - **(a)** deliberately failing test placed at `<fixture>/.conductor/runs/x/quarantine/`,
   run the runner's whole-tree command — is it collected?
 - **(b)** the same failing file moved to an out-of-repo sibling path simulating
-  `<stateHome>/conductor/<key>/quarantine/` — is it collected?
+  `<stateHome>/conductor/<workspaceKey>/quarantine/<runId>/` — the directory
+  `conductor/adapter/quarantine.ts` moves the foreign red set into — is it collected?
 - **(c)** a `git worktree` created INSIDE the fixture repo at `<fixture>/wt`, on a
   branch whose committed tests include a deliberately failing one — does the main
   tree's whole-tree command collect the worktree's copies?
@@ -572,6 +573,11 @@ runners, zero collections, by construction outside every glob, module, rootdir, 
 registration boundary.
 
 ## Citations for HONEST-LIMITS
+
+Three measurements a reader of [HONEST-LIMITS.md](./HONEST-LIMITS.md) should have in hand.
+They are why both out-of-repo trees — the quarantine and the parallel-implementer worktrees
+at `<stateHome>/conductor/<workspaceKey>/worktrees/<runId>/<itemId>` — live on the home
+volume rather than under `.conductor/`.
 
 - **`node --test` collects worktree copies.** A `git worktree` inside the repo made
   the main tree's whole-tree `node --test` execute the worktree's tests (duplicate

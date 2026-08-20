@@ -4,8 +4,9 @@ A self-contained macOS/Apple-Silicon workspace for running open-weight LLMs loca
 llama.cpp, and for driving them from [opencode](https://opencode.ai). On top of that sits
 **conductor**: a TDD-enforcing, adversarially-reviewed orchestration harness whose job is to
 make a *local* ~27B model produce software you can trust. Everything the workspace downloads,
-builds or generates lives under a small set of gitignored directories (`.data/`, `.out/`,
-`build/`), so a clean checkout is one `rm -rf` away.
+builds or generates lives under a small set of gitignored paths — `.data/` for models, tools and
+configs, `.out/` for CMake build and install trees, plus `conductor/node_modules/` (dev types
+only) and the generated `router/tests/schemas/` — so a clean checkout is one `rm -rf` away.
 
 ## What this is
 
@@ -18,9 +19,10 @@ nothing. See [the conductor overview](docs/user/conductor-overview.md).
 
 **The model harness** is the substrate underneath: Python 3.9 stdlib-only scripts and a pinned
 `llama.cpp` submodule that install, verify, serve and benchmark GGUF models locally. One
-`llama-server` in *router mode* serves every installed model at a single endpoint and swaps
-weights on demand; opencode talks to that endpoint and nothing else. No cloud provider is
-involved and no API key is required.
+`llama-server` started in *multi-model mode* (llama.cpp's own `--models-preset` mode, which
+upstream also calls router mode — it is not conductor's llama-router) serves every installed
+model at a single endpoint and swaps weights on demand; opencode talks to that endpoint and
+nothing else. No cloud provider is involved and no API key is required.
 
 ## Quickstart
 
@@ -37,9 +39,6 @@ Type `exit` in that shell to stop the model. Requires Python 3.9+ (macOS ships i
 [docs/user/installation.md](docs/user/installation.md).
 
 ## conductor
-
-> *Not yet wired: `scripts/serve.py` loads the conductor plugin and launches llama-router from
-> task 12.1 onward — see [project status](docs/developer/project-status.md).*
 
 ### The problem
 
@@ -115,7 +114,7 @@ flowchart TD
     end
 
     subgraph INF["Inference substrate"]
-        LS["llama-server in router mode"]
+        LS["llama-server (multi-model)"]
     end
 
     W -.->|"injects plugin"| S
@@ -166,19 +165,21 @@ PUBLISHED`. See [run lifecycle](docs/user/run-lifecycle.md), [state machines](do
 
 ### What is actually enforced
 
-| Mechanism                | Fires on                                  | Enforces                                                                                                                                                                                                                                          |
-| ------------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session-registry gate    | every tool call                           | only a registered, scoped session may write; opencode's `task` sub-agent spawning is denied in every session                                                                                                                                      |
-| Git-policy gate          | any bash command containing a git segment | default-deny for any subcommand not on the read-only allow-list, matched over parsed tokens rather than substring regex                                                                                                                           |
-| Edit-scope gate          | every write-shaped call                   | implementer writes only its item's `fileScope`, test-writer only `testScope`, reviewers and planners write nothing, nobody writes `.conductor/**`                                                                                                 |
-| Verify freeze            | any edit while a verify marker is live    | the tree is frozen for the duration, production and test files alike                                                                                                                                                                              |
-| Phase-legality gate      | every `conductor_*` call                  | out-of-order transitions are denied; the same `legalTools` derivation drives the gate, the prompt injection, and continuation                                                                                                                     |
-| Item FSM                 | each per-item stage tool                  | a behavioral item cannot reach GREEN without an observed, vetted RED first, and an item may declare itself non-behavioral only if its `fileScope` is disjoint from `verify.behavioralPaths` — impossible for real code, trivial for a comment fix |
-| Handler-derived evidence | every FSM-advancing tool                  | the handler runs the command and classifies the failure; the model's claim is not the record                                                                                                                                                      |
-| Freshness stamp          | every verify                              | a verify is start-stamped against a `HEAD`; an edit to a staged behavioral file or a moved `HEAD` voids it                                                                                                                                        |
-| Foreign-red quarantine   | before each verify start-stamp            | other items' red tests are moved outside the repository so they cannot mask or pollute this item's verdict                                                                                                                                        |
-| Override budget          | `conductor_override`                      | one per item, two per run; records an anomaly, permanently taints the item, and over budget is a stop rather than a third override                                                                                                                |
-| Doctrine injection       | every request                             | the role's doctrine packs plus a live state block are restated every request, never remembered                                                                                                                                                    |
+| Mechanism                | Fires on                                  | Enforces                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session-registry gate    | every tool call                           | only a registered, scoped session may write; opencode's `task` sub-agent spawning is denied in every session, registered or not                                                                                                                                                                                   |
+| Patch-tool refusal       | `patch` and `apply_patch`                 | refused ahead of every other gate in every session: a patch body names its targets in a form no gate parses, so no scope decision can bound it                                                                                                                                                                    |
+| Git-policy gate          | any bash command containing a git segment | default-deny for any subcommand not on the read-only allow-list, matched over parsed tokens rather than substring regex                                                                                                                                                                                           |
+| Edit-scope gate          | every write-shaped call                   | implementer writes its item's `fileScope` minus its `testScope`, test-writer only `testScope`, reviewers and planners write nothing, nobody writes `.conductor/**`, nobody writes outside the session's tree                                                                                                      |
+| Interpreter-shape rules  | `node -e`, `python -c` and friends        | recognized write calls surface their literal path operands into the edit gate, and any interpreter program text that so much as names `.conductor` is refused outright                                                                                                                                            |
+| Verify freeze            | any edit while a verify marker is live    | the tree is frozen for the duration, production and test files alike                                                                                                                                                                                                                                              |
+| Phase-legality gate      | every `conductor_*` call                  | one choke point checks the caller (only `conductor_status`, `conductor_surface` and `conductor_override` are sub-session callable), then the declared arguments, then the phase rule; a tool with no rule is refused, and the same `legalTools` derivation drives the gate, the prompt injection and continuation |
+| Item FSM                 | each per-item stage tool                  | a behavioral item cannot reach GREEN without an observed, vetted RED first, and an item may declare itself non-behavioral only if its `fileScope` is disjoint from `verify.behavioralPaths` — impossible for real code, trivial for a comment fix                                                                 |
+| Handler-derived evidence | every FSM-advancing tool                  | the handler runs the command and classifies the failure; the model's claim is not the record                                                                                                                                                                                                                      |
+| Freshness stamp          | every verify                              | a verify is start-stamped against a `HEAD`; an edit to a staged behavioral file or a moved `HEAD` voids it                                                                                                                                                                                                        |
+| Foreign-red quarantine   | before each verify start-stamp            | other items' red tests are moved outside the repository so they cannot mask or pollute this item's verdict                                                                                                                                                                                                        |
+| Override budget          | `conductor_override`                      | the gate must be one of `session`, `git`, `edit` — anything else is refused and spends nothing; one override per item, two per run; each records an anomaly and permanently taints the item, and over budget is a stop rather than a third override                                                               |
+| Doctrine injection       | every request                             | the role's doctrine packs plus a live state block are restated every request, never remembered                                                                                                                                                                                                                    |
 
 Full inventory: [tool reference](docs/user/tool-reference.md),
 [gates and hatches](docs/user/gates-and-hatches.md), [gates internals](docs/developer/gates.md).
@@ -224,13 +225,23 @@ that stamp and rebuilds if the submodule moved, so the tools can never silently 
 scripts/serve.py                             # numbered picker, then a ready shell
 scripts/serve.py ornith-35b                  # skip the picker
 scripts/serve.py --no-shell                  # plain foreground server
+scripts/serve.py --no-router                 # talk to llama-server directly
 ```
 
-`serve.py` starts one `llama-server` in router mode reading
-`.data/configs/llama-models.ini`, writes a session-scoped `opencode.json` whose default model
-is the one you picked, and drops you into a subshell with `OPENCODE_CONFIG` exported. Because
-`--models-max 1`, switching models transparently evicts the previous one — which matters when
-a single model occupies 30 GB of a 64 GB machine. See [docs/user/serving.md](docs/user/serving.md).
+`serve.py` starts one `llama-server` in multi-model mode reading
+`.data/configs/llama-models.ini`, writes a session-scoped
+`.data/configs/opencode.session.json` that merges in `conductor/opencode-fragment.json` and
+names the model you picked as the default, and drops you
+into a subshell with `OPENCODE_CONFIG` exported. Because `--models-max 1`, switching models
+transparently evicts the previous one — which matters when a single model occupies 30 GB of a
+64 GB machine. The server is sized for the harness's own fan-out: `--parallel` and a total
+`--ctx-size` are derived from `--max-readers` (6 by default) at 8192 tokens per slot. `serve.py`
+launches `llama-router` under a restart supervisor and points opencode at it when the session
+opens a shell, a `llama-router` binary is found, and the exported
+`router/tests/schemas/RouterConfig.schema.json` exists; if any of those is missing it prints a
+notice and talks to `llama-server` directly, and an explicit `--router` refuses with the remedy
+instead. `--no-router` runs the identical workflow without it. See
+[docs/user/serving.md](docs/user/serving.md).
 
 ```bash
 scripts/benchmark.py --dry-run               # plan + time estimate, runs nothing
@@ -253,41 +264,44 @@ conductor/               the opencode plugin - all enforcement lives here
   core/                    pure logic: FSMs, gate predicates, scheduler, decisions
   adapter/                 I/O seams: state, journal, evidence, fan-out, injection
   plugin/index.ts          the opencode plugin factory - the module's only export
-  doctrine/                nine always-injected doctrine packs
-  tools/                   export-schemas.ts (TS types to JSON Schema)
+  doctrine/                nine doctrine packs, injected by role on every request
+  tools/                   schema export, doctrine generation, replay, audit drivers
   tests/                   the TypeScript suite
+  docs/                    OPERATIONS.md, HONEST-LIMITS.md, RUNNER-DISCOVERY.md
   DECISIONS.md             standing-decisions ledger
   opencode-fragment.json   plugin + agents + permissions, merged into the session config
-src/
-  main.cpp                 llama-router entry point
-  router/                  the C++23 router; src/ is the only include root
+router/                  the C++23 llama-router; main.cpp plus one header per concern
   tests/                   doctest suite (CMake target router-tests) + generated schemas
-  tools/membench/          standalone memory-bandwidth probe
+  UPSTREAM_CONTRACT.md     the measured llama-server /v1 contract the router must respect
+dashboard/               the optional ftxui metrics TUI (CMake option CONDUCTOR_DASHBOARD)
+tools/membench/          standalone memory-bandwidth probe
+bench/                   conductor-tasks.json - the POC benchmark task set
 scripts/                 Python harness (serve, fetch, benchmark) + the test gates
 docs/
   user/ developer/ faq/    this documentation set
-  plans/                   the immutable design plan
+  plans/                   the immutable design plan and its phase 16-19 addendum
   build/                   STATE.json, HANDOFF.md, CORRECTIONS.md - conductor build state
   reviews/                 adversarial reviews of the plan
 cmake/                   vcpkg init, warnings, clang-format
 extern/llama-cpp         pinned llama.cpp submodule (configured, never built here)
 extern/vcpkg             the vcpkg toolchain
 setup.sh                 guided first-time install
-CMakeLists.txt           llama-router, router-tests, membench
+CMakeLists.txt           llama-router, router-tests, conductor-dashboard; tools/ is a subdirectory
 .data/                   everything downloaded or generated  (gitignored)
 .out/                    CMake build and install trees       (gitignored)
 ```
 
 ## Documentation
 
-| Page                                                                                               | What it covers                                                                            |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [docs/README.md](docs/README.md)                                                                   | the documentation hub — start here and pick a track                                       |
-| [docs/user/quickstart.md](docs/user/quickstart.md)                                                 | install to first working session, end to end                                              |
-| [docs/user/README.md](docs/user/README.md)                                                         | the user guide: models, serving, running conductor, configuration, troubleshooting        |
-| [docs/developer/README.md](docs/developer/README.md)                                               | the developer guide: architecture, state machines, gates, evidence, schemas, build system |
-| [docs/faq/README.md](docs/faq/README.md)                                                           | short answers to the questions the design keeps provoking                                 |
-| [docs/plans/2026-08-07-conductor-harness-plan.md](docs/plans/2026-08-07-conductor-harness-plan.md) | the immutable design authority the whole build is derived from                            |
+| Page                                                                                               | What it covers                                                                                            |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [docs/README.md](docs/README.md)                                                                   | the documentation hub — start here and pick a track                                                       |
+| [docs/user/quickstart.md](docs/user/quickstart.md)                                                 | install to first working session, end to end                                                              |
+| [docs/user/README.md](docs/user/README.md)                                                         | the user guide: models, serving, running conductor, configuration, troubleshooting                        |
+| [docs/developer/README.md](docs/developer/README.md)                                               | the developer guide: architecture, state machines, gates, evidence, schemas, build system                 |
+| [docs/faq/README.md](docs/faq/README.md)                                                           | short answers to the questions the design keeps provoking                                                 |
+| [docs/prompt-lifecycle.md](docs/prompt-lifecycle.md)                                               | one prompt followed end to end, naming the mechanism at each step and roughly what it costs in wall-clock |
+| [docs/plans/2026-08-07-conductor-harness-plan.md](docs/plans/2026-08-07-conductor-harness-plan.md) | the immutable design authority the whole build is derived from                                            |
 
 ## Building the C++ side
 
@@ -304,11 +318,16 @@ ctest --test-dir .out/build/clang-relwdebinfo
 A bare `cmake --build` also compiles the whole vendored `extern/llama-cpp` tree, which nothing
 here links — the router proxies to a separately-launched `llama-server` — so always pass
 `--target`. The presets are `clang-debug`, `clang-release` and `clang-relwdebinfo`, all writing
-to `.out/build/<preset>/`. `membench` is a third, dependency-free target that also builds with a
-single `c++` invocation. Every in-workspace header is included by its full path relative to
-`src/` — `#include "router/version.hpp"`, never `#include "version.hpp"` — because `src/` is the
-only user-code include root on both targets. Setting `-DAUTOFORMAT_SRC_ON_CONFIGURE=ON` runs
-clang-format over `src/` at configure time.
+to `.out/build/<preset>/`; every preset is gated on a macOS host. `membench` is a third,
+dependency-free target that also builds with a single `c++` invocation, and
+`-DCONDUCTOR_DASHBOARD=ON` adds a fourth, `conductor-dashboard`, the optional ftxui TUI over the
+router's metrics ledger — it is off by default so no ordinary build pays for ftxui. Every
+in-workspace header is included by its full path from the repository root —
+`#include "router/version.hpp"`, never `#include "version.hpp"` — because the root is the only
+user-code include root on every target that includes one; `membench` includes no workspace
+header and sets no include root at all. `AUTOFORMAT_SRC_ON_CONFIGURE` defaults to `ON` and runs
+clang-format over `router/`, `dashboard/` and `tools/` at configure time; pass `-D…=OFF` to
+suppress it.
 
 The TypeScript side has one canonical gate, and it is not `node --test`:
 
@@ -320,9 +339,17 @@ bash scripts/conductor-gate.sh                                  # mechanical stu
 
 The wrapper exists because raw `node --test` lies in two directions on Node 26: a directory
 positional resolves as a module and produces a bogus failure, and a glob matching zero files
-exits 0. It parses the TAP trailer and fails unless tests ran and nothing was skipped or
-marked todo at any depth, then typechecks, runs the Bun dual-runtime smoke, and regenerates
-the JSON Schemas the C++ tests consume. See [build system](docs/developer/build-system.md),
+exits 0. It has five legs: it parses the TAP trailer and fails unless tests ran and nothing was
+skipped or marked todo at any depth; typechecks with
+`tsc --noEmit`; runs the Bun dual-runtime smoke; regenerates the §2 JSON Schemas into
+`router/tests/schemas/` so the C++ tests validate against the same objects the plugin enforces;
+and runs the Python suite under `/usr/bin/python3 -m unittest`, failing if it discovers zero
+tests. Four of the five hard-fail the gate; the Bun leg is skipped with a loud warning if `bun`
+is absent and fails the gate whenever it runs. A failing run preserves its scratch output at a
+path it prints rather than deleting it.
+`conductor-gate.sh` is a separate mechanical scan of committed TypeScript, C++ and Python
+sources for stub markers, skipped tests, trivially-true assertions and empty catch blocks. See
+[build system](docs/developer/build-system.md),
 [testing and verification](docs/developer/testing-and-verification.md).
 
 ## Honest limits
@@ -330,19 +357,30 @@ the JSON Schemas the C++ tests consume. See [build system](docs/developer/build-
 The design states its own limits rather than hiding them.
 
 - Gates fire inside opencode only. A human at a raw terminal is ungated, and so is a second,
-  plain `opencode` session running in the same repository.
+  plain `opencode` session started without the harness in the same repository — it loads no
+  plugin, takes no lock, and is invisible to the conductor session it is racing. (Two
+  *conductor* sessions are the benign case: the workspace lock refuses the second one outright.)
 - conductor cannot detect its own absence. A plugin that fails to load is logged and opencode
-  continues completely ungated, which is why the plugin writes a liveness beacon and the first
-  response carries a banner. **No banner, no conductor.**
+  continues completely ungated, which is why the plugin writes a liveness beacon to
+  `.conductor/state/alive.json` carrying its `pid`, `startMs`, `version` and `sessionID`.
+  **No beacon, no conductor.** The visible in-session banner the design also calls for is not
+  wired, so the beacon is the check that works.
 - Ledgers are records, not proofs — but every FSM-advancing record is written by a handler
   that re-derived the evidence itself.
 - Scope intersection is deliberately conservative: false positives serialize work that could
   have run in parallel, and never corrupt it.
 - Verify trusts the target repository's own test command, so vacuous tests get vacuous
   protection.
-- `node -e` and `python -c` bypass the write-shape extractor the edit-scope gate depends on.
+- The edit gate reads write *shapes*, not intent. It resolves the literal path operands of the
+  interpreter write calls it enumerates and refuses any one-liner naming `.conductor`, but a
+  path an interpreter computes at runtime in a shape outside that enumeration is not seen.
 - `behavioral: false` is only as honest as the configured `behavioralPaths`, which is why
   setup asks for them instead of guessing.
+
+The fifteen normative limits, and the further limits the build itself discovered, are
+[`conductor/docs/HONEST-LIMITS.md`](conductor/docs/HONEST-LIMITS.md);
+the operator's counterpart, covering the beacon check, the lock and the recovery paths, is
+[`conductor/docs/OPERATIONS.md`](conductor/docs/OPERATIONS.md).
 
 ## License
 

@@ -34,9 +34,6 @@ state, or spawns a child. A harmless read fails open. Either way the crash is jo
 
 ### Layer 2 — llama-router
 
-> *Not yet wired: the router beyond config parsing (proxy, admission, affinity, schema
-> observation, metrics) is tasks 11.3–11.8; see [project-status.md](project-status.md).*
-
 **Owns.** Wall-clock and measurement. It is a C++23 reverse proxy in front of
 `llama-server` that passes `/v1/*` through transparently, including SSE streaming, and
 serves `/conductor/*` for its own health and metrics endpoints. Everything else 404s.
@@ -69,16 +66,15 @@ to batch. It, and per-role model routing, live in the plan's stretch section.
 
 ### Layer 3 — the wiring
 
-> *Not yet wired: `serve.py`'s router launch and plugin injection are task 12.1, and the
-> first-run repo setup flow is task 12.2.*
-
 **Owns.** Putting the other two in front of `llama-server`.
-[`scripts/serve.py`](../../scripts/serve.py) already generates a session-scoped opencode
-config; it grows `--router` / `--no-router` (defaulting to the router when the binary
-exists), launches the router under its supervisor, and merges
+[`scripts/serve.py`](../../scripts/serve.py) generates a session-scoped opencode config. It
+takes `--router` / `--no-router` (defaulting to the router when the binary exists), launches the
+router under its supervisor against a generated `conductor-router.json`, and merges
 [`conductor/opencode-fragment.json`](../../conductor/opencode-fragment.json) — agent
-definitions, permissions, and the plugin path — into that config. That merge is what makes
-the harness travel: `cd` into any repo, run `serve.py`, and the plugin is loaded there.
+definitions, permissions, and the plugin path — into that config through
+[`scripts/conductor_wiring.py`](../../scripts/conductor_wiring.py). That merge is what makes
+the harness travel: `cd` into any repo, run `serve.py`, and the plugin is loaded there. First-run
+repo setup is the plugin's own `conductor_setup` tool, not `serve.py`'s job.
 
 **Cannot do.** It makes no runtime decisions. Once the shell is live, `serve.py` is gone.
 
@@ -176,11 +172,11 @@ in the base build. Enforcing structured output belongs to the fan-out engine's o
 validation, which runs in both configurations; what the router uniquely provides is an
 *independent* record, and a record needs no authority to produce.
 
-**`--no-router` runs the identical process, and that is a tested claim.** Task 12.1's
-equivalence step runs the scripted end-to-end pipeline twice — once with the router in the
-loop, once with `--no-router` — and asserts the same terminal state, the same item
-dispositions, and the same commit set. The claim appears in five places in the design; this
-is the one test that makes it true rather than aspirational.
+**`--no-router` runs the identical process, and that is a tested claim.** The G5 equivalence
+check runs the scripted end-to-end pipeline twice — once with the router in the loop, once with
+`--no-router` — and asserts the same terminal state, the same item dispositions, and the same
+commit set. The claim appears in several places in the design; that check is what makes it true
+rather than aspirational.
 
 Reverse the dependency and the system breaks: every gate would inherit the router's
 availability, and "the router crashed" would become "the run was ungated".
@@ -189,9 +185,6 @@ availability, and "the router crashed" would become "the run was ungated".
 
 Layer 1 is three tiers with a strict import direction: the plugin entry wires hooks,
 adapters do I/O, and core decides. Nothing points back up.
-
-> *Not yet present: `adapter/continuation.ts` (task 10.1) and `adapter/worktrees.ts`
-> (task 9.6) — the two rows below without links.*
 
 ```mermaid
 ---
@@ -222,52 +215,68 @@ config:
 ---
 %% Design: the plan's three-tier rule (§3.4, §3.5), not a literal import listing.
 %% The direction is what conductor/tests/purity.test.ts enforces.
+%% Layout: no `direction LR` inside the clusters (it fights the parent TD ranking),
+%% plus three invisible spacers out of SIDE so core always ranks below adapter.
 graph TD
 
-    subgraph LC["core - pure, imports only core"]
-        direction LR
-        GATES["gates-git, gates-edit"]
-        PHASE["gates-phase"]
-        FSM["fsm-run, fsm-item"]
-        DERIVE["schedule, freshness, verdict"]
-        TYPES["types, shell-parse"]
-    end
+    OC["opencode runtime"]
 
     subgraph LP["plugin - hook wiring only"]
-        direction LR
         IDX["plugin/index.ts"]
     end
 
     subgraph LA["adapter - all I/O"]
-        direction LR
-        TOOLS["adapter/tools.ts"]
         CHAT["adapter/chat-message.ts"]
         INJ["adapter/inject.ts"]
+        CONT["adapter/continuation.ts"]
+        TOOLS["adapter/tools.ts"]
         SIDE["fanout, evidence, state"]
     end
 
-    OC["opencode runtime"] --> IDX
+    subgraph LC["core - pure, imports only core"]
+        GATES["gates-git, gates-edit"]
+        PHASE["gates-phase, tool-legality"]
+        FSM["fsm-run, fsm-item, disposition"]
+        DERIVE["schedule, freshness, verdict"]
+        TYPES["types, shell-parse"]
+    end
 
-    IDX --> TOOLS
+    OC --> IDX
+
     IDX --> CHAT
     IDX --> INJ
+    IDX --> CONT
+    IDX --> TOOLS
+
+    CONT --> TOOLS
+    CHAT --> SIDE
+    TOOLS --> SIDE
+
     TOOLS --> GATES
     TOOLS --> PHASE
     TOOLS --> FSM
-    TOOLS --> SIDE
-    CHAT --> SIDE
     INJ --> PHASE
+    CONT --> PHASE
+    CONT --> FSM
+
     SIDE --> DERIVE
     SIDE --> TYPES
     GATES --> TYPES
     PHASE --> DERIVE
+    PHASE --> FSM
 
-    linkStyle default stroke:#C1C4CAaa,stroke-width:2px,color:#C1C4CAaa
+    %% rank spacers - invisible, no semantic meaning
+    SIDE ~~~ GATES
+    SIDE ~~~ PHASE
+    SIDE ~~~ FSM
+
+    %% styled by index (0-18) so the spacers at 19-21 keep their invisible stroke
+    linkStyle 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 stroke:#C1C4CAaa,stroke-width:2px,color:#C1C4CAaa
 
     classDef neutral fill:#3a3f47,stroke:#6a6f77,color:#C1C4CA,rx:6,ry:6
     classDef accent  fill:#2b4268,stroke:#779DC9,color:#ffffff,rx:6,ry:6
 
-    class OC,CHAT,INJ,SIDE,GATES,PHASE,FSM,DERIVE,TYPES neutral
+    class OC,CHAT,INJ,CONT,SIDE,GATES,PHASE,FSM,DERIVE,TYPES neutral
     class IDX,TOOLS accent
 ```
 
@@ -284,22 +293,36 @@ subprocess module.
 
 ### Core modules
 
-| Module                                                             | Responsibility                                                                                         |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| [`core/types.ts`](../../conductor/core/types.ts)                   | Every schema as a TS type *and* a hand-written JSON Schema, plus the subset validator `validate`       |
-| [`core/shell-parse.ts`](../../conductor/core/shell-parse.ts)       | Quote-aware tokenizer, operator segmentation, git command/subcommand detection, glob scope matching    |
-| [`core/gates-git.ts`](../../conductor/core/gates-git.ts)           | The git deny matrix: enumerated-allow over parsed tokens, default-deny for anything unlisted           |
-| [`core/gates-edit.ts`](../../conductor/core/gates-edit.ts)         | The session-registry decision, the edit-scope and freeze decisions, and the bash write-shape extractor |
-| [`core/gates-phase.ts`](../../conductor/core/gates-phase.ts)       | `legalTools(run, items, questions, repoConfigured)` → `{legal, recommended, why}`                      |
-| [`core/fsm-run.ts`](../../conductor/core/fsm-run.ts)               | The eight run positions and their legal, forward-only transitions                                      |
-| [`core/fsm-item.ts`](../../conductor/core/fsm-item.ts)             | The seven item positions, the behavioral and non-behavioral chains, and the annotation rule            |
-| [`core/schedule.ts`](../../conductor/core/schedule.ts)             | Wave computation — dependency readiness, scope disjointness, caps — and the per-stage read fan-out     |
-| [`core/freshness.ts`](../../conductor/core/freshness.ts)           | The start-stamp freshness rule and the failure-class resolution table                                  |
-| [`core/verdict.ts`](../../conductor/core/verdict.ts)               | `findingSurvives`: a finding survives iff upholds ≥ ⌈k/2⌉, and a tie upholds                           |
-| [`core/stops.ts`](../../conductor/core/stops.ts)                   | The stop-kind vocabulary, the single terminality definition, and the termination rule                  |
-| [`core/decide.ts`](../../conductor/core/decide.ts)                 | Decision-protocol helpers: option scoring, human-territory classification, the two-options rule        |
-| [`core/planning.ts`](../../conductor/core/planning.ts)             | The decompose validation table and the plan placeholder scan, as named rejections                      |
-| [`core/journal-events.ts`](../../conductor/core/journal-events.ts) | The closed per-component event vocabulary and the level defaults                                       |
+| Module                                                               | Responsibility                                                                                         |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [`core/types.ts`](../../conductor/core/types.ts)                     | Every schema as a TS type *and* a hand-written JSON Schema, plus the subset validator `validate`       |
+| [`core/shell-parse.ts`](../../conductor/core/shell-parse.ts)         | Quote-aware tokenizer, operator segmentation, git command/subcommand detection, glob scope matching    |
+| [`core/gates-git.ts`](../../conductor/core/gates-git.ts)             | The git deny matrix: enumerated-allow over parsed tokens, default-deny for anything unlisted           |
+| [`core/gates-edit.ts`](../../conductor/core/gates-edit.ts)           | The session-registry decision, the edit-scope and freeze decisions, and the bash write-shape extractor |
+| [`core/gates-phase.ts`](../../conductor/core/gates-phase.ts)         | `legalTools(run, items, questions, repoConfigured, publishEnabled)` → `{legal, recommended, why}`      |
+| [`core/tool-legality.ts`](../../conductor/core/tool-legality.ts)     | The per-tool declaration table — where each tool may be called and by whom — and the override gates    |
+| [`core/tool-bindings.ts`](../../conductor/core/tool-bindings.ts)     | Which handler serves each tool, and which inputs the composition root supplies                         |
+| [`core/fsm-run.ts`](../../conductor/core/fsm-run.ts)                 | The eight run positions and their legal, forward-only transitions                                      |
+| [`core/fsm-item.ts`](../../conductor/core/fsm-item.ts)               | The seven item positions, the behavioral and non-behavioral chains, and the annotation rule            |
+| [`core/disposition.ts`](../../conductor/core/disposition.ts)         | The one item/run disposition derivation, and the one cause-to-stop-kind closer                         |
+| [`core/schedule.ts`](../../conductor/core/schedule.ts)               | Wave computation — dependency readiness, scope disjointness, caps — and the per-stage read fan-out     |
+| [`core/freshness.ts`](../../conductor/core/freshness.ts)             | The start-stamp freshness rule and the failure-class resolution table                                  |
+| [`core/verdict.ts`](../../conductor/core/verdict.ts)                 | `verdictKind` and `findingSurvives`: an unevidenced refutation abstains, and an abstention upholds     |
+| [`core/stops.ts`](../../conductor/core/stops.ts)                     | The stop-kind vocabulary, the single terminality definition, and the termination rule                  |
+| [`core/decide.ts`](../../conductor/core/decide.ts)                   | Decision-protocol helpers: option scoring, human-territory classification, the two-options rule        |
+| [`core/provenance.ts`](../../conductor/core/provenance.ts)           | Which artifacts carry a human's authority, and where a human writes them                               |
+| [`core/planning.ts`](../../conductor/core/planning.ts)               | The decompose validation table and the plan placeholder scan, as named rejections                      |
+| [`core/queue-amend.ts`](../../conductor/core/queue-amend.ts)         | The queue-amendment op vocabulary and what applying it to a queue means                                |
+| [`core/vet-criteria.ts`](../../conductor/core/vet-criteria.ts)       | The five TEST_VET criteria as data, behind the schema, the pack, and both prompts                      |
+| [`core/review-witness.ts`](../../conductor/core/review-witness.ts)   | The reviewer read witness: nonce, diff contact, and the check that a lens opened the diff              |
+| [`core/receipt-floor.ts`](../../conductor/core/receipt-floor.ts)     | The fixer-receipt floor: a fix must touch a file its finding names                                     |
+| [`core/reply-protocol.ts`](../../conductor/core/reply-protocol.ts)   | The named sub-session reply statuses and the exact-token pushback matcher                              |
+| [`core/commit-message.ts`](../../conductor/core/commit-message.ts)   | The commit-message template and the trailer denylist conductor never signs                             |
+| [`core/mechanics.ts`](../../conductor/core/mechanics.ts)             | The doctrine packs' generated mechanics block, derived from the tool table and the legality machine    |
+| [`core/journal-events.ts`](../../conductor/core/journal-events.ts)   | The closed per-component event vocabulary and the level defaults                                       |
+| [`core/vocab-registry.ts`](../../conductor/core/vocab-registry.ts)   | The four cross-language vocabularies and every site that restates them                                 |
+| [`core/wiring-manifest.ts`](../../conductor/core/wiring-manifest.ts) | Every hook, tool binding, and module wire the composition root must register                           |
+| [`core/preflight.ts`](../../conductor/core/preflight.ts)             | Spec currency against HEAD, and the live-artifact check that binds an artifact to its run's ledger     |
 
 ### Adapter modules
 
@@ -313,11 +336,16 @@ subprocess module.
 | [`adapter/gitio.ts`](../../conductor/adapter/gitio.ts)                 | Read-only git queries, argv-only, never through a shell                                                                  |
 | [`adapter/fanout.ts`](../../conductor/adapter/fanout.ts)               | The sub-session pool over the SDK: create → prompt → collect, with independent receipt validation and a per-job watchdog |
 | [`adapter/inject.ts`](../../conductor/adapter/inject.ts)               | System-prompt append, per-role sampling params, router headers, and the fail-closed pack load at init                    |
-| [`adapter/router-client.ts`](../../conductor/adapter/router-client.ts) | Router health and metrics, absorbing every failure rather than propagating it                                            |
+| [`adapter/router-client.ts`](../../conductor/adapter/router-client.ts) | Router metrics and the fail-soft failover latch, absorbing every failure rather than propagating it                      |
 | [`adapter/chat-message.ts`](../../conductor/adapter/chat-message.ts)   | The `chat.message` hook body: create the run, or route a mid-run prompt into the live one                                |
 | [`adapter/tools.ts`](../../conductor/adapter/tools.ts)                 | `gateBeforeToolCall`, the tool-name inventory, tool classification, and the stage-tool handlers                          |
-| `adapter/continuation.ts`                                              | The `session.idle` re-prompt engine and the disengage backstop                                                           |
-| `adapter/worktrees.ts`                                                 | Git worktree create/merge/remove for parallel implementers, outside the repo                                             |
+| [`adapter/continuation.ts`](../../conductor/adapter/continuation.ts)   | The `session.idle` re-prompt engine, the run-closure fold, the ask-gate, and run teardown                                |
+| [`adapter/worktrees.ts`](../../conductor/adapter/worktrees.ts)         | Git worktree create/merge/remove for parallel implementers, outside the repo                                             |
+| [`adapter/block-and-ask.ts`](../../conductor/adapter/block-and-ask.ts) | The transactional pair — one question plus the item's `blocked` annotation — with its crash repair                       |
+| [`adapter/answer-file.ts`](../../conductor/adapter/answer-file.ts)     | The out-of-band answer file the operator drops into the state area                                                       |
+| [`adapter/config-io.ts`](../../conductor/adapter/config-io.ts)         | The `.conductor/config.json` reader and the frozen defaults; a malformed config throws rather than reverting             |
+| [`adapter/clock.ts`](../../conductor/adapter/clock.ts)                 | The monotonic clock the handlers stamp with, and the stamp-resolution helper freshness reads                             |
+| [`adapter/jsonl.ts`](../../conductor/adapter/jsonl.ts)                 | The one tolerant ledger reader: a torn line is skipped and counted, never thrown                                         |
 
 ### The plugin entry
 
@@ -327,23 +355,37 @@ throws when one is not a plugin function — skipping the *whole* plugin and lea
 session ungated. So the shared tool inventory lives in `adapter/tools.ts`, and the entry
 imports it.
 
-The factory is construction-safe: it builds closures and zod schemas, touches no live
+The factory is construction-safe: it builds closures and schemas, touches no live
 opencode service, and does no blocking I/O, so tool registration is unit testable against a
 synthetic plugin input with no running opencode. It builds its `tool` map *from*
 `CONDUCTOR_TOOL_NAMES` rather than a hand-written literal, so a renamed or forgotten tool
 cannot slip through — a test asserts the two never drift.
 
-## One derivation, three consumers
+It registers six hooks: `experimental.chat.system.transform`, `chat.params`, and
+`chat.headers` for the injection layer, `chat.message` for prompt intake,
+`tool.execute.before` for the gate stack, and `event` for the idle engine and the ask-gate.
+[`core/wiring-manifest.ts`](../../conductor/core/wiring-manifest.ts) declares that set, and the
+completeness test asserts in both directions that what the factory registers equals what the
+manifest declares — a wire that is built and imported but never registered is the failure this
+closes.
+
+## One derivation, four readers
 
 `legalTools` in [`core/gates-phase.ts`](../../conductor/core/gates-phase.ts) returns three
 things: `legal`, a map from tool name to its argument hint; `recommended`, the single next
-tool to run or `null`; and `why`, a non-empty rationale. It is consumed by three subsystems:
+tool to run or `null`; and `why`, a non-empty rationale. Four readers consume it:
 
 - **the phase-order gate**, which denies any `conductor_*` call not in `legal`, with a
   reason naming what *is* legal and what is recommended;
 - **the system-prompt injection**, which states the same thing to the model every request;
 - **the continuation engine**, which re-prompts an idle orchestrator with exactly the
-  recommended call.
+  recommended call;
+- **the doctrine mechanics renderer**, which derives the stage sequences the packs teach by
+  asking the gate what it recommends at each position, so a renamed tool or a moved FSM edge
+  fails the build rather than leaving the doctrine quietly wrong.
+
+The first three describe a live workspace; the renderer pins its two environment inputs to
+constants, because a checked-in pack must not vary with any one repo's git mode.
 
 They share one derivation because the alternative is three implementations of the same
 question, which eventually disagree — and a disagreement here is the worst kind. If the
@@ -365,6 +407,12 @@ items are arranged in the array.
 Treat this as an architectural rule, not a convenience. Any new consumer of "what may the
 model do now" calls `legalTools`. Nothing re-derives legality from the FSM position directly.
 
+`legalTools` answers *where* a tool may be called, and only that. *Who* may call it, and whether
+a tool with no stage of its own is callable at all, is
+[`core/tool-legality.ts`](../../conductor/core/tool-legality.ts)'s declaration table, which every
+`conductor_*` call passes through before its handler runs. A tool with no row there is refused
+rather than run, so the next tool cannot be born guarded by nothing.
+
 ## The path of a prompt
 
 An ordered walk from a user's message to a written report, naming the module responsible at
@@ -374,8 +422,8 @@ each hop.
    checks the current run. If there is none, or it is terminal, it creates
    `runs/<runId>/run.json` in state `INTAKE`, points `current-run.json` at it, and captures
    the starting facts four later rules read: `startHead`, `startBranch`, `startDirty`, and
-   `excludedStaleRed` — the stale-red registry entries now in force, reported to the user in
-   the first response. A prompt arriving *during* a live run is routed into it as
+   `excludedStaleRed` — the stale-red registry entries in force for this run, reported to the
+   user in the first response. A prompt arriving *during* a live run is routed into it as
    orchestrator context, journaled `user.midrun-prompt`, and never starts a second run.
 2. **Every request is injected.** [`adapter/inject.ts`](../../conductor/adapter/inject.ts)
    appends the role's doctrine pack(s) verbatim plus a live state block — run state, active
@@ -417,10 +465,12 @@ each hop.
    the `HEAD` it judged), `conductor_item_review` (parallel lenses, skeptic refutation,
    path-routed fixes), `conductor_publish` (branch check, stage, format, re-check freshness,
    commit — via `execFile`, never a model-issued `git commit`). State `PUBLISHED`.
-8. **Report.** `conductor_report` requires every item to be `PUBLISHED`, `blocked`, or
-   `deferred`, re-runs the full verify itself with the same foreign-red exclusion, writes
-   `report.md`, and records stop `done`. State `REPORTED` — or `TRIVIAL_DONE` for a trivial
-   run, which takes the report-lite mode of the same writer.
+8. **Report.** `conductor_report` requires that no item is still *actionable*, re-runs the full
+   verify itself with the same foreign-red exclusion, writes `report.md`, and records the stop
+   kind [`core/disposition.ts`](../../conductor/core/disposition.ts)'s closer returns for the
+   run's persisted dispositions — `done` only when at least one item advanced and nothing is
+   outstanding, and never at all when the closing verify came back red. State `REPORTED` — or
+   `TRIVIAL_DONE` for a trivial run, which takes the report-lite mode of the same writer.
 
 Every terminal path reaches one of the report writer's three modes — full, lite, or
 stop-report. No terminal path writes nothing.
@@ -442,27 +492,37 @@ Every tool call the model makes, `conductor_*` or not, passes through one functi
 3. **The guarded flag is computed from that parse** — a git segment present, a write-shaped
    target present, or a tool class of `write`, `conductor`, or `spawn` — before any gate runs,
    precisely so it stays reliable when a gate crashes.
-4. **The session-registry gate runs first.** A session with no registry entry may read; every
+4. **The patch tools are refused ahead of everything.** `patch` and `apply_patch` are denied in
+   every session, registered or not: a patch body carries its own write targets in a format no
+   gate here parses, so the edit-scope gate has nothing to bound it with.
+5. **The session-registry gate runs next.** A session with no registry entry may read; every
    write-shaped and every `conductor_*` call from it is denied naming the missing assignment.
    Sub-agent spawning is denied in *every* session, registered or not — the load-bearing half,
    because a model-spawned session would be an unregistered, unscoped writer.
-5. **For a bash call, the git gate runs over the whole command,** not per segment, because
+6. **For a bash call, the git gate runs over the whole command,** not per segment, because
    `decideGit` allows non-git commands: running it over every bash command is how a git write
-   hidden in a compound command such as `ls && git commit` is still caught. Then the
-   edit-scope gate runs over each write-shaped target.
-6. **For an edit, write, or patch tool, the edit-scope gate runs over the edited path.**
-7. **Every deny journals its snapshot** under `gates/deny` at `warn` — tool name, raw args,
+   hidden in a compound command such as `ls && git commit` is still caught. Then any interpreter
+   one-liner naming the `.conductor` state area is refused whole, and then the edit-scope gate
+   runs over each write-shaped target.
+7. **For an edit or write tool, the edit-scope gate runs over the edited path.**
+8. **Every deny journals its snapshot** under `gates/deny` at `warn` — tool name, raw args,
    the command or path, and the reason — then throws. The snapshot exists so the decision can
    be reproduced through the pure core function in a test.
+
+Every deny point except the patch refusal first checks for a one-shot override grant keyed to
+`{sessionID, gate, itemId}`. A live grant converts exactly one denial of its named gate into an
+allow and is deleted in the same breath, journaled as `gates/allow` with `via: "override-grant"`.
 
 The fail-closed guard wraps each pure decision individually. If one crashes, the anomaly is
 journaled as `gates/gate-crash` at `error` and the disposition follows the guarded flag: a
 guarded call is denied with a reason that says so, a harmless read is allowed.
 
-Two gates in the stack do not live here. The phase-order gate runs inside each `conductor_*`
-handler, which checks `legalTools` before doing anything else. The ask-gate runs on the
-`permission.asked` bus event, adjudicated over HTTP, on top of the static per-agent
-`question: "ask"` permissions in the config fragment.
+Two more gates do not live here. The phase-order gate runs at one choke point ahead of every
+`conductor_*` handler, which asks `core/tool-legality.ts` who the caller is and `legalTools` where
+the run stands before the handler does anything. The ask-gate runs on the `permission.asked` bus
+event, on top of the static per-agent `question: "ask"` permissions in the config fragment; its
+default is deny, and only an `edit` permission backed by an active inline claim, or a `question`
+permission, is adjudicated at all.
 
 ## State and ledgers
 
@@ -477,7 +537,9 @@ below is relative to whatever workspace the user `cd`'d into.
 │   ├── alive.json              # liveness beacon {pid, startMs, version, sessionID}
 │   ├── stale-red.json          # cross-run registry of abandoned red tests
 │   ├── halt                    # owner-only halt file; the model never touches it
-│   └── run.lock                # advisory single-writer lock {pid, startMs}
+│   ├── run.lock                # single-writer lock {pid, startMs, sessionID?, token?}
+│   ├── run.lock.break.<key>    # transient: an exclusive right to break a stale lock
+│   └── run.lock.stale.<key>    # transient: the broken lock, set aside
 └── runs/<runId>/
     ├── run.json                # run FSM state + starting facts
     ├── queue.json              # items + dependency DAG
@@ -486,14 +548,22 @@ below is relative to whatever workspace the user `cd`'d into.
     ├── report.md               # written on EVERY terminal stop, not only `done`
     ├── journal.jsonl           # the structured event journal
     ├── evidence.jsonl          # red/green/verify records
+    ├── evidence.seq            # the durable evidence-seq reservation counter
+    ├── evidence.seq.lock       # the counter's latch
     ├── decisions.jsonl
     ├── anomalies.jsonl         # overrides, gate crashes, disengages
     ├── questions.jsonl         # the blocked-set source
-    └── reviews/<itemId|plan>-r<N>.json
+    ├── publish-batch.jsonl     # one record per published item: git mode, staged files, diff, message
+    ├── verify-running-<tree>.json  # the per-tree verify marker; its presence is the freeze
+    ├── block-intents/          # transient: an in-flight block-and-ask pair
+    └── answers/                # the operator's out-of-band answer files
 ```
 
-The `.conductor/` prefix is registered in the target's `.git/info/exclude`, never in its
-tracked `.gitignore` — the harness must not dirty a target's tracked files with its presence.
+The `.conductor/` prefix is registered in the target's `<gitCommonDir>/info/exclude`, never in its
+tracked `.gitignore` — the harness must not dirty a target's tracked files with its presence. The
+*common* gitdir is the target on purpose: in a linked worktree the per-worktree gitdir is a file
+rather than a directory, so composing `<root>/.git/info` there fails, and an exclude written into
+a per-worktree gitdir would be inert anyway.
 
 **Atomic write discipline.** Every persisted write goes through `writeFileAtomicSync` in
 [`adapter/state.ts`](../../conductor/adapter/state.ts): bytes to a pid-suffixed temp file in
@@ -503,13 +573,22 @@ intact, so a crash mid-commit can never leave a half-written record for the next
 The one exception by design is the evidence ledger: an append-only JSONL owned exclusively by
 `adapter/evidence.ts`, which every other component reads through the state store.
 
-**The advisory run lock.** `run.lock` holds `{pid, startMs}`. A fresh claim is an
-exclusive-create, closing the TOCTOU window. Against an existing lock the store decides: a
-dead pid (signal 0 reports `ESRCH`) or an over-age lock is stale, and is broken and
-re-claimed with a `lock.stale-break` warning — an opencode crash must never wedge a
-workspace. A live, young, foreign lock means a second session, so the store drops to
-read-only, journals `lock.contended`, and leaves the lock intact. It is never stolen from a
-process that might still be running.
+**The workspace lock.** `run.lock` holds `{pid, startMs, sessionID?, token?}`. A claim is
+published by `linkSync` from a fully-written same-directory temp, so the file another session
+observes is never partially written. Against an existing lock the store decides: a dead pid
+(signal 0 reports `ESRCH`) or an over-age lock is stale, and a live, young, foreign lock means a
+second session.
+
+A second session is **refused**, not demoted. `openWorkspace` journals `lock.contended` at `warn`
+and throws `WorkspaceLockedError` naming the holder; no store is returned and there is no
+read-only mode to fall back into. There is a second refusal with the same code,
+`workspaceUnreclaimableError`, thrown when the retry budget is exhausted; it deliberately does not
+assert the named pid is alive, and it tells the operator which files to remove by hand.
+
+Breaking a stale lock is a three-part, identity-keyed compare-and-delete rather than an overwrite:
+an exclusive `run.lock.break.<key>` file grants the right, the lock is re-read under that right,
+and the broken lock is moved aside to `run.lock.stale.<key>`. An opencode crash must never wedge a
+workspace, and a lock is never stolen from a process that might still be running.
 
 **Why quarantine and worktrees live outside the repository.** `.git/info/exclude` hides a
 directory from *git*. It hides it from nothing else. The verify command is the target repo's
@@ -519,8 +598,8 @@ under `.conductor/` can still be collected by the very verify it was moved aside
 and a worktree, being a complete second checkout of every test file, is guaranteed to be.
 Both therefore live at `<stateHome>/conductor/<workspaceKey>/quarantine/<runId>/` and
 `.../worktrees/<runId>/<itemId>/`, where `<stateHome>` is `$XDG_STATE_HOME` or
-`~/.local/state`, and `<workspaceKey>` is the repo root's absolute path hashed plus its
-basename so two checkouts never collide. Per-runner discovery behavior for dot-directories is
+`~/.local/state`, and `<workspaceKey>` is the first 16 hex characters of the SHA-256 of the repo
+root's absolute path, so two checkouts never collide. Per-runner discovery behavior for dot-directories is
 a version-dependent accident, measured rather than assumed and recorded in
 [`RUNNER-DISCOVERY.md`](../../conductor/docs/RUNNER-DISCOVERY.md); correctness comes from the
 files being outside the walked tree entirely.
@@ -534,9 +613,9 @@ llama-harness/
 │   ├── core/                      # pure decision + state-machine modules
 │   ├── adapter/                   # all I/O
 │   ├── doctrine/                  # the nine markdown doctrine packs
-│   ├── tools/export-schemas.ts    # writes the JSON Schemas to router/tests/schemas/
+│   ├── tools/                     # dev tools: schema export, replay, audit, checks
 │   ├── tests/                     # *.test.ts + fixtures
-│   ├── docs/RUNNER-DISCOVERY.md
+│   ├── docs/                      # OPERATIONS.md, HONEST-LIMITS.md, RUNNER-DISCOVERY.md
 │   ├── opencode-fragment.json     # merged into the session opencode config
 │   ├── DECISIONS.md               # the standing-decisions ledger
 │   └── tsconfig.json
@@ -545,9 +624,11 @@ llama-harness/
 │   ├── *.hpp                      # header-only modules + UPSTREAM_CONTRACT.md
 │   └── tests/                     # doctest suites; CMake target `router-tests`
 │       └── schemas/               # generated JSON Schemas (gitignored)
+├── dashboard/                     # the optional ftxui metrics TUI over the router ledger
 ├── tools/                         # standalone measurement tools — NOT part of the router
 │   └── membench/                  # dependency-free memory-bandwidth probe
 ├── scripts/                       # layer 3 — the wiring, plus the model harness
+├── bench/                         # the benchmark task set
 ├── extern/llama-cpp/              # pinned llama.cpp submodule
 ├── cmake/                         # toolchain, warnings, clang-format helpers
 ├── docs/
@@ -568,16 +649,20 @@ lives there and in `docs/build/STATE.json`.
 | root `tools/`       | `tools/`         | Standalone measurement tools with no project dependencies, so they sit beside `router/` rather than inside it                              |
 | —                   | The include rule | Every in-workspace header is included by its full path from the repo root: `#include "router/version.hpp"`, never `#include "version.hpp"` |
 
-The include rule applies to all C++ under `router/` and `tools/`, headers included: the REPO
-ROOT is the only user-code include root on both C++ targets, so an include names where the
-header actually
-lives no matter which file does the including. Generated schemas land in `router/tests/schemas/`
-and are gitignored.
+The include rule applies to every in-workspace header, `router/` and `dashboard/` alike: the
+REPO ROOT is the only user-code include root, and the three targets that include such a header
+— `llama-router`, `router-tests` and `conductor-dashboard` — each get it and nothing else, so an
+include names where the header actually lives no matter which file does the including.
+`membench` is one self-contained translation unit that includes nothing from the workspace and
+sets no include root at all. Generated schemas land in `router/tests/schemas/` and are
+gitignored.
 
 One build note follows from the layout: build only the named targets
 (`--target llama-router`, `--target router-tests`, `--target membench`). A bare
 `cmake --build` also compiles the whole vendored `extern/llama-cpp` tree, which no target in
-this project links.
+this project links. A fourth target, `conductor-dashboard`, is built only when
+`-DCONDUCTOR_DASHBOARD=ON` is passed: it is the one target that links `ftxui`, and the pure
+aggregation header it stands on is exercised by `router-tests` either way.
 
 ## See also
 

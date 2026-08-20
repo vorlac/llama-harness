@@ -100,7 +100,7 @@ so it cannot pass vacuously.
 
 ## The exported schemas
 
-`SCHEMAS` holds 18 entries. Five groups:
+`SCHEMAS` holds 19 entries. Five groups:
 
 **Configuration.**
 
@@ -124,7 +124,7 @@ so it cannot pass vacuously.
 | `EvidenceRecord` | `runs/<runId>/evidence.jsonl` — a `red`, `green`, or `verify` observation, with the command, exit code, failure class, and the verify's start stamp and judged tree |
 | `DecisionRecord` | `runs/<runId>/decisions.jsonl` — a fork with its options, per-option scores, choice, rationale, and where it was applied                                            |
 | `AnomalyRecord`  | `runs/<runId>/anomalies.jsonl` — an `override`, `gate-crash`, or `disengage` event                                                                                  |
-| `QuestionRecord` | `runs/<runId>/questions.jsonl` — a surfaced question, its origin, the items it blocks, and its answer                                                               |
+| `QuestionRecord` | `runs/<runId>/questions.jsonl` — a surfaced question, its origin, the items it blocks, its answer, and the channel that answer arrived through                       |
 | `JournalRecord`  | the structured log line: sequence, level, component, event, the `(runId, itemId?, sessionID?)` correlation triple, and a free-form `data` object                    |
 
 **Sub-session receipts.** These are the structured outputs the fan-out engine asks a
@@ -136,7 +136,8 @@ sub-session to produce and then validates itself.
 | `ClassificationCheck` | the second opinion on that call: agreed, corrected kind, note                           |
 | `Plan`                | the plan document plus the decision proposals the planner wants recorded                |
 | `Findings`            | a reviewer's findings, each with id, severity, lens, claim, evidence, and suggested fix |
-| `Verdict`             | one skeptic's `upheld` / not-upheld ruling on one finding, with reasoning               |
+| `ItemFindings`        | the same findings plus a required `readWitness` — the item-review lens must name its contact with the diff, so a reply that cannot is rejected before the handler sees it |
+| `Verdict`             | one skeptic's ruling on one finding: `findingId`, `upheld`, `reasoning`, and an optional `refutationEvidence` triple (`discriminatingInput`, `run`, `reading`) |
 | `TestVet`             | the five-criterion test verdict plus the `mustFix` list                                 |
 | `ImplementerResult`   | status, summary, concerns, needed context, block reason                                 |
 
@@ -186,7 +187,7 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart TD
-    %% Source: conductor/core/types.ts:1243-1262, conductor/tools/export-schemas.ts:21-41
+    %% Source: core/types.ts SCHEMAS, tools/export-schemas.ts exportSchemas
     SRC["core/types.ts SCHEMAS"]
 
     subgraph L1["Layer 1 - plugin"]
@@ -312,6 +313,7 @@ so they cannot disagree.
 | Severities           | `major`, `minor`, `nit`                                                                                              |
 | Implementer statuses | `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`                                                             |
 | Ladder rungs         | `skip`, `reuse`, `stdlib`, `platform`, `dependency`, `one-liner`, `minimal-code`                                     |
+| Answer channels      | `tool`, `human-file` — the channel a question's answer arrived through                                               |
 
 `Config`'s own vocabularies — git modes, branch policies, dirty-tree handling, format
 modes, parallel write modes, ponytail levels — follow the same pattern; see the
@@ -325,9 +327,11 @@ pattern: eight components — `fsm`, `gates`, `fanout`, `evidence`, `continuatio
 unlisted event name is caught at its source rather than landing in the journal under a
 name no test can grep for.
 
-`types.ts` keeps its vocabulary arrays module-private; only the erased TS unions are
-exported. That makes the schema `enum` the sole runtime-derivable copy — and it is exactly
-the copy the validator uses.
+The vocabulary arrays stay module-private in `types.ts` with three exceptions, which makes
+the schema `enum` the sole runtime-derivable copy for the rest — and it is exactly the copy
+the validator uses. `LOG_LEVELS` (read by `tools/replay.ts`), `IMPLEMENTER_STATUSES` (read by
+`core/reply-protocol.ts`) and `ANSWER_CHANNELS` (read by the provenance suite) are exported
+because a consumer needs the runtime values, as is the `SCHEMAS` record itself.
 [`conductor/tests/single-source.test.ts`](../../conductor/tests/single-source.test.ts)
 exploits this: it reads `SCHEMAS.Run.properties.state.enum` and
 `SCHEMAS.Item.properties.state.enum` at runtime and asserts set equality against the
@@ -336,16 +340,18 @@ added to an FSM but not to its schema, or the reverse, turns the suite red.
 
 ## The C++ side
 
-[`router/config.hpp`](../../router/config.hpp) is the first router consumer of the
-exported schemas, and it demonstrates the rule the rest of the router follows: it
-validates against whatever schema **file** it is handed, never a copy of the shape baked
-into the header.
+[`router/config.hpp`](../../router/config.hpp) is the router's consumer of an exported
+schema — `RouterConfig.schema.json` — and it demonstrates the rule the rest of the router
+follows: it validates against whatever schema **file** it is handed, never a copy of the
+shape baked into the header. The path is not guessed: `--schema <path>` is a required CLI
+flag with no default and no search path, so a router that would validate against nothing
+does not start.
 
 ```cpp
 RouterConfig parseRouterConfig(const std::string& json, const std::string& schemaPath);
 ```
 
-`parseRouterConfig` runs four steps in order:
+`parseRouterConfig` runs five steps in order:
 
 1. **Parse** the input text as JSON. A syntax error throws immediately.
 2. **Fill the documented defaults.** Three §2.2 keys are optional in the hand-edited
@@ -355,9 +361,17 @@ RouterConfig parseRouterConfig(const std::string& json, const std::string& schem
    the schema to reject by name.
 3. **Validate** the completed document against the schema read from `schemaPath`. The file
    is opened, parsed, and compiled on every call.
-4. **Range-check both ports** to `1..65535`, since the schema types them as plain numbers.
-   `logging.level` is likewise checked against the levels the router can actually apply, so
-   an unusable level is refused by name rather than falling back silently.
+4. **Range-check the numbers the schema can only type as bare numbers.** Both ports to
+   `1..65535`; `admission.maxInflightPerModel` to `1..1000000`, `admission.maxQueued` to
+   `0..1000000`, and `admission.queueTimeoutMs` to `0..86400000` (24 hours) — bounds that
+   keep the listener's sizing arithmetic clear of integer overflow while sitting far above
+   any value an operator could mean. `logging.level` is likewise checked against the levels
+   the router can actually apply, so an unusable level is refused by name rather than
+   falling back silently.
+5. **Reconcile `admission.maxQueued` with the listener's fixed thread budget.** An
+   over-budget value is clamped, and the clamp is logged at warn; a budget that cannot pay
+   for even one queue slot is refused. The parse therefore yields the `maxQueued` the router
+   will actually run with, not the one the file asked for.
 
 Every failure is a `ConfigError`, whose `field()` is a dotted path — `listen.port`,
 `admission.bogus`, `logging.level` — built by converting the validator's RFC 6901 instance
@@ -391,11 +405,11 @@ shape would produce the same answer twice and fail the test.
 6. **Expect a guard to fire — and know which one.** A drifted FSM vocabulary fails
    `single-source.test.ts`; an out-of-subset keyword fails the subset-clean test in
    `types.test.ts`; a *renamed* schema fails that same file's hardcoded `SCHEMA_NAMES` list
-   ("SCHEMAS contains a JSON Schema object for each of the 17 §2 names"). A newly *added*
+   ("SCHEMAS contains a JSON Schema object for each of the 18 §2 names"). A newly *added*
    schema fires nothing: `export-schemas.test.ts` derives both sides of every assertion
    from `Object.keys(SCHEMAS)` at runtime, so an addition moves both sides together. Add the
-   new name to `SCHEMA_NAMES` by hand. That list is also why it still reads 17 while
-   `SCHEMAS` holds 18: `Plan` arrived later and was never added to it. If nothing went red
+   new name to `SCHEMA_NAMES` by hand. That hand-maintained list is why it names 18 while
+   `SCHEMAS` holds 19 — `Plan` is in the registry and not in the list. If nothing went red
    at all, check that what you changed is actually reachable from `SCHEMAS`.
 
 ## See also

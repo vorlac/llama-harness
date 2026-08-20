@@ -13,45 +13,73 @@ An item advances because a handler ran a command and wrote down what happened, n
 said the tests pass — and the engine that runs the command is the only component allowed to write
 the result down. [`adapter/evidence.ts`](../../conductor/adapter/evidence.ts) is **the** evidence
 writer, and the sole legitimate importer of `appendLedgerLineRaw`, the raw one-record-per-line
-appender defined in [`adapter/state.ts`](../../conductor/adapter/state.ts). Every other component
-reads `runs/<runId>/evidence.jsonl` through the state store; none of them appends to it. That is
-not a convention — `conductor/tests/state.test.ts` carries a source-scan test
-(`[4.1-evidence-append]`) that reads every `.ts` file in `conductor/adapter/` and fails if any file
-other than `state.ts` and `evidence.ts` names the export.
+appender defined in [`adapter/state.ts`](../../conductor/adapter/state.ts). Other components read
+`runs/<runId>/evidence.jsonl`; none of them appends to it. That is not a convention —
+`conductor/tests/state.test.ts` carries a source-scan test (`[4.1-evidence-append]`) that reads
+every `.ts` file in `conductor/adapter/` and fails if any file other than `state.ts` and
+`evidence.ts` names the export.
 
 Three record kinds exist. The ledger's merged JSON Schema requires only the four shared fields
 (`seq`, `ts`, `kind`, `itemId`); each kind's real contract is enforced by
 `validateEvidenceRecord`, which runs the merged schema *and* the per-kind required fields before
 anything is appended:
 
-| Kind     | Written by                   | Required beyond the shared four                                      |
-| -------- | ---------------------------- | -------------------------------------------------------------------- |
-| `red`    | `runTest` on a non-zero exit | `command`, `exitCode`, `failureExcerpt`, `failureClass`, `targeted`  |
-| `green`  | `runTest` on exit 0          | `command`, `exitCode`                                                |
-| `verify` | `runVerify`                  | `startedMs`, `head`, `branch`, `tree`, `excluded`, `green`, `scopes` |
+| Kind     | Written by                   | Required beyond the shared four                                                |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------ |
+| `red`    | `runTest` on a non-zero exit | `command`, `exitCode`, `failureExcerpt`, `failureClass`, `targeted`, `writer`  |
+| `green`  | `runTest` on exit 0          | `command`, `exitCode`, `writer`                                                |
+| `verify` | `runVerify`                  | `startedMs`, `head`, `branch`, `tree`, `excluded`, `green`, `scopes`, `writer` |
 
 The split matters most for `verify`: a record missing `startedMs` or `head` passes the merged
 schema and would then be read as fresh forever. `appendEvidence` throws rather than append an
-invalid record, so an incomplete verify never reaches the ledger.
+invalid record, so an incomplete verify never reaches the ledger. An unrecognized `kind` is
+rejected by name for the same reason.
 
-Sequence numbers come from `nextSeq` — the highest `seq` already in the ledger plus one, where an
-unparseable line cannot advance the counter. Every append is mirrored into the journal under the
-component `evidence` with the record kind as the event.
+`writer` is the attribution stamp — `{pid, startedMs}` for the process that produced the record,
+where `startedMs` is that process's own start time, derived once at module load. The merged schema
+keeps it *optional* so a ledger written without it still reads back, and the writer keeps it
+*mandatory* so nothing is appended without it: a record nobody can attribute is exactly where a
+second process's collision hides. Attribution is checked at resolution too, though on the record's own
+fields rather than on the stamp: `lookupEvidenceAt` refuses a record found at the requested `seq`
+when its `itemId` is another item's, or (for a verify record in worktree mode) its `tree` is another
+tree's, and reports what it found instead of returning it.
+
+### Minting a `seq`
+
+Sequence numbers are **reserved**, not computed from the ledger. `mintEvidenceSeq(runDir)`:
+
+1. checks the workspace lock: minting beside a **live foreign** holder throws rather than issue a
+   number that process is about to issue too, while a missing lock or a dead holder's lock is
+   permitted, so a crash never makes a run unwritable;
+2. takes a short exclusive-create latch at `<runDir>/evidence.seq.lock`, retried a few times, and
+   treats a latch whose pid is dead or that is older than 30 seconds as a killed process's
+   leftover, broken by rename-aside-then-delete rather than a read-then-unlink;
+3. computes `max(issued counter, highest seq on the ledger) + 1` and persists it atomically to
+   `<runDir>/evidence.seq` as `{"issued": <n>}`;
+4. releases the latch, and only if it is still this process's.
+
+The durable counter is the point. A read-max-plus-one mint re-issues its own last number to any
+caller that has not appended yet, so two records minted before either was written collide by
+construction. Reading the ledger's own maximum is still part of the computation, through the
+tolerant reader that skips torn lines, so a truncated ledger cannot lower the counter.
+
+Every append is mirrored into the journal under the component `evidence` with the record kind as
+the event — `red`, `green`, and `verify` are the whole closed evidence vocabulary.
 
 ## runTest versus runVerify
 
 `runTest` answers "does this item's test behave the way the item claims"; `runVerify` answers
 "is the whole tree still green at this commit".
 
-|                        | `runTest`                                                                                                                    | `runVerify`                                                                              |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Record kind            | `red` or `green`                                                                                                             | `verify`                                                                                 |
-| Command                | the scope's `itemTest` template, substituted; the full scope command when there is no template                               | every scope `requiredScopes` selects for the changed path                                |
-| Callers                | `conductor_submit_test` (the RED), `conductor_mark_green` (the GREEN)                                                        | `conductor_validate`, publish's automatic re-verify, `conductor_report`'s closing verify |
-| Quarantine             | only on the fallback path, and only when the caller supplies `excludeTestFiles` plus `stateHome`, `workspaceKey` and `runId` | always, whenever the foreign red set is non-empty                                        |
-| Verify marker          | none                                                                                                                         | written per tree, removed on completion                                                  |
-| Freshness stamp        | none                                                                                                                         | `startedMs`, `head`, `branch`                                                            |
-| Failure classification | yes, against the item's `fileScope`                                                                                          | no — a scope is green or it is not                                                       |
+|                        | `runTest`                                                                                                                                                                                                                                                          | `runVerify`                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Record kind            | `red` or `green`                                                                                                                                                                                                                                                   | `verify`                                                                                                                                                                      |
+| Command                | the scope's `itemTest` template, substituted; the full scope command when there is no template                                                                                                                                                                     | every scope `requiredScopes` selects for the changed path                                                                                                                     |
+| Callers                | `conductor_submit_test` (the RED), `conductor_vet_test` (the re-run when the captured red is stale, and the re-run after a must-fix repair), `conductor_mark_green` (the GREEN), `conductor_item_review` (the changed-test re-run and the reverted-behavior probe) | `conductor_validate`, `conductor_item_review`'s re-validate after a fix round, publish's re-verify and its post-merge integration verify, `conductor_report`'s closing verify |
+| Quarantine             | only on the fallback path, and only when the caller supplies `excludeTestFiles` plus `stateHome`, `workspaceKey` and `runId`                                                                                                                                       | always, whenever the foreign red set is non-empty                                                                                                                             |
+| Verify marker          | none                                                                                                                                                                                                                                                               | written per tree, removed on completion                                                                                                                                       |
+| Freshness stamp        | none                                                                                                                                                                                                                                                               | `startedMs`, `head`, `branch`                                                                                                                                                 |
+| Failure classification | yes, against the item's `fileScope`                                                                                                                                                                                                                                | no — a scope is green or it is not                                                                                                                                            |
 
 Both share the subprocess layer. Commands are argv arrays spawned with `shell:false`; there is
 no shell to quote against. `childEnv` scrubs the inherited environment before every spawn:
@@ -65,9 +93,12 @@ no shell to quote against. `childEnv` scrubs the inherited environment before ev
 Timeouts kill with `SIGKILL`, not the default `SIGTERM`: a hung test that installs a `SIGTERM`
 handler could catch a trappable timeout signal and exit 0, which reads as a false green. A
 non-numeric exit status — killed, or a spawn failure — is recorded as exit code `124`, which is
-non-zero and therefore red. `buildCommand` is optional per scope and runs first; if the build
-fails, the scope is red with the build's exit code and **the test command is not run at all**,
-because a test executed against a stale artifact is a false green.
+non-zero and therefore red. `buildCommand` is an optional per-scope field the evidence engine
+honours and runs first; if the build fails, the scope is red with the build's exit code and
+**the test command is not run at all**, because a test executed against a stale artifact is a
+false green. It is reachable only from an internal scope spec: the `Config` schema sets
+`additionalProperties: false` on each scope object and does not carry `buildCommand`, so a
+`.conductor/config.json` that sets it fails validation.
 
 ## Targeted tests
 
@@ -146,6 +177,19 @@ is evaluated only after a successful build — a failed build already stands as 
 `buildFailed`, `namesTestScopeFile`, and `legalRed`. The calling handler decides what to do with an
 illegal red; the engine only reports.
 
+### Reading a red back
+
+`conductor_vet_test` has to answer "which red are the critics judging this test against", and the
+answer is `capturedRedOf`. Only a legal red counts — `kind: "red"` with `failureClass` of
+`assertion` or `missing-subject`; a class-`error` record is not a red — and having none at all is a
+refusal, not a shrug, because there is then nothing for the critics to judge.
+
+Selection prefers the item's own pointer `item.evidence.red.seq`, taking the *last* record carrying
+that number, and falls back to the last legal red on the ledger otherwise. **Recency is judged by
+the ledger's append position, not by `seq`**: the chosen red is stale when its position is not the
+last position recorded for that item, or when any line of the ledger was unreadable. Two writers
+that minted the same number cannot then hide a later run behind an equal `seq`.
+
 ## Failure classification
 
 [`core/freshness.ts`](../../conductor/core/freshness.ts) owns `classifyFailure`, a pure function
@@ -217,10 +261,36 @@ arrives as an input, gathered by the impure caller.
 
 A record is fresh **iff both** hold:
 
-1. `startedMs >= max(worktree mtimes of the staged behavioral files that exist, index mtime when
-   any staged behavioral entry is a deletion or rename)`. Equality counts as fresh — an edit
-   stamped at the start instant was visible to the verify.
+1. No staged reference mtime is later than `startedMs`. The reference set is the worktree mtimes
+   of the staged behavioral files that exist, plus the index mtime when any staged behavioral entry
+   is a deletion or rename. With no reference terms at all the condition holds vacuously.
 2. `record.head === currentHead`.
+
+### The tie, and the clock that decides it
+
+`startedMs === maxRef` is the one comparison a coarse stamp cannot settle, and settling it by
+machine speed is what would make the rule hold only on an idle machine. So the tie is decided by
+data the caller supplies: `stampResolutionMs`, the resolution of the clock that produced this
+record's stamp.
+
+| `stampResolutionMs` | The stamp                                                     | A tie reads |
+| ------------------- | ------------------------------------------------------------- | ----------- |
+| `0`                 | fractional — from the monotonic clock, orders sub-millisecond | **stale**   |
+| `1`, or absent      | a whole millisecond — cannot order two events in its own tick | **fresh**   |
+
+`stampResolutionMsOf(startedMs)` in [`adapter/clock.ts`](../../conductor/adapter/clock.ts) reads
+that resolution off the stamp itself — a finite non-integer came from the monotonic source and
+returns `0`; anything else, including anything unreadable, returns `1`. Reading it off the stamp
+rather than off configuration is what lets a record written by an earlier process still be judged
+correctly: the stamp is all that survives. The reason string changes with the verdict too, "at or
+after … `<=`" versus "after … `<`", so the refusal says which rule it applied.
+
+The monotonic clock itself is `createMonotonicClock()`: it reads the wall clock once at
+construction and advances by `process.hrtime.bigint()` deltas, guaranteeing a strictly increasing
+value — two calls never return the same number — while staying in epoch milliseconds so the value
+remains comparable to a filesystem mtime. One clock is created per plugin process and handed to
+the handlers. The state store is *not* given it: lock, beacon, and run timestamps written by
+`adapter/state.ts` are whole-millisecond wall reads.
 
 The start stamp is taken **after** the quarantine is established and **before** the first scope
 runs, and both halves matter. Stamping after the quarantine puts the quarantine's own moves inside
@@ -280,7 +350,7 @@ config:
         messageTextColor: '#C1C4CA'
 ---
 sequenceDiagram
-    %% Source: conductor/adapter/evidence.ts:716-817
+    %% Source: conductor/adapter/evidence.ts runVerify
     participant H as conductor_validate
     participant E as runVerify
     participant Q as quarantine.ts
@@ -321,16 +391,30 @@ item's verify. Before start-stamping, the engine quarantines:
 > the `testScope` files of every **other** queue item below GREEN, unioned with every path in
 > the workspace stale-red registry.
 
-The item's own tests are never excluded — the whole point of the verify is that they pass. The
-registry half is `.conductor/state/stale-red.json`, a workspace-level file that survives runs: a
-blocked item leaves a deliberately-red test file behind, the next prompt creates a run whose queue
-knows nothing about it, and without the registry that file would fail every subsequent verify in
-the workspace. Entries leave when the file is deleted, when a later run drives the test green, or
-through `conductor_forget_stale`.
+The item's own tests are never excluded — the whole point of the verify is that they pass. Its own
+set is compared after path normalization, because the queue and the registry are written by
+different authors at different times and the same file arrives as `tests/a.test.mjs`,
+`./tests/a.test.mjs`, or `tests//a.test.mjs`; on a raw string comparison a second spelling walks
+past the guard and quarantines the item's own red, which is a false green. Paths that do not exist
+in the tree being verified are dropped — they cannot poison anything, and handing one to the
+quarantine would fail the rename and sink the run — and the result is sorted, so two runs over one
+fixture quarantine the same set in the same order.
 
-The same set is applied by `runVerify`, by `runTest`'s no-template fallback, by publish's automatic
-re-verify, and by `conductor_report`'s closing verify. It is recorded verbatim on the verify
-record's `excluded` field, so a reader sees exactly what was not running.
+The registry half is `.conductor/state/stale-red.json`, a workspace-level file that survives runs:
+a blocked item leaves a deliberately-red test file behind, the next prompt creates a run whose
+queue knows nothing about it, and without the registry that file would fail every subsequent verify
+in the workspace. `conductor_report` and the stop-report both register the `testScope` files of
+every item below GREEN that exists on disk, through one helper, so a run that ends with a red test
+discloses it once and in one shape, and each report lists only what that run added. The one way an
+entry leaves is `conductor_forget_stale`, which takes the path and is bound directly to the store's
+`removeStaleRed` — an unknown path is a no-op rather than an error. Deleting the file does not
+remove its entry; the entry simply stops contributing, because a path that is not in the tree is
+skipped.
+
+The same set is applied by `runVerify` and by `runTest`'s no-template fallback — which quarantines
+only when the caller supplied the exclude list together with `stateHome`, `workspaceKey`, and
+`runId`, and restores it in a `finally`. It is recorded verbatim on the verify record's `excluded`
+field, so a reader sees exactly what was not running.
 
 Paths are validated before anything moves: `assertSafeRelPath` rejects an absolute path or any
 `..` segment, before the quarantine directory is even created, so a poisoned exclude entry can
@@ -347,7 +431,10 @@ merely undisclosed.
 ## Why quarantine is outside the repository
 
 Quarantined files move to `<stateHome>/conductor/<workspaceKey>/quarantine/<runId>/`, which is
-never inside the target repository. The obvious cheaper design — park them under `.conductor/`
+never inside the target repository. `stateHome` is `$XDG_STATE_HOME`, or `~/.local/state` when that
+is unset; `workspaceKey` is the first 16 hex characters of the sha256 of the workspace root's
+real path, so two checkouts of the same project never share a quarantine. The obvious cheaper
+design — park them under `.conductor/`
 — does not work, and the reason is worth stating plainly: **`.git/info/exclude` hides a
 directory from git and from nothing else.** The verify command is the target repo's own test
 command, and every default this design ships walks the tree. Moving a failing test from one
@@ -417,9 +504,13 @@ are the interesting part:
   not a crashed orphan, and stealing its files back mid-verify would corrupt a running verify.
 - A manifest whose `repoRoot` no longer exists as a directory is skipped; the checkout is gone and
   replay never recreates it.
-- If the repo slot has been **refilled** since the crash, the entry is not restored and is recorded
-  as a conflict: the stored file stays parked and the quarantine directory is preserved rather than
-  cleared, so nothing is lost and nothing is clobbered.
+- If the repo slot has been **refilled** since the crash *and* the stored copy is still parked, the
+  entry is not restored and is recorded as a conflict: the stored file stays parked and the
+  quarantine directory is preserved rather than cleared, so nothing is lost and nothing is
+  clobbered.
+- If the destination exists and the stored copy does **not**, the entry was never moved at all —
+  the manifest is written before the moves — so it is marked restored and the directory is cleaned.
+  Treating that case as a permanent conflict would strand a quarantine that has nothing in it.
 - An `ENOENT` on the stored file mid-restore means a peer already restored it — mark it restored
   and continue.
 - Every directory is healed inside its own `try`, with errors swallowed per entry, so one bad
@@ -449,22 +540,36 @@ tree, written inside the run directory:
 The filename is `verify-running-<tree>.json`, where `tree` is `main` or the item id of a worktree.
 Because the tree key composes a filename that is later removed, it is validated as a conservative
 slug before use — a traversing key would otherwise write and delete outside the run directory.
+Markers, the `cwd` argument, and the freeze are per-tree throughout, so worktree mode
+(`parallel.writes: "worktrees"`) needs no separate machinery; under the default `"off"` every tree
+is the workspace root and the only slug in play is `main`.
 
-*Worktree mode itself is built in task 9.6; markers, `cwd` arguments, and freeze are per-tree from
-day one so that the mode drops in without changing this machinery.*
+**A marker is honored only while its pid is alive *and* it is not over-age** (default 24 hours,
+injectable). Both halves are load-bearing: a dead pid means a crashed run, and an ancient marker
+whose pid number has been recycled by an unrelated process would otherwise wedge a tree's verify
+forever. That rule has exactly one derivation, shared by the gate inside `runVerify` and by
+`liveVerifyTrees(runDir)`, the read-only enumeration the freeze and the scheduler consult.
+`liveVerifyTrees` returns the sorted slugs of the live markers; it *omits* a broken marker rather
+than deleting it, ignores a filename whose slug would not validate, and answers with an empty list
+for a run directory it cannot read.
 
 The marker does three jobs.
 
 **It denies a second concurrent validate in one tree.** `runVerify` reads the marker first, and a
-live same-tree holder means it returns a refusal naming the holding pid, runs nothing, and never
-steals the marker. Two verifies in one tree produce two records that each describe a tree the other
-was mutating; neither is evidence.
+live same-tree holder means it returns a refusal — `{refused: true, reason, tree, heldBy: {pid,
+startMs}}`, naming the holding pid — runs nothing, and never steals the marker. A dead or over-age
+marker is removed instead and surfaced on the successful outcome as `staleMarkerBroken`, so the
+break is visible rather than silent. Two verifies in one tree produce two records that each
+describe a tree the other was mutating; neither is evidence.
 
 **It freezes edits.** While a marker is live for a tree, the edit-scope gate denies **every** edit
 in that tree — production files, test files, config, all of it. The strict reading is normative and
 it is exactly what the quarantine safety argument needs: a foreign test file cannot be written while
 it is moved aside, so the move cannot race a writer. Freeze is per tree, so a worktree implementer
-is never frozen by another tree's validate.
+is never frozen by another tree's validate. Marker filenames carry a tree *slug* while a session
+carries a tree *path*, so the slug is translated before the comparison; a slug that will not
+translate cannot be ruled out of the session's tree and therefore freezes it, which is the
+fail-closed direction.
 
 **It shapes scheduling.** The fan-out engine must not dispatch a write-capable sub-session — an
 implementer or a test-writer — into a tree with a live marker; it holds the job until the marker

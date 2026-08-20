@@ -67,19 +67,28 @@ A plugin is a factory: `(input: PluginInput) => Promise<Hooks>`. `PluginInput` c
 shell), and — beyond what plan §5.1 named — `experimental_workspace`. All of it is
 verified present at 1.18.15.
 
-Every hook name below fires on 1.18.15; the suite asserts the whole set in one coverage
-sweep at the end of the run.
+Every hook name below fires on 1.18.15; the wire-contract suite asserts the whole set in
+one coverage sweep at the end of the run, using a recorder plugin rather than conductor's
+own. Conductor itself registers six of them plus the `tool` map:
 
 | Hook                                 | What conductor does with it                                                                                                                                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tool`                               | Registers the `conductor_*` tool inventory                                                                                                                                                                    |
 | `tool.execute.before`                | Runs the gate stack; a throw denies the call                                                                                                                                                                  |
-| `tool.execute.after`                 | Fires; observed and coverage-asserted                                                                                                                                                                         |
+| `tool.execute.after`                 | Nothing — the hook fires on 1.18.15 and is coverage-asserted, but conductor registers no handler for it: every gate decision is made before the call, not after it                                            |
 | `chat.message`                       | Creates a run when no live run exists, routes a mid-run prompt into the live one, and writes the orchestrator's session-registry entry ([`adapter/chat-message.ts`](../../conductor/adapter/chat-message.ts)) |
 | `chat.params`                        | Per-role sampling temperature (`paramsForRole` in [`adapter/inject.ts`](../../conductor/adapter/inject.ts))                                                                                                   |
-| `chat.headers`                       | The router tags `X-Conductor-Role`, `X-Conductor-Priority`, `X-Conductor-Group`, and `X-Conductor-Schema` (`headersFor`)                                                                                      |
+| `chat.headers`                       | The router tags `X-Conductor-Role`, `X-Conductor-Priority`, and `X-Conductor-Group` (`headersFor`)                                                                                                            |
 | `event`                              | `session.idle` drives continuation; `permission.asked` and `permission.replied` drive the ask-gate; `session.created` is observed                                                                             |
 | `experimental.chat.system.transform` | Appends the role's doctrine pack(s) plus the live state block to every request; a string pushed onto `output.system` arrives as its own `role:"system"` message in the provider request                       |
+
+Which hooks conductor must register is itself declared as data, in
+[`core/wiring-manifest.ts`](../../conductor/core/wiring-manifest.ts): nine wires naming the
+six hook keys, the tool-name inventory, and the two modules the composition root must bind
+(the fan-out engine and the state adapter's `openWorkspace`). A test constructs the real
+plugin and does set equality in both directions between the declared hook keys and the keys
+actually present. It exists because a whole subsystem once shipped green while never being
+registered at all — every test proved its own helper, and nothing proved the wire.
 
 There is one rule about the module itself, and it is load-bearing:
 
@@ -106,8 +115,13 @@ Conductor uses the third, with an **absolute file path**. The config travels via
 already exports for its session-scoped config, so the harness follows the user into
 whatever workspace they `cd` into and **nothing is written into the target repo**.
 
-> *Not yet wired: `serve.py` merges the conductor fragment into that session config from
-> task 12.1 onward.*
+[`scripts/serve.py`](../../scripts/serve.py) performs that merge itself: it reads the base
+opencode config, calls `apply_conductor_wiring` in
+[`scripts/conductor_wiring.py`](../../scripts/conductor_wiring.py) — which merges the
+fragment, substitutes `${LLAMA_HARNESS_ROOT}`, points the provider's `baseURL` at the
+router, and pins auto-update off — writes the result as the session config, and exports
+`OPENCODE_CONFIG` pointing at it. The merge is idempotent, so re-running over an
+already-fragment-aware config is a no-op.
 
 Two verified properties matter:
 
@@ -142,7 +156,11 @@ return {
 
 The plugin builds this map by iterating `CONDUCTOR_TOOL_NAMES`, so a renamed or forgotten
 tool cannot slip through: a name with no spec falls back to an argument-free definition
-rather than disappearing.
+described as `Conductor tool <name>.` rather than disappearing. That fallback is a
+diagnostic, not a shipping state — the wiring test refuses any registered tool still
+carrying it, and it also asserts the registered keys equal `CONDUCTOR_TOOL_NAMES` exactly.
+A name in the inventory with no handler binding is refused at call time with a message
+saying so, rather than pretending the stage ran.
 
 Registration is verified end to end. A registered tool appears in
 `GET /experimental/tool/ids` and in the `tools` array of the provider request, it executes
@@ -195,7 +213,7 @@ config:
         messageTextColor: '#C1C4CA'
 ---
 sequenceDiagram
-    %% Source: conductor/plugin/index.ts:212-242, conductor/adapter/tools.ts:206-209
+    %% Source: conductor/plugin/index.ts tool.execute.before, conductor/adapter/tools.ts gateBeforeToolCall
     participant M as Model
     participant O as opencode
     participant H as Plugin hook
@@ -219,13 +237,17 @@ gates in order and turns a `deny` decision into the throw. See
 The fan-out engine drives a small, deliberately structural subset of the SDK client handed
 to the plugin, so a fake client satisfies the same interface in tests.
 
-| Call                      | Shape                                                             | Used for                                                                             |
-| ------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `client.session.create`   | `{body: {title, parentID?}}` → `{id}`                             | One sub-session per fan-out job; `parentID` nests it under the orchestrator          |
-| `client.session.prompt`   | `{path: {id}, body: {parts: [{type: "text", text}], model}}`      | The job's prompt; `model` overrides the agent default                                |
-| `client.session.abort`    | `{path: {id}}`                                                    | The per-sub-session wall-clock watchdog, and halt handling                           |
-| `client.session.messages` | `{path: {id}}`                                                    | The journal's sub-session transcript refs — paths at `info`, full content at `trace` |
-| Permission adjudication   | `POST /session/{id}/permissions/{permissionID}` with `{response}` | The ask-gate and the inline-claim mechanism                                          |
+| Call                    | Shape                                                                                | Used for                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `client.session.create` | `{body: {title, parentID?}}` → `{id}`                                                | One sub-session per fan-out job; `parentID` nests it under the orchestrator |
+| `client.session.prompt` | `{path: {id}, body: {parts: [{type: "text", text}], model}}`                         | The job's prompt; `model` overrides the agent default                       |
+| `client.session.abort`  | `{path: {id}}`                                                                       | The per-sub-session wall-clock watchdog, and halt handling                  |
+| Permission adjudication | `postSessionIdPermissionsPermissionId({path: {id, permissionID}, body: {response}})` | The ask-gate and the inline-claim mechanism, in the continuation adapter    |
+
+The fan-out engine's own client interface names exactly the first three; the continuation
+adapter declares those three plus `session.messages` and the permission method. Both are
+structural interfaces the adapter declares for itself rather than the SDK's full client
+type, which is what lets a fake satisfy them.
 
 Notes on each:
 
@@ -233,12 +255,17 @@ Notes on each:
   client handed to the plugin, and is echoed on the session and by `/session/{id}/children`.
 - **The model override reaches the provider.** A prompt body carrying
   `model: {providerID, modelID}` produces that model id in the provider request body, and
-  the assistant message info echoes it back. Under G13 every dispatch passes the same id,
-  which is what keeps the multi-model experiment a config change rather than a code change.
+  the assistant message info echoes it back. The id is
+  `config.models.roles[role] ?? config.models.default`, and setup writes `models.roles` empty, so
+  under G13 every dispatch passes the same id — which is what keeps a multi-model experiment a
+  config change rather than a code change.
 - **A sub-session is registered before its first prompt.** The engine writes its
   `sessionID → role/item/tree` registry entry between create and prompt, so a sub-session
   can never make a tool call while unregistered.
-- **An agent is bound by name** by passing `agent: "<name>"` in the prompt body.
+- **An agent can be bound by name** by passing `agent: "<name>"` in the prompt body — the
+  wire-contract suite drives sessions that way. The fan-out engine does not: it sends
+  `parts` and `model` only, and the sub-session's role is carried by the doctrine the
+  injection layer appends and by the registry entry the gates read.
 - **No `format` field is ever set** on the prompt body. See the drift below.
 
 ## The config fragment
@@ -270,9 +297,9 @@ Four things about that table:
   gate is the enforcement, and it denies spawning in every session, registered or not.
 - **There is no separate `write` permission key** in opencode. The write and patch tools
   are governed by `edit`.
-- **The fragment stays model-agnostic.** Agent-level `model` is set per dispatch by the
-  fan-out engine from `config.models.default`, so a multi-model configuration needs no
-  fragment change.
+- **The fragment stays model-agnostic.** The model rides the prompt body, chosen per
+  dispatch by the fan-out engine as `config.models.roles[role] ?? config.models.default`,
+  so a per-role or multi-model configuration needs no fragment change.
 
 The orchestrator's `edit: "ask"` is the inline-claim mechanism: each ask is adjudicated by
 the plugin, allowing only when an active claim covers the path (plan §3.6). See
@@ -353,11 +380,16 @@ the router's schema observer to a request-side `schemaMissing` counter. See
 completely ungated.** A factory throw produces one
 `level=ERROR message="failed to load plugin" … error=<thrown message>` line on the serve
 log, and then session create and prompt proceed entirely normally with zero hooks installed
-and no API-visible refusal or banner. The same log-and-continue applies to module-load
-failures such as a bad export. Nothing inside the session betrays that the gates are
-absent, which is exactly why the liveness beacon must be loud and out-of-band: the plugin
-writes `.conductor/state/alive.json` at init and the orchestrator's first response carries a
-one-line banner. **No banner, no conductor.**
+and no API-visible refusal. The same log-and-continue applies to module-load failures such
+as a bad export. Nothing inside the session betrays that the gates are absent, which is
+exactly why the liveness signal has to be out-of-band: the plugin writes
+`.conductor/state/alive.json` the first time it opens the workspace, after the doctrine
+packs have loaded and the workspace lock has been won, carrying `{pid, startMs, version,
+sessionID}`. Its presence means a plugin that loaded, found its doctrine, and owns this
+workspace; its absence — or a `pid` that is not running — means stop and fix the load. The
+plan's visible session banner ("no banner, no conductor") is the intended at-a-glance form
+of the same check and has no implementation in the plugin, so the beacon file is the check
+that works. See [`conductor/docs/OPERATIONS.md`](../../conductor/docs/OPERATIONS.md).
 
 **(iii) The per-agent spawn-denial key is `agent.<name>.tools: {"task": false}`.** The
 built-in spawn tool's id is `task` (args `description`, `prompt`, `subagent_type`,
@@ -392,16 +424,16 @@ Five behaviors that will cost an afternoon if you meet them without warning.
 From plan §5.4, updated where 1.18.15 changed the picture. None of these are hoped away;
 each has a design consequence that is already built.
 
-| Gap                                                                   | Design consequence                                                                                                                                                                                       |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No pre-emptive stop or turn-end hook                                  | Continuation is `session.idle` → SDK re-prompt with a disengage backstop (plan §3.7)                                                                                                                     |
-| `tool.execute.before` deny is an exception, not a typed response      | Gate reasons ride the `Error` message; tests assert the thrown text                                                                                                                                      |
-| Plugin hooks are async but not transactional                          | State writes are atomic (tmp + rename) and journaled write-ahead, so a crashed handler leaves a consistent last state                                                                                    |
-| A sub-session's tool calls also hit our hooks                         | The session registry maps `sessionID → role/item` and the gates dispatch on that — a feature, because implementers are gated too                                                                         |
-| A session the plugin did not create has no registry entry             | Session-registry gate: reads allowed, all writes and all `conductor_*` calls denied; sub-agent spawning denied everywhere so unregistered sessions cannot be manufactured                                |
-| A plugin that throws at init leaves a normal-looking, ungated session | Liveness beacon plus first-response banner (plan §3.8); confirmed by discovery (ii)                                                                                                                      |
-| `experimental.chat.system.transform` is explicitly experimental       | The test pins it; if it disappears upstream the fallback is prepending the state block to the first user part of each prompt — worse, workable, recorded in wire-notes                                   |
-| The `permission.ask` plugin hook is typed but never dispatched        | The ask-gate uses static agent permissions plus the `permission.asked` bus event plus HTTP adjudication; the suite asserts zero dispatches across two full permission flows, so an upstream fix trips it |
+| Gap                                                                   | Design consequence                                                                                                                                                                                                   |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No pre-emptive stop or turn-end hook                                  | Continuation is `session.idle` → SDK re-prompt with a disengage backstop (plan §3.7)                                                                                                                                 |
+| `tool.execute.before` deny is an exception, not a typed response      | Gate reasons ride the `Error` message; tests assert the thrown text                                                                                                                                                  |
+| Plugin hooks are async but not transactional                          | State writes are atomic (tmp + rename) and journaled write-ahead, so a crashed handler leaves a consistent last state                                                                                                |
+| A sub-session's tool calls also hit our hooks                         | The session registry maps `sessionID → role/item` and the gates dispatch on that — a feature, because implementers are gated too                                                                                     |
+| A session the plugin did not create has no registry entry             | Session-registry gate: reads allowed, all writes and all `conductor_*` calls denied; sub-agent spawning denied everywhere so unregistered sessions cannot be manufactured                                            |
+| A plugin that throws at init leaves a normal-looking, ungated session | The §3.8 liveness beacon at `.conductor/state/alive.json`, written only after the doctrine packs load; confirmed by discovery (ii). The plan's visible session banner is not implemented, so the beacon is the check |
+| `experimental.chat.system.transform` is explicitly experimental       | The test pins it; if it disappears upstream the fallback is prepending the state block to the first user part of each prompt — worse, workable, recorded in wire-notes                                               |
+| The `permission.ask` plugin hook is typed but never dispatched        | The ask-gate uses static agent permissions plus the `permission.asked` bus event plus HTTP adjudication; the suite asserts zero dispatches across two full permission flows, so an upstream fix trips it             |
 
 ## Re-verifying the contract
 
@@ -422,7 +454,7 @@ that the suite really ran on a machine that has the binary. The test wrapper rej
 skipped test, so on a developer machine a skip is a failure.
 
 **The `[observed]` tag** in wire-notes marks behavior genuinely observed during live
-probing that **no test currently pins**. An upstream regression in a tagged line would be
+probing that **no test pins**. An upstream regression in a tagged line would be
 invisible to the suite. The tags are the honest record: they say where the safety net has
 holes rather than implying uniform coverage.
 

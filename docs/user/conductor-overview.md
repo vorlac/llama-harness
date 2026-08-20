@@ -123,10 +123,8 @@ flowchart TD
 | Layer                                                   | Job                                                                                                                                                                       | Failure posture                                                                                                                     |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | 1 — conductor plugin ([`conductor/`](../../conductor/)) | All enforcement: run and item state machines, gates, the `conductor_*` tools, the fan-out engine, the ledgers, doctrine injection                                         | **Fail-closed.** A crash inside gate evaluation while a guarded call is being judged denies the call.                               |
-| 2 — llama-router ([`router/`](../../router/))   | Wall-clock and measurement: admission control, prefix-affinity grouping, wire-level schema observation, per-request metrics                                               | **Fail-soft.** If it is not running, the identical process is enforced, just slower. `serve.py --no-router` runs the same workflow. |
-| 3 — wiring (`scripts/serve.py`)                         | Launches the router and injects the plugin, agents, and permissions into the session-scoped opencode config, so the harness travels into whatever workspace you `cd` into | The harness never enters the session at all — which is why the first rule of operations is *no banner, no conductor*.               |
-
-> *Not yet wired: `scripts/serve.py` gains the conductor and router launch paths in task 12.1, and first-run setup in 12.2.*
+| 2 — llama-router ([`router/`](../../router/))           | Wall-clock and measurement: admission control, prefix-affinity grouping, wire-level schema observation, per-request metrics                                               | **Fail-soft.** If it is not running, the identical process is enforced, just slower. `serve.py --no-router` runs the same workflow. |
+| 3 — wiring (`scripts/serve.py`)                         | Launches the router and injects the plugin, agents, and permissions into the session-scoped opencode config, so the harness travels into whatever workspace you `cd` into | If it does not run, the harness never enters the session at all — which is what the liveness beacon is for.                         |
 
 Here is the sentence that makes the split click: **layer 1 is the only layer that can see a
 tool call, so every gate lives there; layer 2 gets exactly the jobs the plugin structurally
@@ -188,9 +186,11 @@ The model does not get to spawn its own: opencode's `task` tool is denied in eve
 registered or not, because a model-spawned session would be an unregistered, unscoped
 writer.
 
-Inline work is still possible, through a record. `conductor_inline_claim {itemId, reason}`
-scopes the orchestrator's edit permission to one item's `fileScope`. The item state machine
-still applies in full — the claim changes *who* edits, never *what* is enforced.
+Inline work is still possible, through a record. `conductor_inline_claim` scopes the
+orchestrator's edit permission to one item's `fileScope`, and is itself a recorded decision:
+alongside the item and the reason it carries the scored options it was chosen over, because
+dispatching was the alternative. The item state machine still applies in full — the claim
+changes *who* edits, never *what* is enforced.
 
 ## Doctrine, not skills
 
@@ -204,11 +204,13 @@ Instead the rules are compiled into nine short, role-scoped doctrine packs under
 [`conductor/doctrine/`](../../conductor/doctrine/) — `core.md`, `decompose.md`, `plan.md`,
 `tdd.md`, `test-vet.md`, `debug.md`, `review.md`, `skeptic.md`, `receive-review.md` — and
 the plugin appends the role's pack, plus a live state block of at most 30 lines, to the
-system prompt of *every* request. The state block carries the run state, the active item,
-the recommended next tool call with its arguments, the open question count, blocked and
-deferred counts, taint count, and overrides remaining. The process is re-stated every
-request and never remembered. A missing pack is a startup error, raised before the liveness
-beacon is written, so the beacon's absence proves initialization failed.
+system prompt of *every* request. The state block carries the run state, the active item for
+a sub-session bound to one, the single recommended next tool call with its item argument, a
+*count* of the other legal tools, the open question count, blocked and deferred counts, taint
+count, and overrides remaining. It names only the recommendation — the other legal tools are
+counted, never listed, so nothing in the block can contradict the one next step. The process
+is re-stated every request and never remembered. A missing pack is a startup error, raised
+before the liveness beacon is written, so the beacon's absence proves initialization failed.
 
 Doctrine is still only the courtesy. Every doctrine obligation that can be a gate is one:
 the packs make the legal path obvious, and the gate is what makes the illegal path fail.
@@ -229,7 +231,13 @@ cost anywhere in the design. A role selects four things, and never the weights.
 | implementer  | `tdd.md` (+ `debug.md` in DEBUG) | 0.4      | edit: `fileScope` only         | review       |
 | reviewer     | `review.md` / `test-vet.md`      | 0.3      | edit: deny                     | review       |
 | skeptic      | `skeptic.md`                     | 0.3      | edit: deny                     | review       |
-| mechanical   | `core.md` (lite)                 | 0.1      | edit: deny                     | batch        |
+| mechanical   | `core.md`                        | 0.1      | edit: deny                     | batch        |
+
+Two of the nine packs are not a role's primary doctrine and are delivered on a condition
+instead: `debug.md` goes to an implementer whose item is in the debug posture, and
+`receive-review.md` goes to exactly the dispatches that are receiving review findings. A pack
+that is loaded but never delivered governs nothing, so both have a delivery trigger rather
+than a place in the table above.
 
 The single-model decision bought two things. First, wall clock: an earlier multi-model
 design paid a full weight unload and reload — roughly 30 seconds for a 30 GB model — at
@@ -277,13 +285,17 @@ before trusting it:
 - **Gates fire inside opencode, and nowhere else.** A human at a raw terminal is ungated.
   Operational security is out of scope.
 - **Conductor cannot detect its own absence.** If opencode fails to load the plugin, every
-  gate described here is silently gone and the session looks completely normal. The plugin
-  writes a liveness beacon at init and the orchestrator's first response carries a one-line
-  banner — that makes absence *visible*, not *impossible*. No banner, no conductor.
+  gate described here is silently gone and the session looks completely normal. Nothing
+  inside the session announces conductor's presence — there is no startup banner to look
+  for. The out-of-band signal is the liveness beacon at
+  `.conductor/state/alive.json`, written when the plugin opens the workspace and after the
+  doctrine packs have loaded, so its absence is evidence that initialization failed. That
+  makes absence *visible*, not *impossible*.
 - **A second, plain `opencode` session in the same repo is ungated and invisible.** The
   harness travels through the config that `serve.py` hands its shell; another terminal
   running `opencode` in the same repo has no plugin, takes no lock, and races the conductor
-  session's freshness stamps, quarantine moves, and freeze windows.
+  session's freshness stamps, quarantine moves, and freeze windows. (A second *conductor*
+  session is the benign case: the workspace lock refuses it outright.)
 - **Ledgers are records, not proofs.** They are strong records — every state-advancing one
   is written by a handler that re-derived the evidence itself — but the model's one
   remaining fabrication path is `conductor_override`, which is budgeted, taints the item,
@@ -291,9 +303,12 @@ before trusting it:
 - **Verification trusts the target repo's own test command.** Vacuous tests get vacuous
   protection. The `TEST_VETTED` stage exists to raise that floor for the tests conductor
   itself writes, and does nothing for the ones already there.
-- **In-session interpreters bypass the write-shape extractor.** `node -e` and `python -c`
-  can write files without matching any redirect or edit shape. The journal records the
-  command either way.
+- **The write-shape extractor is an enumeration, not a proof.** It reads the shapes it knows
+  — redirects, `tee`, in-place editors, `mv`/`cp`/`rm`, and the recognized write calls inside
+  `node -e` and `python -c` one-liners — and it is measured, not proven, against the ones it
+  does not. A program that computes its target surfaces no path for the scope gate to judge.
+  The state area is the one place this does not degrade: any interpreter text that merely
+  names `.conductor` is refused whole. The journal records the command either way.
 - **`behavioral: false` is only as honest as `behavioralPaths`.** The arithmetic is
   mechanical; the path list is human-confirmed at setup. A repo that lists `src/**` while
   keeping its logic in `lib/**` has handed the model a legal TDD bypass, which is why setup
@@ -305,11 +320,19 @@ before trusting it:
 
 ## Where the build is
 
-Conductor is under active construction, and the parts described here land phase by phase
-against [the plan](../plans/2026-08-07-conductor-harness-plan.md), which is the design
-authority. For what is committed and green today, what is next, and what is deliberately
-deferred, see [project status](../developer/project-status.md) — it is the single
-authoritative page for build state, and this page deliberately does not duplicate it.
+Conductor is under active construction against
+[the plan](../plans/2026-08-07-conductor-harness-plan.md), which is the design authority.
+
+Two things this page describes have not been exercised end to end. The **live smoke** — a
+real opencode session driving a real run against a real served model — has not been run, so
+every claim here rests on the test suite rather than on an observed session. And the
+**proof-of-concept benchmark campaign**, the measurement that would say whether the process
+buys the quality it costs, has not been run either. Nothing on this page should be read as a
+measured result.
+
+For what is committed and green, what is next, and what is deliberately deferred, see
+[project status](../developer/project-status.md) — it is the single authoritative page for
+build state, and this page deliberately does not duplicate it.
 
 ## See also
 

@@ -69,7 +69,7 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart TD
-    %% Source: conductor/core/fsm-run.ts:39-48
+    %% Source: conductor/core/fsm-run.ts:39-48 (RUN_SUCCESSORS)
     INTAKE[INTAKE] -->|work| DECOMPOSED[DECOMPOSED]
     INTAKE -->|trivial| EXECUTING[EXECUTING]
     INTAKE -->|question| ANSWERED[ANSWERED]
@@ -110,6 +110,16 @@ Every rejection carries a non-empty `why`, and an off-diagram rejection always n
 legal successor of `from`. That is not decoration — the phase-order gate denies by
 `throw`ing the reason text at the model, so a rejection that does not say where the run
 *can* go leaves the orchestrator guessing.
+
+Handlers reach the check through `advanceRun(run, to, context)`, which refuses first on a
+recorded stop — a stopped run is terminal for every subsystem at once and advances to no state —
+then on an unrecognized `from`, and only then asks `legalRunTransition`. Five handlers use it:
+`conductor_decompose` for `DECOMPOSED`, `conductor_plan` for `PLANNED`, `conductor_plan_review`
+for `PLAN_REVIEWED`, `conductor_dispatch_wave` for `EXECUTING`, and `conductor_report` for the
+close. `conductor_classify`'s two exits are the exception: it writes `EXECUTING` (after
+synthesizing and validating the trivial run's single item) or `ANSWERED` onto the run record
+directly, in the same handler that produced the classification the edge would be adjudicated
+against.
 
 ### Forward-only, and the plan-review loop
 
@@ -193,7 +203,7 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart LR
-    %% Source: conductor/core/fsm-item.ts:124-182
+    %% Source: conductor/core/fsm-item.ts:105-183 (legalItemTransition)
     PENDING[PENDING] -->|behavioral true| RED[RED]
     RED --> TEST_VETTED[TEST_VETTED]
     TEST_VETTED -->|test exit 0| GREEN[GREEN]
@@ -241,6 +251,22 @@ every path in its `fileScope` is disjoint from `verify.behavioralPaths`. That ma
 the failing test" mechanically impossible for real code and trivially legal for a comment
 fix.
 
+### The one backward move is not an edge
+
+An item whose closing verify goes red after its review is returned to `GREEN` with the
+`debugging` annotation set, so the debug protocol can take it. Three callers do this, all in
+publish: the auto re-verify, the worktree merge-back when the merge conflicts, and the
+integrated-tree re-validate that runs after a successful merge-back.
+
+That move deliberately does **not** go through `legalItemTransition`, and there is no
+`REVIEWED → GREEN` row for it to use. It is journaled as `state: item.updated`, not as
+`fsm: transition`, because it is an administrative write — the run correcting its own
+bookkeeping after the evidence changed — rather than a claim that the FSM permits the edge.
+Calling it a transition would either force a bogus row into the table or make the journal
+lie about what the FSM allows. `demoteReviewedToGreen` in
+[`adapter/tools.ts`](../../conductor/adapter/tools.ts) is the single implementation all three
+callers share.
+
 ### Annotations are not positions
 
 `blocked`, `deferred`, and `debugging` are fields on the item record, not FSM positions.
@@ -256,10 +282,22 @@ The `blocked` rule is applied **before** the transition table, not inside it. Th
 statement in `legalItemTransition` reads `item.blocked` and, if it is neither `null` nor
 `undefined`, returns a rejection naming the blocking `questionId` — whatever `from` and
 `to` are, and whatever evidence the context carries. A blocked item therefore makes no
-transition at all, including one that would otherwise be legal, until `conductor_answer`
-resolves the named question. Putting the check first is what makes that statement total:
-as a per-row condition, every new row would be a fresh chance to forget it, and the
-failure mode would be an item advancing past a question the human never answered.
+transition at all, including one that would otherwise be legal, until the block is cleared.
+Putting the check first is what makes that statement total: as a per-row condition, every new
+row would be a fresh chance to forget it, and the failure mode would be an item advancing past
+a question the human never answered.
+
+Two tools clear a block. `conductor_answer` resolves the named question and releases every item
+bound to it — except an item that a second, still-open question also names, which is re-blocked
+on the oldest of those rather than released. `conductor_queue_amend`'s `update` op is the other
+legal clearer: an update rewrites the very entry the block was raised against, so the item is
+released, and only released — the FSM position and the item's recorded history are the
+amendment's to keep, not to reset. Core keeps that honest by refusing an update that re-scopes an
+item past `PENDING`; a genuine re-scope arrives as remove-then-add, which reborns the item at
+`PENDING`.
+
+Blocks are raised first-block-wins: an item that already carries a block keeps the one it has, so
+a later question naming the same item does not take ownership of it.
 
 `deferred` is read by the scheduler and by tool legality rather than by the transition
 function: a deferred item is a settled disposition a report can close on, and it never
@@ -286,16 +324,42 @@ engine, and tool legality all call this one function. A run that was terminal fo
 re-prompt loop but live for the phase gate would both refuse to advance and refuse to
 close.
 
-Stop kinds are a closed vocabulary of six:
+Stop kinds are a closed vocabulary of six, and no caller spells one. Every terminal path
+names a *cause* and `stopKindOf` in [`core/disposition.ts`](../../conductor/core/disposition.ts)
+maps the cause plus the run's persisted disposition onto a kind. That mapping is total over the
+six causes and onto the six kinds, which is what stops the seventh terminal path from inventing
+its own literal — and what closed the hole where two kinds were computed by core and written by
+nobody, so a run whose every remaining item waited on a human closed "the run completed".
 
-| Kind        | Recorded by             | Meaning                                                |
-| ----------- | ----------------------- | ------------------------------------------------------ |
-| `done`      | `conductor_report`      | the run closed with a full or lite report              |
-| `noop`      | the continuation engine | `futileRePrompts` reached 3 — a wedged loop            |
-| `blocked`   | `shouldTerminate`       | no open item remains and blocked items remain          |
-| `surfaced`  | `shouldTerminate`       | no open and no blocked item remains, questions pending |
-| `env`       | `shouldTerminate`       | the override budget is exhausted                       |
-| `interrupt` | halt handling           | a halt file was present                                |
+| Cause                | Kind                               | Produced when                                                              |
+| -------------------- | ---------------------------------- | -------------------------------------------------------------------------- |
+| `halt`               | `interrupt`                        | halt handling saw a halt file                                              |
+| `transport`          | `env`                              | the delivery layer could not reach the orchestrator                        |
+| `override-exhausted` | `env`                              | the §3.6 override budget was spent to its cap                              |
+| `futility`           | `noop`                             | the futile re-prompt limit was reached                                     |
+| `closing-verify-red` | `blocked`, or `env`                | the closing verify came back red; `env` only when its runner could not run |
+| `settle`             | `done`/`noop`/`blocked`/`surfaced` | the run closed over its persisted dispositions — see below                 |
+
+A `settle` resolves in a fixed order: any blocked item gives `blocked`; a run whose remaining work
+can never publish gives `blocked`; a settle taken while work is still live gives `surfaced` if a
+question is open and `blocked` otherwise; an open question with nothing live gives `surfaced`; a
+settle that advanced no item at all gives `noop`, naming the deferral count; and only what is left
+gives `done`.
+
+The `done` branch is deliberately the narrowest of the six. Completion is the one verdict a
+prompter must be able to trust without reading further, so it is reachable only from a settle with
+nothing actionable, nothing blocked, no open question, no stuck item, at least one advanced item,
+and no red closing verify. A red closing verify can never stamp `done` at all — a law that cannot
+fail the completion is advisory.
+
+Stops are written from two modules. `conductor_report` records the kind `stopKindOf` returns for
+its own close, red closing verify included, and `conductor_override` records `env` when a budget
+is exhausted. The continuation engine writes the rest through one `recordStop` helper: `interrupt`
+when the halt file is present, `noop` on futility, `blocked` and `surfaced` when `shouldTerminate`
+returns them, the `stopKindOf` verdict when a settle leaves the run stuck with no lever, and `env`
+when consecutive re-prompt sends fail in transport. On the `blocked`/`surfaced` path, a run still
+waiting on an unanswered question keeps its current-run pointer, so an answer can revive it rather
+than find it archived; a resumable stop with nothing outstanding is archived like any other.
 
 `STOP_KINDS` is exported as runtime data, `as const satisfies readonly StopKind[]`, so
 consumers iterate exactly the list the type is drawn from.
@@ -314,16 +378,21 @@ applies its rules in a fixed order:
    `env`-stop at start.
 4. Otherwise an open item outranks the rest: `itemsSummary.open > 0` returns
    `{stop: false}`.
-5. With no open items, `blocked > 0` returns `blocked`, then `surfacedQuestions > 0`
-   returns `surfaced`.
+5. With no open items and neither a blocked item nor an open question, it returns
+   `{stop: false}` — an all-settled run is closed by `conductor_report`, not by this engine.
+6. Otherwise it asks `stopKindOf` for a `settle`, which yields `blocked` or `surfaced`.
 
-`done` and `interrupt` are never computed here — the report tool and halt handling record
-them directly. Deferred items influence no rule at all: they are settled, never
-actionable.
+The kinds are never spelled in this module: each arm hands a cause to `stopKindOf`, so a rule
+added to the §2.9 vocabulary lands in one place rather than in every recorder's own literal.
+`done` and `interrupt` are never produced here — `conductor_report` records the first and halt
+handling the second. Deferred items influence no rule at all: they are settled, never actionable.
+`shouldTerminate` reads counts rather than items, and it folds those counts through the same
+four-member disposition vocabulary the per-item derivation produces, so the engine and the report
+closer cannot disagree about what a position means.
 
 ## Tool legality
 
-`legalTools(run, items, questions, repoConfigured)` in
+`legalTools(run, items, questions, repoConfigured, publishEnabled)` in
 [`core/gates-phase.ts`](../../conductor/core/gates-phase.ts) turns the two FSM positions
 into a verdict with three parts:
 
@@ -335,25 +404,34 @@ into a verdict with three parts:
 
 It reads only what it needs: the run's state, its recorded classification and its stop
 record's *presence*, each item's state plus `blocked`/`deferred` plus the scheduler inputs
-(`dependsOn`, `fileScope`), whether any question is unanswered, and whether the repo is
-configured. The parameter interfaces `GateRun`, `GateItem`, and `GateQuestion` are
-deliberately narrower than the full schema records, so real state files and minimal test
-fixtures both assign under `tsc --strict`.
+(`dependsOn`, `fileScope`), whether any question is unanswered, whether the repo is
+configured, and whether publishing is available at all. The parameter interfaces `GateRun`,
+`GateItem`, and `GateQuestion` are deliberately narrower than the full schema records, so real
+state files and minimal test fixtures both assign under `tsc --strict`.
+
+`publishEnabled` is the §3.9 no-git input. With it false, an item terminates at `REVIEWED` with
+its diff recorded in the report, so `conductor_publish` is suppressed from `legal` *and* from
+`recommended` — the two are derived on separate paths, and without the suppression on both a
+no-git run would be recommended a tool the same verdict declares illegal. It carries a default of
+`true` so the pinned five-parameter type stays assignable, and every production call site passes
+it explicitly instead of inheriting the default;
+[`conductor/tests/legaltools-callsites.test.ts`](../../conductor/tests/legaltools-callsites.test.ts)
+fails if one stops.
 
 Precedence runs top to bottom; each level returns or falls through:
 
-| Situation                                 | `legal`                                                                                                                       | `recommended`                                               |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| repo not configured                       | `conductor_setup`, `conductor_status`                                                                                         | `conductor_setup`                                           |
-| terminal run                              | `conductor_status`, plus `conductor_answer` if a question is open                                                             | `null`                                                      |
-| any non-terminal run                      | `conductor_status`, `conductor_decide`, `conductor_surface`, `conductor_defer`, plus `conductor_answer` if a question is open | —                                                           |
-| `INTAKE`, unclassified                    | `+ conductor_classify`                                                                                                        | `conductor_classify`                                        |
-| `INTAKE`, classified `work`               | `+ conductor_decompose`                                                                                                       | `conductor_decompose`                                       |
-| `INTAKE`, classified `trivial`/`question` | meta tools only                                                                                                               | `null`                                                      |
-| `DECOMPOSED`                              | `+ conductor_plan`                                                                                                            | `conductor_plan`                                            |
-| `PLANNED`                                 | `+ conductor_plan_review`                                                                                                     | `conductor_plan_review`                                     |
-| `PLAN_REVIEWED`                           | `+ conductor_dispatch_wave`                                                                                                   | `conductor_dispatch_wave`                                   |
-| `EXECUTING`                               | `+` each actionable item's next stage tool, `+ conductor_report` when every item is settled                                   | wave-order-first item's stage tool, else `conductor_report` |
+| Situation                                 | `legal`                                                                                                                                                               | `recommended`                                               |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| repo not configured                       | `conductor_setup`, `conductor_status`                                                                                                                                 | `conductor_setup`                                           |
+| terminal run                              | `conductor_status`, plus `conductor_answer` if a question is open                                                                                                     | `null`                                                      |
+| any non-terminal run                      | `conductor_status`, `conductor_decide`, `conductor_surface`, `conductor_defer`, plus `conductor_answer` if a question is open                                         | —                                                           |
+| `INTAKE`, unclassified                    | `+ conductor_classify`                                                                                                                                                | `conductor_classify`                                        |
+| `INTAKE`, classified `work`               | `+ conductor_decompose`                                                                                                                                               | `conductor_decompose`                                       |
+| `INTAKE`, classified `trivial`/`question` | meta tools only                                                                                                                                                       | `null`                                                      |
+| `DECOMPOSED`                              | `+ conductor_plan`                                                                                                                                                    | `conductor_plan`                                            |
+| `PLANNED`                                 | `+ conductor_plan_review`                                                                                                                                             | `conductor_plan_review`                                     |
+| `PLAN_REVIEWED`                           | `+ conductor_dispatch_wave`                                                                                                                                           | `conductor_dispatch_wave`                                   |
+| `EXECUTING`                               | `+` each actionable, dependency-ready item's next stage tool, `+ conductor_dispatch_wave` while the wave has members, `+ conductor_report` when no item is actionable | wave-order-first item's stage tool, else `conductor_report` |
 
 An unconfigured repo short-circuits everything: nothing else runs, in any state, until
 `conductor_setup` has run. A terminal run keeps `conductor_status` (read-only, legal in
@@ -376,22 +454,45 @@ tool that advances it:
 | `REVIEWED`                | `conductor_publish`     |
 | `PUBLISHED`               | none                    |
 
-An item contributes its stage tool only if it is *actionable*: neither `blocked` nor
-`deferred`, and not already `PUBLISHED`. Contributions are aggregated by tool, so the map
-value is the sorted list of item ids that tool may target right now — items `I1`
-(`PENDING`, behavioral) and `I2` (`TEST_VETTED`) yield
+An item contributes its stage tool only if it is *actionable* — neither `blocked` nor
+`deferred`, and not already `PUBLISHED` — **and** dependency-ready, meaning every id in its
+`dependsOn` names an item this run has `PUBLISHED`. Nothing below `PUBLISHED` unlocks a
+dependent, and an unknown id is never published, so it never unlocks one either. The readiness
+veto lives in `legal`, not only in `recommended`: `recommended` was always deps-aware because it
+comes from `nextWave`, so without the veto the gate offered `conductor_submit_test` for an item
+the scheduler would never schedule, and the gate and the handler disagreed.
+
+Contributions are aggregated by tool, so the map value is the sorted list of item ids that tool
+may target in the current state — items `I1` (`PENDING`, behavioral) and `I2` (`TEST_VETTED`) yield
 `conductor_submit_test → {itemIds: ["I1"]}` and
 `conductor_mark_green → {itemIds: ["I2"]}`, while two items both at `TEST_VETTED` yield a
 single `conductor_mark_green → {itemIds: ["I1", "I2"]}`. Ids are sorted on insert, so the
 hint is invariant under item-array order too.
 
-`conductor_report` is legalized only when the item list is non-empty and every item is
-*settled* — `PUBLISHED`, `blocked`, or `deferred`. This holds for trivial runs as well as
-work runs. An earlier reading legalized `conductor_report` for any trivial `EXECUTING`
-run; that permitted closing a trivial run to `TRIVIAL_DONE` with its sole item still
-`PENDING`, and the handler's closing verify could not catch it because the foreign-red-set
-exclusion removes exactly that unsettled item's own red test. The correction is recorded
-as C-018 in [`docs/build/CORRECTIONS.md`](../build/CORRECTIONS.md).
+`conductor_dispatch_wave` is offered again inside `EXECUTING`, whenever the wave it would compute
+has members. It is the run's work engine, not a one-shot entry edge: a run with more items than
+one wave can hold needs a second call, and a denied call is a run that cannot proceed. The
+recommendation stays the per-item stage tool, so the injection and the continuation engine still
+read the same single next step.
+
+`conductor_report` is legalized only when the item list is non-empty and **no item is
+actionable** — the same predicate the report handler applies to decide whether to accept the call,
+exported as `settledForReport` so the two agree by construction rather than by two
+implementations that happen to match. An item is settled when it is `PUBLISHED`, when it is
+`deferred`, or when it is `REVIEWED` in no-git mode; a blocked item is not settled but is not
+actionable either, and an item whose dependency chain can never publish is stuck rather than
+actionable, which is what keeps a single deferred dependency from leaving a run with no legal exit
+at all. `unsettled` names the items that block the report, so a refusal can say *which* work is
+unfinished.
+
+This holds for trivial runs as well as work runs. An earlier reading legalized
+`conductor_report` for any trivial `EXECUTING` run; that permitted closing a trivial run to
+`TRIVIAL_DONE` with its sole item still `PENDING`, and the handler's closing verify could not
+catch it because the foreign-red-set exclusion removes exactly that unsettled item's own red test.
+The correction is recorded as C-018 in
+[`docs/build/CORRECTIONS.md`](../build/CORRECTIONS.md). The report precondition is deliberately
+not a verify for the same reason: disposition is a property of persisted state, and it is read
+from persisted state.
 
 ### The recommendation is wave order, not array order
 
@@ -430,22 +531,34 @@ instruction, and nothing has to pretend the set is a singleton.
 stage tools are in the set, that exactly one is recommended, and that reversing the item
 array changes neither.
 
-## One derivation, three consumers
+## One derivation, four readers
 
-`legalTools` is the single source for three subsystems that would otherwise each grow
-their own copy of the phase rules:
+`legalTools` is the single source for every subsystem that would otherwise grow its own copy of
+the phase rules:
 
-| Consumer                | Reads                              | Uses it for                                                                                               |
-| ----------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| the phase-order gate    | `legal`, `recommended`, `why`      | denying any `conductor_*` call not in `legal`, with a reason naming what is legal and what is recommended |
-| the injection layer     | `recommended`, `legal.size`, `why` | the live state block appended to every request's system array                                             |
-| the continuation engine | `recommended`, `why`               | the re-prompt message on `session.idle`, naming the exact next tool call                                  |
+| Reader                        | Module                                                               | Reads                              | Uses it for                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| the phase-order gate          | [`adapter/tools.ts`](../../conductor/adapter/tools.ts)               | `legal`, `recommended`, `why`      | denying any `conductor_*` call not in `legal`, with a reason naming what is legal and what is recommended |
+| the injection layer           | [`adapter/inject.ts`](../../conductor/adapter/inject.ts)             | `recommended`, `legal.size`, `why` | the live state block appended to every request's system array                                             |
+| the continuation engine       | [`adapter/continuation.ts`](../../conductor/adapter/continuation.ts) | `recommended`, `why`               | the re-prompt message on `session.idle`, naming the exact next tool call                                  |
+| the doctrine mechanics render | [`core/mechanics.ts`](../../conductor/core/mechanics.ts)             | `recommended`                      | deriving the stage sequences the doctrine packs teach                                                     |
 
-[`adapter/inject.ts`](../../conductor/adapter/inject.ts) shows the pattern: it calls
-`legalTools`, names the single recommended tool and its `itemId` when it has one, counts
-the other legal tools, and — when nothing is recommended — reports `legalTools`' own `why`
-rather than asserting terminality itself. The gate is the enforcement, the injection is
-the courtesy; they agree because they are the same call.
+The first three describe a live workspace and pass its real `repoConfigured` and `publishEnabled`.
+The fourth does not: it renders the pipeline the FSM defines into a checked-in pack, so it pins
+both inputs to named constants at the fullest pipeline — a pack must not vary with any one repo's
+git mode or setup state.
+
+`adapter/inject.ts` shows the pattern: it calls `legalTools`, names the single recommended tool
+and its `itemId` when it has one, counts the other legal tools, and — when nothing is recommended
+— reports `legalTools`' own `why` rather than asserting terminality itself. The gate is the
+enforcement, the injection is the courtesy; they agree because they are the same call.
+
+`legalTools` is not the whole legality story, though, and reading it as such is the mistake it
+already made once. It answers "what may be called at this *position*?"; it says nothing about who
+may call a tool, and it carries no row for a tool with no stage of its own. That second question
+lives in [`core/tool-legality.ts`](../../conductor/core/tool-legality.ts), whose declaration table
+every `conductor_*` call passes through before its handler runs — see
+[core and adapters](core-and-adapters.md#coretool-legalityts--417-lines).
 
 ## Testing an FSM change
 
@@ -471,12 +584,14 @@ hardcodes the expected state list and compares it to the exported array:
 - `conductor/tests/stops.test.ts` asserts `STOP_KINDS` is exactly the six, and that
   `interrupt` is never computed by `shouldTerminate` for any input.
 
-So adding a state is not a one-line change: the vocabulary is closed and five places
-hardcode it — the FSM's own `*_STATES` array, its successor record, the expected-state
-array and successor record in its test file, the `state` enum in `core/types.ts` (which
-the single-source test pins and the JSON Schema export publishes), and the `switch` in
-`legalTools` or, for an item position, the `nextStageTool` map. A change that misses any
-of them goes red rather than silently diverging, which is the point.
+So adding a state is not a one-line change. The vocabulary is closed and several places
+hardcode it: the FSM's own `*_STATES` array; the run FSM's `RUN_SUCCESSORS` record (the item FSM
+spells its successors inside each `switch` arm instead); the expected-state list in its test file;
+the `state` enum in `core/types.ts`, which the single-source test pins and the JSON Schema export
+publishes; the `switch` in `legalTools` or, for an item position, the `nextStageTool` map; and the
+pin in [`core/vocab-registry.ts`](../../conductor/core/vocab-registry.ts), which also names the
+Python restatements no TypeScript change reaches. A change that misses any of them goes red rather
+than silently diverging, which is the point.
 
 Run the FSM tests through the canonical wrapper, never `node --test` directly:
 

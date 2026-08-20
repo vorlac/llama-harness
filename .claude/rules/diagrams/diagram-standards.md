@@ -9,17 +9,20 @@ Professional reference for creating diagrams in documentation. Examples use a **
 **Related docs:**
 - [mermaid-templates.md](mermaid-templates.md) - Copy-paste ready templates (TEMPLATE AUTHORITY)
 
-**Skills using these standards:**
-- `/generate-docs` — Documentation generation workflow
-- `/generate-gui` — GUI examples generation workflow
+**Where these standards apply:** every Mermaid block committed under `docs/` and in
+`README.md`.
 
 ---
 
 ## Compatibility Requirements
 
+Diagrams are read as plain Markdown — on GitHub and in an editor's preview. There is no
+documentation build step in this repository, so a diagram that renders only under a
+site generator renders nowhere.
+
 All diagrams must render correctly in:
 - **GitHub markdown** (native Mermaid support since Feb 2022)
-- **mdbook + mdbook-mermaid** (generated documentation)
+- Any editor preview using a stock Mermaid build
 
 **GitHub Mermaid limitations (critical):**
 - **fontFamily/fontSize are BLOCKED** — Security restriction (CVE-2022-31108), these values are ignored
@@ -176,7 +179,7 @@ flowchart TD
 | Architecture/flow | `flowchart TD` |
 | API interactions | `sequenceDiagram` |
 | Type relationships | `classDiagram` |
-| State transitions | `stateDiagram-v2` |
+| State transitions | `flowchart TD` — `stateDiagram-v2` theming is broken on GitHub |
 | Data model | `erDiagram` |
 | Timeline | `gantt` or `timeline` |
 | Distribution | `pie` |

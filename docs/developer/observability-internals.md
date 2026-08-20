@@ -21,7 +21,11 @@ the decision is re-derivable by calling the same core function with them. That i
 ```ts
 // conductor/adapter/tools.ts
 function denySnapshot(input: GateHookInput, reason: string): Record<string, unknown> {
-  const data: Record<string, unknown> = { toolName: input.toolName, args: input.args, reason };
+  const data: Record<string, unknown> = {
+    toolName: input.toolName,
+    args: input.args,
+    reason,
+  };
   if (input.command !== undefined) data.command = input.command;
   if (input.editPath !== undefined) data.editPath = input.editPath;
   return data;
@@ -52,16 +56,38 @@ logs you cannot grep by name are logs you cannot debug with.
 Widening the vocabulary means adding a name in that file — plus a test that greps for it —
 never inventing one at a call site.
 
-| Component       | Events                                                                                                                         | What it records                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `fsm`           | `transition`, `refusal`, `guard-reject`, `invalid-transition`                                                                  | run/item state movement, and every refusal to move                                         |
-| `gates`         | `deny`, `allow`, `snapshot`, `gate-crash`, `override-granted`                                                                  | gate dispositions, the §2.8 gate-crash anomaly, the budgeted override hatch                |
-| `fanout`        | `subsession.dispatched`, `subsession.hold`, `subsession.complete`, `subsession.retry`, `subsession.abort`                      | the sub-session lifecycle the fan-out engine drives                                        |
-| `evidence`      | `red`, `green`, `verify`                                                                                                       | one per evidence-ledger append; the names are the §2.6 evidence kinds                      |
-| `continuation`  | `reprompt`, `idle`, `disengage`                                                                                                | idle re-prompts and the futile-re-prompt wedge detector                                    |
-| `inject`        | `system-append`                                                                                                                | the doctrine + live-state append made to each request's system array                       |
-| `router-client` | `request`, `response`, `failover`, `retry`                                                                                     | request tagging and the fail-soft failover to the upstream base URL                        |
-| `state`         | `run.created`, `lock.acquired`, `lock.released`, `lock.stale-break`, `lock.contended`, `item.updated`, `user.midrun-prompt`, `decision.recorded`, `question.surfaced`, `run.stop-report` | run and lock lifecycle, item mutations, a prompt arriving mid-run, decision- and question-ledger appends, the §2.9 stop-report artifact |
+| Component       | Events                                                                                                                                                                                                                                                        | What it records                                                                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fsm`           | `transition`, `refusal`, `guard-reject`, `invalid-transition`                                                                                                                                                                                                 | run/item state movement, and every refusal to move                                                                                                                                                        |
+| `gates`         | `deny`, `allow`, `snapshot`, `gate-crash`, `override-granted`                                                                                                                                                                                                 | gate dispositions, the §2.8 gate-crash anomaly, the budgeted override hatch                                                                                                                               |
+| `fanout`        | `subsession.dispatched`, `subsession.hold`, `subsession.complete`, `subsession.retry`, `subsession.abort`                                                                                                                                                     | the sub-session lifecycle the fan-out engine drives                                                                                                                                                       |
+| `evidence`      | `red`, `green`, `verify`                                                                                                                                                                                                                                      | one per evidence-ledger append; the names are the §2.6 evidence kinds                                                                                                                                     |
+| `continuation`  | `reprompt`, `idle`, `disengage`                                                                                                                                                                                                                               | idle re-prompts and the futile-re-prompt wedge detector                                                                                                                                                   |
+| `inject`        | `system-append`                                                                                                                                                                                                                                               | the doctrine + live-state append made to each request's system array                                                                                                                                      |
+| `router-client` | `request`, `response`, `failover`, `retry`                                                                                                                                                                                                                    | request tagging and the fail-soft failover to the upstream base URL                                                                                                                                       |
+| `state`         | `run.created`, `lock.acquired`, `lock.released`, `lock.stale-break`, `lock.contended`, `item.updated`, `user.midrun-prompt`, `decision.recorded`, `question.surfaced`, `question.answered`, `run.stop-report`, `run.resumed`, `hook.failed`, `config.updated` | run and lock lifecycle, item mutations, a prompt arriving mid-run, decision- and question-ledger appends, the §2.9 stop-report artifact, a hook that could not do its work, and a `conductor_setup` write |
+
+Three component names and nine event names are additionally exported as **named constants**
+from the same file — `COMPONENT_FSM`, `COMPONENT_GATES`, `COMPONENT_FANOUT`, and the `fsm`,
+`gates` and `fanout` events — and spliced into the tables above. `conductor/tools/replay.ts`
+imports those symbols rather than restating the literals, so a rename moves in one place
+instead of silently blanking a replay lane while the vocabulary still claims reuse. One of
+the standing mutations (`replay-restate-event-literal`) exists to keep it that way.
+
+Four of the `state` names are worth naming individually, because each states a fact no
+other name states truthfully:
+
+| Event               | What it says that nothing else can                                                                                                                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `question.answered` | A question was answered, and through which channel (`via`, plus a derived `human` flag). Neither the ask nor the released items answer "what did a human actually decide".                                                                                                                                               |
+| `run.resumed`       | A resumable stop was cleared because the human answered the question the run was waiting on.                                                                                                                                                                                                                             |
+| `hook.failed`       | A conductor opencode hook could not do its conductor-side work. G5 swallows the throw so the session survives, which makes this record the only trace; `data.hook` names the hook.                                                                                                                                       |
+| `config.updated`    | `conductor_setup` wrote `.conductor/config.json`. `data.changes` carries the reconfigure diff and `data.answers` the values the call was answered with — including `acknowledgeNoTdd`, which has no config field to land in and would otherwise leave the one call that can turn the TDD law off with no trace anywhere. |
+
+Not every declared name is emitted. `router-client` lists four, and the module emits only
+`failover` and `response`; nothing anywhere writes `router-client`/`request` or
+`router-client`/`retry`. The vocabulary is a ceiling on what may be written, not a
+guarantee that each name occurs.
 
 `decision.recorded` shows the rule working. A `conductor_decide` or `conductor_defer`
 changes no run or item state, so borrowing `item.updated` would have made every decision
@@ -205,21 +231,32 @@ a log line that tells you a deny happened and one you can paste into a test.
 
 ## Sinks
 
-| Sink                                                  | Gets                                                                                          | Purpose                                     |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `runs/<runId>/journal.jsonl`                          | everything at or above the resolved per-component level, plus every `error`/`warn` regardless | machine-readable truth; the input to replay |
-| stderr, via opencode's log surface (`client.app.log`) | records at or above the console level, default `warn`, independent of the file threshold      | live debugging without opening files        |
-| `runs/<runId>/report.md`                              | a curated summary, written on **every** terminal stop                                         | the human's read                            |
-| llama-router: `spdlog` plus `metrics.jsonl`           | one line per proxied request                                                                  | wire truth, independent of the plugin       |
+| Sink                                        | Gets                                                                                          | Purpose                                     |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| stderr, before a run exists                 | **every** record, unfiltered, as one `console.error` per JSON object                          | the only sink that exists at plugin init    |
+| `runs/<runId>/journal.jsonl`                | everything at or above the resolved per-component level, plus every `error`/`warn` regardless | machine-readable truth; the input to replay |
+| `runs/<runId>/report.md`                    | a curated summary, written on **every** terminal stop                                         | the human's read                            |
+| llama-router: `spdlog` plus `metrics.jsonl` | one line per proxied request                                                                  | wire truth, independent of the plugin       |
 
-The console sink is an injected function, not a hard-wired `console.error`: `createJournal`
-takes `consoleFn` and calls it for every record at or above `warn`, plus any forced
-unknown-event record in production. Injection is what lets the tests assert on the console
+The journal is rebindable, and the two stages behave differently. Before a run exists, the
+plugin's journal facade forwards every record to a plain `console.error(JSON.stringify(…))`
+sink and applies **no level filter at all** — it is the only sink there is, so filtering
+would lose a record outright rather than downgrade it. Once a run directory exists,
+`bindRunJournal` points the facade at `createJournal(runDir, config, process.env)` and every
+record goes to the file instead. Pre-rebind records are not replayed into it: they belong to
+the workspace, not to the run.
+
+`createJournal` accepts an optional `consoleFn` as a fourth argument, called for every record
+at or above `warn` plus any forced unknown-event record in production. The composition root
+passes none, so **once a run exists there is no stderr mirror of journal records**; the
+console sink fires only in tests, where injection is what lets an assertion read the console
 stream without capturing process stderr.
 
 The router's ledger is deliberately not part of the journal. Its path is
-`metrics.ledgerPath` in the router config (default `.data/router/metrics.jsonl`), its level
-is `logging.level` there, and it records what the *wire* saw: model, role, group, priority,
+`metrics.ledgerPath` in the router config — an absolute path under `.data/router/` written
+by the config generator, so a router that inherited some other working directory cannot
+write an invisible ledger — its level is `logging.level` there, and it records what the
+*wire* saw: model, role, group, priority,
 queue-wait, upstream duration, token counts and timings from llama-server's `usage` and
 `timings` fields, `schemaMissing`, `schemaConformed`, and status. Because the router
 observes rather than enforces (G5), it is an independent conformance dataset produced by a
@@ -278,24 +315,41 @@ is written atomically during store init. Every gate assumes the plugin is loaded
 opencode logs a plugin factory throw and then continues completely ungated — so the beacon's
 *absence* is the proof that init failed. A missing doctrine pack is deliberately a startup
 error raised before the beacon is written, which keeps that inference sound. The
-operational rule that follows is the first rule of running conductor: no banner, no
-conductor.
+operational rule that follows is the first rule of running conductor: no beacon, no
+conductor. The plan's visible session banner is not wired — no module emits one — so the
+beacon file is the whole of that check.
 
-**The advisory run lock and the dead-holder rule.** `.conductor/state/run.lock` holds
-`{pid, startMs}`. A fresh claim uses an exclusive create (`wx`) so two cold starts that both
-saw no lock cannot both become writers. Against a lock that already exists:
+**The single-writer run lock and the dead-holder rule.** `.conductor/state/run.lock` holds
+`{pid, startMs, sessionID?, token?}`. The two optional fields are absent from a lock written
+by an older conductor or by a test fixture, and identity then falls back to pid and
+`startMs`. A fresh claim is written whole into a same-directory temp and published with
+`linkSync`, which is atomic and refuses to overwrite an existing name, so the OS decides the
+winner and two cold starts cannot both become writers. Against a lock that already exists:
 
-| Holder         | Test                                   | Outcome                                                           |
-| -------------- | -------------------------------------- | ----------------------------------------------------------------- |
-| Our own pid    | `existing.pid === pid`                 | overwrite in place; an idempotent re-open                         |
-| Dead           | `process.kill(pid, 0)` reports `ESRCH` | stale-break: journal `state/lock.stale-break` at `warn`, claim it |
-| Over-age       | `startMs` older than 24h, alive or not | stale-break, same path                                            |
-| Live and young | neither of the above                   | this conductor drops to read-only; the lock is left intact        |
+| Holder         | Test                                   | Outcome                                                                   |
+| -------------- | -------------------------------------- | ------------------------------------------------------------------------- |
+| Our own pid    | `existing.pid === pid`                 | adopt it as it stands; an idempotent re-open that does not move `startMs` |
+| Dead           | `process.kill(pid, 0)` reports `ESRCH` | stale-break: journal `state/lock.stale-break` at `warn`, claim it         |
+| Over-age       | `startMs` older than 24h, alive or not | stale-break, same path                                                    |
+| Live and young | neither of the above                   | journal `state/lock.contended` at `warn` and **throw** — the open ends    |
+
+A live young holder ends the open: this process gets **no store at all**, rather than a
+demoted read-only one whose write guards covered only a fraction of the store's mutating
+surface. The thrown error carries a `conductorCode` and names the holding pid, its session
+and how long it has held, so an operator is told what to close rather than left guessing.
+
+Winning the publication is not yet holding the lock. The definitive check is the self-verify
+that follows: the file on disk must carry this claim's own token. Winning the `linkSync` says
+only that the path was free at that instant; *being the identity the path names*
+is what makes this process the writer, so a displacement is caught there rather than one
+ledger mint later. Breaking a stale lock goes through an identity-keyed break right, so two
+processes racing to break the same lock cannot both proceed. The retry budget is eight
+passes, each of which claims, refuses, or removes one identity from play; exhausting it is
+itself a refusal, never a silent claim.
 
 The asymmetry is deliberate. `EPERM` and any other `kill` error count as *alive*, so a lock
 is never stolen from a process we cannot prove is dead — the independent over-age threshold
-is what stops a crashed opencode from wedging a workspace forever. A read-only store refuses
-`createRun` and never deletes the foreign lock on `release()`. The verify marker
+is what stops a crashed opencode from wedging a workspace forever. The verify marker
 (`verify-running-<tree>.json`) uses the identical rule with the same 24h ceiling, and a
 broken marker rides out on the verify outcome as an anomaly rather than inventing a journal
 event outside the closed vocabulary.
@@ -304,9 +358,16 @@ event outside the closed vocabulary.
 On its first file write, each journal instance checks the trailing byte once; if the file
 does not end in `\n` it prepends one, so the torn fragment is isolated on its own
 unparseable line and the new record stays a complete line. Readers are built for the same
-artifact: `readLastSeq` scans backwards past unparseable lines, the evidence `nextSeq` skips
+artifact: `readLastSeq` scans backwards past unparseable lines, `mintEvidenceSeq` skips
 them, and the decision-id mint reads raw text with a regex over `"id":"D-<n>"` rather than
 parsing lines — so a torn tail neither wedges the mint nor lets the next id collide with it.
+
+Every JSONL ledger read goes through `readJsonlTolerant` in
+[`adapter/jsonl.ts`](../../conductor/adapter/jsonl.ts), which skips unparseable lines and
+**counts** them rather than throwing. The question ledger is why: a strict reader turned a
+truncated `questions.jsonl` into a `SyntaxError`, which made a run uncloseable at exactly the
+moment a crash had just made it hard to close. Skipping silently would be worse than
+throwing, so the count rides out with the read and surfaces rather than vanishing.
 
 ## Levels and what they cost
 
@@ -337,25 +398,64 @@ CONDUCTOR_LOG=fanout:trace,gates:debug opencode
 
 Two readers consume all of this, one offline and one live.
 
-`conductor/tools/replay.ts` — which arrives with task 15.0 — renders a journal into a human
-timeline: per-item swimlanes, gate denials highlighted, a fan-out duration table, and review
-verdict tables, with `--component`, `--level`, and `--item` filters. It is built as pure
-render functions (journal lines in, rows out) with a thin argv/stdout shell at the bottom,
-so the rendering is unit-testable against a fixture journal:
+[`conductor/tools/replay.ts`](../../conductor/tools/replay.ts) renders a journal into a
+human timeline. It is built as pure render functions (journal lines in, rows out) with a
+thin argv/stdout shell at the bottom, so the rendering is unit-testable against a fixture
+journal:
 
 ```bash
 node conductor/tools/replay.ts .conductor/runs/r-20260807-a1b2 --component gates --level warn
 ```
 
+The output is six sections in a fixed order, every one present even when empty:
+
+| Section         | Contents                                                                                     |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `SOURCES`       | which files were read, and the filters applied                                               |
+| `SWIMLANES`     | one lane per item, plus a run lane for records with no `itemId`                              |
+| `DENIALS`       | every `gates/deny` and `gates/gate-crash`                                                    |
+| `FAN-OUT`       | sub-session dispatch/complete durations                                                      |
+| `REVIEW ROUNDS` | per-round subject, round/max, findings raised by severity, surviving majors, lenses, outcome |
+| `MALFORMED`     | every line that could not become a record, quoted verbatim with its 1-based line number      |
+
+`REVIEW ROUNDS` deliberately carries **no** per-finding uphold/overturn column, because the
+journal records no per-finding verdict — a table with one would be fabricating it, and a
+test pins its absence.
+
+What replay reads is the journal and nothing else: `<runDir>/journal.jsonl` plus its rotated
+archives `<runDir>/journal.N.jsonl.gz`. It never opens the run's ledgers or review files,
+writes nothing, and dispatches nothing. Ordering is **source order** — archives by ascending
+index, then the active journal, line order within each — never a sort by `seq` or `ts`,
+because rotation restarts `seq` at 1 and the same `seq` legitimately occurs twice in one
+run's history. The rendered row prints the recorded `seq` verbatim, duplicates included,
+because that is what a grep of the file will match. The three filters are `--component`,
+`--level` and `--item`; the exit codes are `0` rendered (an empty journal renders a
+zero-record notice and is still `0`), `1` no readable journal source at all, `2` usage
+error.
+
 `conductor_status` serves the live equivalent in-session and is strictly read-only — it
-mutates no persisted byte. It returns the run id and run state, the classification kind,
-one row per item (`id`, `state`, `blocked`, `deferred`), and the open questions by id, which
-is the same set the injection state block summarizes into every request.
+mutates no persisted byte. It returns the run id and run state, the classification kind, one
+row per item (`id`, `state`, `blocked`, `deferred`), and three question/delivery surfaces:
+
+- `openQuestions` — each with the repo-relative path an operator drops an answer file at. A
+  channel nobody is told about is a channel nobody uses.
+- `standingQuestions` — a human-territory question the model answered through the tool. The
+  answer is recorded but does not settle it, so the question leaves `openQuestions` while
+  the run it blocks stays stopped. Carrying it here is what stops status reporting "nothing
+  outstanding" over a run sitting on exactly that.
+- `deliveries` — one row per session that has received doctrine in this run, carrying its
+  role, the packs it received and a digest of their bytes. It is read back out of the
+  `inject`/`system-append` journal receipts, so it reports what **was** delivered rather
+  than what a fresh composition would produce at read time. The field is `[]` when nothing
+  has been delivered, never absent — an absent field and an empty list would otherwise say
+  the same thing.
 
 The router's ledger has its own readers: `/conductor/metrics` serves aggregates (counts,
-p50/p95 queue wait, token totals, schema-conformance rate), and the ftxui dashboard — which
-arrives with task 15.2 — tails the ledger for in-flight and queue lanes, group-affinity hits
-and schema-conformance markers, an optional build target with no runtime coupling.
+p50/p95 queue wait, token totals, schema-conformance rate), and the ftxui dashboard reads the
+ledger file for its lanes. The dashboard is the `conductor-dashboard` CMake target, `OFF` by
+default and with no runtime coupling to the router; its pure aggregation half
+(`dashboard/ledger_view.hpp`) is compiled into `router-tests` whether or not the TUI is
+built, so its logic is exercised on every C++ run.
 
 ## See also
 

@@ -74,8 +74,8 @@ is in [models](../user/models.md).
 
 ## Why one server for every model instead of one process each?
 
-One `llama-server` in router mode reads the generated INI, publishes every installed model
-at `/v1/models`, and loads or unloads weights on demand:
+One `llama-server` in multi-model mode reads the generated INI, publishes every installed
+model at `/v1/models`, and loads or unloads weights on demand:
 
 ```bash
 llama-server --models-preset .data/configs/llama-models.ini --models-max 1 --models-autoload
@@ -83,6 +83,10 @@ llama-server --models-preset .data/configs/llama-models.ini --models-max 1 --mod
 
 `--models-max 1` keeps one model resident, which is what makes switching models in opencode's
 picker transparent; one process per model would hold several 25 GB models resident at once.
+`scripts/serve.py` adds `--host`, `--port`, `--jinja` and the slot sizing on top of that line:
+`--parallel <slots>` with a total `--ctx-size` of 8192 tokens per slot, where slots comes from
+`--max-readers` (6 by default). `--ctx-size` is llama-server's *total* context divided among
+slots, so the per-model `ctx-size` in the INI is overridden whenever more than one slot runs.
 
 ## What does "fits" versus "tight" actually mean?
 
@@ -159,6 +163,9 @@ Constraint G8: the main session coordinates, sub-sessions implement. Its `edit` 
 `"ask"` and the plugin rejects every ask not covered by an active `conductor_inline_claim`.
 When inline work is genuinely right, the claim tool scopes the orchestrator's edit permission
 to one item's `fileScope` and records that it happened; the item FSM still applies in full.
+The claim is itself a scored decision — it takes `{itemId, reason, options, choice}` and is
+refused without at least two options scored on the minimality ladder, because "do it inline"
+only means something against "dispatch it".
 
 ## Why is a test that passes immediately rejected?
 
@@ -183,16 +190,25 @@ asks for that list rather than defaulting it.
 
 Because there is no implementation yet, and that is the point. The `RED → TEST_VETTED` critics
 get the item spec, the test diff, and the captured red output only, so they cannot be anchored
-by code that already passes. Their lenses are fixed: asserts observable behavior rather than
-internals, would fail for a subtly-wrong implementation, right level, pins acceptance, and an
-anti-pattern scan.
+by code that already passes. Their five criteria are fixed and come from one list that also
+generates the schema their reply is validated against and the checklist the doctrine pack
+teaches: asserts observable behavior rather than internals, would fail for a subtly-wrong
+implementation, right level, pins this item's acceptance, and an anti-pattern scan. A critic
+that fails a criterion but leaves `mustFix` empty has a repair line generated for it — the
+item cannot advance on that self-contradiction.
 
 ## Why do findings have to survive skeptics?
 
 Because a 27B reviewer that upholds garbage findings costs real fix-loop rounds (honest limit
 5), and the cheapest defense is a second, independent opinion with the opposite posture. Each
 finding faces `skepticsPerFinding` refuters in fresh sessions and survives only if upholds ≥
-`⌈k/2⌉`; only survivors block the item.
+`⌈k/2⌉`; only survivors block the item. A refutation counts as one only when it names all
+three of the discriminating input, what was run, and the reading under which the finding
+fails; a refutation without that evidence is an *abstention*, and an abstention counts with
+the upholds — incapacity does not get to convert itself into a verdict. A
+`skepticsPerFinding` of `0` is schema-valid but unusable: the moment a round raises a finding to
+adjudicate, plan review and item review both refuse rather than run the survival test, because
+with no seats it would be vacuously true and every major would auto-survive.
 
 ## Why does a tie uphold a finding?
 
@@ -202,12 +218,17 @@ arguable claim earns a fix round rather than a dismissal.
 
 ## What is taint, and why is the override budgeted?
 
-`conductor_override {gate, reason}` is the deliberate escape hatch: it checks the budget,
-records an anomaly, appends to the item's `taint[]`, and disables the named gate for exactly
-one next action in the same session. Taint is permanent for the run and headlined in
-`report.md`. It is budgeted at `maxOverridesPerItem: 1` and `maxOverridesPerRun: 2` because
-the bookkeeping cost is paid by the *human* at reading time, not by the model during the run.
-Over budget is an `env` stop: a gate that needs overriding twice in one run is a bug.
+`conductor_override {gate, reason, grantedAction}` is the deliberate escape hatch: it checks
+the budget, records an anomaly, appends to the item's `taint[]`, and disables the named gate
+for exactly one next denied action in the same session and on the same item. `grantedAction` is
+the action the caller declares it is spending the override on — it is recorded in the anomaly,
+the taint entry and the journal, but the grant itself is spent by the first decision that gate
+makes. `gate` is a closed vocabulary of `session`, `git` and `edit`; any other name is
+refused before the budget is touched, so a misspelling costs nothing. Taint is permanent for
+the run and headlined in `report.md`. It is budgeted at `maxOverridesPerItem: 1` and
+`maxOverridesPerRun: 2` because the bookkeeping cost is paid by the *human* at reading time,
+not by the model during the run. Over budget is an `env` stop: a gate that needs overriding
+twice in one run is a bug.
 
 ## Why is quarantine outside the repository?
 
@@ -248,11 +269,48 @@ output is the fan-out engine's job, and it runs in both configurations.
 ## What happens if the plugin fails to load?
 
 opencode logs the failure and continues completely ungated — verified against the installed
-binary, not assumed. Nothing in the session betrays the absence. So the plugin writes
-`.conductor/state/alive.json` at init and the orchestrator's first response carries a
-one-line banner, and the first rule of operations is: **no banner, no conductor**. A missing
-doctrine pack is a startup error raised *before* the beacon is written, so the beacon's
-absence proves init failed.
+binary, not assumed. Nothing in the session betrays the absence. So the plugin writes a
+liveness beacon, `.conductor/state/alive.json`, carrying the `pid`, `startMs`, `version` and
+`sessionID` of the process that opened the workspace, and the first rule of operations is:
+**no beacon, no conductor**. A beacon whose `pid` is not running, or whose `sessionID` is not
+the session in front of you, is somebody else's conductor. A missing doctrine pack is a
+startup error raised *before* the beacon is written, so the beacon's absence proves init
+failed. The visible in-session banner the design also calls for is not wired; the beacon is
+the check that works. See [operations](../../conductor/docs/OPERATIONS.md).
+
+## What happens if I open a second conductor session in the same repository?
+
+The second one is refused, not quietly downgraded. `.conductor/state/run.lock` is an
+OS-level single-writer lock — claimed with `linkSync`, which the kernel will not let a second
+caller overwrite — holding the holder's `pid`, `startMs` and `sessionID`. A second conductor
+session opening the same workspace throws, the plugin catches it and hands that session a null
+workspace, and it does no conductor-side work at all: no lock, no evidence, no state writes.
+The refusal is loud — a `lock.contended` record at error level naming the holder.
+
+A held lock breaks automatically on the next open in three cases: the holder's `pid` is not
+alive, the lock is older than 24 hours (measured from the holder's `startMs`), or the
+lock file cannot be parsed at all — an unreadable lock is evidence of nothing. All three are the
+ordinary way back in after a crash or an abandoned session, so there is normally nothing to
+delete by hand. This says nothing
+about a second, *plain* opencode session started without the harness — that one loads no
+plugin, takes no lock, and is invisible. See [operations](../../conductor/docs/OPERATIONS.md).
+
+## Where does conductor keep its state, and does it touch my repository?
+
+Runtime state lives in `.conductor/` at the repo root: `config.json`, a `state/` directory
+holding the current-run pointer, the liveness beacon, the run lock and the cross-run stale-red
+registry, and one self-contained directory per run under `runs/<runId>/` with the run and item
+records, `queue.json`, `plan.md`, `report.md`, the `answers/` drop directory, and the journal,
+evidence, decision, anomaly, question and prepared-batch ledgers. Nothing in a gated session may
+write there — the edit gate denies every path
+under `.conductor/**`, handlers are the only writers.
+
+It does not touch your tracked files. The first time conductor opens a repo it registers the
+`.conductor/` prefix in `info/exclude` under the repository's common git directory, so the
+directory is ignored without editing the project's own `.gitignore`. Two things deliberately
+live *outside* the repo, under `$XDG_STATE_HOME` (or `~/.local/state`): the quarantine of
+moved-aside red tests, and the per-item worktrees. Both would otherwise be walked by the
+target's own test command.
 
 ## Why can the model not spawn its own sub-agents?
 
@@ -290,11 +348,25 @@ in code it never wrote.
 
 ## How do I unblock a run that is waiting on a question?
 
-Answer it. `conductor_answer {questionId, answer}` records the answer, unblocks every item
-that named that question, and journals the event — that is how a human resumes a blocked or
-surfaced run without hand-editing state. Conductor only asks about human territory: taste,
-money, irreversible external commitments, secrets, and genuine ties at the bottom of the
-decision ladder. It never asks "shall I proceed?", and never for a derivable answer.
+Answer it, through one of two channels. Writing the answer into the file the question names —
+`.conductor/runs/<runId>/answers/<questionId>.md`, a path `conductor_surface` and
+`conductor_status` both print — is the **human-file** channel, and it is the only one that
+counts as a human having spoken. `conductor_answer {questionId, answer}` is the **tool**
+channel, the model relaying an answer it was given; the record keeps the channel it arrived
+on so a reader can tell the two apart.
+
+Either channel records the answer, releases the items that question blocked, and journals
+`question.answered`. Two edges are worth knowing. An item that a *second* still-open question
+also names is re-blocked on the oldest of those rather than released, so first-block-wins
+hands off instead of leaking. And a run that stopped waiting on a **human-territory** question
+is revived only by the file: a tool answer is recorded, and the report shows the question as
+answered but still standing, because the escalation the stop exists to force would otherwise
+be a two-call formality the model could perform on itself.
+
+Conductor only asks about human territory: taste, money, irreversible external commitments,
+secrets, and genuine ties at the bottom of the decision ladder. It never asks "shall I
+proceed?", and never for a derivable answer. An empty or whitespace-only answer file is not an
+answer — the question stays open — so a stray `touch` cannot release anything.
 
 ## Does conductor work with a cloud model?
 
@@ -302,8 +374,10 @@ Not in the base build. Nothing in the enforcement layer touches weights — the 
 calls and sessions — but the surrounding machinery assumes the local stack: setup validates
 `models.default` against the live `/v1/models` list, `serve.py` and llama-router are built
 around the local `llama-server`, and G13 requires one model for every role. The `models.roles`
-map is accepted by the schema, but a non-empty map logs a warning at init and sits outside the
-tested surface.
+map is read — the fan-out engine resolves each job's model as
+`models.roles[role] ?? models.default` and groups the queue by resolved model so one weight
+load serves a whole batch — but the base build ships it empty by convention, and a non-empty
+map is outside the tested surface. Nothing mechanically enforces that it stay empty.
 
 ---
 
@@ -323,14 +397,22 @@ bash scripts/test-conductor.sh 'conductor/tests/gates-*.test.ts'
 It parses the TAP trailer and fails unless `tests > 0` and `fail`, `cancelled`, `skipped`, and
 `todo` are all zero, and unless no `# SKIP`/`# TODO` directive appears at any subtest depth —
 describe-level skips are invisible to the trailer counts. It then runs `tsc --noEmit`, the Bun
-smoke, and regenerates the JSON Schemas.
+smoke, regenerates the JSON Schemas into `router/tests/schemas/`, and runs the Python suite with
+`/usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py'`, failing if that leg discovers
+zero tests — the same vacuous-green hole the node leg exists to close. Four legs hard-fail the
+gate; the bun leg is skipped with a loud warning when `bun` is missing.
+A failing run keeps its scratch output at a path it prints instead of deleting it.
 
 ## Why does the plugin have zero runtime dependencies?
 
 Constraint G1. opencode loads the `.ts` source directly, so there is no bundler and no build
-step, and `@opencode-ai/plugin` is a types-only dev dependency. A runtime dependency is a
-thing that can fail to resolve inside somebody else's session, and a plugin that fails to load
-is a session that runs completely ungated.
+step, and `conductor/package.json` declares no `dependencies` at all — `@opencode-ai/plugin`,
+`@types/node` and `typescript` are dev dependencies, types and tooling only. A runtime
+dependency is a thing that can fail to resolve inside somebody else's session, and a plugin
+that fails to load is a session that runs completely ungated. Nothing reads `package.json` to
+enforce this. What is mechanically guarded is narrower: a purity test pins `core/` to relative
+`.ts` imports that resolve inside `core/` and to no runtime module at all, and scans `adapter/`
+and `plugin/` for single-runtime APIs and unsanctioned subprocess use.
 
 ## Why erasable TypeScript only?
 
@@ -360,39 +442,48 @@ the build. One smoke test runs the state store and journal assertions under Bun,
 
 Because a bare `cmake --build` also compiles the whole vendored `extern/llama-cpp` tree. The
 subtree is added with `add_subdirectory` so its configure runs, but nothing here links it —
-`llama-router` proxies to a separately-launched `llama-server` and needs neither `llama` nor
-`ftxui` — so that build is minutes spent on artifacts no target consumes. Always name the
-target; the valid ones are `llama-router`, `router-tests`, and `membench`:
+`llama-router` proxies to a separately-launched `llama-server` and needs no inference library
+— so that build is minutes spent on artifacts no target consumes. Always name the target; the
+committed ones are `llama-router`, `router-tests` and `membench`, plus `conductor-dashboard`
+when you configure with `-DCONDUCTOR_DASHBOARD=ON` (it is the only target that links `ftxui`,
+which is why it is off by default):
 
 ```bash
 cmake --build .out/build/clang-relwdebinfo --target llama-router
 ```
 
-## Why does every C++ include name a path under `src/`?
+## Why does every C++ include name a path from the repository root?
 
-Because `src/` is the only user-code include root on both C++ targets, so an include names
-where the header actually lives regardless of which file includes it:
-`#include "router/version.hpp"`, never `#include "version.hpp"`. The rule applies to every
-file under `src/`, headers included.
+Because the repository root is the only user-code include root, and every target that includes
+an in-workspace header — `llama-router`, `router-tests`, `conductor-dashboard` — gets it and
+nothing else, so an include names where the header actually lives regardless of which file
+includes it: `#include "router/version.hpp"`, never `#include "version.hpp"`. The rule applies
+to every file under `router/` and `dashboard/`, headers included. `tools/membench` is one
+self-contained translation unit that includes nothing from the workspace and sets no include
+root at all.
 
 ## Where do the JSON Schemas come from, and why are two languages reading them?
 
 `conductor/core/types.ts` is the single source: every schema in the plan exists there as a
 TypeScript type and a JSON Schema. `conductor/tools/export-schemas.ts` writes them out to
-`src/tests/schemas/` (gitignored) so the C++ router's validator checks bodies against the same
-definitions the plugin enforces, not a hand-copied second version. The export runs as part of
-`scripts/test-conductor.sh`. See [schemas](../developer/schemas.md).
+`router/tests/schemas/` (gitignored, so there is nothing to keep in sync by hand) and the C++
+router's validator checks bodies against the same definitions the plugin enforces, not a
+hand-copied second version. The export runs as part of `scripts/test-conductor.sh`. See
+[schemas](../developer/schemas.md).
 
 ## How do I add a new conductor tool, doctrine pack, or review lens?
 
-A tool is a pure decision function in `core/`, a legality row in `core/gates-phase.ts`, and a
-handler in `adapter/tools.ts` that checks legality, re-derives its own evidence, writes state
-and journal atomically, and returns a compact result — handlers are the only writers of run
-and item state. A doctrine pack is a markdown file in `conductor/doctrine/` under 120 lines,
-plus the delivery signal in `adapter/inject.ts` that appends it for the right role; a pack
-loaded but injected to no session is dead weight. A review lens extends the item-review lens
-set, where the five mandatory lenses are never truncated. See
-[extending](../developer/extending.md).
+A tool is a pure decision function in `core/`, a row in `core/tool-legality.ts` declaring who
+may call it and in which run states (a stage tool also needs its phase edge in
+`core/gates-phase.ts`; a tool with no row at all is refused), and a handler in
+`adapter/tools.ts` that re-derives its own evidence, writes state and journal atomically, and
+returns a compact result — handlers are the only writers of run and item state. A doctrine
+pack is a markdown file in `conductor/doctrine/` under 120 lines, plus a section profile in
+`core/mechanics.ts` (without one the generated block cannot render), the pack's filename in
+`conductor/tools/generate-mechanics.ts`, and the delivery signal in `adapter/inject.ts` that
+appends it for the right role; a pack loaded but injected to no session is dead weight. A
+review lens extends the item-review lens set, where the five mandatory lenses are never
+truncated. See [extending](../developer/extending.md).
 
 ---
 
@@ -402,8 +493,8 @@ set, where the five mandatory lenses are never truncated. See
 
 They describe the system as designed. The plan is the specification and the code is the
 reality; where they differ, the code wins and the deviation is recorded in
-[HANDOFF.md](../build/HANDOFF.md) and [STATE.json](../build/STATE.json). One older document,
-`docs/prompt-lifecycle.md`, is marked stale by HANDOFF and should not be read as current.
+[HANDOFF.md](../build/HANDOFF.md) and [STATE.json](../build/STATE.json), and these pages
+describe the code.
 
 ## Where do I read the design?
 

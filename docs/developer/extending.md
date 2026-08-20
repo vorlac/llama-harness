@@ -29,33 +29,53 @@ Never run `node --test` directly for a gate decision. A directory positional res
 and produces a bogus `MODULE_NOT_FOUND` that looks exactly like a legitimate red, and a glob
 matching zero files exits 0 — a vacuous green. The wrapper parses the TAP trailer and fails unless
 `tests > 0` and `fail`, `cancelled`, `skipped`, and `todo` are all zero, with no `# SKIP`/`# TODO`
-directive at any subtest depth. A green run of it is four things, not one: the trailer,
-`tsc --noEmit`, the Bun dual-runtime smoke, and the JSON Schema regeneration into
-`router/tests/schemas/`.
+directive at any subtest depth. A green run of it is five things, not one: the trailer,
+`tsc --noEmit`, the Bun dual-runtime smoke, the JSON Schema regeneration into
+`router/tests/schemas/`, and the Python `unittest` leg over `scripts/`.
 
 ## Add a `conductor_*` tool
 
 **What you are adding.** One more way to advance the state machine. There is no other way to
 advance it: handlers are the only writers of run and item state.
 
-**Files, in order.**
+**Files, in order.** Seven of them, and the last three are the ones people forget.
 
 1. [`conductor/tests/gates-phase.test.ts`](../../conductor/tests/gates-phase.test.ts) — the
    legality row, as a case. Then a handler test alongside the existing
    `conductor/tests/tools-*.test.ts` files.
 2. [`conductor/core/gates-phase.ts`](../../conductor/core/gates-phase.ts) — a name constant and
-   the row that legalizes it. This file names only the tools it can legalize; the four hatch and
-   maintenance tools (`conductor_queue_amend`, `conductor_inline_claim`, `conductor_override`,
-   `conductor_forget_stale`) are absent from it deliberately.
-3. [`conductor/adapter/tools.ts`](../../conductor/adapter/tools.ts) — add the exact name to
-   `CONDUCTOR_TOOL_NAMES`, then write `handleYourTool`.
-4. [`conductor/core/journal-events.ts`](../../conductor/core/journal-events.ts) — register any new
+   the row in `legalTools` that legalizes it. This file names only the tools it can legalize; the
+   four hatch and maintenance tools (`conductor_queue_amend`, `conductor_inline_claim`,
+   `conductor_override`, `conductor_forget_stale`) are absent from it deliberately.
+3. [`conductor/core/tool-legality.ts`](../../conductor/core/tool-legality.ts) — a `TOOL_LEGALITY`
+   row: the `phase` rule from the closed `PHASE_RULES` vocabulary saying where in the run the tool
+   may be called, and the `callers` set saying who may call it. This is the one legality
+   declaration every `conductor_*` call passes through; a name with no row is refused rather than
+   run, and [`tool-legality.test.ts`](../../conductor/tests/tool-legality.test.ts) asserts the
+   table's keys are exactly `CONDUCTOR_TOOL_NAMES`.
+4. [`conductor/adapter/tools.ts`](../../conductor/adapter/tools.ts) — add the exact name to
+   `CONDUCTOR_TOOL_NAMES` (22 names today), then write `handleYourTool`.
+5. [`conductor/core/tool-bindings.ts`](../../conductor/core/tool-bindings.ts) — a `TOOL_BINDINGS`
+   entry naming the handler function, its input interface, the `infrastructure` fields the
+   composition root supplies from its own context (`store`, `runId`, `config`, `journal`,
+   `fanout`, …), and any `fixed` field the root pins to a constant.
+   [`tool-binding.test.ts`](../../conductor/tests/tool-binding.test.ts) then enforces that the
+   handler's *required* input fields are exactly the declared args ∪ infrastructure ∪ fixed. A
+   tool with no handler yet is declared `null` here, and the guard asserts that null-ness against
+   the adapter source — so the moment the handler is exported, the guard reds until its binding
+   is declared.
+6. [`conductor/core/journal-events.ts`](../../conductor/core/journal-events.ts) — register any new
    event name under its component. `isKnownEvent` is checked on every journal write, so an
    unlisted name is caught at its source rather than leaking under a name no test can grep.
-5. [`conductor/plugin/index.ts`](../../conductor/plugin/index.ts) — a `specs` entry: a one-line
-   description and the zod arg shape built from `tool.schema`. The tool map is built *from*
-   `CONDUCTOR_TOOL_NAMES`, so a name you forget here still registers, with an argument-free
-   definition.
+7. [`conductor/plugin/index.ts`](../../conductor/plugin/index.ts) — a `specs` entry: a one-line
+   description and the zod arg shape built from `tool.schema`, plus the binding that assembles
+   the handler's input from the dependency bundle.
+
+**The `specs` entry is not optional.** The tool map is built *from* `CONDUCTOR_TOOL_NAMES`, so a
+name absent from `specs` still registers — with a fallback `ToolSpec` carrying no arguments and
+the description `Conductor tool <name>.` A tool registered that way is reachable and useless, and
+[`wiring-manifest.test.ts`](../../conductor/tests/wiring-manifest.test.ts) refuses any registered
+tool still carrying that template. Forgetting the spec is a red, not a silent degradation.
 
 **The handler's four obligations.** In this order, every time:
 
@@ -71,8 +91,19 @@ advance it: handlers are the only writers of run and item state.
    `evidence.jsonl`.
 4. **Return a compact result** — the shape the model reads back. Small, and named.
 
-**Gates.** `bash scripts/test-conductor.sh`. `gate-wiring.test.ts` asserts that the names the
-plugin registers are exactly the inventory, so a rename in one place is a red in the other.
+**Gates.** `bash scripts/test-conductor.sh`. Four guards will speak up if any of the seven files
+is missed:
+
+- [`wiring-manifest.test.ts`](../../conductor/tests/wiring-manifest.test.ts) constructs the real
+  plugin and asserts the registered tool-map keys equal `CONDUCTOR_TOOL_NAMES`, each carrying a
+  real (non-fallback) `ToolSpec`. It is the completeness index over the whole wiring; the manifest
+  it checks against is [`conductor/core/wiring-manifest.ts`](../../conductor/core/wiring-manifest.ts).
+- [`tool-binding.test.ts`](../../conductor/tests/tool-binding.test.ts) checks the binding table
+  against the handler's real signature.
+- [`tool-legality.test.ts`](../../conductor/tests/tool-legality.test.ts) checks that the tool
+  passes through the one legality choke point rather than reaching its handler unguarded.
+- [`gate-wiring.test.ts`](../../conductor/tests/gate-wiring.test.ts) checks the gate hook's own
+  registration, so a rename in one place is a red in the other.
 
 **The trap.** Every handler lives in one file. Two queue items that each add a tool therefore
 share a `fileScope`, `scopesIntersect` reports a conflict, and the wave scheduler will never put
@@ -89,6 +120,14 @@ bug in the scheduler — plan for it when you decompose.
 
 **Files, in order.** The test file for that gate, then the core module. Nothing else — if a gate
 change needs an adapter change, the decision has leaked out of the core.
+
+**One caveat on `legalTools`' signature.** It takes five parameters —
+`legalTools(run, items, questions, repoConfigured, publishEnabled = true)` — and the fifth is
+optional only because a required one is not assignable to the type the publish/report suite pins.
+The danger an optional flag carries, a call site silently inheriting "publish is available", is
+removed by construction instead: every production call site passes it explicitly, and
+[`legaltools-callsites.test.ts`](../../conductor/tests/legaltools-callsites.test.ts) reads the
+*source* and fails if one stops. If you add a call site, pass all five.
 
 **The table-row-as-test discipline.** Each row of the matrix is one case, and the git suite is
 biased toward proving deny for a stated reason: a missing allow row only annoys a model, which
@@ -112,8 +151,10 @@ denies. Write that case first; it is the one that fails when the widening is too
 then the whole suite.
 
 **The trap.** Two of them. Match parsed tokens, never a substring regex — detection has to see
-through env-assignment prefixes, one wrapper (`env`/`command`/`sudo`/`builtin`/`exec`), and path
-basenames. And the fail-closed disposition is decided by a `guarded` flag computed from the *real*
+through env-assignment prefixes, the wrapper set the gate you are touching owns, and path
+basenames. The two sets differ: the git gate strips one level of
+`env`/`command`/`sudo`/`builtin`/`exec`, while the edit gate's write-shape extractor strips a
+twelve-name set repeatedly and recurses into a shell's `-c` string to eight levels. And the fail-closed disposition is decided by a `guarded` flag computed from the *real*
 parse (a git segment present, a write shape present, or the tool itself writes, advances state, or
 spawns), not from the gate that crashed — so a new gate guarding something the flag cannot see
 fails *open* on a crash.
@@ -130,12 +171,29 @@ approximately never.
    that pins the pack's normative sentences verbatim. Anchors are what stop a pack from drifting
    into vague encouragement.
 2. `conductor/doctrine/<name>.md` — the pack itself.
-3. [`conductor/adapter/inject.ts`](../../conductor/adapter/inject.ts) — add the filename to
+3. [`conductor/core/mechanics.ts`](../../conductor/core/mechanics.ts) — a `PACK_SECTIONS` profile
+   naming which generated sections the pack carries. Without one `renderMechanics` **throws**, so
+   the pack cannot be generated at all.
+4. [`conductor/tools/generate-mechanics.ts`](../../conductor/tools/generate-mechanics.ts) — add the
+   filename to its `PACKS` list, a second nine-name list that has to move with the first.
+5. [`conductor/adapter/inject.ts`](../../conductor/adapter/inject.ts) — add the filename to
    `REQUIRED_PACKS`, and to `ROLE_PACKS` for the role that receives it.
 
-**The length ceiling.** 120 lines, asserted for every pack. The current nine run 56–102 lines. No
-pack may carry a placeholder marker (`TODO`, `TBD`), and none may name a client — `opencode`,
-`claude`, and `cursor` are all forbidden strings, because model-facing text is client-agnostic.
+**Every pack carries a generated block.** Between `<!-- BEGIN GENERATED MECHANICS -->` and its
+matching end marker sits text derived from the code — the tool inventory, the item-state
+sequence, the read-set budget numbers — rendered by `core/mechanics.ts` and written by
+`tools/generate-mechanics.ts`. Hand-editing inside those markers fails
+[`doctrine-mechanics.test.ts`](../../conductor/tests/doctrine-mechanics.test.ts). The point is
+that a number the prose would otherwise hand-type — `ITEM_MAX_FILES`, the read-set token budget —
+is derived from its single source instead, and a guard fails the pack if the prose reintroduces a
+hand-typed copy.
+
+**Two ceilings.** 120 lines per pack, asserted for every pack; and 6500 bytes, which matters
+because the packs ride in every request's system array. The nine run 82–116 lines, and
+`decompose.md` and `core.md` sit within single-digit bytes of the byte budget — there is no room
+for a tenth pack's worth of prose in either. No pack may carry a placeholder marker (`TODO`,
+`TBD`), and none may name a client — `opencode`, `claude`, and `cursor` are all forbidden strings,
+because model-facing text is client-agnostic.
 
 **The role that receives it, and the signal that delivers it.** `ROLE_PACKS` maps a role to its
 pack list; `append[0]` is the primary doctrine and the live state block is always last. Delivery
@@ -148,10 +206,17 @@ test.
 `inject.test.ts`, then the suite.
 
 **The trap.** `REQUIRED_PACKS` and `ROLE_PACKS` are different lists, and only the first is
-fail-closed. `receive-review.md` is loaded and cached at init but no role list names it — it is
-present, valid, and undelivered. Adding a pack to `REQUIRED_PACKS` alone gets you a startup
-requirement, not an injection. Adding it to neither and referencing it from `ROLE_PACKS` gets you
-a silently skipped pack: `buildSystemAppend` appends only packs it finds in the cache.
+fail-closed. Adding a pack to `REQUIRED_PACKS` alone gets you a startup requirement, not an
+injection. Adding it to neither and referencing it from `ROLE_PACKS` gets you a silently skipped
+pack: `packTextsFor` contributes only packs it finds in the cache, and a missing one adds nothing
+rather than an `undefined` string.
+
+Two of the nine packs are delivered by a **signal** rather than by a role, which is the shape to
+copy for a conditional pack. `debug.md` is appended when the session's role is `implementer` *and*
+its active item carries the debugging annotation. `receive-review.md` is appended when the
+registry entry carries `receivingReview` — the mark the review-fix routing puts on exactly the
+dispatches that receive review findings, so the same item's other dispatches get nothing extra.
+Both are secondary: the role's primary pack stays `append[0]` and the live state block stays last.
 
 ## Add a review lens
 
@@ -230,6 +295,13 @@ injection tables use `testWriter`, the edit gate uses `test-writer`, and the ope
 `core.md`, temperature 0.4, and `interactive` priority with no error anywhere. Only the edit gate
 fails loudly, by denying. Write the injection test first; it is the one that catches the typo.
 
+Since the three `ROLE_*` maps are hand-maintained parallel tables,
+[`core/vocab-registry.ts`](../../conductor/core/vocab-registry.ts) registers them as restatement
+sites of one vocabulary and
+[`vocab-registry.test.ts`](../../conductor/tests/vocab-registry.test.ts) fails on a role present in
+one map and absent from another. That guard catches the omission; it does not catch a
+*misspelling* consistent across all three, which is what the injection test is for.
+
 ## Add a schema
 
 **What you are adding.** A new payload shape that both TypeScript and the router agree on.
@@ -269,10 +341,8 @@ extra field turns into a schema rejection and a re-prompt. Decide which one you 
 
 ## Add a router module
 
-*The router today parses its config and reports its version; the proxy, admission control,
-affinity, schema observation, and metrics modules land at tasks 11.3–11.8.*
-
-**What you are adding.** A C++23 translation unit under `router/`.
+**What you are adding.** A C++23 header under `router/`. Every module there is header-only, so
+the binary and the test suite share one compile without a library target in between.
 
 **Files, in order.**
 
@@ -280,14 +350,15 @@ affinity, schema observation, and metrics modules land at tasks 11.3–11.8.*
    produce. `router/tests/config_test.cpp` is the model: it opens with the target header's full
    declaration in a comment block, and every name in it is asserted below.
 2. `router/<name>.hpp` (and `.cpp` if it needs one).
-3. [`CMakeLists.txt`](../../CMakeLists.txt) — add sources to the `router-tests` source list, and to
-   `llama-router` if the binary needs them. The doctest binary is registered whole:
-   `add_test(NAME router-tests COMMAND router-tests)`.
+3. [`CMakeLists.txt`](../../CMakeLists.txt) — add the test file to the `router-tests` source list.
+   A header-only module needs no entry in `llama-router`'s source list; only a `.cpp` would. The
+   doctest binary is registered whole: `add_test(NAME router-tests COMMAND router-tests)`, so
+   `ctest` reports one test whatever the case count.
 
-**The include rule.** `src/` is the only user-code include root on both targets, so every
-in-workspace header is included by its full path relative to `src/`: `#include "router/config.hpp"`,
-never `#include "config.hpp"`. An include then names where the header actually lives, no matter
-which file includes it.
+**The include rule.** The **repo root** is the only user-code include root on every target, so
+every in-workspace header is included by its full path from the root:
+`#include "router/config.hpp"`, never `#include "config.hpp"`. An include then names where the
+header actually lives, no matter which file includes it.
 
 **The constraint every new module inherits.** The router is fail-soft and it *observes*. It never
 returns a status the direct path would not have returned; its schema guard records and does not
@@ -301,10 +372,19 @@ cmake --build .out/build/clang-relwdebinfo --target router-tests
 ctest --test-dir .out/build/clang-relwdebinfo
 ```
 
-**The trap.** Build only `--target llama-router`, `--target router-tests`, or `--target membench`.
-A bare `cmake --build` also compiles the whole vendored `extern/llama-cpp` tree, which no target
-here links. The other trap is validation shape: parse against the schema file
-you are handed, never a copy of the shape baked into the parser.
+**The trap.** Build only a named target — `llama-router`, `router-tests`, `membench`, or
+`conductor-dashboard` when it has been configured on. A bare `cmake --build` also compiles the
+whole vendored `extern/llama-cpp` tree, which no target here links.
+
+The other trap is validation shape: parse against the schema **file** you are handed, never a copy
+of the shape baked into the parser. `router/tests/schemas/` is generated from
+`conductor/core/types.ts` and gitignored; a second copy of a schema is the drift the export step
+exists to prevent. And note that the parser, not the schema, owns every range limit — the exported
+schema types each number as a bare `number` — so a new bound goes in `parseRouterConfig` beside
+the existing port and admission checks.
+
+One more: `AUTOFORMAT_SRC_ON_CONFIGURE` defaults to **`ON`**, so configuring reformats your
+working tree in place. Configure before you start editing, not after.
 
 ## Support a new verify ecosystem
 
@@ -463,14 +543,22 @@ report instead. Keep `workflow.itemReviewers` at its default of 6 so every lens 
 session — 6 is also the ceiling, since sessions are `clamp(itemReviewers, 3, 6)` — and raise
 `skepticsPerFinding` and `reviewMaxRounds` to taste.
 
-**Do not change.** The item FSM. `REVIEWED` is a position, not a terminus, and this is where a
-review-only workflow meets real friction: `conductor_report` is legalized only when *every* item
-is settled, and `isSettled` in [`gates-phase.ts`](../../conductor/core/gates-phase.ts) counts
-exactly three dispositions — `PUBLISHED`, blocked, or deferred. A workflow whose items genuinely
-stop at `REVIEWED` therefore needs `isSettled` widened, and that is a gate change: a table row, a
-test that proves the new disposition closes a run, and a test that proves an unreviewed item still
-does not. Do not work around it by deferring every item — a deferral writes a decision record
-claiming a judgment nobody made.
+**Do not change.** The item FSM, and in particular do not reach for a workaround at the report
+gate. `conductor_report` is legalized only when every item is settled, and that question has
+exactly one derivation: `dispositionsOf` in
+[`core/disposition.ts`](../../conductor/core/disposition.ts), read by `settledForReport` in
+[`gates-phase.ts`](../../conductor/core/gates-phase.ts). One rule living in two places drifted
+four separate times in this build, and each drift meant the gate offering a tool the handler
+refused — so `legalTools` and `handleReport` call the same function rather than two that happen
+to agree.
+
+`git.mode: "read-only"` is already understood by that derivation: with publish disabled,
+`REVIEWED` is where an item **ends**, and it settles there. Under git, a `REVIEWED` item is still
+actionable. So a review-only workflow needs no gate change at all. If you find yourself wanting a
+*different* terminal position, extend that one function — with a test that proves the new
+disposition closes a run and a test that proves an unreviewed item still does not — rather than
+adding a second predicate. And do not work around it by deferring every item: a deferral writes a
+decision record claiming a judgment nobody made.
 
 **What you give up.** The publish stage's guarantees: the HEAD-mismatch refusal, the
 staged-scope-minus-pre-existing-dirty discipline, and format enforcement. Nothing is committed, so

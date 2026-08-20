@@ -5,15 +5,21 @@ error envelope means, and what to do when one of the four failures an operator a
 meets shows up.
 
 **First rule: no beacon, no conductor.** The liveness beacon at
-`.conductor/state/alive.json`, rewritten at plugin init by the init sequence, is what
-actually distinguishes a gated session from an ungated one: it exists only when the plugin
-loaded. The visible §3.8 session banner ("no banner, no conductor" — not yet wired) is the
-intended at-a-glance version of that check, but until it ships the beacon is the signal
-that works. opencode loads a plugin by iterating the module's exports; a plugin that throws
-at construction is skipped whole and the session comes up looking completely normal, with
-every gate in this repository silently absent. If the beacon is missing — or names a `pid`
-that is not running — stop and fix the load before trusting anything the session does. See
-[HONEST-LIMITS.md](./HONEST-LIMITS.md), limit 11.
+`.conductor/state/alive.json` is what actually distinguishes a gated session from an
+ungated one. It is written the first time the plugin opens the workspace — on the first
+opencode bus event, chat message or tool call handled by this plugin process — and only
+after the doctrine
+packs have all loaded and the workspace lock has been won, so its presence means a plugin
+that loaded, found its doctrine and owns this workspace. The visible §3.8 session banner
+("no banner, no conductor" — not yet wired) is the intended at-a-glance version of that
+check, but until it ships the beacon is the signal that works. opencode loads a plugin by
+iterating the module's exports; a plugin that throws at construction is skipped whole and
+the session comes up looking completely normal, with every gate in this repository silently
+absent. If the beacon is missing — or names a `pid` that is not running — stop and fix the
+load before trusting anything the session does. A second conductor session in a workspace
+another one already holds also leaves no beacon, because the lock is claimed before the
+beacon is written; [Degraded modes](#10-degraded-modes) tells that case apart from a plugin
+that never loaded. See [HONEST-LIMITS.md](./HONEST-LIMITS.md), limit 11.
 
 **Contents**
 
@@ -43,19 +49,19 @@ $ python3 scripts/serve.py qwen3.6-27b --max-readers 6 --router-port 8088
 $ python3 scripts/serve.py qwen3.6-27b --print-env
 ```
 
-| Flag | Effect |
-|---|---|
-| `--router` / `--no-router` | force the router in or out of the loop. The default is *router when the binary exists*, so a machine that never built it degrades to the direct path instead of failing. |
-| `--router-port N` | the port the router listens on; opencode's `baseURL` is rewritten to it when the router is enabled. |
-| `--max-readers N` | the reader fan-out width. **One number, three consumers**: the llama-server slot count, the router config's `admission.maxInflightPerModel`, and the total context handed to llama-server. They cannot drift because nothing else computes them. |
-| `--ctx N` | the **per-slot** window, matching the flag's own help. It is honoured at every slot count: the derivation multiplies it by the slot count to get llama-server's total, so `--ctx 4096 --max-readers 6` serves 4096 tokens per sub-session. With no `--ctx`, the per-slot window is the recorded default of 8192. |
-| `--host` / `--port` | where `llama-server` itself binds. |
-| `--models-max N` | how many models stay resident at once. |
-| `--fresh` | ignore saved settings and ask for everything again. |
-| `--no-shell` | run the server in the foreground; do not open a session shell. |
-| `--print-env` | print the environment the session shell would get, and exit. |
-| `--include-utility` | also offer embedding and reranker models in the picker. |
-| `--no-build-check` | skip verifying the built tools against the submodule. |
+| Flag                       | Effect                                                                                                                                                                                                                                                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--router` / `--no-router` | force the router in or out of the loop. The default is *router when the binary exists*, so a machine that never built it degrades to the direct path instead of failing.                                                                                                                                         |
+| `--router-port N`          | the port the router listens on; opencode's `baseURL` is rewritten to it when the router is enabled.                                                                                                                                                                                                              |
+| `--max-readers N`          | the reader fan-out width. **One number, three consumers**: the llama-server slot count, the router config's `admission.maxInflightPerModel`, and the total context handed to llama-server. They cannot drift because nothing else computes them.                                                                 |
+| `--ctx N`                  | the **per-slot** window, matching the flag's own help. It is honoured at every slot count: the derivation multiplies it by the slot count to get llama-server's total, so `--ctx 4096 --max-readers 6` serves 4096 tokens per sub-session. With no `--ctx`, the per-slot window is the recorded default of 8192. |
+| `--host` / `--port`        | where `llama-server` itself binds.                                                                                                                                                                                                                                                                               |
+| `--models-max N`           | how many models stay resident at once.                                                                                                                                                                                                                                                                           |
+| `--fresh`                  | ignore saved settings and ask for everything again.                                                                                                                                                                                                                                                              |
+| `--no-shell`               | run the server in the foreground; do not open a session shell.                                                                                                                                                                                                                                                   |
+| `--print-env`              | print the environment the session shell would get, and exit.                                                                                                                                                                                                                                                     |
+| `--include-utility`        | also offer embedding and reranker models in the picker.                                                                                                                                                                                                                                                          |
+| `--no-build-check`         | skip verifying the built tools against the submodule.                                                                                                                                                                                                                                                            |
 
 **Why the context arithmetic is one derivation.** llama-server's `--ctx-size` is the
 TOTAL context it divides among its slots, not the per-slot window
@@ -110,7 +116,7 @@ State lives in two places, and only one of them is inside your repo.
 │   │   ├── alive.json              the §3.8 liveness beacon
 │   │   ├── stale-red.json          the cross-run registry of abandoned red tests (§2.11)
 │   │   ├── halt                    present ⇒ the workspace is halted (see "Halting a run")
-│   │   └── run.lock                the single-writer lock {token, sessionID, pid, startMs}
+│   │   └── run.lock                the single-writer lock {pid, startMs, sessionID?, token?}
 │   └── runs/<runId>/               one directory per prompt-run, self-contained
 │       ├── run.json                §2.3 — run FSM state, classification, stop record
 │       ├── queue.json              §2.4 — the item DAG, scopes, sizes
@@ -177,11 +183,11 @@ Read a finished run in this order:
    itself; nothing in it is the model's word. A failing test carries a `failureClass` from
    the §2.6.1 closed vocabulary:
 
-   | `failureClass` | Means | Legal red? |
-   |---|---|---|
-   | `assertion` | the test ran, evaluated the behaviour, and the behaviour was wrong | yes |
-   | `missing-subject` | the test could not resolve the module it is testing, and that path is inside this item's declared `fileScope` | yes |
-   | `error` | anything else that prevented evaluation — a syntax error, an import outside the item's scope, a build failure elsewhere | no |
+    | `failureClass`    | Means                                                                                                                   | Legal red? |
+    | ----------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------- |
+    | `assertion`       | the test ran, evaluated the behaviour, and the behaviour was wrong                                                      | yes        |
+    | `missing-subject` | the test could not resolve the module it is testing, and that path is inside this item's declared `fileScope`           | yes        |
+    | `error`           | anything else that prevented evaluation — a syntax error, an import outside the item's scope, a build failure elsewhere | no         |
 
 5. **`questions.jsonl`** — the surfaced questions, and therefore the blocked set: an item
    that will not move is usually waiting on one of these that nobody answered.
@@ -200,19 +206,30 @@ $ node conductor/tools/replay.ts .conductor/runs/<runId> --component gates --lev
 $ node conductor/tools/replay.ts .conductor/runs/<runId> --component fanout,fsm
 ```
 
-It renders per-item swimlanes, highlights gate denials, and prints the fan-out duration
-and review-verdict tables. It reads the journal and its rotated archives and **nothing
-else**, writes nothing, and reads no clock — two machines render one journal identically.
+It renders six sections: the journal sources it read, per-item swimlanes, every
+gate denial, a fan-out table with each sub-session's duration and outcome, a review-round
+table, and any malformed records. The review table reports **rounds** — what each round
+raised, how many majors survived, which lenses ran, who was dispatched — and no per-finding
+uphold/overturn column, because the journal records no per-finding verdict. It reads the
+journal and its rotated archives and **nothing else**, writes nothing, and reads no clock —
+two machines render one journal identically.
 
-| Flag | Values |
-|---|---|
+| Flag          | Values                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
 | `--component` | `fsm`, `gates`, `fanout`, `evidence`, `continuation`, `inject`, `router-client`, `state` (comma-separated) |
-| `--level` | `error`, `warn`, `info`, `debug`, `trace` — the minimum severity shown |
-| `--item` | one or more item ids (comma-separated); filters to those swimlanes |
+| `--level`     | `error`, `warn`, `info`, `debug`, `trace` — the minimum severity shown                                     |
+| `--item`      | one or more item ids (comma-separated); filters to those swimlanes                                         |
 
-Those three are the whole flag surface; anything else is a usage error. `conductor_status`
-is the live in-session equivalent: same run, same facts, from inside the session rather
-than from a finished directory.
+Each flag takes its value either as the next argument (`--level warn`) or glued on
+(`--level=warn`), and a repeated `--component` or `--item` unions its values, so
+`--item I1 --item I2` and `--item I1,I2` are the same request; a repeated `--level` keeps
+the last one given. `--item` selects records that carry an item id, which
+means it also drops the run-level lane — use it to read one item, not to read the run.
+
+Those three are the whole flag surface; anything else is a usage error, and so is an
+unknown `--component` or `--level` value, because a typo must never render a silently empty
+timeline. `conductor_status` is the live in-session equivalent: same run, same facts, from
+inside the session rather than from a finished directory.
 
 ---
 
@@ -295,10 +312,29 @@ core.md    decompose.md  receive-review.md  skeptic.md  test-vet.md
 debug.md   plan.md       review.md          tdd.md
 ```
 
-`adapter/inject.ts` composes them per sub-session role (§6.1's port map) at dispatch time,
-so an edit takes effect on the **next** sub-session — no rebuild, no restart. Keep edits
-inside the packs: role-to-pack routing is the port map's job, and a pack that starts
-addressing a different role than its port map entry makes the injection unreadable.
+`adapter/inject.ts` composes them per sub-session role (§6.1's port map) at dispatch time.
+There is nothing to rebuild — the packs are plain files read at run time — but they are
+read **once per pack directory, per plugin process**: the plugin loads all nine on the
+first hook or tool call that needs a workspace and serves that cached copy to every session
+that opencode process handles. An edit therefore takes effect only after opencode is
+restarted — not in the sub-session after the save, and not merely in a different session of
+the same process. Keep edits inside the packs: role-to-pack routing is the port
+map's job, and a pack that starts addressing a different role than its port map entry makes
+the injection unreadable.
+
+**Loading fails closed.** A required pack that is missing, unreadable, or present but empty
+stops the load with an error naming the offending file, reported at `error` level on the
+session's stderr sink. The session then opens no workspace: no beacon is written, no run
+starts, no stage tool works — rather than dispatching sub-sessions carrying no doctrine.
+Adjudication does not go permissive with it: the gate hook still runs, and with no
+workspace it derives no scope, which denies every edit.
+
+**Pointing at a different pack directory.** Setting `LLAMA_HARNESS_DOCTRINE_DIR` in the
+session environment makes the plugin read the packs from that directory instead of
+`conductor/doctrine/`. It is read at call time, so a directory that changes between two
+tool calls is honoured by the second, and a directory missing any of the nine required
+packs fails closed exactly as a missing shipped pack does. Unset (or empty) means the
+packs that ship beside the plugin.
 
 Two hard rules survive every edit:
 
@@ -320,14 +356,14 @@ and a role that silently lost its instructions.
 **How a run ends (§2.9).** The stop kind is recorded in `run.json`; it is not a process
 exit code, because a run ends inside a live opencode session that keeps running.
 
-| Stop kind | What it means | Who records it |
-|---|---|---|
-| `done` | the report tool ran and the run completed | `conductor_report` |
-| `noop` | the run made no observable progress across consecutive re-prompts | the continuation engine |
-| `blocked` | no open item remains and blocked items remain, or a closing verify came back red | the continuation engine on idle re-entry, or `conductor_report` on settle |
-| `surfaced` | no open and no blocked item remains, and human-territory questions are pending | the continuation engine on idle re-entry, or `conductor_report` on settle |
-| `env` | a closing verify's runner could not run, or the override budget is exhausted | `conductor_report`, or the override hatch |
-| `interrupt` | the halt file was present at an idle re-entry | the continuation engine |
+| Stop kind   | What it means                                                                                                    | Who records it                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `done`      | the report tool ran and the run completed                                                                        | `conductor_report`                                                                                             |
+| `noop`      | the run made no observable progress across consecutive re-prompts, or it settled without advancing a single item | the continuation engine on the futile re-prompt limit, or `conductor_report` on a settle that advanced nothing |
+| `blocked`   | no open item remains and blocked items remain, or a closing verify came back red                                 | the continuation engine on idle re-entry, or `conductor_report` on settle                                      |
+| `surfaced`  | no open and no blocked item remains, and human-territory questions are pending                                   | the continuation engine on idle re-entry, or `conductor_report` on settle                                      |
+| `env`       | a closing verify's runner could not run, or the override budget is exhausted                                     | `conductor_report`, the override hatch, or the continuation engine                                             |
+| `interrupt` | the halt file was present at an idle re-entry                                                                    | the continuation engine                                                                                        |
 
 **Every stop kind writes `report.md`** — the same single writer, selecting stop-report
 content for the five non-`done` kinds and full-report content for `done`. Two engines reach
@@ -340,20 +376,22 @@ finds the run out of moves or when the model settles it over blocked or question
 work; `noop` from the continuation engine on the futile re-prompt limit and from
 `conductor_report` on a settle that advanced no item (the defer-everything-with-a-green-verify
 case); and `env` from `conductor_report` on a closing verify that came back red because its
-runner could not run, and from the override hatch when the override budget is spent. The **fan-out engine** never
-records a run stop at all — what it produces on a failed sub-session is a per-job error of
-kind `env` on that job's result (see [Error envelopes](#8-error-envelopes)), which the
-caller reads; the run-level `env` stop is one of the two above.
+runner could not run, from the override hatch the moment a request meets an exhausted
+budget, and from the continuation engine on the next idle re-entry after a granted override
+took the run's meter to `workflow.maxOverridesPerRun`. The **fan-out engine** never records
+a run stop at all — what it produces on a failed sub-session is a per-job error of kind
+`env` on that job's result (see [Error envelopes](#8-error-envelopes)), which the caller
+reads; the run-level `env` stop is one of the three above.
 
 **What a process returns.** These are the things an operator runs by hand.
 
-| Command | 0 | 1 | 2 | 3 | 4 |
-|---|---|---|---|---|---|
-| `scripts/test-conductor.sh` | GATE PASS | any leg red — a failing or cancelled test, a test the suite declined to execute (G4 forbids those), a typecheck failure, a bun or python leg | — | — | — |
-| `conductor/tools/replay.ts` | rendered | no readable journal source in that directory | usage error: unknown flag, missing value, more than one run dir | — | — |
-| `conductor/tools/export-schemas.ts` | schemas written | an unwritable output directory (the throw's own exit) | — | — | — |
-| `scripts/serve.py` | exec'd into the session shell, or printed and exited | a fatal setup error, named on stderr | — | — | — |
-| `llama-router` | clean shutdown on SIGINT or SIGTERM, and the help and version paths | — | usage error: stderr carries the parse error naming the offending flag, then the usage text | config error: stderr carries the offending field, and a config file that cannot be read lands here too, named by path | listen bind failure: stderr carries host and port |
+| Command                             | 0                                                                   | 1                                                                                                                                                                                                             | 2                                                                                          | 3                                                                                                                     | 4                                                 |
+| ----------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `scripts/test-conductor.sh`         | GATE PASS                                                           | any leg red — a failing or cancelled test, a test the suite declined to execute (G4 forbids those), a glob that matched no tests at all, a typecheck failure, a bun leg, the schema export, or the python leg | —                                                                                          | —                                                                                                                     | —                                                 |
+| `conductor/tools/replay.ts`         | rendered                                                            | no readable journal source in that directory                                                                                                                                                                  | usage error: unknown flag, missing value, more than one run dir                            | —                                                                                                                     | —                                                 |
+| `conductor/tools/export-schemas.ts` | schemas written                                                     | an unwritable output directory (the throw's own exit)                                                                                                                                                         | —                                                                                          | —                                                                                                                     | —                                                 |
+| `scripts/serve.py`                  | exec'd into the session shell, or printed and exited                | a fatal setup error, named on stderr                                                                                                                                                                          | —                                                                                          | —                                                                                                                     | —                                                 |
+| `llama-router`                      | clean shutdown on SIGINT or SIGTERM, and the help and version paths | —                                                                                                                                                                                                             | usage error: stderr carries the parse error naming the offending flag, then the usage text | config error: stderr carries the offending field, and a config file that cannot be read lands here too, named by path | listen bind failure: stderr carries host and port |
 
 `export-schemas.ts` has no usage errors of its own: its one optional argument is an output
 directory, defaulting to `router/tests/schemas`. `scripts/serve.py` additionally exits 130
@@ -365,10 +403,11 @@ entry point.
 
 ## 8. Error envelopes
 
-**The router's 503.** The router is an observer (§4.4) and it never rejects a request for
-what it *says*: an untagged priority, an unknown priority and an unusable `model` field
-are all admitted normally. It has exactly two **capacity** refusals, and both are a `503`
-in one pinned envelope, the OpenAI-compatible shape `llama-server` itself emits:
+**The router's 503.** In the configuration it ships with, the router is an observer (§4.4)
+and rejects nothing for what a request *says*: an untagged priority, an unknown priority
+and an unusable `model` field are all admitted normally. Its only two refusals of a
+request out of the box are about **capacity**, and both are a `503` in one pinned envelope, the
+OpenAI-compatible shape `llama-server` itself emits:
 
 ```json
 { "error": { "message": "llama-router queue is full for model 'qwen3.6-27b'; the request was not queued",
@@ -380,13 +419,25 @@ The `code` is the discriminator. `queue_overflow` means the queue already held
 `admission.maxQueued` entries, so the request was refused immediately and never queued —
 retrying now will do the same thing. `queue_timeout` means the request *was* queued and
 its wait expired past `admission.queueTimeoutMs`; the queue moved too slowly, and retrying
-may well work. The `type` is `unavailable_error` in both cases.
+may well work. The `type` is `unavailable_error` in both cases. The router's other error
+status, a `502`, is not a refusal of the request at all but the upstream being unreachable
+or truncating mid-body — same envelope shape, with `code` `502`.
 
 Both codes are **diagnostic only**. Nothing on the conductor side reads them: the fan-out
 reaches the router through opencode's provider fetch, which hands back an error string
 rather than the envelope, so a `503` here becomes a failed sub-session and not a bounded
 backoff. Read the codes in the router log and in the metrics ledger; do not expect a run
 to have acted on them.
+
+**The router's one opt-in refusal.** The router config carries
+`schema.rejectOnMissing`, and the base build ships it `false`. Turned on by hand it adds a
+`400` — the only refusal the router makes for what a request *says* — to a `POST /v1/*`
+that carries the schema header tagged `required` while its body declares no schema. The
+envelope has the same shape as the 503, and the message names both the header it resolved
+and the literal `schema.rejectOnMissing`, so the answer says which key produced it. It is
+decided before admission, so it consumes no slot and no queue entry. `serve.py` refreshes
+only the machine-derived keys of `conductor-router.json` on each run, so this one survives
+regeneration once you set it; `--fresh` drops it back to the shipped `false`.
 
 `/conductor/health` is registered outside admission on purpose, so it answers `200` even
 while every slot and every queue entry is held. If the router is refusing traffic, that
@@ -399,14 +450,22 @@ back to the model as the refusal reason. That is why every deny names the gate t
 and the state that made the call illegal — that message is the model's only route back to
 a legal action.
 
-The same decision is journaled under the `gates` component as a `deny` record, carrying
-the gate's input `snapshot` at `debug` level so a denial can be reconstructed exactly.
+The same decision is journaled under the `gates` component as a `deny` record at `warn`,
+and the record's own data is the gate's input `snapshot` — the tool name, the raw arguments,
+the command or edit path, and the reason — so a denial can be reconstructed exactly. `warn`
+is one of the two levels written regardless of the configured verbosity, so lowering the log
+level never hides a refusal.
+
 Should a gate itself throw while judging a guarded call, the harness fails **closed**: the
 call is denied with a `gate-crash` anomaly and a reason beginning
 
 > a security gate crashed while judging a guarded call — denied (fail-closed, G5)
 
-followed by the crash message.
+followed by the crash message. The `gate-crash` record is journaled at `error` either way,
+but the *disposition* follows what was at stake: a crash while judging a call that could
+write fails closed as above, and a crash while judging a harmless read fails **open** and
+allows it. A crash is never invisible in either direction — read the `gate-crash` records
+before concluding a gate approved something.
 
 **Handler refusals** are different from gate denials: the tool was legal to call, and the
 handler re-derived the evidence and found it wanting (a stale verify, an item not in the
@@ -424,6 +483,12 @@ with the errors appended. When the third fails, the engine journals
   "reason": "sub-session output failed schema validation after retries",
   "errors": [ "…the last validation errors…" ] }
 ```
+
+Two other failures produce the same `kind: "env"` result shape with their own reason: a
+sub-session opencode would not create at all (`sub-session could not be created`, journaled
+as `subsession.complete` with reason `session-create-failed`), and a throw from the SDK
+mid-job (`sub-session engine error: …`, reason `engine-error`). Both are environment
+faults rather than model faults, and neither is worth re-prompting.
 
 Four `fanout` event names carry that lifecycle: `subsession.dispatched` when the job goes
 out, `subsession.retry` once per failed attempt, `subsession.complete` on either outcome,
@@ -466,18 +531,33 @@ The second command must print exactly `[ 'ConductorPlugin' ]`.
 
 The heading is a mnemonic: the §3.8 visible banner is not yet wired, so the check that
 actually works is the liveness beacon at `.conductor/state/alive.json`, which the plugin
-rewrites at init. It holds four fields — `pid`, `startMs`, `version` and `sessionID`. A
-beacon whose `pid` is not running, or whose `sessionID` is not the session you are sitting
-in, means the conductor you are reading about is not the one in front of you. No beacon at
-all means the plugin has never initialised in this workspace.
+writes when it first opens the workspace. It holds four fields — `pid`, `startMs`,
+`version` and `sessionID`. A beacon whose `pid` is not running, or whose `sessionID` is not
+the session you are sitting in, means the conductor you are reading about is not the one in
+front of you. No beacon at all means no conductor has opened this workspace: the
+plugin never loaded, its doctrine failed to load, the workspace lock was refused, or the
+workspace itself would not open — an unreadable root, or a `.conductor/config.json` that
+cannot be read, is not JSON, or fails the §2.1 schema. All but the first report themselves
+at `error` level on stderr — the doctrine failure and the open failure as
+`state/hook.failed`, the lock refusal as `state/lock.contended` — and a plugin that never
+loaded says nothing at all.
 
 ### "publish denied stale"
 
 **What it means:** the green evidence describes a tree that no longer exists. A verify
-record is fresh for a commit only if BOTH conditions hold: `startedMs` is at or after the
-newest `mtime` among the staged behavioral files, **and** the record's `head` equals the
-current HEAD. (The second condition is skipped entirely in **no-git** mode, where there is
-no HEAD to compare — see [Degraded modes](#10-degraded-modes).)
+record is fresh for a commit only if BOTH conditions hold: the verify's `startedMs` is not
+behind the newest reference `mtime` — the staged behavioral files that still exist, plus the
+index's own `mtime` when one of the staged entries is a deletion — **and** the record's
+`head` equals the current HEAD. (The second condition is skipped entirely in **no-git**
+mode, where there is no HEAD to compare — see [Degraded modes](#10-degraded-modes).)
+
+The exact-tie case is decided by what the stamp can prove. Conductor stamps `startedMs`
+from a strictly increasing clock whose values carry a fraction of a millisecond, and such a
+stamp *can* order two events inside one tick — so an edit stamped at the same instant as
+the verify reads **stale**. A record left by an earlier process with a whole-millisecond
+stamp cannot order them, and there the tie counts fresh rather than making every
+coarse-timestamp repository unpublishable. A record whose timestamps are not finite numbers
+at all is treated as stale outright (see [HONEST-LIMITS.md](./HONEST-LIMITS.md)).
 
 **Two ordinary causes.** Either an **edit** landed inside the item's scope after the verify
 started, which trips the first condition; or HEAD moved under it, which trips the second.
@@ -588,12 +668,21 @@ it journals a `lock.contended` record at **error** level naming the holder (its 
 `startMs` and `sessionID`), which the console sink surfaces to stderr, so a blocked second
 session is never silent.
 
-A held lock is **broken automatically** on the next open in exactly two situations: the
-holder's `pid` is no longer alive, or the lock is older than 24h
-(`DEFAULT_STALE_LOCK_MS`). Both are the ordinary path back in — a crashed session leaves a
-lock its own dead pid invalidates, and an abandoned one ages out — so there is nothing to
-delete by hand. If a stale lock is genuinely in your way, let the staleness rule break it,
-or stop the holding process and let the next open break it on the dead pid.
+A held lock is **broken automatically** on the next open in three situations: the holder's
+`pid` is no longer alive, the lock is older than 24h (`DEFAULT_STALE_LOCK_MS`, measured from
+the holder's `startMs`), or the lock file cannot be parsed at all — an unreadable lock is
+evidence of nothing, and breaking it is the only way the workspace becomes usable again.
+All three are the ordinary path back in — a crashed session leaves a lock its own dead pid
+invalidates, and an abandoned one ages out — so there is nothing to delete by hand. If a
+stale lock is genuinely in your way, let the staleness rule break it, or stop the holding
+process and let the next open break it on the dead pid.
+
+Claiming is retried a bounded number of times, and exhausting that budget is itself a
+refusal rather than a silent claim. Its message is deliberately different from the
+live-holder one: it reports the pid the lock names **together with whether that pid is
+actually alive**, and it names the break-right files (`run.lock.break.*`) as the other thing
+that can be in the way. That is the only shape in which removing `.conductor/state/run.lock`
+by hand is the right move, and the message says so.
 
 Neither of these is a guarantee about a *second, plain* opencode session — one started
 without the harness. That one takes no lock at all and is invisible to conductor. Read

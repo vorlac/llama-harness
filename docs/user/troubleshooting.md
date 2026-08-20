@@ -184,22 +184,112 @@ pkill -f 'llama-server --models-preset'
 
 ## opencode and conductor
 
-> *Not yet wired: `scripts/serve.py` injects the conductor plugin, agents, and permissions into
-> the session opencode config from task 12.1 onward.*
+### You cannot tell whether conductor is loaded
 
-### No conductor banner in the orchestrator's first response
+There is no startup banner to look for — no conductor module emits one, so nothing in the
+model's first response confirms or denies that the plugin is running. That matters because
+the failure is silent in the worst way: opencode logs a plugin factory throw and then
+continues with zero hooks installed, so the session looks completely normal and every gate is
+absent.
 
-**The first rule of operating conductor: no banner, no conductor.** opencode logs a plugin
-factory throw and then continues with zero hooks installed — the session looks completely normal
-and every gate is silently absent. Nothing inside the session betrays it, which is why the
-liveness beacon is written out of band at plugin init.
+The signal is the liveness beacon, written out of band when the plugin opens the workspace:
 
 ```bash
-cat .conductor/state/alive.json      # {pid, startMs, version}; absent means init failed
+cat .conductor/state/alive.json      # {pid, startMs, version, sessionID}
 ```
 
-If the beacon is missing, find the `failed to load plugin` line on opencode's log, fix the
+The ordering makes the check meaningful. The doctrine packs load *before* the workspace is
+opened, so the commonest startup failure — a missing or unreadable pack — happens before the
+beacon is written. An absent or stale beacon is evidence that initialization did not
+complete. The second signal is stderr: until a run directory exists, every journal record
+goes there as one JSON object per line, unfiltered, so an open failure shows up as a
+`hook.failed` record naming the root and the errno.
+
+If the beacon is missing, find the `failed to load plugin` line in opencode's log, fix the
 underlying error, and start a new session. Do not keep working in an ungated one.
+
+### `the conductor workspace at <root> is held by another live conductor`
+
+A second conductor opening a workspace a live one already holds is **refused**. It does not
+fall back to a read-only mode; it simply does no conductor-side work in that workspace, and
+logs `lock.contended` at `error` level naming the holder's pid, its start time, and its
+session id. Two conductors sharing one workspace would mint colliding evidence sequence
+numbers and publish one item's green on another item's verify, which is why the second
+session does not open at all.
+
+Close the named session, or wait for it to release the workspace, and try again. Confirm
+which process holds it:
+
+```bash
+cat .conductor/state/run.lock        # {pid, startMs, sessionID?, token?}
+ps -p <pid>
+```
+
+### `could not be acquired within the retry budget`
+
+A different refusal from the one above, and it means something different: the retry budget
+ran out without a claim being made. The lock in the way may be **stale** — its pid is not
+alive — and the reclaim may itself be blocked by a stuck break right. The message reports
+whether the named pid is actually alive, so read that clause before doing anything.
+
+Reclaiming a stale lock is a three-part compare-and-delete: an exclusive
+`run.lock.break.<key>` file grants the right to break one particular lock, the lock is
+re-read under that right, and the broken lock is set aside as `run.lock.stale.<key>`. A
+process killed mid-reclaim can leave the break right behind, and then nothing can claim the
+workspace.
+
+With no conductor running, clear them by hand:
+
+```bash
+pgrep -fl opencode                                   # confirm nothing is running first
+rm -f .conductor/state/run.lock .conductor/state/run.lock.break.*
+```
+
+### `the conductor config at <path> is not valid JSON` / `is not a valid §2.1 Config`
+
+A malformed or schema-invalid `.conductor/config.json` throws and names the file. It is never
+silently replaced by the built-in default, because a repo whose `git.mode` reverts under it is
+a security downgrade nobody asked for. Fix the file — the message names the parse error or
+the failing schema path — or delete it and re-run `conductor_setup`.
+
+An unknown key is a validation error too: the schema sets `additionalProperties: false` at
+every level, so `gitMode` typed for `git.mode` is refused rather than ignored.
+
+### The run is stopped and answering the question does not resume it
+
+Two cases, and the messages differ.
+
+If the question is **human territory** under the decision protocol, answering it through
+`conductor_answer` records the answer but does not un-stop the run: a human-territory
+question is released by the operator's own answer file and by nothing else. `conductor_status`
+shows it under standing questions, with the path you owe. Write the file:
+
+```bash
+echo 'your answer' > .conductor/runs/<runId>/answers/Q-0001.md
+```
+
+An empty or whitespace-only file is not an answer — the question stays open — so make sure
+the redirect actually wrote something.
+
+If the run is terminal by **state** rather than by a stop record — closed by
+`conductor_report`, so it has its report — it is not resumable at all. Start a new run with a
+fresh prompt.
+
+### An item is released and immediately blocked again
+
+That is the hand-off rule, not a bug. An item carries exactly one `blocked` annotation, so if
+two open questions both name it, the first one owns the block. Answering that one re-blocks
+the item on the oldest still-open question that also names it, and the item is listed in the
+journal as blocked on the successor rather than cleared. Answer the remaining questions —
+`conductor_status` lists them all with their ids.
+
+### `is not a gate an override can bypass`
+
+`conductor_override` accepts exactly three gate names: `session`, `git` and `edit`. Anything
+else is refused before the budget is consulted, and the refusal costs nothing at all — no
+budget meter moved, no taint was recorded, no anomaly was appended, and the run did not stop.
+Re-issue naming one of the three, or take the refusal the gate actually gave you as the
+answer.
 
 ### `TypeError: Plugin export is not a function`
 
@@ -232,7 +322,7 @@ Two Node v26.7.0 behaviors make raw `node --test` unusable as a gate, and both l
 an ordinary result. `scripts/test-conductor.sh` exists to close them, which is why it is the only
 gate that counts.
 
-### `MODULE_NOT_FOUND` from a test run that used to pass
+### `MODULE_NOT_FOUND` from a test run with no missing module
 
 You passed a directory to `node --test`. A directory positional resolves as a module, and the
 resulting failure is indistinguishable from a real red. The wrapper turns a directory argument
@@ -263,6 +353,9 @@ shell does not expand it first.
 | `bun leg … G14 dual-runtime divergence` | the smoke test passes on Node, not on Bun                  | fix the runtime-dependent code               |
 | `GATE WARN: bun absent`                 | Bun disappeared from the machine                           | reinstall Bun; the leg is meant to be active |
 | `export-schemas.ts failed to run`       | the schema exporter itself is broken                       | fix the exporter, then re-run                |
+| `python leg`                            | a `scripts/test_*.py` unittest failed                      | fix the script or the test                   |
+| `python leg discovered ZERO tests`      | the `scripts/test_*.py` files moved or were renamed        | restore the naming the discovery expects     |
+| `python leg reported skipped/expected-failure tests` | a Python test was skipped                     | restore the test                             |
 
 The run ends with `GATE PASS`. Anything else is a fail, including a nonzero Node exit with
 otherwise clean TAP counts.
@@ -327,7 +420,8 @@ interrupted sweep at the first cell with no `result.json`.
 | ------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `CONDUCTOR_LOG`    | environment                             | raises the log level; wins over `logging.level` and `logging.components`                 |
 | Journal            | `.conductor/runs/<runId>/journal.jsonl` | every gate denial, FSM refusal, fan-out dispatch, and retry, with its correlation triple |
-| `conductor_status` | in-session                              | the live run/item/question/ledger summary                                                |
+| `conductor_status` | in-session                              | the live run state, every item, open and standing questions, and each session's doctrine delivery |
+| Replay             | `node conductor/tools/replay.ts <run dir>` | the journal rendered in order: swimlanes, denials, fan-out durations, review rounds    |
 | `llama_log`        | session shell                           | tails `.data/configs/server.log`                                                         |
 | `llama_status`     | session shell                           | the served model list from `/v1/models`                                                  |
 

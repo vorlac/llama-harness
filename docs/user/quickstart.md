@@ -161,22 +161,31 @@ the same command — completed chunks are tracked in a sidecar and skipped. Usef
 ## Serve it
 
 `serve.py` is the everyday entry point. It picks a model, starts one `llama-server` in
-router mode behind it, and leaves you in an interactive bash subshell that opencode is
-already wired to. Run it with no arguments to get the picker, or name a model to skip
-straight through.
+llama.cpp's *router mode* — one process serving every installed model, loading weights on
+demand — and leaves you in an interactive bash subshell that opencode is already wired to. Run
+it with no arguments to get the picker, or name a model to skip straight through.
 
 ```bash
 scripts/serve.py                 # pick a model, land in a ready shell
 scripts/serve.py ornith-35b      # skip the picker
 scripts/serve.py --fresh         # ignore saved settings, ask everything
 scripts/serve.py --no-shell      # run the server in the foreground instead
+scripts/serve.py --no-router     # talk to llama-server directly
 ```
 
 The picker lists installed chat-capable models only — embedding and reranker models are
 still served, but opencode cannot use one as an agent model, so offering them would only
-produce a broken session. Pass `--include-utility` to see them anyway. Port, host, and
-context size are remembered in `.data/configs/serve-session.json` and reused on the next
-run, so a repeat launch is one keypress.
+produce a broken session. Pass `--include-utility` to see them anyway. Model, host, port,
+context size, reader count and router port are remembered in
+`.data/configs/serve-session.json` and reused on the next run, so a repeat launch is one
+keypress.
+
+If the `llama-router` binary has been built and the router schema has been exported — a
+separate CMake target plus one run of `bash scripts/test-conductor.sh`, both covered in
+[Installation](installation.md) — `serve.py` also starts it in front of `llama-server` and
+points opencode at the router instead. That is the default; `--no-router` runs the identical
+session without it, and either piece missing falls back to a direct session with a notice
+rather than failing. The full flag list is in [Serving](serving.md).
 
 The shell you land in prints what it set up:
 
@@ -203,9 +212,10 @@ after a `SIGKILL` no trap could catch. Nothing is left resident in the backgroun
 ## Use it from opencode
 
 `serve.py` writes a session-scoped opencode config beside — never over — the main
-`.data/configs/opencode.json`, points its `baseURL` at the endpoint it just started, and
-sets `model` and `small_model` to the model you picked. That path is exported as
-`OPENCODE_CONFIG` in the session shell, so opencode picks it up from any directory.
+`.data/configs/opencode.json`, points its `baseURL` at the endpoint the session settled on —
+the router when one is running, `llama-server` otherwise — and sets `model` and `small_model`
+to the model you picked. That path is exported as `OPENCODE_CONFIG` in the session shell, so
+opencode picks it up from any directory.
 
 ```bash
 cd ~/your/project
@@ -217,10 +227,9 @@ picker — embedding and reranker models are served but deliberately absent from
 `opencode.json` — and switching in the TUI transparently swaps which weights are resident,
 because one `llama-server` in router mode serves them all with `--models-max 1`.
 
-*Not yet wired: `serve.py` gains the conductor plugin, agent, and permission wiring at
-task 12.1.* Once it does, the same session config also carries
-[`conductor/opencode-fragment.json`](../../conductor/opencode-fragment.json) — the
-`conductor-orchestrator` primary agent plus six subagents — so the harness travels into
+The same session config also carries
+[`conductor/opencode-fragment.json`](../../conductor/opencode-fragment.json) — the plugin entry,
+the `conductor-orchestrator` primary agent, and six subagents — so the harness travels into
 whatever workspace you `cd` into. See [Conductor overview](conductor-overview.md).
 
 ## Check what you got
@@ -258,8 +267,8 @@ scripts/benchmark.py --report-only   # rebuild the report from existing results
 
 The estimate matters because wall clock is dominated by model loads, not by generation, so
 a plan that looks small can take hours on large weights. `--resume` makes an interrupted
-multi-hour run continue where it stopped. Scoring, presets, and the eviction mode that
-benchmarks more models than fit on disk are covered in [Benchmarking](benchmarking.md).
+multi-hour run continue where it stopped. Scoring, presets, and the eviction setting that lets
+a sweep cover more models than fit on disk are covered in [Benchmarking](benchmarking.md).
 
 ## Concepts at a glance
 

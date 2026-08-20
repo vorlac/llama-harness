@@ -45,10 +45,11 @@ is described in [gates and hatches](../user/gates-and-hatches.md).
 
 ## The sequence
 
-`gateBeforeToolCall` runs the gates in a fixed order. The session-registry gate is always
-first. What follows depends on the tool: bash gets the git gate over the whole command
-and then the edit gate once per write-shaped target; an edit/write/patch tool gets the
-edit gate over the single edited path.
+`gateBeforeToolCall` runs the gates in a fixed order. The patch-tool refusal comes before
+everything else; the session-registry gate follows. What comes after that depends on the tool:
+bash gets the git gate over the whole command, then the interpreter state-area refusal, then
+the edit gate once per write-shaped target; an edit/write tool gets the edit gate over the
+single edited path.
 
 ```mermaid
 ---
@@ -78,15 +79,19 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart TD
-    %% Source: conductor/adapter/tools.ts:250-350
+    %% Source: conductor/adapter/tools.ts:426-559
     Hook["tool.execute.before fires"] --> Parse["parse args, classify tool"]
     Parse --> Guarded["compute guarded flag"]
-    Guarded --> Session["session-registry gate"]
-    Session -->|deny| Deny["throw Error with reason"]
+    Guarded --> Patch{"patch or apply_patch"}
+    Patch -->|yes| Deny["throw Error with reason"]
+    Patch -->|no| Session["session-registry gate"]
+    Session -->|deny| Deny
     Session -->|allow| IsBash{"bash tool"}
     IsBash -->|yes| Git["git gate, whole command"]
     Git -->|deny| Deny
-    Git -->|allow| Targets["edit gate, each write target"]
+    Git -->|allow| Interp["interpreter state-area refusal"]
+    Interp -->|deny| Deny
+    Interp -->|allow| Targets["edit gate, each write target"]
     Targets -->|deny| Deny
     Targets -->|allow| Allow["return, call proceeds"]
     IsBash -->|no| HasPath{"edit path present"}
@@ -103,7 +108,7 @@ flowchart TD
     classDef err     fill:#724848,stroke:#ac9696,color:#ffffff,rx:6,ry:6
     classDef ok      fill:#425f5f,stroke:#8c9c81,color:#ffffff,rx:6,ry:6
 
-    class Hook,Parse,Session,IsBash,Git,Targets,HasPath,EditPath neutral
+    class Hook,Parse,Patch,Session,IsBash,Git,Interp,Targets,HasPath,EditPath neutral
     class Guarded accent
     class Deny err
     class Allow ok
@@ -118,11 +123,32 @@ alike — `classifyTool` marks a bash command `write` only when it has a write s
 and is denied by the git gate instead. The two gates cover different halves of the same
 surface on purpose.
 
+Two steps in the sequence are refusals rather than table lookups. `patch` and `apply_patch` are
+denied in every session, registered or not, ahead of every other gate: a patch body carries its
+own write targets in a format no gate here parses, so the edit-scope gate has nothing to bound
+it with, and a refusal that does not depend on the call's arguments cannot be spelled around by
+choosing different ones. And a bash command carrying an interpreter one-liner that so much as
+names `.conductor` is refused whole, between the git gate and the write-target loop — see
+[the write-shape extractor](#the-write-shape-extractor).
+
+Every deny point except the patch refusal first consults `consumeOverrideGrant`. A §3.6 override
+grant, minted by `conductor_override` into a map keyed by `{sessionID, gate, itemId}`, converts
+exactly one otherwise-denied decision of its named gate into an allow and is deleted in the same
+breath — the next call meets the gate on its ordinary terms. The spend is journaled as
+`gates/allow` at `warn` with `via: "override-grant"`, so a bypassed deny stays as visible as a
+deny. The gate names an override may name are a closed set — `session`, `git`, `edit` — because
+those are exactly the decisions with a consumption point; `core/tool-legality.ts` holds the list
+and refuses anything else before any budget is spent.
+
 ## shell-parse.ts: the primitives
 
 [`core/shell-parse.ts`](../../conductor/core/shell-parse.ts) is the only place that turns
-a command string into structure. Both the git gate and the write-shape extractor consume
-it, so a write hidden behind `env sh -c "..."` is analyzed identically to a bare one.
+a command string into structure. Both the git gate and the write-shape extractor consume it, so
+both see the same tokens and the same command segments. They diverge above that shared layer:
+the git gate unwraps at most one command wrapper from a five-name set and never looks inside a
+shell `-c` string, while the write-shape extractor unwraps a twelve-name set iteratively and
+recurses into `-c`. Each set is enumerated in its own section below, and the difference is a
+documented limit rather than an accident.
 
 ### The tokenizer
 
@@ -155,7 +181,8 @@ gate that reasons about "a command" reasons about one of these segments.
 `NAME=value` env-assignment tokens, then unwraps at most one leading wrapper from
 `env`, `command`, `sudo`, `builtin`, `exec`, together with that wrapper's own options.
 Value-taking flags are tracked per wrapper, so `sudo -u bob git push` resolves to `git`
-rather than `bob`, while `env -i git push` does not eat its neighbor.
+rather than `bob`, while `env -i git push` does not eat its neighbor. This five-name set is the
+git gate's; the write-shape extractor keeps its own, longer one.
 
 It returns one of three things:
 
@@ -165,13 +192,25 @@ It returns one of three things:
 | `{index: null, unresolvable: false}` | An empty or prefix-only segment with no wrapper: nothing to decide                                                                                                           |
 | `{index: null, unresolvable: true}`  | A wrapper was unwrapped but its options consumed the segment, or the unwrap landed on a second wrapper. The real command is decided at shell runtime; callers must fail safe |
 
-`isGitCommand(seg)` is true when the resolved command word's basename equals `git`, so
-`/usr/bin/git` and `./git` are git and `echo git status` is not. `gitSubcommand(seg)`
-returns the first non-option token after the command word, skipping the value-taking
-global options `-c k=v`, `-C dir`, `--git-dir <dir>`, and the inline `--git-dir=<dir>`.
-Any *other* leading flag is returned verbatim as the subcommand — a deny-forcing token
-that is on no allow-list — rather than being skipped, because git may itself treat the
-flag's value as the real subcommand.
+`gitInvocation(seg)` resolves a git call once, so detection, subcommand extraction, and the
+gate's operand analysis can never disagree about the same command. It returns
+`{index, sub, operandStart}` — the command-word index, the subcommand or `null` for a bare
+`git`, and the index of the first operand after the subcommand — or `null` when the segment is
+not a git call. `isGitCommand(seg)` and `gitSubcommand(seg)` are thin readers of it.
+
+The command word resolves by basename, so `/usr/bin/git` and `./git` are git and
+`echo git status` is not. The subcommand is the first non-option token after it, skipping the
+value-taking global options `-c k=v`, `-C dir`, `--git-dir <dir>`, and the inline
+`--git-dir=<dir>`. Any *other* leading flag is returned verbatim as the subcommand — a
+deny-forcing token that is on no allow-list — rather than being skipped, because git may itself
+treat the flag's value as the real subcommand.
+
+Git's dashed dispatch form resolves too. `git-apply` and `git apply` are the same program, and
+the hyphenated plumbing binaries ship in `$(git --exec-path)` and historically sit on `PATH`,
+so a basename compared for equality with `git` alone would miss `git-apply p.diff` entirely
+while it wrote files. A command word matching `git-<sub>` is read as an invocation of `<sub>`
+whose operands start at the very next token, and the matrix below — its default deny included —
+decides it on exactly the terms it decides the spaced spelling.
 
 ### Glob and scope matching
 
@@ -241,9 +280,9 @@ Every row is decided over the segment's full parsed tokens.
 | `config` with anything else                                                                                                                                                                                                             | deny — writes or unsets configuration                                                       |
 | `reflog show`                                                                                                                                                                                                                           | allow                                                                                       |
 | `reflog` with anything else                                                                                                                                                                                                             | deny — expire/delete mutate the reflog                                                      |
-| `branch` list forms                                                                                                                                                                                                                     | allow                                                                                       |
-| `branch` with a mutating flag                                                                                                                                                                                                           | deny (see below)                                                                            |
-| `checkout --`, `checkout -B`, `checkout -f`/`--force`/`--discard-changes`                                                                                                                                                               | deny, unconditionally                                                                       |
+| `branch` carrying only enumerated list flags, and a positional only under `--list`                                                                                                                                                      | allow                                                                                       |
+| `branch` with any other flag, or a bare positional                                                                                                                                                                                      | deny (see below)                                                                            |
+| `checkout --`, `checkout -B`, `checkout -f`/`--force`/`--discard-changes`, `checkout -p`/`--patch`                                                                                                                                      | deny, unconditionally                                                                       |
 | `checkout` with two or more positionals, or one path-like positional                                                                                                                                                                    | deny — discards working-tree files                                                          |
 | `checkout -b <br>`, `checkout <br>`                                                                                                                                                                                                     | branch movement, policy-gated                                                               |
 | `switch -C`/`--force-create`, `switch -f`/`--force`/`--discard-changes`                                                                                                                                                                 | deny, unconditionally                                                                       |
@@ -254,14 +293,76 @@ Every row is decided over the segment's full parsed tokens.
 | bare `git` with no subcommand                                                                                                                                                                                                           | deny — nothing on the allow-list matches                                                    |
 | any other subcommand                                                                                                                                                                                                                    | **deny** by default, reason naming the subcommand                                           |
 
-The `branch` mutating flags are `-d`, `-D`, `--delete`, `-m`, `-M`, `--move`, `-c`, `-C`,
-`--copy`, `-f`, `--force`, `-u`, `--set-upstream-to`, `--unset-upstream`,
-`--edit-description`. `git branch -D x` is the required false-allow trap: `branch` is on
-the allow-list and the flag is what turns the read into a write.
+The `branch` arm is itself an enumerated allow with a default-deny tail, not a list of
+forbidden flags. The allowed list flags are `--list`, `-l`, `-a`, `--all`, `-r`, `--remotes`,
+`-v`, `-vv`, `--verbose`, `-q`, `--quiet`, `-i`, `--ignore-case`, `--show-current`, `--color`,
+`--no-color`, `--column`, `--no-column`, `--omit-empty`, `--no-abbrev`, and the filters
+`--contains`, `--no-contains`, `--merged`, `--no-merged`, `--points-at`, `--sort`, `--format`,
+`--abbrev`. Anything else denies. Three details make that posture hold:
+
+- Flags compare by name with any `=`-glued value stripped, so `--set-upstream-to=origin/x` is
+  recognized as `--set-upstream-to` and denied on the same terms as the spaced spelling. An
+  exact-token comparison against a hand-list of mutating flags knew only the spaced one.
+- A bare value-taking filter consumes the following token as its value, so the `refname` in
+  `branch --sort refname` is not read as a branch name.
+- A positional operand denies unless `--list` is present to make it a match pattern. That is
+  what closes bare branch *creation*: `git branch newbranch` writes a ref while carrying no
+  flag at all, so a deny-list keyed on flags admitted it.
+
+`-l` is deliberately not a pattern flag. On git before 2.28 it spells `--create-reflog`, where
+`git branch -l topic` creates `topic`. The gate cannot see which git is on the other side of the
+call, so the spelling that means two things is read as the one that writes a ref and its
+positional denies. Bare `-l` with no operand stays allowed — under neither reading does it write
+anything.
+
+`git branch -D x` is the required false-allow trap: `branch` reaches an allow arm and the flag
+is what turns the read into a write.
 
 Note that `tag` appears on no list, so every spelling of `git tag` is default-denied, not
 only `tag -d`. That is the enumerated-allow posture working as intended: an unlisted verb
 needs no row of its own.
+
+### Execution through configuration and the environment
+
+A git invocation can run an arbitrary program without ever naming it as the subcommand.
+`git -c core.pager=<cmd> log` reaches the gate as a `log`: the command word is the literal
+`git`, `-c k=v` is skipped by subcommand resolution, and `log` is on the read-only allow-list —
+while git runs `<cmd>` as the pager. `GIT_PAGER=<cmd> git log` is the same route through the
+environment, and env-assignment prefixes are seen through by detection without their *values*
+ever being adjudicated. The same shape covers an external diff, an editor, a credential helper,
+a hook, and an alias.
+
+Both routes are decided *before* the subcommand is looked at, because the whole point of the
+route is that the subcommand is a legal read. Both key on the exec-capable name, not on `-c` or
+on env prefixes as such, so `git -c user.name=x log` and `A=b git status` are untouched.
+
+| Route                                                     | Denied when                                                                                         |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `-c <key>=<value>`, inside git's own global-option region | the key's first component is an exec-capable section, or its last component is an exec-capable leaf |
+| A `NAME=value` assignment before the git command word     | `NAME` is an exec-capable variable, or begins with an exec-capable prefix                           |
+
+The exec-capable config sections are `alias`, `pager`, `credential`, `difftool`, `mergetool`,
+`filter`, `trailer`, `guitool`, `instaweb` — every key under them names a program. The
+exec-capable final key components, whatever section or subsection carries them, are `pager`,
+`editor`, `external`, `command`, `cmd`, `driver`, `clean`, `smudge`, `process`, `helper`,
+`program`, `browser`, `textconv`, `packobjectshook`, `sshcommand`, `askpass`, `hookspath`,
+`gitproxy`, `proxy`, `fsmonitor`, `uploadpack`, `receivepack`, `templatedir`, `httpd`, `hook`.
+Both comparisons fold case, which is git's own rule for section and final-key names rather than
+an extra allowance.
+
+The exec-capable environment variables are `GIT_PAGER`, `GIT_EXTERNAL_DIFF`, `GIT_EDITOR`,
+`GIT_SEQUENCE_EDITOR`, `GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `GIT_PROXY_COMMAND`,
+`GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `GIT_TEXTCONV`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+`GIT_CONFIG`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_GLOBAL`,
+`GIT_CONFIG_SYSTEM`, `PAGER`, `EDITOR`, and `VISUAL`, plus any name beginning `GIT_CONFIG_KEY_`
+or `GIT_CONFIG_VALUE_`. The `GIT_CONFIG_*` family injects configuration wholesale, which is the
+config route one step removed.
+
+The `-c` scan is bounded to the region before the subcommand, so a subcommand's own `-c` is
+never read as a config assignment: `git grep -c pattern` counts matches and is left alone. Every
+other global-option spelling — `--exec-path=…`, `--config-env`, a glued `-ckey=v` — is already
+deny-forcing, because subcommand resolution returns the unrecognized flag verbatim and the
+matrix default-denies it.
 
 ### Seeing through prefixes, wrappers, and paths
 
@@ -273,11 +374,21 @@ env git push                   # one wrapper
 sudo -u bob git push           # wrapper with a value-taking option
 /usr/bin/git apply patch.diff  # absolute path, resolved by basename
 ./git apply patch.diff         # relative path, resolved by basename
+git-apply patch.diff           # dashed dispatch: the subcommand rides the binary name
 ```
 
-All five reach `decideGitSegment` as git invocations. Exactly one wrapper level is
+All six reach `decideGitSegment` as git invocations. Exactly one wrapper level is
 unwrapped; `sudo env git push` is *unresolvable* rather than parsed, and unresolvable
 denies.
+
+The limit of that unwrap is worth stating plainly, because G7 requires every known bypass to be
+written down. The git gate unwraps only `env`, `command`, `sudo`, `builtin`, and `exec`, and it
+does not re-tokenize the inner string of a shell `-c`. A git write behind a wrapper outside that
+set — `timeout 5 git push`, `nice git push`, `xargs git push` — or behind `sh -c "git push"`
+resolves to a command word that is not `git`, so the segment is treated as non-git and allowed.
+The write-shape extractor does see through all of those, but it surfaces file paths, and a git
+write has no write-shaped path to surface. Widening the wrapper set here is the fix; until it
+lands, this is a real hole rather than a theoretical one.
 
 Two fail-safe denies close the residual gap where a static parser cannot know the command:
 
@@ -347,21 +458,28 @@ the write-shape extractor.
 
 ### The session-registry gate
 
-`decideSession` runs first, for every tool call, and dispatches on whether the session has
+`decideSession` runs ahead of every other decision table, for every tool call, and dispatches on whether the session has
 a registry entry (`sessionID → {role, itemId, tree}`) and on the tool's class. The
 registry is written by the fan-out engine when it creates a sub-session, and by the
 `chat.message` hook for the orchestrator.
 
-| Tool class                                                              | Registered                       | Unregistered                                            |
-| ----------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------- |
-| `spawn` (opencode's `task`)                                             | **deny**                         | **deny**                                                |
-| `read`                                                                  | allow                            | allow                                                   |
-| `write` (`edit`, `write`, `patch`, `apply_patch`, or write-shaped bash) | allow, subject to later gates    | **deny** — no item assignment                           |
-| `conductor` (any `conductor_*` tool)                                    | allow, subject to phase legality | **deny** — state advances only from registered sessions |
+| Tool class                                      | Registered                       | Unregistered                                            |
+| ----------------------------------------------- | -------------------------------- | ------------------------------------------------------- |
+| `spawn` (opencode's `task`)                     | **deny**                         | **deny**                                                |
+| `read`                                          | allow                            | allow                                                   |
+| `write` (`edit`, `write`, or write-shaped bash) | allow, subject to later gates    | **deny** — no item assignment                           |
+| `conductor` (any `conductor_*` tool)            | allow, subject to phase legality | **deny** — state advances only from registered sessions |
 
 A registered session passes this gate for any non-spawn call. Its role and scope are a
 later gate's job, not this one's. A stray unregistered reader is allowed because it is
 harmless and not worth a confusing failure.
+
+A bash call classifies `write` when the write-shape extractor surfaces at least one target, or
+when it carries an interpreter one-liner naming the state area; otherwise it classifies `read`.
+A git write hidden in a read-classified bash command is deliberately not forced to `write` here
+— the git gate catches it, and it runs for registered and unregistered sessions alike.
+`patch` and `apply_patch` still classify `write`, so a gate crash on one fails closed, but they
+never reach this table: the refusal ahead of it has already thrown.
 
 The spawn deny is the load-bearing half. Without it, an implementer could create a child
 session conductor never registered — no role, no item, no scope — and have that child
@@ -375,25 +493,39 @@ same rule is `agent.<name>.tools: {"task": false}` in the generated agent defini
 `decideEdit` applies five checks in a fixed order. The order is the specification: each
 step reads the result of the one before it.
 
-1. **Tree-relative normalization.** Strip the session tree prefix from the path.
+1. **Tree-relative normalization.** Strip the session tree prefix from the path. A path that
+   is not under the tree denies here.
 2. **Path traversal.** Any `..` segment in the normalized path denies outright.
 3. **Freeze.** A live verify marker for *this* tree denies every edit here.
-4. **`.conductor/**`.** The state area is handler-written only, for everyone.
+4. **`.conductor/**`.** The state area is handler-written only, for everyone, and the match is
+   case-folded.
 5. **Per-role scope.**
 
 The role table:
 
-| Role                                           | May write                                                   |
-| ---------------------------------------------- | ----------------------------------------------------------- |
-| `orchestrator`                                 | nothing, unless an active inline claim scopes the path (G8) |
-| `implementer`                                  | paths matching the item's `fileScope`                       |
-| `test-writer`                                  | paths matching the item's `testScope`                       |
-| `reviewer`, `skeptic`, `planner`, `mechanical` | nothing — they read and report                              |
-| any unknown role                               | nothing — fail safe                                         |
+| Role                                           | May write                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `orchestrator`                                 | nothing, unless an active inline claim scopes the path (G8)              |
+| `implementer`                                  | paths matching the item's `fileScope` and *not* matching its `testScope` |
+| `testWriter`                                   | paths matching the item's `testScope`                                    |
+| `reviewer`, `skeptic`, `planner`, `mechanical` | nothing — they read and report                                           |
+| any unknown role                               | nothing — fail safe                                                      |
+
+The role strings are compared exactly, and `testWriter` is one camel-cased word. It is the
+spelling the fan-out engine writes into the session registry and the one
+[`core/vocab-registry.ts`](../../conductor/core/vocab-registry.ts) pins across the codebase.
 
 For the orchestrator, a present-but-non-matching inline claim still denies: the claim must
 scope the specific path. The claim changes *who* edits, never *what* is enforced — the
 item FSM applies in full either way.
+
+The implementer's writable set is `fileScope` *minus* `testScope`, and the subtraction is
+checked first: a path inside the item's `testScope` denies whatever `fileScope` also covers, and
+the reason names the covering globs. A session gated to write the very test it must pass holds a
+licence to make the proof agree with the code. Queue acceptance already refuses an item whose
+`fileScope` covers its own `testScope`, and `conductor_mark_green`'s digest witness catches a
+rewritten vetted test afterwards — but the witness speaks only once a whole sub-session has been
+spent, so the gate answers the question at the point where it costs nothing.
 
 The `..` deny exists because `normalizeUnderTree` does not collapse `..` and `globMatch`
 treats it as a literal segment that `**` swallows. Without the check, a scope of
@@ -434,22 +566,51 @@ write has burned a dispatch and an attempt counter for nothing.
 Item scopes are tree-relative. Session paths are absolute. `normalizeUnderTree` strips the
 session tree prefix so both sides of every comparison are in the same coordinate system:
 
-| Session tree                               | Incoming path     | Normalized        | Effect                                                   |
-| ------------------------------------------ | ----------------- | ----------------- | -------------------------------------------------------- |
-| `/repo`                                    | `/repo/src/a.ts`  | `src/a.ts`        | matched against `fileScope`                              |
-| `<stateHome>/…/worktrees/<runId>/<itemId>` | `<tree>/src/a.ts` | `src/a.ts`        | the same scope matches in a worktree                     |
-| `<stateHome>/…/.conductor/…/<itemId>`      | `<tree>/src/a.ts` | `src/a.ts`        | the tree's own `.conductor` prefix does not false-deny   |
-| `/repo`                                    | `/elsewhere/x.ts` | `/elsewhere/x.ts` | matches no tree-relative scope, denied by the role check |
+| Session tree                               | Incoming path     | Normalized | Effect                                                 |
+| ------------------------------------------ | ----------------- | ---------- | ------------------------------------------------------ |
+| `/repo`                                    | `/repo/src/a.ts`  | `src/a.ts` | matched against `fileScope`                            |
+| `<stateHome>/…/worktrees/<runId>/<itemId>` | `<tree>/src/a.ts` | `src/a.ts` | the same scope matches in a worktree                   |
+| `<stateHome>/…/.conductor/…/<itemId>`      | `<tree>/src/a.ts` | `src/a.ts` | the tree's own `.conductor` prefix does not false-deny |
+| `/repo`                                    | `/elsewhere/x.ts` | —          | not under the tree: denied at normalization            |
+
+A path outside the tree is denied at normalization rather than handed on for a scope match to
+reject. Returning it unchanged looked safe on the reasoning that an absolute path matches no
+tree-relative scope, but that is false for any wildcard-headed scope: `globMatch("**", "/etc/passwd")`
+is true, because `**` spans separators including the leading one. An item whose `fileScope` is
+`**` — which the verify-scope derivation produces for an item that declares no paths — would
+have granted edit permission to any absolute path on the machine, and the `..` guard does not
+help, because a path that is already absolute needs no traversal.
 
 The `.conductor/**` deny is applied to the normalized path — the current tree's state
 area — never to the worktree root prefix, which is why a worktree living under a
-`.conductor` state home is still writable by its implementer.
+`.conductor` state home is still writable by its implementer. The comparison folds the path to
+NFKC and lower case first, because the filesystem this rule defends is case-insensitive:
+`.Conductor/runs/<id>/state.json` and `.conductor/runs/<id>/state.json` are one file on macOS
+and on Windows, so a byte-exact match let a session forge run state, evidence, and journal
+through the other spelling. Folding compatibility forms too means a fullwidth or decomposed
+spelling of the token is the state area as well.
 
 ## The write-shape extractor
 
 `writeShapedPaths(command)` surfaces the paths a bash command *writes*. It reuses the same
-tokenizer and operator segmentation the git gate uses, and re-runs itself over the inner
-string of a shell `-c` wrapper, bounded at eight levels of nesting.
+tokenizer and operator segmentation the git gate uses, unwraps command wrappers iteratively,
+and re-runs itself over the inner string of a shell `-c` wrapper, bounded at eight levels of
+nesting.
+
+The wrappers it unwraps are `env`, `command`, `sudo`, `builtin`, `exec`, `nice`, `nohup`,
+`time`, `timeout`, `xargs`, `stdbuf`, and `ionice` — twelve names, stripped repeatedly rather
+than once, each together with its own flags, those flags' values, and (for `env`) its
+`NAME=value` assignments. `timeout` also consumes one positional operand of its own, so
+`timeout 5 rm x` runs `rm`, not `5`. A single bare-word level of unwrap resolved
+`env -i sh -c "rm x"` to the command word `-i`, so the inner command reached neither the
+write-shape extraction nor the interpreter rule and the whole call classified as a harmless
+read.
+
+Every command name — wrapper, shell, interpreter, and write-shaped tool alike — resolves by
+basename and is then folded to NFKC lower case, the same fold the state-area deny applies, so
+`/usr/bin/RM`, `ENV`, `SH`, and `PYTHON3` all resolve. The fold is fail-closed: no allow arm
+keys off a command name, so matching more spellings can only surface more write shapes and
+unwrap more wrappers.
 
 | Shape                                             | Extracted target                                        |
 | ------------------------------------------------- | ------------------------------------------------------- |
@@ -464,6 +625,7 @@ string of a shell `-c` wrapper, bounded at eight levels of nesting.
 | `awk`/`gawk -i inplace`                           | every non-flag operand after the program                |
 | `ex`, `ed`                                        | every non-flag operand                                  |
 | `sh`/`bash`/`dash`/`zsh`/`ksh -c "<inner>"`       | recurse into `<inner>`                                  |
+| An interpreter one-liner's recognized write calls | each call's literal path operand (see below)            |
 | `cat`, `grep`, `echo`, `printf`, anything else    | nothing                                                 |
 
 Targets are de-duplicated preserving first-seen order, and each one is judged separately
@@ -471,10 +633,35 @@ by the edit gate. The same function decides the tool class: a bash command with 
 one write target classifies as `write` for the registry gate, and one with none classifies
 as `read`.
 
-The honest limit: an in-session interpreter bypasses this entirely. `node -e "require('fs')
-.writeFileSync(...)"` and `python -c "open(...,'w')"` are single tokens whose contents the
-extractor does not evaluate, and evaluating them would mean writing an interpreter. The
-extractor covers the shell-shaped writes a model actually reaches for; it is not a
+### Interpreter one-liners
+
+`node -e "require('fs').writeFileSync(p, s)"` is none of the shell shapes above, and neither is
+`python3 -c "open(p,'w').write(s)"`. Both once classified as `read`, took no edit-gate decision,
+and wrote wherever they liked — including under `.conductor`, whose whole value is that a gated
+session cannot produce a file there. Two rules cover them, because the two cases are different.
+
+The first reads the program text for a *recognized write call* and surfaces its literal path
+operand, which then meets the ordinary edit gate like any other write target. The recognized
+interpreters are `node`, `nodejs`, `bun`, `deno`, `python`, `python2`, `python3`, `perl`, and
+`ruby`; the program text is whatever follows `-e`, `-c`, `-E`, `--eval`, `--eval=`, or a perl
+single-dash bundle ending in the eval letter. The recognized calls are an enumeration rather
+than a heuristic — Node's `fs` write family, Python's `open(..., <mode>)` for any mode but a
+plain read plus `Path(...).write_text`/`write_bytes` and the `os`/`shutil` mutators, Ruby's
+`File`/`IO`/`FileUtils` writers, and Perl's `open` for write and `unlink`. A name on that list is
+a write in the language it belongs to, and a reader can check the claim.
+
+The second rule is blunt: any interpreter program text that so much as *mentions* `.conductor`,
+case-folded, is refused whole, path operand or not. A program can build the path it writes to,
+so a rule that held only for the spellings this extractor parses would leave the provenance
+channel resting on the model's choice of syntax. That refusal sits between the git gate and the
+write-target loop, and it is consumable by an `edit` override grant on the same terms as any
+other edit deny — §3.6 is a budgeted, taint-recording hatch, not an exemption.
+
+The honest limit is narrower than it was and still real. The write-call enumeration reads
+literal string operands only: a path assembled from variables, decoded at runtime, or written
+through an unlisted API surfaces nothing, and evaluating it would mean writing an interpreter.
+The state-area rule is the backstop for the one case where guessing wrong is unaffordable;
+outside `.conductor` the extractor covers the shapes a model actually reaches for. It is not a
 sandbox, and the design says so rather than implying otherwise.
 
 ## Fail-closed in practice
@@ -521,16 +708,16 @@ function denyThrow(input: GateHookInput, reason: string): never {
 }
 ```
 
-The snapshot carries:
+The journaled record carries:
 
-| Field      | Content                                           |
-| ---------- | ------------------------------------------------- |
-| `toolName` | The tool that was refused                         |
-| `args`     | The raw tool arguments as opencode delivered them |
-| `reason`   | The exact text thrown back to the model           |
-| `command`  | The bash command text, when there was one         |
-| `editPath` | The edited path, when there was one               |
-| `corr`     | `runId`, `sessionID`, and `itemId` where known    |
+| Field      | Content                                                                           |
+| ---------- | --------------------------------------------------------------------------------- |
+| `toolName` | The tool that was refused                                                         |
+| `args`     | The raw tool arguments as opencode delivered them                                 |
+| `reason`   | The exact text thrown back to the model                                           |
+| `command`  | The bash command text, when there was one                                         |
+| `editPath` | The edited path, when there was one                                               |
+| `corr`     | `runId`, `sessionID`, and `itemId` where known — the journal's correlation record |
 
 Denies are logged at `warn`, not `debug`, so the journal always persists them. The bar is
 concrete: given a `gates/deny` line, you can call `decideGit(command, ...)` or
@@ -559,8 +746,9 @@ The working rules:
    `branch` and `branch -D`, `stash list` and `stash push`, `restore --staged` and
    `restore`. An allow row without its trap is how a deny row goes missing.
 4. **Prefer a two-word discriminator to a broadened verb.** If a verb is read-only in one
-   spelling and a write in another, give it a `decideX(operands)` function like the seven
-   that already exist rather than putting the verb on the simple allow-list.
+   spelling and a write in another, give it a `decideX(operands)` function like the nine that
+   already exist — `stash`, `worktree`, `remote`, `config`, `reflog`, `branch`, `checkout`,
+   `switch`, `restore` — rather than putting the verb on the simple allow-list.
 5. **Keep the reason text useful and the core pure.** The reason reaches the model, so name
    the violated rule and the legal alternative — `conductor_publish` for staging and
    committing, `conductor_surface` for a genuinely needed command, `conductor_inline_claim`

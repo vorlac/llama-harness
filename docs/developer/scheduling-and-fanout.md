@@ -25,7 +25,7 @@ Membership is four conditions, each checked explicitly in the candidate loop:
 | a   | Dependency-ready          | every id in `dependsOn` is in the PUBLISHED set; nothing below PUBLISHED unlocks a dependent            |
 | b   | Pairwise scope-disjoint   | `scopesIntersect(candidate.fileScope, chosen.fileScope)` is false against every already-selected member |
 | c   | Not blocked, not deferred | the runtime item's `blocked` and `deferred` annotations are both `null`                                 |
-| d   | Within the cap            | the wave is closed once it reaches `parallel.maxImplementers`                                           |
+| d   | Within the cap            | the wave is closed once it reaches `parallel.maxImplementers` (default 2)                               |
 
 Two filters sit alongside them: an item already in state `PUBLISHED` is never a member, and
 an item with no runtime record is not schedulable — the scheduler has no facts about it, so
@@ -144,7 +144,7 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart TD
-%% Source: conductor/core/schedule.ts:152-236
+%% Source: conductor/core/schedule.ts:140-225 (nextWave)
     Q["queue item plus runtime facts"] --> P{"already PUBLISHED"}
     P -->|yes| SKIP["not a candidate"]
     P -->|no| B{"blocked or deferred"}
@@ -200,45 +200,57 @@ one set of gates either way.
 The driver owns three ordering rules that the scheduler's disjointness check alone cannot
 provide.
 
-| Guarantee                                                            | Why                                                                                                         |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Implementer writes serialize per tree under `parallel.writes: "off"` | there is one working tree, so two concurrent implementers would race on it regardless of scope disjointness |
-| `conductor_publish` runs serially in item order                      | the git index is a singleton; two concurrent stages would interleave into one commit                        |
-| No write-capable dispatch enters a tree with a live verify marker    | the freeze is a scheduling rule, not only a gate — a held job waits rather than being denied                |
+| Guarantee                                                         | Why                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| The write-capable stages never overlap, and run in wave order     | there is one working tree, so two concurrent writers would race on it regardless of scope disjointness      |
+| `conductor_publish` runs serially in item order                   | the git index is a singleton; two concurrent stages would interleave into one commit                        |
+| No write-capable dispatch enters a tree with a live verify marker | the freeze is a scheduling rule, not only a gate — a held job waits rather than being denied                |
 
-Test-writing is deliberately exempt from the first rule. Each test-writer is confined by
-the edit-scope gate to its own item's `testScope`, and decomposition doctrine prefers a new
-test file per item, so two test-writers in one wave do not target the same file; the one
-window where their writes would genuinely be unsafe — a verify in flight — is already
-covered by the freeze. Under `off`, then, a wave runs **one implementer at a time per
-tree** while its members' RED tests are still written wave-wide (plan §4.3). What that
-leaves overlapping in the default mode is every read stage plus test-writing against an
-implementer that is thinking rather than verifying; full write concurrency is worktree
-mode's job.
+The first two rules are one mechanism. `SERIAL_STAGES` names the three stages that may not
+overlap — `conductor_submit_test` and `conductor_mark_green`, whose sub-sessions are write-capable,
+and `conductor_publish`, whose git index is a singleton. Within a stage group the driver chains
+those into a single promise in wave order and lets every other stage overlap freely. The first job
+of each is started in one synchronous pass, so the order sub-session traffic reaches the engine is
+the wave's and not the event loop's.
+
+What overlaps, then, is every read stage: vet critics, review lenses, and skeptics across all wave
+members at once. That is where most of a run's usable concurrency lives, and it is why stage
+batching matters more than write parallelism does.
 
 The third guarantee is where the scheduler and the engine meet. The edit-scope gate denies
 every edit in a frozen tree, production and test files alike; the engine additionally
 *holds* the dispatch, so a write-capable job never reaches a session that would immediately
-be denied.
-The gate is the correctness guarantee and the hold is the scheduling behavior that keeps
-the gate from being hit in the first place.
+be denied. The gate is the correctness guarantee and the hold is the scheduling behavior that
+keeps the gate from being hit in the first place. A stage that finishes notifies the tree view,
+which is what releases any job the engine was holding on a marker that stage broke or a verify it
+finished.
 
 ## Stage batching
 
 Within a wave the driver batches like stages: all members' vet critics dispatch together,
-all members' review lenses dispatch together. The read fan-out for a stage is the stage's
-configured reader count clamped to the ceiling:
+all members' review lenses dispatch together. `readFanout` gives a stage its reader count as the
+configured count clamped to the concurrency ceiling:
 
 ```ts
 readFanout(stage, config) === min(stageCount(stage, config), config.parallel.maxReaders)
 ```
 
-| Stage        | Config key                    |
-| ------------ | ----------------------------- |
-| `planReview` | `workflow.planReviewers`      |
-| `itemReview` | `workflow.itemReviewers`      |
-| `vet`        | `workflow.vetCritics`         |
-| `skeptics`   | `workflow.skepticsPerFinding` |
+| Stage        | Config key                    | Default | Ceiling default          |
+| ------------ | ----------------------------- | ------- | ------------------------ |
+| `planReview` | `workflow.planReviewers`      | 4       | `parallel.maxReaders` = 6 |
+| `itemReview` | `workflow.itemReviewers`      | 6       | `parallel.maxReaders` = 6 |
+| `vet`        | `workflow.vetCritics`         | 3       | `parallel.maxReaders` = 6 |
+| `skeptics`   | `workflow.skepticsPerFinding` | 2       | `parallel.maxReaders` = 6 |
+
+`readFanout` is not the last word on either review roster, and it is important not to read it as
+one. **Coverage outranks the concurrency knob.** Plan review floors its roster at the number of
+named lenses — `max(readFanout("planReview", config), lensCount)` — because sizing by `readFanout`
+alone silently dropped lenses whenever the reader clamp fell below the lens count, and at
+`maxReaders: 0` dispatched nothing at all while still advancing the run to `PLAN_REVIEWED`: a plan
+that "passed review" on evidence nobody gathered. Item review clamps instead:
+`clamp(readFanout("itemReview", config), 3, 6)`, and pins 3 for a trivial-classified run. Neither
+costs anything operationally, because the fan-out engine still admits at most `maxReaders` jobs at
+a time — the clamp is a concurrency knob and the engine is where it is enforced.
 
 Under one model, batching saves no model swaps — there are none to save. What it still buys
 is **KV prefix locality**: like stages across wave members share most of their prompt
@@ -248,8 +260,9 @@ fan-out saturated, which is where most of a run's usable concurrency lives.
 
 ## Worktree mode
 
-*Not yet wired: worktree mode is built in task 9.6; the default `parallel.writes: "off"`
-runs one implementer per tree until then.*
+`parallel.writes` selects between two arrangements. The default, `"off"`, runs every session
+against the one workspace tree and serializes implementer writes within it. `"worktrees"` gives
+each wave implementer a tree of its own, so their writes genuinely overlap.
 
 Under `parallel.writes: "worktrees"`, each wave implementer gets its own worktree at
 `<stateHome>/conductor/<workspaceKey>/worktrees/<runId>/<itemId>` — **outside the
@@ -259,28 +272,49 @@ in the main tree would discover and execute all of them, including another item'
 in-progress red test. Quarantine moves a handful of files out of the walked tree; a
 worktree inside it would add an entire second tree's worth of collectable tests.
 
-The rest of the mode is four rules:
+The rest of the mode is five rules:
 
+- **Created at wave setup.** The wave driver creates one worktree per member *before* any stage
+  dispatch, so every member's sub-sessions are born bound to their own tree, and records the path
+  on the item's `worktree` field. Under `"off"` that block runs no git command at all and
+  `worktree` stays `null`. A tree an earlier call already created and that still exists is
+  reused, and `createWorktree` itself prunes first, adopts a still-registered worktree only after
+  verifying its branch, and reuses a surviving branch rather than force-deleting it — so a
+  crash-recovery path preserves committed work.
 - **Edit-scope binding.** Each session's edit-scope gate binds to its worktree path, so an
-  implementer cannot write into the main tree or into another item's worktree.
-- **Serial merge-back in item order.** `git merge --ff-only` where possible, otherwise a
-  normal merge performed by the handler.
+  implementer cannot write into the main tree or into another item's worktree. The reviewers and
+  the verify runner bind to the same tree: dispatching reviewers into the workspace while the
+  change sits in a worktree would show them a tree without the change they were convened for.
+- **Serial merge-back in item order.** `mergeBack` verifies the branch identity, tries
+  `--ff-only` first, falls back to a normal merge, and aborts a conflicted merge before
+  returning, so the workspace is never left mid-merge. Serial order follows from the driver's
+  publish stage being serial and the call being synchronous.
 - **Re-validation against the integrated tree.** After each merge the item re-validates
   before reaching PUBLISHED. A green in isolation is not a green in company, and the
   integrated tree is the only place where that distinction can be observed.
-- **Conflict fallback.** Scope disjointness makes conflicts structurally rare; a conflict
-  anyway drops the later item to GREEN, and it re-validates from there.
+- **Conflict fallback.** Scope disjointness makes conflicts structurally rare; a conflict anyway
+  aborts the merge, drops the later item back to `GREEN` with the `debugging` annotation set, and
+  it re-validates from there. Earlier items' completed merges stand and this item's commit stays
+  on its own branch. That drop is an administrative write, not an FSM edge — see
+  [state machines](state-machines.md).
 
-The groundwork is already in place: `gitio` and `evidence.runVerify` take an explicit
-tree/`cwd` argument, and verify markers are per-tree from day one.
+Teardown is the continuation engine's: it removes each worktree-bearing item's tree at run
+teardown. `gitio` and `evidence.runVerify` take an explicit tree/`cwd` argument throughout, and
+verify markers are per-tree, which is what lets one tree's verify freeze only that tree.
 
 ## The fan-out engine
 
 `createFanout(client, config, journal, registry, treeState, runId)` returns
 `{dispatch, dispatchWave}`. A job is `{role, itemId, tree, writeCapable, prompt,
-schemaName, priority, lens?}`; a result is `{sessionID, value?, error?, timings}` with
-`timings: {startedMs, endedMs, durationMs}`. `dispatchWave` writes results positionally, so
+schemaName, priority, lens?, receivingReview?}`; a result is `{sessionID, value?, error?, timings}`
+with `timings: {startedMs, endedMs, durationMs}`. `dispatchWave` writes results positionally, so
 `results[i]` always corresponds to `jobs[i]` regardless of completion order.
+
+`tree` is the tree *path* the sub-session is dispatched into, and the engine writes it verbatim
+onto the session-registry entry the gates read — so the gate judges an edit against the same tree
+the scheduler put the session in. A job that works no tree of its own carries `NO_TREE`.
+`receivingReview` marks a dispatch that is receiving review findings, which is what makes the
+doctrine layer deliver `receive-review.md` to it.
 
 Each job is create, prompt, collect:
 
@@ -328,9 +362,9 @@ final error list — an env-failed *completion*, never confused with a watchdog 
 ### The watchdog
 
 A per-job timer is armed on the global `setTimeout` **before** `session.create`, so
-`parallel.subSessionTimeoutMs` bounds the entire job including the create phase. If create
-itself hangs, nothing else in the system would abort it and the whole wave would stall
-behind one slot.
+`parallel.subSessionTimeoutMs` (default 900000 ms — fifteen minutes) bounds the entire job
+including the create phase. If create itself hangs, nothing else in the system would abort it and
+the whole wave would stall behind one slot.
 
 On fire the watchdog aborts the session over the SDK if an id exists yet, journals
 `subsession.abort` at `warn` with `reason: "watchdog-timeout"`, and produces an `env` error
@@ -340,8 +374,8 @@ produce a session id, it is aborted so it does not leak.
 
 ### Freeze-aware admission
 
-Within a model group the engine admits up to `parallel.maxReaders` jobs at once. Before
-admitting a job it checks the freeze:
+Within a model group the engine admits up to `parallel.maxReaders` jobs at once (default 6).
+Before admitting a job it checks the freeze:
 
 ```ts
 if (entry.job.writeCapable && treeState.isFrozen(entry.job.tree)) { hold(entry); continue; }
@@ -401,7 +435,7 @@ config:
         messageTextColor: '#C1C4CA'
 ---
 sequenceDiagram
-%% Source: conductor/adapter/fanout.ts:192-339
+%% Source: conductor/adapter/fanout.ts:204-356 (runJob)
     participant E as Fan-out engine
     participant W as Watchdog
     participant R as Session registry
@@ -426,19 +460,27 @@ sequenceDiagram
 
 ## Roles
 
-Every sub-session runs `config.models.default` — `qwen3.6-27b`. There is no role-to-weights
-mapping in the base build, so no stage boundary costs a model swap. A role selects doctrine,
-sampling, gate posture, and a router priority tag; it never selects weights.
+A job's model is `config.models.roles[role] ?? config.models.default`. The reference deployment
+leaves `models.roles` empty and serves every role from one set of weights, so no stage boundary
+costs a model swap; the key is read rather than ignored, so pointing a role at different weights
+is a config change and not a redesign. A role selects doctrine, sampling, gate posture, and a
+router priority tag; in the base configuration it never selects weights.
 
-| Role         | Doctrine pack                   | Temp | Gate posture                   | Priority    |
+| Role         | Doctrine packs                  | Temp | Gate posture                   | Priority    |
 | ------------ | ------------------------------- | ---- | ------------------------------ | ----------- |
 | orchestrator | `core.md`                       | 0.4  | edit: ask (inline claims only) | interactive |
-| planner      | `decompose.md` / `plan.md`      | 0.7  | edit: deny                     | interactive |
+| planner      | `decompose.md` + `plan.md`      | 0.7  | edit: deny                     | interactive |
 | testWriter   | `tdd.md`                        | 0.5  | edit: `testScope` only         | review      |
 | implementer  | `tdd.md` (+`debug.md` in DEBUG) | 0.4  | edit: `fileScope` only         | review      |
-| reviewer     | `review.md` / `test-vet.md`     | 0.3  | edit: deny                     | review      |
+| reviewer     | `review.md` + `test-vet.md`     | 0.3  | edit: deny                     | review      |
 | skeptic      | `skeptic.md`                    | 0.3  | edit: deny                     | review      |
-| mechanical   | `core.md` (lite)                | 0.1  | edit: deny                     | batch       |
+| mechanical   | `core.md`                       | 0.1  | edit: deny                     | batch       |
+
+A role whose name is not in the table falls back to `core.md` and temperature 0.4, so an
+unregistered session still receives grounding rather than an empty system append. One more pack
+is delivered by signal rather than by role: a dispatch that receives review findings also gets
+`receive-review.md`, keyed on the registry entry the fan-out engine wrote for that dispatch and
+not on the item's state, so the same item's other dispatches get nothing extra.
 
 The single-model decision is also what makes the POC's measurement meaningful: a quality
 delta measured this way is attributable to process, not to a bigger model doing the
@@ -457,28 +499,40 @@ Item review dispatches fresh reviewers over the item's diff, spec, and test, one
 | minimality/simplification | unnecessary machinery, simpler equivalents                           | yes                          |
 | perf                      | performance consequences                                             | added at `itemReviewers` ≥ 6 |
 
-Session count is `clamp(itemReviewers, 3, 6)`. At 6 each lens gets its own session. Below 6,
+Session count is `clamp(readFanout("itemReview", config), 3, 6)`, or a flat 3 for a
+trivial-classified run. At 6 each lens gets its own session. Below 6,
 lenses **merge pairwise from the tail** of the priority list: 5 merges minimality with perf;
 4 additionally joins test-adequacy to spec/contract; 3 gives spec+correctness,
 guardrail+minimality, test-adequacy+perf. Values below 3 clamp to 3 with a journal warning.
 Merging never drops a mandatory lens, and configuration cannot truncate the mandatory five
 away.
 
-Every finding then faces `skepticsPerFinding` refuters, and survival is a threshold on the
-uphold count:
+Every finding then faces `skepticsPerFinding` refuters, and survival is a threshold on the count
+of seats that did **not** refute it:
 
 ```ts
 // conductor/core/verdict.ts
 export function findingSurvives(verdicts: readonly Verdict[], k: number): boolean {
   let upholds = 0;
-  for (const verdict of verdicts) if (verdict.upheld) upholds += 1;
+  for (const verdict of verdicts) {
+    if (verdictKind(verdict) !== "refuted") upholds += 1;
+  }
   return upholds >= Math.ceil(k / 2);
 }
 ```
 
+**A refutation without evidence is an abstention, and an abstention upholds.** `verdictKind`
+counts a verdict as a refutation only when its `refutationEvidence` names all three of the
+discriminating input, what was run, and the reading under which the finding fails; anything less
+is a seat that could not evaluate the finding, and incapacity must not extinguish it. Refutation
+stays cheap for a skeptic who did the work and stays fatal to the finding.
+
 **A tie upholds.** At the default `k = 2` the threshold is `⌈2/2⌉ = 1`, so a finding two
 skeptics split on survives — a finding worth arguing about is worth a fix round. At `k = 3`
 the threshold is 2, a strict majority.
+
+`skepticsPerFinding: 0` does not disable skeptic review: it throws when any major finding is
+raised, because `findingSurvives([], 0)` is vacuously true and would auto-survive every major.
 
 Adjudication is two-stage. Surviving spec/contract findings are fixed **first**, and
 quality-lens findings from a round that produced surviving spec findings are **discarded
@@ -538,10 +592,15 @@ provider base URL, which the plugin cannot repoint mid-session, so a router that
 takes `env` failures on its in-flight sub-sessions and the supervisor's restart is the
 resilience story, not a client-side probe.
 
-The endpoints are `/conductor/health` and `/conductor/metrics`. `MetricsSummary` carries
+The client addresses one endpoint, `/conductor/metrics`. `MetricsSummary` carries
 `totalRequests`, `schemaMissing`, `schemaConformed`, `statusCounts`, `promptTokens`, and
 `completionTokens` — the POC's cost and conformance dataset. See
-[llama-router](llama-router.md) for what serves them.
+[llama-router](llama-router.md) for what serves it.
+
+There is deliberately no health-probe function here. Setup reaches the router through its own
+proof requests and reads the verdict off those, and the live health probing an operator relies on
+is the supervisor's, in `scripts/serve.py`. An exported, tested probe with no caller reads as
+coverage of a mechanism that does not run.
 
 ## See also
 

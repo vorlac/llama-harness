@@ -20,17 +20,18 @@ second assumes the first is already serving a model.
 2. **[Installation](installation.md)** — *What does this machine need, and what gets put
    where?*
    Prerequisites, the guided installer, building the `llama-*` binaries from the pinned
-   submodule, and the layout of the gitignored `.data/` directory.
+   submodule, the conductor and C++ development environments, and the layout of the gitignored
+   `.data/` and `.out/` directories.
 
 3. **[Models](models.md)** — *Which model should I install, and how do I know the download
    is intact?*
-   The catalog, what fits the machine, and the `scripts/fetch_models.py` subcommands —
-   including the four-step validation every install runs.
+   The catalog of 24 models, what fits the machine, and the `scripts/fetch_models.py`
+   subcommands — including the four-step validation every install runs.
 
 4. **[Serving](serving.md)** — *How do I get one endpoint that serves every installed
    model?*
-   `llama-server` in router mode, on-demand weight swapping, and the session-scoped opencode
-   config that `scripts/serve.py` generates.
+   `llama-server` in router mode, on-demand weight swapping, the `llama-router` proxy in front
+   of it, and the session-scoped opencode config that `scripts/serve.py` generates.
 
 5. **[conductor overview](conductor-overview.md)** — *What is conductor, and why does it
    exist?*
@@ -57,12 +58,13 @@ second assumes the first is already serving a model.
    are deliberately not adjustable.
 
 10. **[Observability](observability.md)** — *How do I see what a run did?*
-    The liveness banner, `conductor_status`, the journal and the evidence, decision, anomaly
+    The liveness beacon, `conductor_status`, the journal and the evidence, decision, anomaly
     and question ledgers, and the report a terminal path always writes.
 
 11. **[Benchmarking](benchmarking.md)** — *How good is this model on this machine?*
-    `scripts/benchmark.py`, the named presets, the three scoring tiers, and why the
-    interesting number is the gap between a model's self-assessment and its objective score.
+    `scripts/benchmark.py`, the ten named presets, the three scoring tiers, why the
+    interesting number is the gap between a model's self-assessment and its objective score,
+    and the separate three-arm bench that measures conductor itself.
 
 12. **[Troubleshooting](troubleshooting.md)** — *It is not doing what I expect. Now what?*
     The common failures in order of likelihood, each with the check that confirms it and the
@@ -74,7 +76,7 @@ second assumes the first is already serving a model.
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [Quickstart](quickstart.md)           | It is the whole install-to-prompt path in one screen, and everything else assumes you have done it once.                                               |
 | [Run lifecycle](run-lifecycle.md)     | Conductor's behavior is only surprising until you know which state the run is in; this page is that map.                                               |
-| [Troubleshooting](troubleshooting.md) | Its conductor section states the first rule of operations — no banner, no conductor — which explains a whole class of "the gates did nothing" reports. |
+| [Troubleshooting](troubleshooting.md) | Its conductor section states the first rule of operations — no beacon, no conductor — which explains a whole class of "the gates did nothing" reports. |
 
 Read them in that order. The other nine pages are reference material you can reach for when
 a specific question comes up, not prerequisites.

@@ -11,8 +11,20 @@ consequence: a good deal of what could go wrong here is *documented rather than 
 A limit written down on this page is a limit you can plan around; a limit nobody wrote
 down is one you find out about from a bad commit.
 
-Read this together with [OPERATIONS.md](./OPERATIONS.md), whose first rule — *no banner, no
-conductor* — is limit 11 turned into a daily habit.
+Read this together with [OPERATIONS.md](./OPERATIONS.md), whose first rule — *no beacon, no
+conductor* — is limit 11 turned into a daily habit. The banner limit 11 names is the visible
+form of that check; the liveness beacon is the form that exists.
+
+Two of the fifteen have drifted from the code, and both are reproduced here anyway because
+this part of the page is pinned verbatim to a plan document that is immutable. Read them with
+these corrections in hand:
+
+- **Limit 8** describes a second conductor session getting a read-only conductor, and calls
+  the lock advisory. Neither holds. `run.lock` is an OS-level claim published with `linkSync`,
+  and `openWorkspace` **refuses** the second session outright — it gets no store at all,
+  rather than a demoted one. There is no read-only mode to fall back into.
+- **Limit 11** names a visible session banner. No module emits one, so the beacon file and
+  the opencode log are the whole of that check.
 
 ---
 
@@ -92,6 +104,29 @@ is a real cost: it **over-denies** legitimate read-only commands, so `git --no-p
 or a `--work-tree` read is refused in a gated session even though it changes nothing. The
 model is told which token caused it and can re-issue the command without the global.
 
+### The git gate unwraps one wrapper, from a list of five
+
+Before it can find a subcommand, the gate has to find the command word, and it looks through
+a leading `NAME=value` environment prefix and through exactly **one** level of five
+recognised wrappers — `env`, `command`, `sudo`, `builtin` and `exec` — together with that
+wrapper's own options and their values. The five are matched as **bare words**: the test is
+token equality, not the basename resolution the edit gate uses, so a path spelling is not a
+recognised wrapper at all. A second wrapper level, as in `sudo env git push`,
+leaves the real command word unknowable to a static parser, so it denies. That is the safe
+direction.
+
+Everything outside those five is simply not unwrapped, and there the cost runs the other
+way. `timeout 5 git push`, `nice git push`, `xargs git push`, `sh -c 'git push'` — and any
+path spelling of one of the five, such as `/usr/bin/env git push` — all present a command
+word that is not `git`, so the gate finds no git invocation in the segment and the git
+matrix never decides the command. The bash **edit** gate has its own, wider
+list — twelve wrapper names, unwrapped repeatedly, including a shell's `-c` string — so a
+wrapped *file write* is still analysed as the write it wraps; a wrapped *git subcommand* is
+not analysed as git. G7 applies as everywhere else: the gate journals only what it refuses
+— `gates: deny`, `gates: gate-crash`, and the `gates: allow` an override grant spends — so a
+git write the matrix never decided leaves no record in the journal at all, and the
+disclosure here is the only place it is written down.
+
 ### Freshness fails safe on a non-finite timestamp
 
 Freshness is a *proof* that no edit landed after a verify, and the proof is arithmetic on
@@ -122,20 +157,29 @@ wrappers — `env`, `command`, `sudo`, `builtin`, `exec`, `nice`, `nohup`, `time
 is analysed as the write it wraps. That unwrap **narrows the wrapper route without closing
 it**: three residuals still escape — `eval`'s string argument is never re-analysed
 (ISSUE-014), an `LD_PRELOAD`-injected write never appears in the command at all, and a
-`cp -t DIR` whose `-t` operand the parser mis-reads slips through (ISSUE-018). It matches
-shapes, not intent. A write performed by a shape outside that set is not seen as a write,
-and adding a shape means adding it to the set — which is exactly the maintenance burden the
-enumeration buys in exchange for never guessing.
+`cp -t DIR` whose destination the parser mis-reads slips through (ISSUE-018) — `cp -t /etc
+a.txt` surfaces the SOURCE as the write target, and the long spelling
+`cp --target-directory=/etc a.txt` surfaces nothing at all.
 
-### The M5 stub scan covers production sources only
+It matches shapes, not intent. A write performed by a shape outside that set is not seen
+as a write, and adding a shape means adding it to the set — which is exactly the
+maintenance burden the enumeration buys in exchange for never guessing.
 
-The mechanical stub-marker scan runs over **production** sources — the tracked TypeScript
-under `conductor/`, the C++ under `router/` and `tools/`, and `scripts/*.py`. Test files
-under `conductor/tests/` are deliberately excluded, because the markers appear there
-legitimately as test *data*, as the *subject* of anti-stub enforcement, and inside example
-strings. The real test-file risk — an unfinished test — is caught independently and does
-not rely on this scan: `scripts/test-conductor.sh` hard-fails any test the suite declined to
-execute, and the TAP directives that mark one, at any depth.
+### The M5 scan's marker rules cover production sources only
+
+The mechanical scan walks the tracked TypeScript under `conductor/`, the C++ under `router/`
+and `tools/`, and `scripts/*.py`. Two of its five rules — the stub-marker scan, and the bare
+word "stub" in a source file — are **production**-only: they skip everything under
+`conductor/tests/` and `router/tests/`, because those tokens appear there legitimately as
+test *data*, as the *subject* of anti-stub enforcement, and inside example strings. The
+other three rules — a test the file marks as skipped or left unfinished, a trivially-true
+assertion, and an empty catch block — run over every scanned file, tests included.
+
+So the exclusion is narrower than "tests are not scanned", and what it leaves uncovered is
+narrower too: a marker word sitting in a test file. The real risk behind that word — a test
+that never ran — is caught independently and does not rely on this scan at all:
+`scripts/test-conductor.sh` hard-fails any test the suite declined to execute, and the TAP
+directives that mark one, at any depth.
 
 ### The current posture on shell expansion, and what it still misses
 
@@ -146,9 +190,16 @@ span, or a backslash escape a real shell would decode — the command word names
 knowable only at shell runtime. Detection resolves the command word by token equality, so
 such a word would read as "not git" and let a git write straight through. Conductor cannot
 adjudicate what it cannot read, so it **denies** the whole command and tells the model to
-surface a question through `conductor_surface` instead of executing it. The same rule
-covers the alias route: a command word that resolves to no real binary is denied rather
-than trusted.
+surface a question through `conductor_surface` instead of executing it.
+
+A companion rule closes git's own run-a-program routes, which would otherwise carry an
+arbitrary command under a read-only verb. A `-c` key or an environment prefix that names a
+program git executes — the `alias`, `pager`, `credential`, `difftool`, `mergetool`,
+`filter`, `trailer`, `guitool` and `instaweb` config sections, exec-shaped leaf keys such
+as `core.pager` and `diff.external`, and the `GIT_*` variables of the same shape — is
+denied before the subcommand is even resolved. A git alias invoked by name is decided by
+the ordinary matrix instead: it arrives as its own subcommand, lands on no allow-list, and
+the default-deny row fires.
 
 Two residuals survive that, and both are over- or under-reach rather than a hole:
 
@@ -168,9 +219,12 @@ Two residuals survive that, and both are over- or under-reach rather than a hole
 Two of these limits change what an operator should *do*, not merely what they should
 expect:
 
-- **Limit 11 → check the banner.** A session without the §3.8 conductor banner is a
-  session with no gates at all. Nothing downstream — not a green suite, not a clean
-  report — distinguishes it from a gated one.
+- **Limit 11 → check the liveness beacon.** The §3.8 session banner is the visible form of
+  this check and nothing emits one, so the signal that works is `.conductor/state/alive.json`,
+  written when the plugin opens the workspace and naming the `pid`, `startMs`, `version` and
+  `sessionID` of the conductor that owns it. A missing beacon — or one naming a dead `pid`,
+  or a different session — means a session with no gates at all. Nothing downstream — not a
+  green suite, not a clean report — distinguishes it from a gated one.
 - **Limit 12 → one terminal per workspace.** A second plain `opencode` in the same repo
   is not merely unhelpful; it races the freshness stamps that publish depends on.
 

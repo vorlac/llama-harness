@@ -18,7 +18,8 @@ produces goes into one self-contained directory in the target repo:
 ├── run.json  queue.json  items/<itemId>.json    # the FSM state
 ├── plan.md   report.md                          # the human-readable artifacts
 ├── journal.jsonl  evidence.jsonl  decisions.jsonl  anomalies.jsonl  questions.jsonl
-└── reviews/<itemId|plan>-r<N>.json              # finding sets + skeptic verdicts
+├── publish-batch.jsonl                          # what each publish staged, with its diff
+└── answers/<Q-NNNN>.md                          # where the operator drops an answer
 ```
 
 The queue is created *for* this run and archived *with* it. There is no long-lived backlog
@@ -77,7 +78,7 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart TD
-%% Source: conductor/core/fsm-run.ts:39-48
+%% Source: conductor/core/fsm-run.ts RUN_SUCCESSORS
     P["user prompt arrives"] --> IN["INTAKE"]
     IN -->|work| DE["DECOMPOSED"]
     IN -->|question| AN["ANSWERED"]
@@ -107,20 +108,23 @@ reached only on a clean round or at the round cap.
 
 | State           | Entered by                                                          | What the handler re-derives                                                             | What you see                                                               |
 | --------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `INTAKE`        | the `chat.message` hook, on a prompt with no live run               | the run's starting facts (`startHead`, `startBranch`, `startDirty`, `excludedStaleRed`) | a run id, the liveness banner, and the stale-red disclosure                |
+| `INTAKE`        | the `chat.message` hook, on a prompt with no live run               | the run's starting facts (`startHead`, `startBranch`, `startDirty`, `excludedStaleRed`) | a run id and the stale-red disclosure                                      |
 | `DECOMPOSED`    | `conductor_decompose`                                               | queue validity: DAG acyclicity, scopes, sizes, ponytail records                         | `queue.json` — items with their file scopes, test scopes, and dependencies |
 | `PLANNED`       | `conductor_plan`                                                    | that `plan.md` was written; extracts its decision records into the ledger               | `plan.md`: per-item test strategy, alternatives, risks, execution order    |
 | `PLAN_REVIEWED` | `conductor_plan_review`                                             | the whole fan-out — lens findings, skeptic verdicts, the revision loop                  | round count, and any surviving majors written as questions                 |
 | `EXECUTING`     | `conductor_dispatch_wave`, or `conductor_classify` on a trivial run | the wave, then each member's item pipeline, concurrently                                | per-item stage progress; the recommended next tool call                    |
-| `REPORTED`      | `conductor_report` on a work run                                    | a fresh, start-stamped full verify                                                      | `report.md` and stop `done`                                                |
-| `TRIVIAL_DONE`  | `conductor_report` on a trivial run                                 | the same handler in report-lite mode                                                    | `report.md` (lite) and stop `done`                                         |
+| `REPORTED`      | `conductor_report` on a work run                                    | a fresh, start-stamped full verify                                                      | `report.md`, and a stop kind derived from the run's dispositions           |
+| `TRIVIAL_DONE`  | `conductor_report` on a trivial run                                 | the same handler in report-lite mode                                                    | `report.md` (lite), and the same derived stop kind                         |
 | `ANSWERED`      | `conductor_classify` with kind `question`                           | the classifier plus one skeptic cross-check                                             | an answer, and no change to the repository                                 |
 
-Transitions happen **only** inside `conductor_*` tool handlers. The phase-order gate denies
-any conductor tool that is not currently legal, naming what is legal and what is
-recommended. The gate, the injected system prompt, and the continuation engine all read one
-derivation — `legalTools` in [core/gates-phase.ts](../../conductor/core/gates-phase.ts) —
-so they cannot disagree.
+Transitions happen **only** inside `conductor_*` tool handlers. Every `conductor_*` call
+passes a single legality choke point that asks two questions of a declared rule — who may
+call this tool, and where in the run it may be called — and the position half delegates to
+`legalTools` in [core/gates-phase.ts](../../conductor/core/gates-phase.ts) or to the
+per-item `requireStageTool` path. The refusal names what is legal and what is recommended.
+That one `legalTools` derivation is read by three subsystems — the gate that denies an
+illegal call, the state block injected into every request's system prompt, and the
+continuation engine that re-prompts an idle orchestrator — so they cannot disagree.
 
 Conductor does **not** claim exactly one tool is legal at a time. With two items in flight,
 `conductor_mark_green {I1}` and `conductor_submit_test {I2}` are legal simultaneously, and
@@ -169,12 +173,26 @@ warning:
 | acceptance criteria phrased as observable checks                            | "make it better"                                                                                    |
 | ponytail rung + reuse note under `ponytail: "full"` or `"ultra"`            | a `minimal-code` rung with no evidence that reuse was considered                                    |
 | item size (scope beyond about 5 files, or more than one acceptance cluster) | one bounded re-split re-prompt round, then rejection                                                |
+| no wildcard-headed `fileScope` entry                                        | `**`, `*.ts`, `{src,lib}/**` — an empty literal head names every path in the repository             |
+| `testScope` disjoint from the item's own `fileScope`                        | an implementer licensed to rewrite the test that proves its own item                                |
+| pairwise-disjoint `fileScope` across every pair of items                    | two items over one file: unattributable findings, and whichever publishes second commits the other's edits |
+| no control character in any scope entry                                     | a newline that writes a line into the commit body or the runner's argv                              |
 
-The fourth row is the load-bearing one: `behavioral: false` skips `RED` and `TEST_VETTED`,
-and the only way to earn it is path arithmetic against `verify.behavioralPaths`, not the
-model's say-so. After `PLAN_REVIEWED` the queue is immutable except through
-`conductor_queue_amend`, which re-validates the DAG, scopes, and behavioral arithmetic and
-records a decision.
+The `behavioral: false` row is the load-bearing one: `behavioral: false` skips `RED` and
+`TEST_VETTED`, and the only way to earn it is path arithmetic against
+`verify.behavioralPaths`, not the model's say-so. The inter-item disjointness rule is judged
+with the same conservative overlap the wave scheduler uses, so `src/**` and `src/lex.mjs`
+overlap, and it applies over every pair whatever each item's `behavioral` flag says —
+territory, not tests, is what it is about.
+
+After `PLAN_REVIEWED` the queue is immutable except through `conductor_queue_amend`, which
+re-validates the DAG, scopes, and behavioral arithmetic and records a decision. Two of its
+own rules matter in practice: the queue is amendable only before verification — `PENDING`,
+`RED`, `TEST_VETTED`, `GREEN`; at `VALIDATED` the item carries a verify record the amended
+scope would invalidate, and at `REVIEWED`/`PUBLISHED` its work is integrated. And an
+`update` may not rewrite an item's scopes past `PENDING` — the item's existing red or green
+was produced under the scope being replaced, so a re-scope must be stated as a `remove` then
+an `add`, which reborns the item `PENDING` with no evidence.
 
 ### PLANNED — write the plan
 
@@ -197,6 +215,10 @@ a proposed execution order.
 | decomposition quality          | item size, scope disjointness, DAG honesty                             |
 | minimality                     | unrequested abstractions, skipped reuse                                |
 
+The roster never drops below the four lenses, whatever `parallel.maxReaders` says; a larger
+`planReviewers` buys a second independent holder of a lens rather than a fifth kind of
+review.
+
 Every `major` finding then faces `skepticsPerFinding` refuters. Surviving majors send the
 plan back to the planner with the findings attached; the plan is revised and the round
 counter increments. The loop exits on a round that yields zero surviving majors, or at
@@ -205,8 +227,11 @@ counter increments. The loop exits on a round that yields zero surviving majors,
 **At the cap**, the run neither stalls nor silently proceeds. Each surviving major is
 written to `questions.jsonl` with `origin: "plan-review-cap"`, and every item that finding's
 claim and evidence name — by item id, or by a file path that intersects the item's
-`fileScope` — is annotated `blocked: {questionId, reason, stage: "plan-review"}`.
-The run proceeds on the remaining items. That is the concrete meaning of "the rest block on
+`fileScope` — is annotated `blocked: {questionId, reason, stage: "plan-review"}`, under the
+same first-block-wins rule everywhere else applies: an item an earlier survivor already
+blocks stays with that block. The later question still records that item in its own
+`blocksItems`; only the ids it actually blocked come back in its result. The run proceeds on
+the remaining items. That is the concrete meaning of "the rest block on
 the human": a field on the item, a row in a ledger, and an unblock path
 (`conductor_answer`).
 
@@ -223,17 +248,36 @@ their own state machine, one recommended tool call at a time, always naming an i
 
 ### REPORTED — close the run
 
-`conductor_report` requires every item to be `PUBLISHED`, `blocked`, or `deferred` — the
-three dispositions a report can close on. This holds for trivial runs too: a trivial run
-closes report-lite, but only once its work is settled.
+`conductor_report` requires every item to be **settled**, and settlement is one derivation
+with two consumers: the same predicate decides whether the gate offers the tool and whether
+the handler accepts the call, so the two can never disagree. An item is settled when it is
+`PUBLISHED`, or annotated `blocked` or `deferred`, or unable ever to advance in this run —
+which covers an item waiting behind a dependency that is itself permanently stuck, and, in
+§3.9 no-git mode, an item sitting at `REVIEWED`, which is as far as that mode can take it.
+The refusal names which items are unfinished, not merely that some are. This holds for
+trivial runs too: a trivial run closes report-lite, but only once its work is settled.
+
+Settlement is deliberately *not* a verify. An unsettled item below `GREEN` has its own red
+test in the exclusion set, so the closing verify would pass without ever executing the
+failure that makes the run unfinished. Disposition is a property of persisted state and is
+read from persisted state.
 
 The handler re-runs the full verify itself, fresh and start-stamped, applying the same
 foreign-red-set exclusion described below (a report is legal with blocked items whose red
 tests linger). Then it writes `report.md` — what shipped per item (red proof, review rounds,
-taint), what was blocked or deferred and why, open surfaced questions with their ids, the
-decision-ledger summary, any test files newly added to the stale-red registry, the
-exclusions the closing verify applied, and metrics (tokens, wall-clock, parallelism
-achieved) — and records stop `done`.
+taint), what was blocked or deferred and why, open surfaced questions with their ids,
+questions that are answered but still standing, the decision-ledger summary, any test files
+newly added to the stale-red registry, the exclusions the closing verify applied, and the run
+metrics.
+
+The stop kind is chosen from those persisted dispositions and from the closing verify's own
+result — it is never asserted by the writer. A green closing verify over a run that advanced
+at least one item stops `done`; a run that settled everything without advancing anything
+stops `noop`, naming how many were deferred; a run whose remaining work waits on a human
+stops `blocked` or `surfaced`. A **red** closing verify can never stop `done`: an assertion,
+missing-subject or unclassifiable failure stops `blocked`, and a runner that could not run
+stops `env`. The plan calls the closing verify "verification-before-completion made
+mechanical", and a law that cannot fail the completion is only advice.
 
 ### TRIVIAL_DONE and ANSWERED — the two short closes
 
@@ -276,7 +320,7 @@ config:
         labelTextColor: '#C1C4CA'
 ---
 flowchart LR
-%% Source: conductor/core/fsm-item.ts:105-183
+%% Source: conductor/core/fsm-item.ts legalItemTransition
     PE["PENDING"] -->|behavioral| RD["RED"]
     RD --> TV["TEST_VETTED"]
     TV --> GR["GREEN"]
@@ -372,21 +416,35 @@ one lens each:
 | minimality / simplification | yes       | unrequested abstraction, code that could be deleted                                        |
 | perf                        | no        | performance, added when `itemReviewers` is 6                                               |
 
-Session count is `clamp(itemReviewers, 3, 6)`. At 6, each lens gets its own session. Below
-6, lenses **merge pairwise from the tail** of the priority list rather than being dropped:
-5 merges minimality with perf; 4 additionally joins test-adequacy to spec/contract; 3 gives
+Session count is `clamp(min(itemReviewers, parallel.maxReaders), 3, 6)`, and a
+trivial-classified run always uses 3. At 6, each lens gets its own session. Below 6, lenses
+**merge pairwise from the tail** of the priority list rather than being dropped: 5 merges
+minimality with perf; 4 additionally joins test-adequacy to spec/contract; 3 gives
 spec+correctness, guardrail+minimality, and test-adequacy+perf — which is also the
-trivial-run composition. Values below 3 clamp to 3 with a journal warning. The five
-mandatory lenses are never truncated away by configuration.
+trivial-run composition. The five mandatory lenses are never truncated away by
+configuration.
+
+The diff the reviewers are shown includes synthesized creation hunks for files the item
+brings into existence. Without them a creation-shaped item has no diff at all, and the
+read-witness check — the requirement that a reviewer name real contact with the change —
+degenerates into echoing back a printed nonce.
 
 All lenses dispatch in parallel. Adjudication preserves a two-stage ordering: surviving
 spec/contract findings are fixed **first**, and quality-lens findings from a round that had
 surviving spec findings are discarded and re-derived after the fix, because judging code
 that is not yet spec-compliant is wasted judgment. Every finding then faces
-`skepticsPerFinding` refuters (K, default 2), and survives if and only if
-`upholds >= ceil(K/2)` — **a tie upholds**, so a split finding earns a fix round rather than
-being dismissed. Surviving findings are routed by the paths their fix touches, not by a
-fixed recipient:
+`skepticsPerFinding` refuters (K, default 2), and survives if and only if the seats that did
+not refute it reach `ceil(K/2)` — **a tie upholds**, so a split finding earns a fix round
+rather than being dismissed.
+
+A verdict counts as a refutation only when it carries evidence symmetric with the finding's:
+a discriminating input, what was run, and the reading under which the finding fails. A
+refutation missing any of the three is an **abstention**, and an abstention counts with the
+upholds. A skeptic that could not evaluate a finding — a transport failure, a small model out
+of its depth, a seat that answered in one unaudited line — cannot extinguish it. Refutation
+stays cheap for a skeptic that did the work, and stays fatal to the finding.
+
+Surviving findings are routed by the paths their fix touches, not by a fixed recipient:
 
 | The fix touches                                                                                 | Dispatched to                          | Then                                                                                                                   |
 | ----------------------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -436,9 +494,23 @@ and publishing *is* the tool. The commit is executed by the handler via `execFil
    `Signed-off-by`, `Generated with`, and the robot emoji. Push happens only under
    `commit-and-push`.
 
-Under `git.mode: "read-only"` nothing is committed: publish writes the prepared batch into
-the report instead — file list, diff, suggested commit message, verify verdict. Everything
-upstream of the commit is unchanged.
+Every publish appends a batch line to `publish-batch.jsonl` — the item, the mode, the staged
+files, the diff, the suggested message and the verify verdict — and the report renders it.
+Under `git.mode: "read-only"` the paths are still computed and the format rules still run,
+but nothing is added to the index and no commit is made, so that batch line is the whole
+record of what the item would have shipped; the item still advances to `PUBLISHED`.
+
+The mode that parks an item at `REVIEWED` instead is §3.9 no-git — a workspace that is not a
+git repository at all. There `conductor_publish` is not offered by the gate and refuses if
+called, and `REVIEWED` is the item's terminal position for that run.
+
+Three paths move an item **backwards** to `GREEN`, and all are administrative store writes
+rather than FSM edges — there is no `REVIEWED → GREEN` transition in the table. The first is
+step 4 above: a stale verify's automatic re-verify comes back red. The second and third are
+worktree mode's merge-back: a merge that conflicts is aborted and the item drops back for
+re-validation, and a merge that lands but whose integrated-tree re-validate goes red holds
+the item back while the merge stands. In every case the item's own committed work survives,
+it goes back to `GREEN` for debugging, and the journal records it as an item update.
 
 ## Waves
 
@@ -477,11 +549,15 @@ Three things serialize, and the driver owns all three:
 | `conductor_validate`, per tree                   | a second validate against a tree with a live verify marker is denied naming the running verify — two verifies in one tree produce two records each describing a tree the other was mutating |
 | writes, per tree, under `parallel.writes: "off"` | while a verify marker is live, the freeze gate denies every edit in that tree, production and test files alike, and no write-capable sub-session is dispatched into a frozen tree at all    |
 
-*Not yet wired: worktree mode (`parallel.writes: "worktrees"`) is built in task 9.6.* Under
-it each wave implementer gets its own `git worktree` outside the repository, edit-scope gates
-bind each session to its worktree path, and merge-back is serial in item order with a
-re-validate against the integrated tree before `PUBLISHED` — a green in isolation is not a
-green in company.
+Under worktree mode (`parallel.writes: "worktrees"`) each wave member gets its own `git
+worktree` outside the repository, created at wave setup before any stage dispatch so every
+sub-session is born bound to its own tree. The edit-scope gate binds each session to that
+worktree path, and merge-back happens inside `conductor_publish` with a re-validate against
+the integrated tree before `PUBLISHED` — a green in isolation is not a green in company. The
+worktrees are removed at run teardown. Worktree creation is work-preserving: it prunes
+first, adopts a still-registered worktree only after verifying its branch, and reuses a
+surviving branch rather than deleting and recreating it, so a crash-recovered run does not
+throw away committed work. Under the default `"off"` none of this runs a single git command.
 
 ## Annotations: blocked, deferred, debugging
 
@@ -494,7 +570,10 @@ These three are fields on the item, not FSM positions. Any state may carry them.
 | `debugging` | the systematic-debugging protocol is currently active on this item | a verify failure that resists fixes; carries `{sinceMs, hypothesis}`                                                                                                          | the fix that turns the verify green                             |
 
 A `blocked` item makes **no** transition at all, even an otherwise legal one, until the named
-question is answered; that rule is applied before the transition table, not inside it. Both
+question is answered; that rule is applied before the transition table, not inside it. An item
+carries exactly one `blocked` annotation, so blocking is first-block-wins and blocks hand off:
+when the question an item is blocked on is answered, the item is immediately re-blocked on the
+oldest still-open question that also names it, and is released only when none remains. Both
 `blocked` and `deferred` also remove the item from wave scheduling and from the legal
 stage-tool set. `debugging` does neither: it vetoes nothing, and its only effect is that the
 injection layer delivers the `debug.md` doctrine pack to the item's implementer. The debug
@@ -509,15 +588,26 @@ There are six stop kinds and no others:
 
 | Stop kind   | Meaning                                                                                                                                                 |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `done`      | report written; every item `PUBLISHED` or explicitly deferred with a reason                                                                             |
-| `noop`      | three consecutive futile idle re-prompts — the run-state signature did not change — recorded with a `disengage` anomaly, after which re-prompting stops |
-| `blocked`   | every remaining item is blocked; surfaced questions are pending                                                                                         |
-| `surfaced`  | only human-territory questions remain; nothing is actionable                                                                                            |
-| `env`       | tooling is broken: verify cannot run, the server is down, a fan-out environment failure, or the override budget is exhausted                            |
+| `done`      | the run advanced at least one item, the closing verify is green, and nothing is outstanding                                                             |
+| `noop`      | either three consecutive futile idle re-prompts — the run-state signature did not change — recorded with a `disengage` anomaly, after which re-prompting stops; or a settle in which not one item was advanced |
+| `blocked`   | items remain blocked, or the closing verify came back red on an assertion or missing subject                                                             |
+| `surfaced`  | human questions are still open and nothing is actionable                                                                                                |
+| `env`       | tooling is broken: the closing verify's runner could not run, the orchestrator could not be reached, or the override budget is exhausted                |
 | `interrupt` | a human aborted, or the halt file is present                                                                                                            |
 
-A run may leave `EXECUTING` only via `conductor_report` (which records `done`) or a recorded
-stop of one of these kinds.
+A run may leave `EXECUTING` only via `conductor_report` or a recorded stop of one of these
+kinds. `conductor_report` does not always record `done`: its kind is derived from the run's
+persisted dispositions and the closing verify's result, so a report over a run that published
+nothing closes `noop`, and a report whose closing verify is red can close `blocked` or `env`.
+The `noop`-on-nothing-advanced rule closes a measured escape: defer every item, close on a
+green verify that executed none of the deferred work, and the run reads as completion.
+
+Two kinds are recorded outside that derivation. `interrupt` comes from halt handling.
+`env`-on-exhausted-override is recorded by the override handler itself.
+
+The wedge and budget rules fire **even with items still open**. A run wedged in a futile
+re-prompt loop, or one that has spent its override budget to the cap, stops immediately
+rather than burning tokens or making every gate advisory.
 
 **Every terminal path writes a report.** Recording a stop is not by itself a terminal action:
 the recorder must invoke the report writer first. The writer has three modes and one
@@ -528,6 +618,15 @@ mid-edit). That rule closes the worst failure shape in the design: `conductor_re
 while an item is unpublished and unblocked, the continuation engine re-prompts, nothing
 changes, the run stops `noop` — and ends with no human-readable artifact at all. That is
 precisely the run you most need to read.
+
+**A stop is not always the end.** A run that stopped on a resumable kind while a question was
+still open keeps its current-run pointer, and answering that question clears the stop and
+brings the run back to life — the answer is what the run was waiting for, and the earlier
+behaviour lost committed work while the run that deferred the same item closed clean. The
+revival is narrow on purpose. It never applies to a run terminal by FSM state, since that run
+has been closed by `conductor_report` and reviving it would mean inventing a backwards edge;
+and it never applies to a §6.2 human-territory question answered through the tool channel,
+which is released by the operator's own answer file and nothing else.
 
 ## Leftovers between runs
 
@@ -548,9 +647,12 @@ is workspace-level and survives runs:
       "sinceMs": 1754560000000, "reason": "item blocked at RED (test-repair exhausted)" } ] }
 ```
 
-Entries are written when a run terminates with any item below `GREEN` whose test files exist.
-They are removed when the file is deleted, when a later run drives that test green, or by
-`conductor_forget_stale {path}` once you have resolved it yourself.
+Entries are written when a run terminates with any item below `GREEN` whose test files exist
+on disk; a declared-but-never-written test poisons nothing and is not registered. A path
+already in the registry is not re-added and not re-reported, so a second terminal path in the
+same workspace discloses nothing twice. Nothing removes an entry on its own — not deleting
+the file, not a later run driving the test green. `conductor_forget_stale {path}` is the only
+way one leaves, and it exists for the case where you resolved the red yourself.
 
 Every quarantine computation unions this registry with the current run's sub-`GREEN` test
 scopes. That union is the **foreign red set** — the tests that are supposed to be red and
@@ -567,4 +669,4 @@ lists the exclusions in force for its closing verify.
 - [Gates and hatches](gates-and-hatches.md) — what is denied, and the two deliberate escapes
 - [State machines](../developer/state-machines.md) — the FSM tables and their tests
 - [Scheduling and fan-out](../developer/scheduling-and-fanout.md) — the wave scheduler and the sub-session engine
-- [Project status](../developer/project-status.md) — what is built today versus what is still specification
+- [Project status](../developer/project-status.md) — where the build stands

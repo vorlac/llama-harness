@@ -13,15 +13,24 @@ than the repo's tracked `.gitignore` — the harness never dirties a target's tr
 with its own presence.
 
 The schema is [`Config` in `conductor/core/types.ts`](../../conductor/core/types.ts), and it
-marks **every** key required with `additionalProperties: false` at every level. An unknown
-key is a validation error, not a warning, and there is no key you may omit — except
-`itemTest` inside a verify scope, the one optional field that schema declares. The verify
-table below lists a second optional scope key, `buildCommand`: it is specified by plan §2.1
-and implemented in the evidence engine
+sets `additionalProperties: false` at every level. An unknown key is a validation error, not
+a warning, and a malformed or invalid config file is never silently replaced by the default
+— every failure arm throws and names the file, because a repo whose `git.mode` quietly
+reverts under it is a downgrade nobody asked for.
+
+Three keys are optional. `itemTest` inside a verify scope; `workflow.readSetTokenBudget`;
+and `workflow.implementerAttempts`. The two `workflow` keys read as their own defaults when
+absent (20000 and 3), not as zero. Everything else is required.
+
+The verify table below lists a fourth optional-looking scope key, `buildCommand`: it is
+specified by plan §2.1 and implemented in the evidence engine
 ([`runWithBuild` in `conductor/adapter/evidence.ts`](../../conductor/adapter/evidence.ts)),
-but the exported `Config` schema does not carry it yet, so a config file that sets it fails
-validation today. "Default" in the tables below means *the value first-run setup writes*,
-not a fallback applied when the key is missing.
+but the exported `Config` schema does not carry it, so a config file that sets it fails
+validation.
+
+"Default" in the tables below means *the value first-run setup writes*, not a fallback
+applied when the key is missing. The two differ, and deliberately — see
+[the restrictive defaults](#the-restrictive-defaults).
 
 ```jsonc
 {
@@ -62,8 +71,8 @@ not a fallback applied when the key is missing.
     "vetMaxRounds": 3,
     "testRepairAttempts": 3,
     "debugFixCap": 3,
-    "readSetTokenBudget": 20000,      // 0 = off
-    "implementerAttempts": 3,
+    "readSetTokenBudget": 20000,      // optional; 0 = off
+    "implementerAttempts": 3,         // optional
     "maxOverridesPerItem": 1,         // the override budget
     "maxOverridesPerRun": 2
   },
@@ -75,7 +84,7 @@ not a fallback applied when the key is missing.
   },
   "models": {
     "default": "qwen3.6-27b",
-    "roles": {}                       // must stay empty in the base build
+    "roles": {}                       // per-role model overrides; empty in the base build
   },
   "ponytail": "full",
   "retention": {
@@ -86,6 +95,33 @@ not a fallback applied when the key is missing.
   "logging": { "level": "info", "components": {} }
 }
 ```
+
+### The restrictive defaults
+
+A repo with no `.conductor/config.json` is not left without a config — it runs on
+`DEFAULT_CONFIG` in
+[`conductor/adapter/config-io.ts`](../../conductor/adapter/config-io.ts). That fallback is
+reachable only until `conductor_setup` runs, because with the repo unconfigured the phase
+gate leaves exactly `conductor_setup` and `conductor_status` legal in every state.
+
+Most of the fallback matches the example above. Five values deliberately do not, and each
+one fails toward "conductor can do less" rather than "conductor may do more":
+
+| Key                      | Fallback      | Why it is restrictive rather than the example value                                                                                                 |
+| ------------------------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git.mode`               | `"read-only"` | The mode is asked on first run and never guessed. Defaulting to `commit` would let an unconfigured repo be committed to.                            |
+| `verify.scopes`          | `{}`          | Conductor does not invent a test command for a repo it has not been set up in.                                                                      |
+| `verify.requiredScopes`  | `[]`          | An entry naming a scope absent from an empty scope map is incoherent, so the list starts empty too.                                                 |
+| `verify.behavioralPaths` | `["**"]`      | `[]` would make `behavioral: false` legal for all code and turn the TDD law off. `["**"]` makes every path owe verification until setup narrows it. |
+| `models.default`         | `""`          | The model is validated against the live `/v1/models` list. Naming one nobody chose would point a run at weights the user never picked.              |
+
+`DEFAULT_CONFIG` is deep-frozen, so one consumer's stray mutation cannot rewrite the
+fallback for every later caller, and `loadConfig` hands out a deep copy of it.
+
+### version
+
+`version` is a required number and is `1`. It is the document version for
+`.conductor/config.json`, so a future format change can be recognized rather than guessed at.
 
 ### verify
 
@@ -184,22 +220,22 @@ review are unchanged.
 
 Every round cap and fan-out width in the pipeline.
 
-| Key                   | Type   | Default | What it changes                                                                                                                                                                                                                             |
-| --------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Key                   | Type   | Default | What it changes                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `trivialMaxFiles`     | number | `2`     | Ceiling for the trivial path. A synthesized trivial item touching more files than this is escalated to `work` by the handler, whatever the classifier said. It bounds only the trivial path: decomposition enforces its own fixed item budget of five files (`ITEM_MAX_FILES` in [`core/planning.ts`](../../conductor/core/planning.ts)), deliberately independent of this key so that tuning the trivial ceiling never silently retunes decompose. |
-| `planReviewers`       | number | `4`     | Parallel plan-review lenses per round.                                                                                                                                                                                                      |
-| `planReviewMaxRounds` | number | `3`     | Cap on the plan review → revise → re-review loop.                                                                                                                                                                                           |
-| `itemReviewers`       | number | `6`     | Lens sessions per item review. Sessions are `clamp(itemReviewers, 3, 6)`; below 6 the lenses merge pairwise from the tail, and the mandatory lens set is never truncated away.                                                              |
-| `skepticsPerFinding`  | number | `2`     | K refuters per finding. A finding survives iff upholds ≥ `⌈K/2⌉` — a tie upholds, so a split finding earns a fix round.                                                                                                                     |
-| `reviewMaxRounds`     | number | `3`     | Per item: review → fix → re-review cap.                                                                                                                                                                                                     |
-| `vetCritics`          | number | `3`     | Critics dispatched to reach `TEST_VETTED`.                                                                                                                                                                                                  |
-| `vetMaxRounds`        | number | `3`     | `RED`: vet → repair → re-vet cap. A distinct knob from `reviewMaxRounds` — different loop, different cost, tuned independently.                                                                                                             |
-| `testRepairAttempts`  | number | `3`     | Illegal-red repair attempts inside `conductor_submit_test`.                                                                                                                                                                                 |
-| `debugFixCap`         | number | `3`     | Failed fixes before the run escalates to an architecture question.                                                                                                                                                                          |
-| `readSetTokenBudget`  | number | `20000` | Read-set ceiling per item, in estimated tokens (`bytes/4`, ~80 KB of source). Queue acceptance refuses an item whose `fileScope` matches more than this — an item a small local model provably cannot read is never dispatched. `0` turns the bound off. Defined in [`core/planning.ts`](../../conductor/core/planning.ts) (`DEFAULT_READ_SET_TOKEN_BUDGET`).                                              |
-| `implementerAttempts` | number | `3`     | Implementer-attempt budget per item (never below 1). Exhaustion takes the item to its blocked path with a disposition naming exhaustion — never a silent retry loop. Defined in [`core/planning.ts`](../../conductor/core/planning.ts) (`DEFAULT_IMPLEMENTER_ATTEMPTS`).                                                                                                                                     |
-| `maxOverridesPerItem` | number | `1`     | Override budget per item.                                                                                                                                                                                                                   |
-| `maxOverridesPerRun`  | number | `2`     | Override budget per run.                                                                                                                                                                                                                    |
+| `planReviewers`       | number | `4`     | Parallel plan-review lenses per round.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `planReviewMaxRounds` | number | `3`     | Cap on the plan review → revise → re-review loop.                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `itemReviewers`       | number | `6`     | Lens sessions per item review. Sessions are `clamp(itemReviewers, 3, 6)`; below 6 the lenses merge pairwise from the tail, and the mandatory lens set is never truncated away.                                                                                                                                                                                                                                                                      |
+| `skepticsPerFinding`  | number | `2`     | K refuters per finding. A finding survives iff upholds ≥ `⌈K/2⌉` — a tie upholds, so a split finding earns a fix round.                                                                                                                                                                                                                                                                                                                             |
+| `reviewMaxRounds`     | number | `3`     | Per item: review → fix → re-review cap.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `vetCritics`          | number | `3`     | Critics dispatched to reach `TEST_VETTED`.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `vetMaxRounds`        | number | `3`     | `RED`: vet → repair → re-vet cap. A distinct knob from `reviewMaxRounds` — different loop, different cost, tuned independently.                                                                                                                                                                                                                                                                                                                     |
+| `testRepairAttempts`  | number | `3`     | Illegal-red repair attempts inside `conductor_submit_test`.                                                                                                                                                                                                                                                                                                                                                                                         |
+| `debugFixCap`         | number | `3`     | Failed fixes before the run escalates to an architecture question.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `readSetTokenBudget`  | number | `20000` | Read-set ceiling per item, in estimated tokens (`bytes/4`, ~80 KB of source). Queue acceptance refuses an item whose `fileScope` matches more than this — an item a small local model provably cannot read is never dispatched. `0` turns the bound off. Defined in [`core/planning.ts`](../../conductor/core/planning.ts) (`DEFAULT_READ_SET_TOKEN_BUDGET`).                                                                                       |
+| `implementerAttempts` | number | `3`     | Implementer-attempt budget per item (never below 1). Exhaustion takes the item to its blocked path with a disposition naming exhaustion — never a silent retry loop. Defined in [`core/planning.ts`](../../conductor/core/planning.ts) (`DEFAULT_IMPLEMENTER_ATTEMPTS`).                                                                                                                                                                            |
+| `maxOverridesPerItem` | number | `1`     | Override budget per item.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `maxOverridesPerRun`  | number | `2`     | Override budget per run.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 The last two are the override budget. `conductor_override` records an anomaly, appends to
 the item's `taint[]`, and disables one named gate for exactly one next action. Every gate in
@@ -232,10 +268,15 @@ count actually reaches it.
 | `models.roles`   | object of role → model id | `{}`            | Per-role overrides.                                                                                                                            |
 
 One model serves every role. A role selects a doctrine pack, a sampling temperature, a gate
-posture, and a router priority tag — never weights. `models.roles` **must stay empty in the
-base build**: a non-empty map is accepted by the schema, so multi-model experiments need no
-code change, but it logs a warning at init and is outside the supported and tested surface.
-Swap batching, per-model wave wall-clock, and the POC's arm design all assume it is empty.
+posture, and a router priority tag — never weights.
+
+`models.roles` is read: the fan-out engine resolves each job's model as
+`models.roles[role] ?? models.default`, then groups jobs by resolved model so all of one
+model's work drains before the next model's. Nothing enforces emptiness. **Leaving it empty
+is a convention of the base build, not a mechanism** — swap batching, per-model wave
+wall-clock and the benchmark's arm design all assume a single model, so a non-empty map is
+outside the supported and tested surface even though the schema accepts it and the code
+honours it.
 
 Setup and every run start validate `models.default` against the live `/v1/models` list and
 fail loudly if it is absent.
@@ -260,11 +301,11 @@ lenses are in the mandatory review set that no configuration removes.
 notices it growing. At `trace` the journal contains full sub-session prompts and outputs —
 large slices of the repo, once per lens, per round, per item.
 
-| Key                          | Type    | Default     | What it changes                                                  |
-| ---------------------------- | ------- | ----------- | ---------------------------------------------------------------- |
-| `retention.keepRuns`         | number  | `20`        | Archived run directories retained, newest first.                 |
-| `retention.maxRunDirBytes`   | number  | `268435456` | 256 MiB. A journal exceeding it rotates to `journal.N.jsonl.gz`. |
-| `retention.pruneOnRunCreate` | boolean | `true`      | Pruning runs at run creation, never mid-run.                     |
+| Key                          | Type    | Default     | What it changes                                                                                                                                                                                                                      |
+| ---------------------------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `retention.keepRuns`         | number  | `20`        | Archived run directories retained, newest first.                                                                                                                                                                                     |
+| `retention.maxRunDirBytes`   | number  | `268435456` | 256 MiB. The journal rotation threshold: an active `journal.jsonl` larger than this is gzipped to the next free `journal.N.jsonl.gz` and a fresh one is started. Despite the name it prunes no run directory — `keepRuns` does that. |
+| `retention.pruneOnRunCreate` | boolean | `true`      | Pruning runs at run creation, never mid-run.                                                                                                                                                                                         |
 
 ### logging
 
@@ -280,10 +321,10 @@ included. `CONDUCTOR_LOG` in the environment beats both keys — see
 
 ## Where the file comes from
 
-*The interactive `conductor_setup` flow lands at task 12.2; until then the file is written by hand.*
-
-On first run in a repo, conductor detects what it can, asks the two questions it may not
-default, and writes the file. Detection reads `package.json`, `CMakeLists.txt` plus `ctest`,
+`conductor_setup` writes it. On first run in a repo, conductor detects what it can, asks the
+two questions it may not default, and writes the file. A setup call with no `answers`
+returns the questions and writes nothing; a call carrying them writes. Detection reads
+`package.json`, `CMakeLists.txt` plus `ctest`,
 `pyproject.toml`, `Cargo.toml`, and `go.mod` to propose verify scopes, and each detected
 runner carries its default `itemTest` template: `node --test {files}`, `pytest {files}`,
 `go test {dirs}`, `ctest -R {name}`.
@@ -307,13 +348,20 @@ remedy, not a warning.
 | Observed concurrent slot count ≥ `parallel.maxReaders` (N concurrent trivial completions, measured for overlap) | The entire read fan-out silently serializes upstream and every parallelism claim is false.           |
 | The repo is a git repo                                                                                          | Publish, freshness, worktrees, and `.git/info/exclude` all assume one.                               |
 
-Setup also registers `.conductor/` in the repo's `.git/info/exclude`. Re-running it later
-requires `reconfigure: true`, which is legal only with no live run and journals a config
-diff.
+There is one more refusal worth knowing, because it is the only place setup asks for an
+explicit word. If the `behavioralPaths` list you confirm matches no source file the
+detection found, every item in the repo would be legally `behavioral: false` and the whole
+repo would run `PENDING → GREEN` with no test at all. Setup refuses such a list, names the
+source globs it detected, and accepts it only when the call also passes
+`answers.acknowledgeNoTdd: true`. Setup will not turn the TDD law off by accident.
+
+Setup registers `.conductor/` for exclusion from git — written into the repository's
+**common** git directory (`<gitCommonDir>/info/exclude`), not into the tracked `.gitignore`,
+and not into a linked worktree's own gitdir where the entry would be inert. Re-running setup
+later requires `reconfigure: true`, which is legal only with no live run; the journal record
+for it carries the diff of what moved.
 
 ## Router configuration
-
-> *Not yet wired: llama-router parses this document today (task 11.2); the proxy, admission, affinity, schema observer, and metrics land in 11.3–11.8, and `serve.py` generates the file from task 12.1.*
 
 `.data/configs/conductor-router.json` configures llama-router. It is generated by `serve.py`
 in this workspace and is hand-editable. The parser is
@@ -344,22 +392,22 @@ source, two consumers.
 }
 ```
 
-| Key                                             | Type                  | Default                      | What it changes                                                                                                                             |
-| ----------------------------------------------- | --------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`                                       | number                | `1`                          | Document version.                                                                                                                           |
-| `listen.host` / `listen.port`                   | string / number       | `127.0.0.1` / `8088`         | Where the router accepts requests. Ports are range-checked to 1..65535.                                                                     |
-| `upstream.host` / `upstream.port`               | string / number       | `127.0.0.1` / `8080`         | The `llama-server` the router proxies to.                                                                                                   |
-| `admission.maxInflightPerModel`                 | number                | `4`                          | Concurrent requests admitted per model. Must be ≤ the server's `--parallel` slot count; `serve.py` generates both from one number.          |
-| `admission.maxQueued`                           | number                | `64`                         | Queue depth before overflow. Overflow returns a 503 the fan-out engine understands and backs off from.                                      |
-| `admission.queueTimeoutMs`                      | number                | `600000`                     | How long a queued request waits before a 503. Kept below `parallel.subSessionTimeoutMs` so a queue timeout is reported as itself.           |
-| `priorities.interactive` / `.review` / `.batch` | number                | `0` / `1` / `2`              | Dequeue order for the `X-Conductor-Priority` tag; lower goes first. Untagged requests count as `interactive`.                               |
-| `affinity.header`                               | string                | `X-Conductor-Group`          | The header carrying the prefix-affinity group id.                                                                                           |
-| `affinity.contiguousDequeue`                    | boolean               | `true`                       | Dequeue same-group requests contiguously, so llama-server's slot reuse keeps the shared KV prefix hot.                                      |
-| `schema.observeHeader`                          | string                | `X-Conductor-Schema`         | The header marking a structured-output request.                                                                                             |
-| `schema.validateResponses`                      | boolean               | `true`                       | Validate non-streaming tagged response bodies against the declared schema and record the verdict. The body is returned verbatim either way. |
-| `schema.rejectOnMissing`                        | boolean               | `false`                      | Must stay `false` in the base build.                                                                                                        |
-| `metrics.ledgerPath`                            | string                | `.data/router/metrics.jsonl` | One JSONL line per request: model, role, group, priority, queue-wait, upstream time, tokens, `schemaMissing`, `schemaConformed`, status.    |
-| `logging.level`                                 | `"error"` … `"trace"` | `"info"`                     | spdlog level. A value outside the five is refused by name, never silently downgraded.                                                       |
+| Key                                             | Type                  | Default                      | What it changes                                                                                                                                                                  |
+| ----------------------------------------------- | --------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`                                       | number                | `1`                          | Document version.                                                                                                                                                                |
+| `listen.host` / `listen.port`                   | string / number       | `127.0.0.1` / `8088`         | Where the router accepts requests. Ports are range-checked to 1..65535.                                                                                                          |
+| `upstream.host` / `upstream.port`               | string / number       | `127.0.0.1` / `8080`         | The `llama-server` the router proxies to.                                                                                                                                        |
+| `admission.maxInflightPerModel`                 | number                | `4`                          | Concurrent requests admitted per model. Must be ≤ the server's `--parallel` slot count; `serve.py` generates both from one number.                                               |
+| `admission.maxQueued`                           | number                | `64`                         | Queue depth before overflow. Overflow returns a 503 coded `queue_overflow`. The code is diagnostic only — nothing on the conductor side reads it, and nothing backs off from it. |
+| `admission.queueTimeoutMs`                      | number                | `600000`                     | How long a queued request waits before a 503. Kept below `parallel.subSessionTimeoutMs` so a queue timeout is reported as itself.                                                |
+| `priorities.interactive` / `.review` / `.batch` | number                | `0` / `1` / `2`              | Dequeue order for the `X-Conductor-Priority` tag; lower goes first. Untagged requests count as `interactive`.                                                                    |
+| `affinity.header`                               | string                | `X-Conductor-Group`          | The header carrying the prefix-affinity group id.                                                                                                                                |
+| `affinity.contiguousDequeue`                    | boolean               | `true`                       | Dequeue same-group requests contiguously, so llama-server's slot reuse keeps the shared KV prefix hot.                                                                           |
+| `schema.observeHeader`                          | string                | `X-Conductor-Schema`         | The header marking a structured-output request.                                                                                                                                  |
+| `schema.validateResponses`                      | boolean               | `true`                       | Validate non-streaming tagged response bodies against the declared schema and record the verdict. The body is returned verbatim either way.                                      |
+| `schema.rejectOnMissing`                        | boolean               | `false`                      | Must stay `false` in the base build.                                                                                                                                             |
+| `metrics.ledgerPath`                            | string                | `.data/router/metrics.jsonl` | One JSONL line per request: model, role, group, priority, queue-wait, upstream time, tokens, `schemaMissing`, `schemaConformed`, status.                                         |
+| `logging.level`                                 | `"error"` … `"trace"` | `"info"`                     | spdlog level. A value outside the five is refused by name, never silently downgraded.                                                                                            |
 
 The parser fills three documented-optional keys before validating — `logging.level`,
 `schema.rejectOnMissing`, and `affinity.contiguousDequeue` — because the exported schema
@@ -395,31 +443,48 @@ Conductor keeps two trees: one inside the repo it is working on, and one outside
 
 ```text
 <target repo>/
-└── .conductor/                   # runtime state, hidden via .git/info/exclude
-    ├── config.json               # the manifest documented above
+└── .conductor/                       # runtime state, hidden via .git/info/exclude
+    ├── config.json                   # the manifest documented above
     ├── state/
-    │   ├── current-run.json      # pointer {runId} or null
-    │   ├── alive.json            # liveness beacon {pid, startMs, version}
-    │   ├── stale-red.json        # cross-run registry of abandoned red tests
-    │   ├── halt                  # owner-only halt file; presence means halt
-    │   └── run.lock              # advisory single-writer lock {pid, startMs}
-    └── runs/<runId>/             # one self-contained directory per prompt-run
-        ├── run.json              # run FSM state and metadata
-        ├── queue.json            # decomposed items and their DAG
-        ├── items/<itemId>.json   # per-item FSM state and evidence refs
-        ├── plan.md               # the plan document
-        ├── report.md             # written on EVERY terminal stop, not only `done`
-        ├── journal.jsonl         # the structured event journal
-        ├── evidence.jsonl        # red / green / verify records
-        ├── decisions.jsonl       # decision-protocol ledger
-        ├── anomalies.jsonl       # overrides, gate crashes, disengages
-        ├── questions.jsonl       # surfaced questions; the blocked-set source
-        └── reviews/<itemId|plan>-r<N>.json
+    │   ├── current-run.json          # pointer {runId} or null
+    │   ├── alive.json                # liveness beacon {pid, startMs, version, sessionID}
+    │   ├── stale-red.json            # cross-run registry of abandoned red tests
+    │   ├── halt                      # owner-only halt file; presence means halt
+    │   ├── run.lock                  # the single-writer lock {pid, startMs, sessionID?, token?}
+    │   ├── run.lock.break.<key>      # transient: the right to break one stale lock
+    │   └── run.lock.stale.<key>      # transient: a broken stale lock, set aside
+    └── runs/<runId>/                 # one self-contained directory per prompt-run
+        ├── run.json                  # run FSM state and metadata
+        ├── queue.json                # decomposed items and their DAG
+        ├── items/<itemId>.json       # per-item FSM state and evidence refs
+        ├── answers/<Q-NNNN>.md       # where the operator drops an answer to a question
+        ├── block-intents/            # crash-safe intents for question-then-block
+        ├── plan.md                   # the plan document
+        ├── report.md                 # written on EVERY terminal stop, not only `done`
+        ├── journal.jsonl             # the structured event journal
+        ├── journal.N.jsonl.gz        # rotated journal archives
+        ├── evidence.jsonl            # red / green / verify records
+        ├── evidence.seq              # durable evidence-sequence reservation counter
+        ├── evidence.seq.lock         # its exclusive-claim file
+        ├── verify-running-<tree>.json # live verify marker; freezes edits in that tree
+        ├── decisions.jsonl           # decision-protocol ledger
+        ├── anomalies.jsonl           # overrides, gate crashes, disengages
+        ├── questions.jsonl           # surfaced questions; the blocked-set source
+        └── publish-batch.jsonl       # one line per publish: files, diff, message
 ```
 
-`alive.json` is rewritten at plugin init; its absence means conductor is not loaded in this
-session. `halt` is owner-only — the model never creates, edits, or deletes it. Nothing in
-`.conductor/**` is writable by any agent, in any role.
+`alive.json` is the liveness beacon: it is rewritten every time a session claims the
+workspace, and it is the signal that tells a fresh session whether the previous one exited
+cleanly or died. `halt` is owner-only — the model never creates, edits, or deletes it.
+Nothing in `.conductor/**` is writable by any agent, in any role, which is what makes
+`answers/` a channel a model cannot forge.
+
+`run.lock` is an **exclusive** lock, not an advisory one. A second conductor opening the same
+workspace while a live one holds it is refused outright — no store is returned and no
+read-only mode exists. The two transient siblings appear only during a stale-lock reclaim:
+`run.lock.break.<key>` is the exclusive right to break one particular stale lock, and
+`run.lock.stale.<key>` is the broken lock set aside. See
+[troubleshooting](troubleshooting.md) if either is left behind.
 
 Two things live deliberately **outside** the repository:
 
@@ -442,10 +507,10 @@ outside the walked tree entirely. This was measured, not assumed — see
 
 The two path components:
 
-| Component        | Value                                                                                                                                           |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<stateHome>`    | `$XDG_STATE_HOME` when set, otherwise `~/.local/state`. macOS included — the path is identical on both platforms.                               |
-| `<workspaceKey>` | The repo root's absolute path hashed with SHA-256, first 16 hex characters, plus its basename. Two checkouts of the same project never collide. |
+| Component        | Value                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `<stateHome>`    | `$XDG_STATE_HOME` when set, otherwise `~/.local/state`. macOS included — the path is identical on both platforms.                     |
+| `<workspaceKey>` | The resolved repo root's absolute path hashed with SHA-256, first 16 hex characters. Two checkouts of the same project never collide. |
 
 Router state lives in this workspace instead: the metrics ledger at
 `metrics.ledgerPath`, which defaults to `.data/router/metrics.jsonl` under the gitignored

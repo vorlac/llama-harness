@@ -9,6 +9,109 @@ and nothing is inferred from a value that was not printed. Run from the repo roo
 Port 8080 was confirmed free before each server start and confirmed free after the last stop;
 no pre-existing server was disturbed and no server this run did not start was killed.
 
+## What llama-router assumes of the upstream
+
+The measurements below are the evidence. This section is the contract they support: what
+the router in `router/` actually requires of the `llama-server` it fronts. Every claim
+here is readable in the C++ and carries its citation.
+
+**It never initiates upstream traffic.** The router has no health probe, no `/props`
+read and no `/v1/models` warm-up of its own. The only bytes it ever sends upstream are a
+client request it is relaying. A dead upstream is discovered by a relayed request
+failing, not by polling.
+
+**It proxies `/v1/*` and nothing else.** The route pattern is `/v1/.*`, registered for
+GET, POST, PUT, PATCH, DELETE and OPTIONS (`router.hpp` `installRoutes`). Any other path
+is httplib's own 404 and never reaches the upstream. `GET /conductor/health` and
+`GET /conductor/metrics` are the router's own endpoints — served from its own state,
+outside admission, and answered while every slot and queue entry is held. `/conductor/health`
+returns `{"status":"ok","version":"0.0.1"}`, where the version is the **router's**
+(`router/version.hpp`); the router reports no llama-server version and reads none.
+
+**Request shape.** The request-line target (path plus query) crosses verbatim, with
+path re-encoding disabled so no byte the caller chose is rewritten. Every request header
+crosses with an unchanged name and value except the hop-by-hop set plus `Host`,
+`Content-Length`, `Expect` and `Accept-Encoding`, which the proxy's own client re-derives
+for the connection it owns. The four `X-Conductor-*` tag headers are read but not
+removed, so they ride along to llama-server, which ignores headers it does not know.
+
+The body is forwarded **byte-verbatim** unless it is a JSON object carrying an
+`x_conductor` key, which is the only case that re-serializes. A body that is not JSON, is
+not an object, or carries no such key crosses untouched — no whitespace, escape form or
+key order can shift under the caller. Two fields are read for the router's own
+bookkeeping and never rewritten:
+
+- `model` — the admission counter key. An absent or non-string one buckets under a
+  reserved empty key rather than being refused.
+- the schema declaration — `response_format.json_schema.schema`, a top-level `grammar`
+  string, or a top-level `json_schema` object (`router/schema-observer.hpp`).
+
+**Response shape.** The upstream's status crosses back untouched, non-2xx included, and
+response headers cross except the hop-by-hop set plus `Content-Length`,
+`Content-Encoding` (the httplib client hands over decoded bytes) and `Content-Type`
+(re-attached with the body).
+
+The relay mode is chosen from the response head alone: a `Content-Type` beginning
+`text/event-stream`, **or** a missing `Content-Length`, means the upstream is producing
+incrementally and so is the router; anything else is relayed as one buffered message.
+Consequences worth knowing:
+
+- On the buffered path the router parses the body as JSON to read `usage.prompt_tokens`,
+  `usage.completion_tokens` and `timings` into the metrics ledger. Absent, null or
+  non-JSON is not an error; those ledger columns are simply null.
+- On the streamed path it scans the SSE events as they pass for the one `data:` chunk
+  carrying a non-null `usage` object, and takes `timings` from that same object. That
+  chunk exists only when the caller sends `stream_options: {"include_usage": true}`.
+- Response schema conformance is checked on non-stream bodies only, reading
+  `choices[0].message.content` (chat completions) or `choices[0].text` (legacy
+  completions).
+
+**Statuses the router mints.** All of them use one envelope shape,
+`{"error":{"message":…,"type":…,"code":…}}`, so a single parser handles them:
+
+| Status | `type`                        | `code`                             | When                                                                                                                                                     |
+| ------ | ----------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 502    | `router_upstream_unreachable` | `502`                              | The upstream could not be reached, or answered and then failed mid-body while the response was still buffered, or the router itself threw while relaying |
+| 503    | `unavailable_error`           | `queue_timeout` / `queue_overflow` | Admission refusal: the queue wait exceeded `admission.queueTimeoutMs`, or the queue was already full                                                     |
+| 400    | `invalid_request_error`       | `schema_missing`                   | Only when `schema.rejectOnMissing` is true, which the generated config sets false                                                                        |
+
+A buffered truncation is refused rather than relayed because a partial body under the
+upstream's own status would carry a `Content-Length` matching the truncation, which no
+client can distinguish from a complete answer. Once bytes are already downstream that
+choice is gone, so a **streamed** relay whose upstream fails mid-body aborts the
+connection instead — the chunked response ends without its terminating chunk, which is a
+detectable error at the client.
+
+**Admission, and the one thing it does not know.** Only POST is admitted; a read such as
+`GET /v1/models` crosses un-admitted, so a saturated queue can never turn a listing into
+an error. The router never learns llama-server's slot count and never compares its cap
+against it — `admission.maxInflightPerModel` is a config number. The equality with the
+upstream's `--parallel` is arranged outside the router, by `scripts/conductor_wiring.py`
+(which derives both from one `maxReaders`) and checked statically by
+`scripts/verify-acceptance.sh`.
+
+One refusal is not a capacity refusal in the usual sense: because the `model` field is
+client-controlled and each distinct string opens its own in-flight counter, a request
+naming a model with nothing in flight is refused `queue_overflow` immediately once the
+number of distinct in-flight model keys reaches `1 + (margin - 1) / maxInflightPerModel`,
+where `margin` is the listener's fixed thread-pool margin of 8. That is **two** distinct
+keys at the shipped `maxInflightPerModel = 6`, and the refusal comes even with free slots
+and an empty queue. The bound exists so that distinct model strings cannot exhaust the
+listener's thread pool and starve `/conductor/health`.
+
+**Timeouts and connection reuse.** Five seconds to connect, so a dead upstream becomes a
+502 promptly rather than stalling; 600 seconds for reads and writes, because a generation
+stream is long and quiet. Keep-alive is off and the client is rebuilt per request, so
+every proxied request is a fresh connection — and nothing is latched: the moment the
+upstream listens again, relaying resumes. A streaming relay parks its upstream reader
+once 1 MiB of payload is queued and unwritten, so a slow consumer throttles the producer.
+
+**The 503 codes reach a human, not a retry loop.** The distinction between
+`queue_timeout` and `queue_overflow` is diagnostic. The fan-out reaches this router
+through opencode's provider fetch, which surfaces a failed request as an error string
+with no body, so nothing on the caller's side can read the envelope. These codes are for
+the router log and the metrics ledger.
+
 ## Task 12.1 — Step 2 live measurement
 
 Every command in this section was run from `/Users/sal/development/vorlac/llama-harness`.
@@ -235,8 +338,8 @@ Tested directly rather than assumed. Parent started with `--parallel 6 --ctx-siz
 **The parent forwards both, and they OVERRIDE the preset INI.** The ini says
 `[ornith-9b] ctx-size = 65536`; the child was started with 49152 and came up with
 `n_slots = 6, n_ctx_slot = 8192` — exactly F3's intended result. So Task 12.1's
-`parallel_server_args` derivation is effective end to end through preset mode, and that is now
-verified rather than hoped. Precedence, recorded: **parent CLI beats the preset file.**
+`parallel_server_args` derivation is effective end to end through preset mode, measured rather
+than assumed. Precedence, recorded: **parent CLI beats the preset file.**
 
 #### A readiness-probe trap worth recording
 
@@ -250,8 +353,15 @@ $ curl -s http://127.0.0.1:8080/health          # while the model is still loadi
 `curl -s` **exits 0** on that response, because a 503 is a successful HTTP transaction. A poll
 written as `until curl -s …/health; do sleep 5; done` therefore returns instantly and reports a
 server that cannot serve. This session made exactly that mistake and caught it only because the
-body was printed. Poll on the **body** — `grep -q '"status":"ok"'` — or use `curl -f`. Task
-12.1's supervisor and Task 12.2's setup probe both depend on getting this right.
+body was printed. In a shell, poll on the **body** — `grep -q '"status":"ok"'` — or use
+`curl -f`.
+
+The shipped probes discharge it a different way: both use `urllib.request.urlopen`, which
+raises on a non-2xx status, and both additionally require `response.status == 200` before
+declaring the server ready. `wait_for_router_health` polls `/conductor/health` on the
+router every 0.25 s for 30 s (`scripts/conductor_wiring.py`); `wait_until_ready` polls
+`/health` on llama-server every 0.5 s for 600 s, and backs off on a non-raising non-200
+answer rather than spinning (`scripts/serve.py`).
 
 ## FINDING F1-CONFIRMED (MAJOR) — the G13 model returns EMPTY content, and there is a fix
 
@@ -340,9 +450,11 @@ $ curl -s http://127.0.0.1:8080/v1/models | python3 -c "import json,sys; print([
 
 So a setup probe matching `models.default` against `/v1/models` sees `qwen3.6-27b` in the mode
 that ships, and would only see a gguf path in the `--model`-direct mode nothing in this build
-uses. **Task 12.2 should match the friendly id** and treat a path-shaped id as the direct-mode
-case. An earlier revision of this file asserted the path form without naming the mode; that was
-half the picture and is corrected here.
+uses. **The setup probe matches the friendly id**: `setupServedModels` in
+`conductor/adapter/tools.ts` collects `data[].id` and tests `models.default` against that list
+by exact string equality, which is the preset-mode shape. It has no branch that recognises a
+path-shaped id as the direct-mode case, so a `--model`-direct origin would fail the check with
+its remedy message rather than be understood.
 
 Also mode-dependent: the response carries BOTH an ollama-style `models[]` array and an
 OpenAI-style `data[]` array, and in `--model`-direct mode `data[0].meta.n_ctx` reports the
@@ -352,11 +464,20 @@ in `/v1/models` does NOT imply the model is loaded.
 
 ## What this run does NOT discharge
 
-- The measurement used `--model` directly, not `scripts/serve.py --no-shell`, because serve.py's
-  router wiring is Task 12.1's deliverable and did not exist when this was run. The numbers are
-  properties of llama-server and its flags, so they transfer; the **serve.py-generated**
-  invocation must still be checked against `PER_SLOT_CONTEXT_ARGV` above once it exists.
-- `admission.maxInflightPerModel ≤ slot count` (SG-E) is now checkable — the slot count is 6 —
-  but no run here drove the router and the upstream together under load.
+- The measurement used `--model` directly, not `scripts/serve.py --no-shell`. The numbers are
+  properties of llama-server and its flags, so they transfer. `scripts/serve.py` emits the
+  derived argv — `build_server_command` appends `conductor_wiring.parallel_server_args(slots, ctx)`
+  to the `--models-preset` command line — and `scripts/test_conductor_wiring.py` pins the
+  derivation, but no run recorded here drove **serve.py's own** invocation against a live
+  server and compared it with `PER_SLOT_CONTEXT_ARGV`.
+- `admission.maxInflightPerModel ≤ slot count` (SG-E) holds by construction:
+  `generate_router_config` sets the cap from the same `derive_slots` result that produces
+  `--parallel`, and `scripts/verify-acceptance.sh` checks the two statically. No run here drove
+  the router and the upstream together under load.
+- F1's binding is **recorded, not implemented**. No code path sends
+  `chat_template_kwargs.enable_thinking=false` or `reasoning_effort:"none"`: the fan-out's
+  schema probe (`setupSchemaProbe` in `conductor/adapter/tools.ts`) sends `response_format`
+  alone. A schema-constrained request to a thinking model therefore still risks the empty-content
+  failure measured above.
 - Items 1–4 remain observed on `ornith-9b` only. Re-observing them on `qwen3.6-27b` would be
   strictly better; it is not required by any acceptance row and was not done.

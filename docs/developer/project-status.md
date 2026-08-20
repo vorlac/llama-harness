@@ -4,8 +4,10 @@ Where the conductor build actually is, what is being built next, and what is kno
 imperfect. Every other page in this set describes the system as designed; this page is the
 one that tells you how much of it exists. Read it before you trust anything else.
 
-Status shown here is taken from [`docs/build/STATE.json`](../build/STATE.json) as of task
-9.3 (`conductor: 9.3 plan review`, commit `1ad82b7`).
+Status shown here is grounded in [`docs/build/STATE.json`](../build/STATE.json),
+[`docs/build/GATES.json`](../build/GATES.json) and
+[`scripts/verify-acceptance.sh`](../../scripts/verify-acceptance.sh). Where this page and
+those three disagree, they win — they are machine-checked and this page is prose.
 
 ## How to read this page
 
@@ -16,6 +18,7 @@ Four artifacts carry build truth, and they do not carry it equally.
 | [`docs/build/STATE.json`](../build/STATE.json)                                                     | Machine truth. One row per task: status, commit, TAP counts, red evidence, files touched, revert assertion, deviations. | Authoritative for task status.                    |
 | [`docs/build/HANDOFF.md`](../build/HANDOFF.md)                                                     | The boot document. What was just done, what is next, live traps, deferred obligations.                                  | Authoritative for the queue and for warnings.     |
 | [`docs/plans/2026-08-07-conductor-harness-plan.md`](../plans/2026-08-07-conductor-harness-plan.md) | The specification. 3399 lines, revision 5, **immutable** — never edited, never ticked.                                  | Authoritative for design intent, not for reality. |
+| [`scripts/verify-acceptance.sh`](../../scripts/verify-acceptance.sh)                               | The §11 acceptance checklist as an executable script. Twelve rows plus six hollowness detectors.                        | Authoritative for "is the project done".          |
 | `git log --grep 'conductor: '`                                                                     | The task list that actually happened. One commit per manifest task.                                                     | Authoritative for "did this land".                |
 
 Two conventions matter when reading `STATE.json`:
@@ -24,93 +27,75 @@ Two conventions matter when reading `STATE.json`:
   the row cannot know its own sha. The next `STATE.json` touch fills it in. Until then,
   `git log --grep` on the row's `commitMessage` is the authoritative lookup. The
   convention is recorded in `meta.convention.commitSha`.
-- **`conductor:` versus `conductor-build:`.** Commits prefixed `conductor:` are manifest
-  tasks. Commits prefixed `conductor-build:` are orchestrator infrastructure — gate fixes,
-  sha backfills, in-progress markers — and are not tasks.
+- **Three commit prefixes.** `conductor:` marks a manifest task. `conductor-build:` marks
+  orchestrator infrastructure — gate fixes, sha backfills, in-progress markers — and is not
+  a task. `conductor-fix:` marks work from the correction campaign that follows the
+  manifest, driven by [`docs/build/fix-campaign-plan.md`](../build/fix-campaign-plan.md)
+  with a per-item record in [`fix-campaign-log.md`](../build/fix-campaign-log.md).
 
 Where the plan and the code disagree, the code wins and the difference is recorded, never
 edited into the plan. See [Recorded deviations from the plan](#recorded-deviations-from-the-plan).
 
 ## Phase status
 
-52 manifest tasks, of which **29 are committed**. Two extra rows exist outside the
-manifest: task 5.4 (committed) and task 12.1-G5 (an equivalence step with no commit of its
-own). 30 `conductor:` commits are on `main`.
+The manifest holds 52 tasks. `STATE.json` carries 57 rows: the manifest tasks plus five
+non-manifest ones added along the way — `5.4`, `5.4a`, `12.1-G5`, `13.1-composition-root`
+and `13.1-composition-root-CR2`.
 
-Work runs on two branches. The **spine** is the TypeScript plugin, Phases 0-10 and 12-15,
-strictly serial. **Branch B** is the C++ router, Phase 11, run in parallel because it
-depends only on task 1.1's schemas and task 0.2's streaming finding.
+**55 of the 57 rows are `COMMITTED`. Two are `NOT_STARTED`: `13.2` and `14.2`.** Both need a
+live model, and the repo owner is holding both back to be scheduled deliberately. Nothing
+else in the build is outstanding.
 
-### The spine
+| Task   | What it needs                                                                                                                                            |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `13.2` | An attended live smoke: real opencode against the smoke model, recorded to `conductor/SMOKE.md`, with retry counts and the non-behavioral path exercised. |
+| `14.2` | The POC campaign: three arms, three repetitions, committed as `docs/build/artifacts/conductor-report.md`.                                                 |
 
-| Task    | Title                                 | Status      | Delivered                                                                                                                     |
-| ------- | ------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 0.1     | standing decisions                    | COMMITTED   | [`conductor/DECISIONS.md`](../../conductor/DECISIONS.md)                                                                      |
-| 0.2     | wire contract pinned                  | COMMITTED   | [`conductor/adapter/wire-notes.md`](../../conductor/adapter/wire-notes.md), `opencode-fragment.json`, the wire-contract suite |
-| 0.3     | scaffold                              | COMMITTED   | `tsconfig.json`, `package.json`, `core/types.ts` seed, fragment tests                                                         |
-| 1.1     | schemas                               | COMMITTED   | `core/types.ts` — every §2 schema plus `validate()`                                                                           |
-| 1.2     | shell/glob parse                      | COMMITTED   | `core/shell-parse.ts` — quote-aware tokenizer, glob intersection                                                              |
-| 1.3     | freshness/failure-class/stops/verdict | COMMITTED   | `core/freshness.ts`, `core/stops.ts`, `core/verdict.ts`                                                                       |
-| 1.4     | purity + dual-runtime guards          | COMMITTED   | `tests/purity.test.ts` — G3 and G14 enforced mechanically                                                                     |
-| 1.5     | decision helpers                      | COMMITTED   | `core/decide.ts` — ladder, scoring, human territory                                                                           |
-| 2.1     | journal                               | COMMITTED   | `core/journal-events.ts`, `adapter/journal.ts`                                                                                |
-| 2.2     | bun runtime smoke                     | COMMITTED   | `tests/bun-smoke.test.ts` plus the bun leg in the test wrapper                                                                |
-| 3.1     | FSMs                                  | COMMITTED   | `core/fsm-run.ts`, `core/fsm-item.ts`                                                                                         |
-| 3.2     | phase legality                        | COMMITTED   | `core/gates-phase.ts` — the single `legalTools` source                                                                        |
-| 3.3     | wave scheduler                        | COMMITTED   | `core/schedule.ts` — `nextWave`, degenerate-scope guard                                                                       |
-| 4.1     | state store                           | COMMITTED   | `adapter/state.ts`, `adapter/questions.ts` — atomic writes, run lock, beacon                                                  |
-| 4.2     | gitio                                 | COMMITTED   | `adapter/gitio.ts`                                                                                                            |
-| 5.1     | git policy                            | COMMITTED   | `core/gates-git.ts` — default-deny over parsed tokens                                                                         |
-| 5.2     | edit + session gates                  | COMMITTED   | `core/gates-edit.ts` — session registry, role scope, freeze                                                                   |
-| 5.3     | gate wiring                           | COMMITTED   | `adapter/tools.ts`, `plugin/index.ts` — fail-closed `tool.execute.before`                                                     |
-| 5.4     | chat.message hook                     | COMMITTED   | `adapter/chat-message.ts` (non-manifest; added per orchestrator prompt §3.3)                                                  |
-| 6.1     | evidence engine                       | COMMITTED   | `adapter/evidence.ts`, `adapter/quarantine.ts`                                                                                |
-| 6.2     | runner discovery probe                | COMMITTED   | [`conductor/docs/RUNNER-DISCOVERY.md`](../../conductor/docs/RUNNER-DISCOVERY.md)                                              |
-| 7.1     | fanout engine                         | COMMITTED   | `adapter/fanout.ts` plus the fake-SDK fixture                                                                                 |
-| 7.2     | router client + failover              | COMMITTED   | `adapter/router-client.ts` — fail-soft, zero-network short circuit                                                            |
-| 8.1     | doctrine packs                        | COMMITTED   | the nine packs under `conductor/doctrine/`                                                                                    |
-| 8.2     | injection                             | COMMITTED   | `adapter/inject.ts` — `buildSystemAppend`, `paramsForRole`, `loadPacks`, `initPlugin`                                         |
-| 9.1     | intake + question tools               | COMMITTED   | `conductor_classify`, `_status`, `_decide`, `_surface`, `_answer`, `_defer`                                                   |
-| 9.2     | planning tools                        | COMMITTED   | `conductor_decompose`, `conductor_plan`, `core/planning.ts`, `SCHEMAS.Plan`                                                   |
-| 9.3     | plan review                           | COMMITTED   | `conductor_plan_review`, `findingBlocksItems`                                                                                 |
-| 9.4a    | test submission + vetting             | NOT_STARTED | `conductor_submit_test`, `conductor_vet_test`                                                                                 |
-| 9.4b    | green/validate/amend                  | NOT_STARTED | `conductor_mark_green`, `conductor_validate`, `conductor_queue_amend`                                                         |
-| 9.4c    | wave driver                           | NOT_STARTED | `conductor_dispatch_wave`                                                                                                     |
-| 9.5a    | item review                           | NOT_STARTED | `conductor_item_review` — lenses, skeptics, path-routed fixes                                                                 |
-| 9.5b    | publish + report                      | NOT_STARTED | `conductor_publish`, `conductor_report`                                                                                       |
-| 9.5c    | stop reports + hatches                | NOT_STARTED | stop-reports, `conductor_inline_claim`, `conductor_override`                                                                  |
-| 9.6     | worktree mode                         | NOT_STARTED | `adapter/worktrees.ts` plus parallel-writes integration                                                                       |
-| 10.1    | continuation + ask gate               | NOT_STARTED | `adapter/continuation.ts`, ask-gate wiring                                                                                    |
-| 12.1    | serve wiring                          | NOT_STARTED | router launch and config generation in `scripts/serve.py`                                                                     |
-| 12.1-G5 | router equivalence                    | NOT_STARTED | runs 13.1 with and without the router (non-manifest, no own commit)                                                           |
-| 12.2    | first-run setup                       | NOT_STARTED | `conductor_setup` repo flow                                                                                                   |
-| 13.1    | e2e scripted                          | NOT_STARTED | five scripted scenarios on a fixture repo, no model                                                                           |
-| 13.2    | live smoke                            | NOT_STARTED | real opencode against the smoke model, recorded                                                                               |
-| 14.1    | bench driver                          | NOT_STARTED | `scripts/conductor_bench.py`                                                                                                  |
-| 14.2    | POC run                               | NOT_STARTED | three arms, three repetitions, committed report                                                                               |
-| 15.0    | replay tool                           | NOT_STARTED | `conductor/tools/replay.ts`                                                                                                   |
-| 15.1    | ops docs                              | NOT_STARTED | `OPERATIONS.md` and `HONEST-LIMITS.md`                                                                                        |
-| 15.2    | dashboard                             | NOT_STARTED | the optional ftxui target                                                                                                     |
+Neither can be written without running it. `verify-acceptance.sh` refuses a live artifact
+under 20 lines or without a verbatim command transcript, for exactly that reason: an
+artifact a model can fabricate more cheaply than it can measure is the worst outcome
+available to this build.
 
-Phases 0 through 8 have passed their adversarial phase gate. Phase 9 is a milestone phase;
-its gate runs after 9.6.
+The work ran on two branches. The **spine** — the TypeScript plugin, Phases 0-10 and 12-15 —
+was strictly serial. **Branch B** — the C++ router, Phase 11 — ran in parallel, because it
+depends only on task 1.1's schemas and task 0.2's streaming finding. Branch B ran on `main`
+rather than in a worktree, because the submodules are already populated there and C++ files
+never overlap `conductor/*.ts`; the rationale and the CMake surgery are in
+[`docs/build/branch-b-plan.md`](../build/branch-b-plan.md).
 
-### Branch B — the C++ router
+For per-task detail — the commit, the TAP counts at commit, the red evidence, the files
+touched, the revert assertion and any deviations — read that task's `STATE.json` row. This
+page does not duplicate it, because a duplicate is a copy that drifts.
 
-| Task | Title                               | Status      | Delivered                                                                                                                                                                          |
-| ---- | ----------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 11.1 | router scaffold + upstream contract | COMMITTED   | CMake targets `llama-router` and `router-tests`, four vcpkg ports, `conductor/tools/export-schemas.ts`, [`router/UPSTREAM_CONTRACT.md`](../../router/UPSTREAM_CONTRACT.md) |
-| 11.2 | router config                       | COMMITTED   | `router/config.hpp` (header-only, `conductor::router`), schema-validated parse                                                                                                 |
-| 11.3 | proxy                               | NOT_STARTED | pass-through request handling                                                                                                                                                      |
-| 11.4 | admission                           | NOT_STARTED | in-flight caps and priority queueing                                                                                                                                               |
-| 11.5 | group affinity                      | NOT_STARTED | prefix-group ordering                                                                                                                                                              |
-| 11.6 | schema observer                     | NOT_STARTED | request-side `schemaMissing` counter (shrunk by task 0.2's streaming finding)                                                                                                      |
-| 11.7 | metrics                             | NOT_STARTED | one JSONL line per request plus the `/conductor/metrics` aggregate                                                                                                                 |
-| 11.8 | router live smoke                   | NOT_STARTED | manual run against a live `llama-server`                                                                                                                                           |
+## Where the gate stands
 
-Branch B runs on `main` rather than in a worktree, because the submodules are already
-populated there and C++ files never overlap `conductor/*.ts`. The rationale and the
-CMake surgery are recorded in [`docs/build/branch-b-plan.md`](../build/branch-b-plan.md).
+The gate at `HEAD`, from [`docs/build/HANDOFF.md`](../build/HANDOFF.md):
+
+| Leg               | Result        |
+| ----------------- | --------------- |
+| node `--test`     | 1811 / 1811     |
+| `tsc --noEmit`    | OK              |
+| bun smoke         | 8 pass          |
+| Python `unittest` | 86 tests        |
+| Schema export     | OK              |
+| `ctest` doctest   | 94 / 94 cases   |
+
+Those numbers move with every commit; re-run `bash scripts/test-conductor.sh` rather than
+quoting them. Note that CMake registers exactly one ctest test — the whole doctest binary —
+so "94" counts doctest cases, not ctest tests. The counts that hold still are structural: 86
+test files under `conductor/tests/`, nine doctrine packs, 19 exported JSON Schemas, 92
+entries in the corrections ledger.
+
+`scripts/verify-acceptance.sh` produces 21 verdicts — 15 checklist verdicts (several §11
+rows split into an `a` and a `b` half) and six hollowness detectors. Four fail, and all four
+are the same two tasks: **row 6** wants `conductor/SMOKE.md` (13.2), **row 8** wants
+`docs/build/artifacts/conductor-report.md` (14.2), **row 12** finds their two commit
+messages missing from `git log`, and **detector E** is the union of the two absent
+artifacts. Run in a fresh worktree, row 3 also fails environmentally — `.out/` is
+gitignored, so there is no build tree there, and configuring one needs `extern/vcpkg`,
+which a worktree does not carry; in the main tree that row is green.
+
+**Acceptance does not pass, and must not be described as passing.**
 
 ## What works today
 
@@ -120,37 +105,47 @@ Things you can run right now, on this machine, and get a real result:
   install, verify, remove, status, config, build, serve), `scripts/serve.py`, and
   `scripts/benchmark.py` are built and in daily use. See
   [`scripts/README.md`](../../scripts/README.md).
-- **The conductor test suite.** `bash scripts/test-conductor.sh` runs 901 tests across 34
-  test files under `conductor/tests/`, then `tsc --noEmit`, then the bun dual-runtime
-  smoke, then regenerates the JSON Schemas into `router/tests/schemas/`.
-- **The mechanical stub scan.** `bash scripts/conductor-gate.sh` scans committed
-  production source for stub markers, skipped or todo tests, trivially-true assertions,
-  and empty catch blocks.
-- **Schema export.** `conductor/tools/export-schemas.ts` writes 18 JSON Schemas into
-  `router/tests/schemas/` (gitignored). It was 17 until task 9.2 added `SCHEMAS.Plan`.
-- **The router build.** `cmake --build .out/build/clang-relwdebinfo --target llama-router`
-  produces a binary that runs; `--target router-tests` plus `ctest` runs the doctest leg
-  (7 cases, 119 assertions at 11.2). Build only those targets — see
-  [build system](build-system.md).
+- **Conductor itself.** `scripts/serve.py` launches `llama-server`, the router and its
+  supervisor, then execs a shell whose `OPENCODE_CONFIG` loads the plugin. `--no-router`
+  runs the identical workflow without layer 2.
+- **The conductor test suite.** `bash scripts/test-conductor.sh` runs the node TAP suite
+  over 86 test files, then `tsc --noEmit`, then the Bun dual-runtime smoke, then regenerates
+  the JSON Schemas into `router/tests/schemas/`, then the Python `unittest` leg.
+- **The mechanical stub scan.** `bash scripts/conductor-gate.sh` scans committed TypeScript,
+  C++ and Python source for stub markers, skipped or todo tests, trivially-true assertions,
+  and empty catch blocks — each language half under a file-count floor so a glob that stops
+  matching is a failure rather than a clean-looking pass.
+- **The standing mutation suite.** `node conductor/tools/audit-mutation-suite.ts` applies a
+  corpus of known mutations to the audit layer and asserts each is caught, with one negative
+  control proving the runner can tell caught from survived.
+- **Schema export.** `conductor/tools/export-schemas.ts` writes 19 JSON Schemas into the
+  gitignored `router/tests/schemas/`.
+- **Replay.** `node conductor/tools/replay.ts <runDir>` renders a run's journal into a
+  deterministic plain-text timeline, with `--component`, `--level` and `--item` filters.
+- **The router build and suite.** `cmake --build .out/build/clang-relwdebinfo --target
+  llama-router` produces a binary that runs; `--target router-tests` plus `ctest` runs the
+  doctest leg. Build only named targets — see [build system](build-system.md).
+- **Acceptance.** `bash scripts/verify-acceptance.sh` in a clean worktree of `HEAD` reports
+  the §11 checklist and the hollowness detectors, and exits non-zero until the two live
+  tasks land.
 
-What you cannot do yet: run conductor. The plugin is not loaded into an opencode session
-until task 12.1 wires it into `scripts/serve.py`, and the pipeline tools it needs
-(9.4a-9.6, 10.1) are not built. Everything committed so far is exercised by unit tests
-against a fake SDK and fixture repos.
+What has not happened: **no attended live run.** Everything above is exercised against unit
+tests, a fake SDK, stub servers and fixture repos. Three live measurements exist and none of
+them is a conductor run: the runner-discovery probe in
+[`conductor/docs/RUNNER-DISCOVERY.md`](../../conductor/docs/RUNNER-DISCOVERY.md), the
+upstream contract in [`router/UPSTREAM_CONTRACT.md`](../../router/UPSTREAM_CONTRACT.md),
+and the router live smoke in `docs/build/artifacts/11.8-live-smoke.md`.
 
 ## What is next
 
-Taken from [`docs/build/HANDOFF.md`](../build/HANDOFF.md):
-
-1. **Task 9.4a — test submission and vetting.** Its assertions file is promoted and signed
-   off at `docs/build/specs/task-9.4a.assertions.json`: 11 rows, 7 spec gaps resolved. The
-   ruling on question origins is to reuse the existing `implementer-blocked` (submit
-   exhaustion) and `review-round-cap` (vet cap) values and never widen the closed §2.11
-   vocabulary.
-2. **Then 9.4b, 9.4c, 9.5a, 9.5b, 9.5c, 9.6**, serially. Phase 9 is a no-parallel zone:
-   every handler lands in the single file `conductor/adapter/tools.ts`.
-3. **The Phase 9 milestone gate**, after 9.6. Then 10.1, then Phases 12, 13, 14, 15.
-4. **Branch B task 11.3 — the proxy**, in parallel, followed by 11.4 through 11.8.
+1. **Task 13.2 — the attended live smoke.** Instrumented, with a preflight go/no-go check in
+   [`conductor/core/preflight.ts`](../../conductor/core/preflight.ts) to run first. It is
+   attended by design: someone watches it happen and the transcript is what gets recorded.
+2. **Task 14.2 — the POC campaign**, whose posture decisions are gated on what 13.2
+   measures. `scripts/conductor_bench.py` (task 14.1) is the driver and is committed.
+3. **Two decisions the owner holds.** Whether to split `conductor/adapter/tools.ts`, and
+   what to do about the collision described under [Honest limits](#honest-limits) between
+   two plan-verbatim limits and the behavior at `HEAD`.
 
 Three traps are recorded in the handoff, each because it already produced a wrong result
 once: an empty review result can mean the lenses **crashed**, not that the diff is clean;
@@ -166,47 +161,50 @@ Deviations are *recorded* instead — in [`CORRECTIONS.md`](../build/CORRECTIONS
 `deviations[]` array of the task's `STATE.json` row, and in `HANDOFF.md` when they change
 how future work is done. Three user-directed layout deviations supersede plan §1.1:
 
-| Plan §1.1 says           | Reality              | Note                                                                                                                      |
-| ------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `src/router-tests/`      | `router/tests/`         | The CMake **target** is still named `router-tests` — it is the ctest name every gate row cites. Only the directory moved. |
-| root `tools/`            | `tools/`         | Contains `membench` and its CMake wiring; see [`tools/README.md`](../../tools/README.md).                         |
-| schemas beside the tests | `router/tests/schemas/` | Generated by `export-schemas.ts`, gitignored, regenerated by every run of the test wrapper.                               |
+| Plan §1.1 says           | Reality                 | Note                                                                                                                       |
+| ------------------------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `src/router/`            | `router/`               | The C++ tree sits at the repo root. `src/main.cpp` is `router/main.cpp`.                                                    |
+| `src/router-tests/`      | `router/tests/`         | The CMake **target** is still named `router-tests` — it is the ctest name every gate row cites. Only the directory moved.  |
+| `src/tools/`             | `tools/`                | Beside `router/`, not inside it: `membench` is a measurement probe that links neither the router nor its libraries. See [`tools/README.md`](../../tools/README.md). |
+| schemas beside the tests | `router/tests/schemas/` | Generated by `export-schemas.ts`, gitignored, regenerated by every run of the test wrapper.                                 |
 
 And one rule that the plan does not state at all:
 
-> **Include rule.** Every in-workspace header is included by its full path relative to
-> `src/` — `#include "router/version.hpp"`, never `#include "version.hpp"`. `src/` is the
-> only user-code include root on both C++ targets, so an include names where the header
-> actually lives regardless of which file includes it. It applies to every file under
-> `src/`, headers included.
+> **Include rule.** Every in-workspace header is included by its full path from the **repo
+> root** — `#include "router/version.hpp"`, never `#include "version.hpp"`. The root is the
+> only user-code include root on every C++ target, so an include names where the header
+> actually lives regardless of which file includes it.
 
-## Deferred bindings
+## Deferred bindings and standing obligations
 
-A binding is an obligation discovered by one task's review that a *later* task must
-satisfy. Bindings are written into the owning task's assertions file (as a
-`phaseGateNBindings` block) and mirrored in `HANDOFF.md`, so the task cannot be built
-without meeting them. These are live:
+A binding is an obligation discovered by one task's review that a *later* task must satisfy.
+Bindings are written into the owning task's assertions file (as a `phaseGateNBindings` block)
+and mirrored in `HANDOFF.md`, so the task cannot be built without meeting them. Every owner
+task in the manifest is committed, so the manifest's bindings are discharged; the obligations
+still standing are these, and each is tracked by a mechanism rather than by memory.
 
-| Owner              | Obligation                                                                                                                                                                                                                                                                 |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 9.1                | Derived decisions must carry two scored options (`decide.requireTwoOptions`); `ClassificationCheck.correctedKind` is null if and only if the check agreed.                                                                                                                 |
-| 9.4a / 5.3         | The gate and the handler must agree on dependency readiness for direct per-item stage-tool calls — `legalTools` must not offer a stage tool for a dependency-unready item.                                                                                                 |
-| 9.4c               | `conductor_dispatch_wave` must supply the PLAN_REVIEWED → EXECUTING context: `survivingMajors: 0` if `planReviewRounds` is below the cap, otherwise the round and max. Without it a clean plan review livelocks entry to EXECUTING.                                        |
-| 9.4c               | A stale or over-age evidence-marker break must fire `treeState.onClear`, so a leaked freeze marker becomes an env failure rather than a silent wave hang.                                                                                                                  |
-| 9.5a               | An under-delivered skeptic panel must be re-run, or its missing verdicts counted as upholds.                                                                                                                                                                               |
-| 9.5b               | The report handler must enforce all-settled as a non-verify precondition, because a closing re-verify is defeated by the foreign-red-set exclusion. Defense in depth.                                                                                                      |
-| 10.1               | `conductor_classify`'s question path sets ANSWERED but does not archive the run; archival wires where run lifecycle and retention are managed, not in classify.                                                                                                            |
-| 10.1               | `conductor_decide` does not consult `isHumanTerritory`; the ask-gate must reject or surface a `kind: derived` decision on a human-territory question.                                                                                                                      |
-| Phase 9 fix rounds | The review-receipt routing must thread a "receiving-review" signal to `buildSystemAppend` so `receive-review.md` is appended, parallel to the already-wired `debug.md` path. The pack is loaded and cached now; only its delivery is deferred.                             |
-| 12.1               | Task 11.1's Step 2 — measure `llama-server`'s `/v1` contract and the effective concurrent slot count through `serve.py --no-shell`, and complete `router/UPSTREAM_CONTRACT.md` with a real verification stamp. Observed output only; fabrication is the worst outcome. |
-| 15.1               | Fold the G7 residuals in [`honest-limits-pending.md`](../build/honest-limits-pending.md) into the shipped honest-limits document.                                                                                                                                          |
+| Obligation                                                                                                              | Where it is tracked                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Twelve committed tasks carry no `GATES.json` M1-M9 record: ten of them are Phases 12-15, which committed after the ledger stopped emitting task rows, plus `0.1` and `5.4a`. | `KNOWN_MISSING_GATE_RECORD` in [`gate-record-completeness.test.ts`](../../conductor/tests/gate-record-completeness.test.ts). The register is self-cleaning: a task that gains a record must leave it, so it cannot rot into a standing excuse. |
+| Roughly 795 assertion-spec row dispositions are unfilled.                                                               | The `UNCOVERED` register in [`row-title-bijection.test.ts`](../../conductor/tests/row-title-bijection.test.ts), whose `[not-stale]` half fails the day a listed row gains a test. They are **not** backfilled from memory: a disposition nobody observed is a fabrication. |
+| Build-discovered honest limits — residual git-command detection gaps, the text-only failure classifier, the production-scoped stub scan. | [`docs/build/honest-limits-pending.md`](../build/honest-limits-pending.md), an accumulator the shipped [`HONEST-LIMITS.md`](../../conductor/docs/HONEST-LIMITS.md) draws from. |
+| Two live-launch items in `serve.py`: a signal trap and a main-launch test.                                              | `HANDOFF.md`.                                                                                                                         |
+
+The pattern to notice is that none of these is "someone will remember". Each is a register a
+test reads, and each register fails the day its entry stops being true.
 
 ## The corrections ledger
 
-[`docs/build/CORRECTIONS.md`](../build/CORRECTIONS.md) is append-only. Each entry has an
-id (`C-001` upward, 31 entries so far) and a fixed shape: the plan quote with line numbers,
-the observed reality as an exact command and its output, the decision taken, the
-alternatives considered, and the blast radius.
+[`docs/build/CORRECTIONS.md`](../build/CORRECTIONS.md) is append-only. It holds 92 entries,
+`C-001` through `C-092`, each in a fixed shape: the plan quote with line numbers, the
+observed reality as an exact command and its output, the decision taken, the alternatives
+considered, and the blast radius.
+
+Alongside it sit the three review registers under
+[`docs/reviews/conductor-review/`](../reviews/conductor-review/) — `ISSUE-`, `MACRO-` and
+`GAP-` numbered — which are the evidence authority for the correction campaign that follows
+the manifest. `GATES.json` records 44 task gates, 17 phase gates, three self-tests and 11
+rejections.
 
 A correction id is a citation, not a filing category. It appears in commit messages
 (`conductor-build: M5 marker scan scoped to production source (C-026)`), in the
@@ -236,9 +234,21 @@ catches the break.
 
 ## Honest limits
 
-These are the fifteen limits from plan §9. They are normative: task 15.1 copies them
-verbatim into the shipped honest-limits document, and no page in this set may contradict
-them.
+These are the fifteen limits from plan §9, copied verbatim into
+[`conductor/docs/HONEST-LIMITS.md`](../../conductor/docs/HONEST-LIMITS.md). They are
+normative, and no page in this set may contradict them.
+
+**Two of them do not describe the code, and that collision is unresolved.** The plan is
+immutable and the limits are pinned to it verbatim, so neither the plan nor the pinned text
+can be edited to match; the discrepancy is recorded here instead and is one of the decisions
+the owner holds.
+
+| Limit | What it says                                                           | What the code does                                                                                                                                        |
+| ----- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 8     | A second conductor session in one workspace "gets a read-only conductor" | `openWorkspace` **refuses**: a live young lock holder ends the open and the second session gets no store at all, rather than a demoted one whose write guards covered a fraction of the mutating surface. |
+| 11    | "The liveness beacon and the banner make that visible"                   | The beacon is written and read. The **visible session banner is not wired**, so the beacon file and the opencode log are the whole of the check.            |
+
+Read the two limits below with those corrections in hand.
 
 1. **Gates fire inside opencode.** A human at a terminal, or any process outside the
    plugin's sight, is ungated. Operational security is out of scope.
@@ -284,10 +294,10 @@ them.
     model makes the quality delta attributable to process, and costs whatever a larger
     reviewer would have added.
 
-Limits discovered during the build — residual git-command detection gaps, the
-text-only failure classifier, and the production-scoped stub scan — accumulate in
-[`docs/build/honest-limits-pending.md`](../build/honest-limits-pending.md) and are folded
-in at task 15.1.
+Limits discovered during the build — residual git-command detection gaps, the text-only
+failure classifier, and the production-scoped stub scan — accumulate in
+[`docs/build/honest-limits-pending.md`](../build/honest-limits-pending.md), which the shipped
+document draws from alongside the fifteen.
 
 ## Explicitly out of scope
 
@@ -305,36 +315,39 @@ Plan §10. These are not unbuilt work items; they are deliberately outside the b
 
 ## The acceptance checklist
 
-Plan §11, verbatim in substance and unchecked, so "done" is legible:
+Plan §11, as [`scripts/verify-acceptance.sh`](../../scripts/verify-acceptance.sh) executes
+it. Run the script rather than reading this table for a verdict — the table says what each
+row checks, the script says whether it holds today.
 
-- [ ] `node --test conductor/tests/` — all green, at least 24 test files.
-- [ ] `bun test conductor/tests/bun-smoke.test.ts` green (G14) — the production runtime is
-      exercised, not assumed.
-- [ ] `ctest` on router-tests — all green.
-- [ ] Purity guard, dual-runtime guard, and doctrine tests green — G3, G14, and the
-      doctrine system enforced mechanically.
-- [ ] Scripted e2e (13.1) green, all five scenarios: full pipeline with a greenfield red,
-      trivial, worktree wave, non-behavioral item, and the
-      blocked/stop-report/next-run-unpoisoned ending.
-- [ ] Live smoke (13.2) recorded in `SMOKE.md` — schema validation survived real
-      local-model outputs, retry counts noted, the non-behavioral path exercised.
-- [ ] Runner discovery probe (6.2) recorded — the quarantine's out-of-repo location is
-      justified by measurement.
-- [ ] POC report (14.2) committed: three arms, three repetitions, per-task spread.
-- [ ] `serve.py`: `--router` and `--no-router` both produce working sessions, and the e2e
-      equivalence step (12.1) passes.
-- [ ] `--parallel` is set from `parallel.maxReaders` and setup's slot probe passes — the
-      fan-out is actually parallel upstream.
-- [ ] `OPERATIONS.md` and `HONEST-LIMITS.md` exist and match all fifteen limits.
-- [ ] `git log --oneline` shows one commit per task, each on a green suite.
+| Row | What it checks                                                                                                                                | Standing |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 1   | The node suite green through the canonical wrapper, over at least 24 test files (there are 86)                                                | PASS     |
+| 2   | `bun test conductor/tests/bun-smoke.test.ts` green — the production runtime exercised, not assumed                                             | PASS     |
+| 3   | `ctest` on `router-tests` green                                                                                                               | PASS in the main tree; fails in a worktree, which has no submodules |
+| 4   | Purity, dual-runtime and doctrine guards green                                                                                                | PASS     |
+| 5   | Scripted e2e green, all five scenarios named in the actual TAP output: greenfield red, trivial, worktree wave, non-behavioral item, and the blocked/stop-report/next-run-unpoisoned ending | PASS |
+| 6   | Live smoke recorded in `conductor/SMOKE.md`, mentioning retries and the non-behavioral path                                                    | **FAIL — 13.2 not run** |
+| 7   | Runner-discovery probe recorded, justifying the quarantine's out-of-repo location by measurement                                               | PASS     |
+| 8   | POC report committed as `docs/build/artifacts/conductor-report.md`: three arms, three repetitions, per-task spread                             | **FAIL — 14.2 not run** |
+| 9   | `serve.py` offers `--router`/`--no-router`, and the G5 equivalence artifact records both arms reaching the same terminal state                 | PASS     |
+| 10  | `--parallel`, `admission.maxInflightPerModel` and the per-slot `--ctx-size` all derive from one number, checked over several reader counts     | PASS     |
+| 11  | `OPERATIONS.md` and `HONEST-LIMITS.md` exist, and the limits document carries as many numbered limits as plan §9 does                          | PASS     |
+| 12  | Every manifest commit message appears in `git log` exactly once                                                                               | **FAIL — 13.2 and 14.2 have no commit** |
 
-The first row is written against raw `node --test`; in practice every gate decision runs
-through `bash scripts/test-conductor.sh` instead, for the reasons in C-005 and in
+Row 1 is written in the plan against raw `node --test`; the script runs it through
+`bash scripts/test-conductor.sh` instead, for the reasons in C-005 and in
 [testing and verification](testing-and-verification.md).
+
+Six hollowness detectors sit alongside the rows, for what a green suite cannot see: every
+§1.1 module exists, is non-empty and is imported by a test (A); all nine doctrine packs are
+present and non-trivial (B); every router module exists and is non-empty (C); the M5 stub
+scan is clean (D); all five live artifacts are present (E — **FAIL**, the two above are
+missing); and the upstream contract's verification stamp is real rather than `<pending>`
+(F).
 
 ## The build process itself
 
-This repository is being built by an orchestrator agent following
+This repository is built by an orchestrator agent following
 [`docs/conductor-build-orchestrator-prompt.md`](../conductor-build-orchestrator-prompt.md).
 The process is deliberately the discipline conductor itself enforces, applied by hand one
 level up. Four mechanisms do the work.
@@ -368,9 +381,16 @@ a failing test or a mutation, then skeptics only for the unprobeable. Fix rounds
 at three; at the cap the phase is parked and its findings are written to the handoff.
 
 Two authoring-time adversarial reviews of the plan itself are kept in
-[`docs/reviews/`](../reviews/). Note that
+[`docs/reviews/`](../reviews/), alongside the full-system review under
+[`docs/reviews/conductor-review/`](../reviews/conductor-review/) whose three registers drive
+the correction campaign. Note that
 [`docs/prompt-lifecycle.md`](../prompt-lifecycle.md) is **stale** — retained for history;
 the orchestrator prompt and `HANDOFF.md` are current.
+
+**The trust premise underneath all of it**, which is what the correction campaign is
+arranged around: trust lives in the harness, not in the orchestrator. Any prompter should
+get a self-defending result, from local models only. That is why the audit layer above is
+adversarial toward conductor's own code rather than only toward the code conductor reviews.
 
 ## See also
 

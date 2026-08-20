@@ -164,6 +164,10 @@ least 5%, and prompts for confirmation on a terminal (`-y` skips the prompt).
 | `--vram-budget GB` | Override the detected budget for the fit labels           |
 | `-y`               | Skip the confirmation prompt                              |
 
+`install` also accepts the config options `--host`, `--port`, `--models-max` and `--serve-ctx`,
+because it regenerates the configs when it finishes; they mean the same thing there as they do
+on `config` below.
+
 **Vision needs `--with-mmproj`** (`scripts/fetch_models.py install qwen3-vl-30b --with-mmproj`).
 A multimodal model installed without its projector loads as text-only, and the generated
 `opencode.json` honestly reports `attachment: false` for it. The catalog's `mmproj` field names
@@ -280,7 +284,7 @@ scripts/fetch_models.py config --port 9000 --serve-ctx 32768
 | File                             | Contents                                                                                                                                                                                                             |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.data/configs/llama-models.ini` | The `llama-server` router preset: one section per model id, with its `model` path, optional `mmproj`, `ctx-size`, category `tags` and the catalog's sampling keys                                                    |
-| `.data/configs/opencode.json`    | The opencode provider block pointing at `http://<host>:<port>/v1`, with one entry per chat model — context limits, tool-call and reasoning flags, and `attachment` set only when a projector was actually downloaded |
+| `.data/configs/opencode.json`    | The opencode provider block pointing at `http://<host>:<port>/v1`, with one entry per chat model — context limits, tool-call and reasoning flags, and `attachment` set only when a projector was actually downloaded. It also carries the conductor plugin entry and agent definitions, merged in from `conductor/opencode-fragment.json` |
 | `.data/configs/benchmark.json`   | The benchmark plan: exactly the installed models, their tasks and the ten presets                                                                                                                                    |
 | `.data/scripts/launch.sh`        | A one-line wrapper around `scripts/serve.py`                                                                                                                                                                         |
 

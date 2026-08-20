@@ -2,7 +2,13 @@
 
 > **TEMPLATE REPOSITORY:** This document is authoritative for **copy-paste ready diagram templates**. For design philosophy, color rationale, and guidelines, see [diagram-standards.md](diagram-standards.md) (STANDARDS AUTHORITY).
 
-Copy-paste ready templates for all Mermaid diagram types with complete theme configurations.
+Copy-paste ready templates, each with the complete theme configuration a diagram of that
+type needs. The index below is the full set; a type with no template here is one no
+diagram in this repository uses, and a diagram of that type should start from the
+palette in [diagram-standards.md](diagram-standards.md).
+
+Every diagram committed in this repository is a `flowchart` or a `sequenceDiagram`, so
+those two templates are the ones in daily use.
 
 **Related docs:**
 - [diagram-standards.md](diagram-standards.md) - Design philosophy, color rationale, usage guidelines (STANDARDS AUTHORITY)
@@ -15,15 +21,12 @@ Copy-paste ready templates for all Mermaid diagram types with complete theme con
 
 | Diagram Type | Section | Key Variables |
 |--------------|---------|---------------|
-| [Flowchart](#flow-chart-template-1-simple) | Basic + Complex | `style` statements |
+| [Flowchart](#flow-chart-template-1-simple) | Architecture, flow, state | `style` statements |
 | [Sequence](#sequence-diagram-template) | Interactions | `actorBkg`, `actorBorder` |
 | [Class](#class-diagram-template) | Types | `classDef` + `:::` syntax |
 | [ER](#entity-relationship-diagram-template) | Data models | `mainBkg`, `attributeBackground*` |
 | [Gantt](#gantt-chart-template) | Timelines | `taskBkgColor`, `activeTaskBkgColor` |
-| [Git Graph](#git-graph-template) | Branches | `git0`-`git7`, `gitBranchLabel*` |
-| [User Journey](#user-journey-template) | UX flows | `fillType0`-`fillType7` |
 | [Pie](#pie-chart-template) | Distribution | `pie1`-`pie12` |
-| [State](#state-diagram-template) | States | **Broken on GitHub** |
 | [Mind Map](#mind-map-template) | Concepts | `cScale0`-`cScale11`, `cScaleLabel*` |
 | [Timeline](#timeline-template) | History | `cScale*` |
 | [Quadrant](#quadrant-chart-template) | Matrices | `quadrant*Fill` |

@@ -7,7 +7,7 @@ change a target.
 ## Two build systems, one repo
 
 The C++ half is a normal CMake project. [`CMakeLists.txt`](../../CMakeLists.txt) at the repo root
-declares three executables, [`CMakePresets.json`](../../CMakePresets.json) supplies the
+declares the executables, [`CMakePresets.json`](../../CMakePresets.json) supplies the
 configurations, and [`vcpkg.json`](../../vcpkg.json) declares the third-party ports. Everything it
 produces lands under the gitignored `.out/`.
 
@@ -28,21 +28,41 @@ produces no files. The plugin you edit is the plugin that runs, in both runtimes
 
 ## CMake targets
 
-Three executables — all declared at the top level except `membench`, which arrives through
-`add_subdirectory(tools)`.
+Four executables. Three are declared at the top level, one of them behind an option;
+`membench` arrives through `add_subdirectory(tools)`.
 
-| Target         | Sources                                                    | Links                                                                  | Purpose                                           |
-| -------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| `llama-router` | `router/main.cpp`                                             | `spdlog`, `httplib`, `nlohmann_json`, `nlohmann_json_schema_validator` | The fail-soft proxy in front of `llama-server`    |
-| `router-tests` | `router/tests/scaffold_test.cpp`, `router/tests/config_test.cpp` | the above plus `doctest`                                               | The router's doctest suite, registered with ctest |
-| `membench`     | `tools/membench/membench.cpp`                          | `Threads::Threads`                                                     | Standalone memory-bandwidth probe                 |
+| Target                | Sources                          | Links                                                                                                                       | Purpose                                           |
+| --------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `llama-router`        | `router/main.cpp`                | `spdlog`, `httplib`, `nlohmann_json`, `nlohmann_json_schema_validator`                                                      | The fail-soft proxy in front of `llama-server`    |
+| `router-tests`        | nine files under `router/tests/` | the above plus `doctest`                                                                                                    | The router's doctest suite, registered with ctest |
+| `conductor-dashboard` | `dashboard/main.cpp`             | `spdlog`, `nlohmann_json`, `nlohmann_json_schema_validator`, plus `ftxui::screen/dom/component` — no httplib and no doctest | Optional ftxui TUI over the metrics ledger        |
+| `membench`            | `tools/membench/membench.cpp`    | `Threads::Threads`                                                                                                          | Standalone memory-bandwidth probe                 |
 
-All three set `cxx_std_23` explicitly with `target_compile_features`, on top of the project-wide
-`CMAKE_CXX_STANDARD 23`. `llama-router` and `router-tests` each add `src/` as a private include
-directory and nothing else — see [the include rule](#the-include-rule). Neither links `llama` nor
-`ftxui`; the router does not need llama.cpp's libraries, only the wire protocol its server speaks.
-Source lists grow per task, so a new `.cpp` under `router/` or `router/tests/` is compiled only
-once it is added to the relevant `add_executable` call.
+All four set `cxx_std_23` explicitly with `target_compile_features`, on top of the project-wide
+`CMAKE_CXX_STANDARD 23`. The three that are not `membench` each add the **repo root** as their
+single private include directory and nothing else — see [the include rule](#the-include-rule).
+
+`router-tests` compiles `scaffold_test.cpp`, `config_test.cpp`, `proxy_test.cpp`,
+`admission_test.cpp`, `affinity_test.cpp`, `schema_observer_test.cpp`, `metrics_test.cpp`,
+`cli_test.cpp` and `dashboard_test.cpp`. Source lists are explicit rather than globbed, so a new
+`.cpp` under `router/` or `router/tests/` is compiled only once it is added to the relevant
+`add_executable` call.
+
+**`conductor-dashboard` is `OFF` by default**, behind `option(CONDUCTOR_DASHBOARD …)`, so no
+ordinary build pays for ftxui and neither default target ever links it:
+
+```bash
+cmake --preset clang-relwdebinfo -D CONDUCTOR_DASHBOARD=ON
+cmake --build .out/build/clang-relwdebinfo --target conductor-dashboard
+```
+
+Its *pure* half — the aggregation header `dashboard/ledger_view.hpp`, which links nothing — is
+exercised by `router/tests/dashboard_test.cpp`, which is in the `router-tests` source list rather
+than a target of its own. So the dashboard's logic is always built and always run even when the
+terminal UI is not. The
+binary itself links `nlohmann_json_schema_validator` as well, because it reuses `router/config.hpp`
+to read `metrics.ledgerPath` from the same config the router does, and that header validates
+through a compiled library rather than a header-only one.
 
 Test registration is two lines:
 
@@ -70,6 +90,7 @@ artifacts nothing here consumes.
 cmake --build .out/build/clang-relwdebinfo --target llama-router
 cmake --build .out/build/clang-relwdebinfo --target router-tests
 cmake --build .out/build/clang-relwdebinfo --target membench
+cmake --build .out/build/clang-relwdebinfo --target conductor-dashboard   # needs -D CONDUCTOR_DASHBOARD=ON at configure
 
 # not safe - also builds all of extern/llama-cpp
 cmake --build .out/build/clang-relwdebinfo
@@ -90,9 +111,8 @@ add_subdirectory(extern/llama-cpp)
 set(CMAKE_CXX_STANDARD 23)
 ```
 
-This costs the project nothing, because `llama-router`, `router-tests` and `membench` each request
-`cxx_std_23` individually through `target_compile_features` rather than relying on the directory
-default.
+This costs the project nothing, because every target here requests `cxx_std_23` individually
+through `target_compile_features` rather than relying on the directory default.
 
 The llama.cpp binaries this workspace actually runs do not come from this tree at all. They are
 built out-of-tree by `scripts/fetch_models.py build` — see
@@ -113,8 +133,11 @@ plus three concrete presets.
 | `clang-relwdebinfo` | no     | `clang`   | `CMAKE_BUILD_TYPE=RelWithDebInfo`                                                                |
 
 Only the build type distinguishes the three concrete presets; `clang-relwdebinfo` is the one this
-project uses. Both directories are derived from the preset name, so every configuration is
-self-contained and no two ever share a cache:
+project uses, and it is the preset every gate record and every command on this page names. The
+`clang` base is conditional on `hostSystemName == macOS`, so on any other host all three concrete
+presets are unavailable — this is a macOS-on-Apple-Silicon project and the preset file says so
+rather than failing later. Both directories are derived from the preset name, so every
+configuration is self-contained and no two ever share a cache:
 
 ```text
 .out/build/<presetName>      # binaryDir
@@ -127,15 +150,15 @@ Hence `.out/build/clang-relwdebinfo` in every build command on this page.
 
 Dependencies are declared in manifest mode. [`vcpkg.json`](../../vcpkg.json) lists seven ports:
 
-| Port                    | `find_package` name              | Used by                                                 |
-| ----------------------- | -------------------------------- | ------------------------------------------------------- |
-| `pkgconf`               | —                                | build-time dependency resolution for other ports        |
-| `spdlog`                | `spdlog`                         | `llama-router`, `router-tests`                          |
-| `cpp-httplib`           | `httplib`                        | `llama-router`, `router-tests`                          |
-| `nlohmann-json`         | `nlohmann_json`                  | `llama-router`, `router-tests`                          |
-| `json-schema-validator` | `nlohmann_json_schema_validator` | `llama-router`, `router-tests`                          |
-| `doctest`               | `doctest`                        | `router-tests`                                          |
-| `ftxui`                 | —                                | reserved for the operator dashboard; no target links it |
+| Port                    | `find_package` name              | Used by                                                   |
+| ----------------------- | -------------------------------- | --------------------------------------------------------- |
+| `pkgconf`               | —                                | build-time dependency resolution for other ports          |
+| `spdlog`                | `spdlog`                         | `llama-router`, `router-tests`                            |
+| `cpp-httplib`           | `httplib`                        | `llama-router`, `router-tests`                            |
+| `nlohmann-json`         | `nlohmann_json`                  | `llama-router`, `router-tests`                            |
+| `json-schema-validator` | `nlohmann_json_schema_validator` | `llama-router`, `router-tests`                            |
+| `doctest`               | `doctest`                        | `router-tests`                                            |
+| `ftxui`                 | `ftxui`                          | `conductor-dashboard`, only when `CONDUCTOR_DASHBOARD=ON` |
 
 The validator's imported target is `nlohmann_json_schema_validator::validator`, not a repeat of the
 package name. The toolchain wiring lives in [`cmake/vcpkg-init.cmake`](../../cmake/vcpkg-init.cmake),
@@ -154,9 +177,11 @@ poll. Subsequent configures hit the cache and take seconds.
 
 ## The include rule
 
-`src/` is the only user-code include root: `llama-router` and `router-tests` each get exactly one
-`target_include_directories(... PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")` and no other. So every
-in-workspace header is included by its full path relative to `src/`:
+The **repo root** is the only user-code include root: `llama-router`, `router-tests` and
+`conductor-dashboard` each get exactly one top-level
+`target_include_directories(... PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")` and no other, and
+`membench` — one self-contained translation unit that includes nothing from the workspace —
+sets none at all. So every in-workspace header is included by its full path from the root:
 
 ```cpp
 #include "router/version.hpp"   // right
@@ -167,10 +192,11 @@ in-workspace header is included by its full path relative to `src/`:
 ```
 
 What it buys: an include names where the header actually lives, no matter which file is doing the
-including. `router/main.cpp` sits beside `router/` and `router/tests/config_test.cpp` sits in a
-sibling directory, yet both spell a router header the same way. There are no per-directory include
-paths to keep in sync, no relative-path chains that break when a file moves, and no ambiguity about
-which `config.hpp` a bare name resolves to — and a new subdirectory under `src/` needs no CMake
+including. `router/main.cpp` sits inside `router/` and `router/tests/config_test.cpp` one level
+down, yet both spell a router header the same way, and `dashboard/main.cpp` reuses
+`router/config.hpp` with the identical line. There are no per-directory include paths to keep in
+sync, no relative-path chains that break when a file moves, and no ambiguity about which
+`config.hpp` a bare name resolves to — and a new top-level source directory needs no include
 change at all.
 
 ## Formatting
@@ -179,17 +205,18 @@ C++ style is defined by [`.clang-format`](../../.clang-format) at the repo root:
 `ColumnLimit: 0` (no automatic wrapping — line breaks are the author's choice), LF line endings,
 `BreakBeforeBraces: Custom` with same-line braces except before `else` and after `extern` blocks,
 `SortIncludes: true`, and `IncludeBlocks: Regroup` with categories that sort system headers ahead
-of quoted project headers. It is never applied on build — only at *configure* time, and only when
-you ask:
+of quoted project headers. It is never applied on build — only at *configure* time, governed by
+one option:
 
 ```bash
-cmake --preset clang-relwdebinfo -D AUTOFORMAT_SRC_ON_CONFIGURE=ON
+cmake --preset clang-relwdebinfo -D AUTOFORMAT_SRC_ON_CONFIGURE=OFF
 ```
 
-`AUTOFORMAT_SRC_ON_CONFIGURE` **defaults to `OFF`**. When it is `ON`, the root `CMakeLists.txt`
-includes [`cmake/clang-format.cmake`](../../cmake/clang-format.cmake), which globs
-`src/*.[hc]` and `src/*.[hc]pp` and runs `clang-format --style=file -i` over every match, printing
-each file as it goes.
+`AUTOFORMAT_SRC_ON_CONFIGURE` **defaults to `ON`**, so an ordinary `cmake --preset` reformats. The
+root `CMakeLists.txt` then includes [`cmake/clang-format.cmake`](../../cmake/clang-format.cmake),
+which globs `router/`, `tools/` and `dashboard/` for `*.[hc]` and `*.[hc]pp` — never `extern/` —
+and runs `clang-format --style=file -i` over every match, printing each file as it goes. If
+`clang-format` is not on `PATH` the module does nothing rather than failing the configure.
 
 Two consequences follow. It rewrites the **working tree**, not the build tree — the reformatted
 files are your source files and show up in `git status` immediately. And if a diff contains C++
@@ -200,12 +227,12 @@ change rather than folding it into a behavioral commit.
 
 Four modules live in `cmake/`, found via `CMAKE_MODULE_PATH`.
 
-| Module                                                           | What it does                                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vcpkg-init.cmake`](../../cmake/vcpkg-init.cmake)               | Initializes the vcpkg submodule, bootstraps the `vcpkg` binary, and sets `CMAKE_TOOLCHAIN_FILE` if it is unset. Included before `project()`.                                                                                                                  |
-| [`clang-format.cmake`](../../cmake/clang-format.cmake)           | Finds `clang-format` and formats everything under `src/` in place. Included only when `AUTOFORMAT_SRC_ON_CONFIGURE` is `ON`.                                                                                                                                  |
-| [`cmake-utils.cmake`](../../cmake/cmake-utils.cmake)             | Diagnostics: `print_project_variables()` (called on include, prints the compiler/toolchain/path banner you see at configure), `dump_cmake_variables()`, and `run_active_cmake_diagnostics()` behind `-D DEPENDENCY_DIAGNOSTICS=ON` / `-D GRAPHVIZ_OUTPUT=ON`. |
-| [`compiler-warnings.cmake`](../../cmake/compiler-warnings.cmake) | A per-compiler warning set (`/W4 /WX` on MSVC; `-Wall -Wcast-align -Wpedantic` plus compiler-specific extras on Clang and GCC) applied to `${PROJECT_NAME}`. Not included by the root `CMakeLists.txt` today — each target spells its own flags.              |
+| Module                                                           | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`vcpkg-init.cmake`](../../cmake/vcpkg-init.cmake)               | Initializes the vcpkg submodule, bootstraps the `vcpkg` binary, and sets `CMAKE_TOOLCHAIN_FILE` if it is unset. Included before `project()`.                                                                                                                                                                                                                                                                                                                                                            |
+| [`clang-format.cmake`](../../cmake/clang-format.cmake)           | Finds `clang-format` and formats `router/`, `tools/` and `dashboard/` in place. Included when `AUTOFORMAT_SRC_ON_CONFIGURE` is `ON`, which is the default.                                                                                                                                                                                                                                                                                                                                              |
+| [`cmake-utils.cmake`](../../cmake/cmake-utils.cmake)             | Diagnostics: `print_project_variables()` (called on include, prints the compiler/toolchain/path banner you see at configure), `dump_cmake_variables()`, and `run_active_cmake_diagnostics()` behind `-D DEPENDENCY_DIAGNOSTICS=ON` / `-D GRAPHVIZ_OUTPUT=ON`. The banner calls `dump_cmake_variables(".*")` on every configure, though its output is `message(DEBUG ...)` and stays hidden under the root's `CMAKE_MESSAGE_LOG_LEVEL STATUS`. `run_active_cmake_diagnostics()` has no call site at all. |
+| [`compiler-warnings.cmake`](../../cmake/compiler-warnings.cmake) | A per-compiler warning set (`/W4 /WX` on MSVC; `-Wall -Wcast-align -Wpedantic` plus compiler-specific extras on Clang and GCC) applied to `${PROJECT_NAME}`. **No `CMakeLists.txt` includes it**, so nothing is built with it. The only live warning flags are `membench`'s, spelled out in `tools/membench/CMakeLists.txt`; the three router/dashboard targets set none. There is no `-Werror` anywhere and no `.clang-tidy` file in the repo.                                                         |
 
 ## Standalone tools
 
@@ -217,22 +244,22 @@ vcpkg, no configure:
 
 ```bash
 cmake --build .out/build/clang-relwdebinfo --target membench
-c++ -std=c++23 -O3 tools/membench/membench.cpp -o build/membench
+mkdir -p .out/build && c++ -std=c++23 -O3 tools/membench/membench.cpp -o .out/build/membench
 ```
 
 `membench` forces `-O3` even in a Debug configuration, because an `-O0` build measures loop
 overhead rather than the memory system, and its warning flags are spelled out locally instead of
 reusing the root scope's generator expressions, so the directory stays self-contained.
 
-`scripts/hostinfo.py` is the consumer. It honors a `MEMBENCH_BIN` override, then looks for an
-existing binary under `build/`, rejecting one older than the source so a stale binary never
-silently measures old code. If no usable binary exists it compiles the source on demand with `$CXX`
-(or `c++`, or `clang++`) at `-O3`, trying `c++23` then `c++20`, and falls back to a pure-Python
-bandwidth estimate only if that fails — a figure that includes page-fault cost and reads roughly a
-third low. One caveat: `hostinfo.py` resolves the source at `tools/membench/` relative to the repo
-root, a path left behind when the tools moved under `src/`, so a built binary or `MEMBENCH_BIN` is
-the reliable route. The full methodology — what the tool was built to answer, and why absolute
-alignment turned out not to matter — is in [`tools/README.md`](../../tools/README.md).
+`scripts/hostinfo.py` is the consumer. It honors a `MEMBENCH_BIN` override, then globs every
+configured preset tree for `.out/build/*/tools/membench/membench`, newest first, rejecting any
+binary older than the source so a stale one never silently measures old code. If no usable binary
+exists it compiles the source on demand with `$CXX` (or `c++`, or `clang++`) at `-O3`, trying
+`c++23` then `c++20`, and writes the result to `.out/build/membench` — beside the preset trees, so
+there is exactly one place binaries land. Only if that fails does it fall back to a pure-Python
+bandwidth estimate, a figure that includes page-fault cost and reads roughly a third low. The full
+methodology — what the tool was built to answer, and why absolute alignment turned out not to
+matter — is in [`tools/README.md`](../../tools/README.md).
 
 ## The llama.cpp submodule
 
@@ -270,6 +297,14 @@ enough on its own: the next `serve` or `benchmark` rebuilds without being asked.
 | `typescript`          | `^5.9`    | `tsc --noEmit` typechecking     |
 
 All three exist to type-check and nothing else; the shipped plugin imports none of them at runtime.
+The `@opencode-ai/plugin` pin is a **types** pin, not the runtime contract: the installed opencode
+binary is 1.18.15, and where the two disagree the code is written against 1.18.15's observed
+behavior. [`conductor/adapter/wire-notes.md`](../../conductor/adapter/wire-notes.md) records which
+behaviors those are.
+
+`conductor/package.json` has **no `scripts` block**, so `npm test`, `npm run build` and
+`npm run typecheck` do not exist. `npm install` is the only npm command this repo needs, and the
+typecheck is reached through the gate wrapper or by invoking `tsc` directly.
 [`conductor/tsconfig.json`](../../conductor/tsconfig.json) is `strict`, `noEmit`, `nodenext` module
 and resolution, targeting `es2023`. Two options carry the no-build design:
 
@@ -288,14 +323,15 @@ packages. Nothing it installs is deployed, imported at runtime, or committed;
 
 ## What is gitignored
 
-| Path                      | Why                                                                                         |
-| ------------------------- | ------------------------------------------------------------------------------------------- |
-| `.out/`                   | CMake build and install trees, one subdirectory per preset                                  |
-| `.data/`                  | Everything the harness generates: models, llama.cpp build, `.data/tools/` binaries, configs |
-| `build/`, `out/`          | Ad-hoc CMake trees, plus where `hostinfo.py` drops its on-demand `membench` build           |
-| `conductor/node_modules/` | Dev-only type tooling; reproducible from `package.json`                                     |
-| `router/tests/schemas/`      | The JSON Schemas regenerated from `core/types.ts` on every test run                         |
-| `__pycache__/`, `*.pyc`   | Python bytecode                                                                             |
+| Path                      | Why                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `.out/`                   | CMake build and install trees, one subdirectory per preset                                                    |
+| `.data/`                  | Everything the harness generates: models, llama.cpp build, `.data/tools/` binaries, configs                   |
+| `build/`, `out/`          | Ad-hoc CMake trees. Ignored to *catch* a stray `cmake -B build`, not to sanction one — both should stay empty |
+| `conductor/node_modules/` | Dev-only type tooling; reproducible from `package.json`                                                       |
+| `router/tests/schemas/`   | The JSON Schemas regenerated from `core/types.ts` on every test run                                           |
+| `__pycache__/`, `*.pyc`   | Python bytecode                                                                                               |
+| `staging/`                | The build's scratch area for a red test file parked until the task that owns it starts                        |
 
 One deliberate exception: `.gitignore` matches `build/` at any depth, which would swallow
 `docs/build/` — so the next line re-includes it with `!docs/build/`. `docs/build/` is not a build
@@ -306,19 +342,20 @@ contrast, are ignored for the same reason the plugin has no build step: they are
 
 ## Common commands
 
-| Command                                                               | What it does                                                          |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `cmake --preset clang-relwdebinfo`                                    | Configure into `.out/build/clang-relwdebinfo` (slow on the first run) |
-| `cmake --build .out/build/clang-relwdebinfo --target llama-router`    | Build the router binary                                               |
-| `cmake --build .out/build/clang-relwdebinfo --target router-tests`    | Build the doctest suite                                               |
-| `ctest --test-dir .out/build/clang-relwdebinfo --output-on-failure`   | Run the registered C++ test                                           |
-| `cmake --build .out/build/clang-relwdebinfo --target membench`        | Build the bandwidth probe                                             |
-| `cd conductor && npm install`                                         | Populate the dev-only type tooling                                    |
-| `bash scripts/test-conductor.sh`                                      | The canonical gate: TAP suite, `tsc`, Bun smoke, schema export        |
-| `bash scripts/test-conductor.sh 'conductor/tests/gates-*.test.ts'`    | Same gate over a subset                                               |
-| `bash scripts/conductor-gate.sh`                                      | Mechanical stub scan over tracked TS and router sources               |
-| `conductor/node_modules/.bin/tsc -p conductor/tsconfig.json --noEmit` | Typecheck alone, for a fast edit loop                                 |
-| `scripts/fetch_models.py build`                                       | Rebuild the llama.cpp binaries into `.data/tools/`                    |
+| Command                                                               | What it does                                                           |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `cmake --preset clang-relwdebinfo`                                    | Configure into `.out/build/clang-relwdebinfo` (slow on the first run)  |
+| `cmake --build .out/build/clang-relwdebinfo --target llama-router`    | Build the router binary                                                |
+| `cmake --build .out/build/clang-relwdebinfo --target router-tests`    | Build the doctest suite                                                |
+| `ctest --test-dir .out/build/clang-relwdebinfo --output-on-failure`   | Run the registered C++ test                                            |
+| `cmake --build .out/build/clang-relwdebinfo --target membench`        | Build the bandwidth probe                                              |
+| `cd conductor && npm install`                                         | Populate the dev-only type tooling                                     |
+| `bash scripts/test-conductor.sh`                                      | The canonical gate: TAP suite, `tsc`, Bun smoke, schema export, Python |
+| `bash scripts/test-conductor.sh 'conductor/tests/gates-*.test.ts'`    | Same gate over a subset                                                |
+| `bash scripts/conductor-gate.sh`                                      | Mechanical stub scan over tracked TypeScript, C++ and Python sources   |
+| `conductor/node_modules/.bin/tsc -p conductor/tsconfig.json --noEmit` | Typecheck alone, for a fast edit loop                                  |
+| `scripts/fetch_models.py build`                                       | Rebuild the llama.cpp binaries into `.data/tools/`                     |
+| `bash scripts/verify-acceptance.sh`                                   | The §11 acceptance checklist as an executable artifact                 |
 
 Never run `node --test` directly for a pass/fail decision: the wrapper exists because raw
 `node --test` produces both false reds and vacuous greens on this Node version. The reasoning is in

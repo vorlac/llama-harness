@@ -75,8 +75,9 @@ never *how*. Everything else lives in `.data/configs/benchmark.json`.
 | `--no-build-check` | Do not re-verify `.data/tools/` against the pinned llama.cpp submodule first.                                                     |
 
 Without `--no-build-check` the runner shells out to `scripts/fetch_models.py build` first,
-exactly as `scripts/serve.py` does, so the binaries cannot silently drift from the pinned
-submodule. Three environment variables matter: `BENCH_PORT` (default `8199`) is the port for
+for the same reason `scripts/serve.py` does, so the binaries cannot silently drift from the
+pinned submodule. That build is a no-op unless the stamp under `.data/tools/` disagrees with
+the submodule. Three environment variables matter: `BENCH_PORT` (default `8199`) is the port for
 the benchmark's own `llama-server`, `MEMBENCH_BIN` points at a prebuilt `membench`, and any
 value of `NO_COLOR` disables color. `rich` is optional — install it with
 `pip3 install --user rich` for live progress and colored tables.
@@ -288,9 +289,11 @@ time. The key lives under `run.eviction` in `.data/configs/benchmark.json`:
 
 With `delete_after_each` set, a model is removed the moment its per-model table renders, via
 `fetch_models.py remove <id> --no-config` — the results are already on disk in `result.json`,
-so nothing is lost. The plan itself is built from what is installed under `.data/models/` when
-the sweep starts, so the working pattern for a catalog-sized sweep is: install a batch, run
-with eviction on, install the next batch, re-run with `--resume`. `--resume` reads back every
+so nothing is lost. Eviction is strictly one-way: nothing re-downloads a model the sweep
+deleted, and you install whatever you want to measure next yourself. The plan itself is built
+from what is installed under `.data/models/` when the sweep starts, so the working pattern for
+a catalog-sized sweep is: install a batch, run with eviction on, install the next batch, re-run
+with `--resume`. `--resume` reads back every
 completed cell and rebuilds the full report around the new work, which is also what makes an
 interrupted overnight run recoverable rather than restartable. Two more keys in the same file:
 `enabled: false` skips a model entirely, and trimming a model's `presets` list shortens its
@@ -336,32 +339,83 @@ name will not run.
 
 ## The conductor POC bench
 
-*Not yet built: the conductor evaluation bench lands at tasks 14.1 and 14.2.*
+The benchmark above measures models. A separate driver,
+[`scripts/conductor_bench.py`](../../scripts/conductor_bench.py), measures **process** — the
+quality delta attributable to enforcement alone, with the model held constant. Every arm runs
+`llamacpp/qwen3.6-27b`, so no part of the difference can be a model mix.
 
-The benchmark above measures models. A separate driver, `scripts/conductor_bench.py`, measures
-**process** — the quality delta attributable to enforcement alone, with the model held
-constant. Every arm runs `qwen3.6-27b`, so no part of the difference can be a model mix.
+This is a benchmark you run; it has no results until you do. No completed campaign is recorded
+anywhere in the repository, and the report described here is what a run produces, not a
+document sitting on disk waiting to be read.
 
 | Arm         | What it isolates                                                              |
 | ----------- | ----------------------------------------------------------------------------- |
-| `baseline`  | plain opencode, same model, no plugin                                         |
-| `doctrine`  | the doctrine packs injected as a system prompt — no gates, no fan-out, no FSM |
-| `conductor` | the full pipeline                                                             |
+| `baseline`  | plain opencode on its own `build` agent, same model, no plugin                |
+| `doctrine`  | the doctrine packs injected as that agent's system prompt — no gates, no fan-out, no FSM |
+| `conductor` | the full pipeline, through the `conductor-orchestrator` agent                 |
 
 Three arms times three repetitions times ten tasks is 90 headless runs, all through
-llama-router so token accounting is uniform. The task manifest `bench/conductor-tasks.json`
+llama-router so token accounting is uniform. The plan is repetition-major and interleaves the
+arms within each repetition, so an interrupted campaign still leaves the arms balanced to
+within one cell. The task manifest [`bench/conductor-tasks.json`](../../bench/conductor-tasks.json)
 holds a language mix (TypeScript, Python, C++), a difficulty spread from one function to a
-small multi-file change, at least two non-behavioral tasks so that path is measured too, and
-for each task a hidden test command that fails on an unmodified repo and is never shown to the
-model. Each run records hidden-test pass/fail, wall clock, total tokens, schema-retry counts,
-review findings caught, overrides used, and the terminal stop kind.
+small multi-file change, two non-behavioral tasks so that path is measured too, and for each
+task a hidden test command that fails on an unmodified repo and is never shown to the model.
+Hidden files are materialized only after opencode exits, so no arm can read the test it is
+being graded by.
+
+Each cell records its outcome from a closed set — `pass`, `fail`, `timeout`, `harness-error` —
+plus wall clock, token totals, router errors, schema retries, review findings upheld, overrides
+used, and the terminal stop kind. The four process metrics are `null` rather than `0` for the
+`baseline` and `doctrine` arms, because those arms have no mechanism to produce them; a zero
+would read as "the pipeline found nothing" instead of "there was no pipeline". A `conductor`
+cell that produced no `.conductor/runs/` directory at all is flagged `pluginAbsent` and
+reported separately as an *ungated* cell, since it measured the baseline by accident.
+
+### Running it
+
+Unlike the other harness scripts, `conductor_bench.py` is not executable, so invoke it through
+the interpreter:
+
+```bash
+python3 scripts/conductor_bench.py --verify-tasks   # check the task set, run no models
+python3 scripts/conductor_bench.py                  # the full 90-cell campaign
+python3 scripts/conductor_bench.py --report-only    # rebuild the report from recorded cells
+```
+
+| Flag                   | Default                                | Effect                                                             |
+| ---------------------- | -------------------------------------- | ------------------------------------------------------------------ |
+| `--manifest PATH`      | `bench/conductor-tasks.json`           | the task set to run                                                |
+| `--verify-tasks`       | off                                    | run each hidden test against its unmodified seed and report; exits non-zero if any passed, because a hidden test that passes unmodified measures nothing |
+| `--report-only`        | off                                    | render the report from cells already on disk, execute nothing      |
+| `--work-root PATH`     | `.data/benchmark/conductor/work`       | where each cell's throwaway repository is built                    |
+| `--results-dir PATH`   | `.data/benchmark/conductor/runs`       | one JSON file per cell, named `<arm>__<task>__r<rep>.json`         |
+| `--report PATH`        | `.data/benchmark/conductor-report.md`  | the rendered report                                                |
+| `--model ID`           | `llamacpp/qwen3.6-27b`                 | the model every arm runs                                           |
+| `--reps N`             | `3`                                    | repetitions per (arm, task) cell                                   |
+| `--router-config PATH` | `.data/configs/conductor-router.json`  | read for the router address every arm is pointed at                |
+
+The report path sits *beside* `benchmark.py`'s own `report.md`, never on top of it. A cell whose
+result file already exists is reused verbatim, so a campaign resumes by being re-run. Each cell
+gets a per-cell timeout of 1800 seconds, and the whole process group is killed on expiry,
+because opencode spawns children of its own.
+
+### Reading the report
+
+`.data/benchmark/conductor-report.md` opens with `# Conductor three-arm benchmark` and carries
+these sections in order: **Method**, **Per-task pass rates**, **Arm totals**, **Cost**,
+**Process metrics**, **Router-error cells**, **Ungated conductor cells**, **Missing cells**. The
+per-task table comes before any arm-level line by design — a bare aggregate delta over ten
+tasks is exactly the number this benchmark exists not to produce. Where two arms differ on a
+task but their per-repetition ranges overlap, the report says so in plain words rather than
+reporting the difference as a result.
 
 The `doctrine` arm is what makes the experiment honest: it separates the cheap intervention —
 better prompting — from the expensive one — gates, state machines, and adversarial fan-out —
 and answers the question a reader will actually ask, which is how much of this needed building
-at all. Repetitions exist because sampling at temperature 0.4–0.7 makes a single
-6/10-versus-4/10 comparison indistinguishable from noise at exactly the resolution this
-experiment produces. The report is therefore per-task pass rates **and their spread across
+at all. Repetitions exist because the served model samples rather than decoding greedily, which
+makes a single 6/10-versus-4/10 comparison indistinguishable from noise at exactly the
+resolution this experiment produces. The report is therefore per-task pass rates **and their spread across
 repetitions**, never a bare aggregate delta, and it states plainly where arms sit within noise
 of each other.
 
