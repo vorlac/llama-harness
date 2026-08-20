@@ -2,11 +2,8 @@
 // Task 15.2 — `conductor-dashboard` (ftxui, optional target): the pure ledger
 // aggregation layer behind the TUI that tails the §4.4 metrics ledger.
 //
-// This suite is written RED: `dashboard/ledger_view.hpp` does not exist yet, so
-// this translation unit fails to COMPILE — the include does not resolve. That is
-// the intended red shape. Everything else this file touches is committed code
-// (or, for the two build rows, files the orchestrator wires) and must keep
-// compiling verbatim. One TEST_CASE per assertion id from
+// Everything this file touches beyond ledger_view.hpp must keep compiling
+// verbatim. One TEST_CASE per assertion id from
 // docs/build/specs/task-15.2.assertions.json (17 rows), named "[<id>] …".
 //
 // LAYOUT NOTE. The spec's `kind` field still spells the module `src/dashboard/`.
@@ -175,11 +172,8 @@
 // helpers below render exactly that shape, so the reader is tested against the
 // writer's real bytes and not against a paraphrase of them.
 //
-// This file's final home is router/tests/dashboard_test.cpp. CMake wiring is
-// ORCHESTRATOR-ONLY: this file joins the router-tests target source list, and
-// the CONDUCTOR_DASHBOARD option plus the conductor-dashboard target are the
-// orchestrator's edit. `ledger_view.hpp` is header-only and needs no source-list
-// entry.
+// `ledger_view.hpp` is header-only and needs no source-list entry; the
+// conductor-dashboard target it also backs is gated on -DCONDUCTOR_DASHBOARD=ON.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns
 // DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN for the whole router-tests binary. This

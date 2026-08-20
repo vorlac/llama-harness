@@ -3454,8 +3454,8 @@ verbatim manifest message `conductor: 12.2 first-run setup` and left every tree 
 `origin/main`; the working tree's five modified files were stashed by explicit path across the
 rewrite and restored unchanged (669 insertions, cmp-clean).
 
-**Old → new sha map.** Any short sha quoted in an earlier correction, in `JOURNAL.jsonl`, or in
-`COMPLETION-REPORT.md` resolves through this table. Those historical texts are deliberately NOT
+**Old → new sha map.** Any short sha quoted in an earlier correction or in `JOURNAL.jsonl`
+resolves through this table. Those historical texts are deliberately NOT
 rewritten — they record what ran at the time — but `STATE.json`'s four in-range `commitSha` receipts
 and `GATES.json`'s `phaseGates['14'].headAtGate` are updated, because those are machine truth.
 

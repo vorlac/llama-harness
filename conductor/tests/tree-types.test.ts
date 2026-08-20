@@ -92,7 +92,7 @@ after(() => {
 });
 
 // A scratch directory for one probe program. node_modules is skipped by
-// conductor/tests/source-hygiene.ts's walk, by composition-root.test.ts's
+// conductor/tests/source-hygiene.test.ts's walk, by composition-root.test.ts's
 // production-source walk, by conductor/tsconfig.json's include globs and by git,
 // while still resolving @types/node and the project's own relative imports.
 function probeDir(tag: string): string {

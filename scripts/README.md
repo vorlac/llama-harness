@@ -6,8 +6,7 @@ router server.
 
 Standard library only — Python 3.9+, no virtualenv required. The repository's test gate
 pins the system interpreter, `/usr/bin/python3`, so no `.py` file here may depend on a
-Homebrew or pyenv Python. The one exception is outside the gate: `watch-agents.sh`, a
-developer transcript viewer, invokes `/opt/homebrew/bin/python3` directly.
+Homebrew or pyenv Python.
 
 ```bash
 /usr/bin/python3 -m unittest discover -s scripts -p 'test_*.py'
@@ -45,7 +44,6 @@ scripts/
   test-conductor.sh         the canonical test gate
   conductor-gate.sh         mechanical stub/defect scan over tracked sources
   verify-acceptance.sh      the acceptance checklist, as executable rows
-  watch-agents.sh           renders a Claude Code subagent transcript
 .data/                everything the harness generates       (gitignored)
   models/<id>/          weights + .manifest.json
   tools/                llama-* binaries built from the pinned submodule
@@ -69,8 +67,7 @@ running it directly prints the measured host profile and its JSON. The four shel
 scripts belong to the conductor harness rather than the model harness.
 `test-conductor.sh` is the canonical gate and `conductor/docs/OPERATIONS.md` records the
 verdict it must print; `conductor-gate.sh` and `verify-acceptance.sh` are the stub scan
-and the acceptance checklist; `watch-agents.sh` gates nothing — it renders a subagent
-transcript.
+and the acceptance checklist.
 
 ---
 

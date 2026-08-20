@@ -3,10 +3,8 @@
 // the in-memory aggregate served by /conductor/metrics, and the extended
 // /conductor/health body.
 //
-// This suite is written RED: `router/metrics.hpp` does not exist yet, so this
-// translation unit fails to COMPILE. That is the intended red shape. Everything
-// else this file touches — config.hpp, router.hpp, admission.hpp,
-// schema-observer.hpp, version.hpp — is committed code and must keep compiling
+// Everything this file touches beyond metrics.hpp — config.hpp, router.hpp,
+// admission.hpp, schema-observer.hpp, version.hpp — must keep compiling
 // verbatim. One TEST_CASE per assertion id from
 // docs/build/specs/task-11.7.assertions.json (16 rows), named "[<id>] …".
 //
@@ -110,8 +108,6 @@
 //     committed GET /conductor/health, whose body 11.7 extends in place to
 //     {"status":"ok","version":<router_version()>}.
 //
-// This file's final home is router/tests/metrics_test.cpp. CMake wiring is
-// ORCHESTRATOR-ONLY: this file joins the router-tests target source list;
 // metrics.hpp is header-only and needs no source-list entry.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns

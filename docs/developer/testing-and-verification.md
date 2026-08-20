@@ -551,9 +551,10 @@ interrupted.
 | [`CORRECTIONS.md`](../build/CORRECTIONS.md)  | Append-only record of every deviation from the plan.                                                                                                                       | Each `C-NNN` entry carries the plan quote with line numbers, the observed reality with the exact command and output, the decision, alternatives considered, and blast radius. The plan itself is immutable; this file is where reality is recorded.                                                                                                                                                                                                                                                          |
 | `docs/build/specs/task-<id>.assertions.json` | The per-task contract, extracted from the plan before any code is written.                                                                                                 | One row per enumerated behavior: `{id, text, planLine, coveredByTest}`. `coveredByTest` starts null and is filled with the exact test name. This file is what makes M7 — "did we build what was asked" — mechanically checkable rather than a judgment call.                                                                                                                                                                                                                                                 |
 
-`docs/prompt-lifecycle.md` is **stale** and is not a description of the current process; do
-not use it. The current process is the one on this page, sourced from
+The build process is the one on this page, sourced from
 [`docs/conductor-build-orchestrator-prompt.md`](../conductor-build-orchestrator-prompt.md).
+[`docs/prompt-lifecycle.md`](../prompt-lifecycle.md) is a different subject — the lifecycle of
+one *run* under the finished harness, not the process that built it.
 
 ## See also
 

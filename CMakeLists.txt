@@ -23,7 +23,7 @@ project(myprogram
 
 option(
   AUTOFORMAT_SRC_ON_CONFIGURE
-    "If enabled, clang-format will be used to format all sources in src/ during configuration"
+    "If enabled, clang-format will be used to format all sources in router/, dashboard/ and tools/ during configuration"
       ON
 )
 
@@ -70,8 +70,6 @@ target_compile_features(llama-router PRIVATE cxx_std_23)
 # The REPO ROOT is the only user-code include root: every in-workspace header is
 # included by its full path from the root (`#include "router/version.hpp"`), so an
 # include names where the header actually lives no matter which file includes it.
-# The spelling is unchanged from when the sources sat under src/ — router/ simply
-# moved up a level, so the include root moved with it.
 target_include_directories(llama-router
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 )

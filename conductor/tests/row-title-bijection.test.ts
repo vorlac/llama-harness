@@ -25,7 +25,7 @@
 //     (the orphan-id class, ISSUE-133).
 //
 // UNCOVERED is the tracked-obligation register, the same shape tests/
-// unreachable-exports.ts uses for production-unwired exports: a row lands here by
+// unreachable-exports.test.ts uses for production-unwired exports: a row lands here by
 // an explicit, reviewable edit naming WHY it is unbound, and [not-stale] fails the
 // day a listed row gains a test — so the register can never rot into a standing
 // excuse for a row a later fix quietly covered. The spec JSON that would carry a

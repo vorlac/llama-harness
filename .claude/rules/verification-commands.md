@@ -220,8 +220,7 @@ produce false positives, because "fixed", "new" and "now" are ordinary words:
 # Change narration
 grep -rnE '//.*\b(changed|updated|previously|formerly|refactored)\b' router/ dashboard/ tools/
 
-# Attribution. The only legitimate hits name scripts/watch-agents.sh, which reads
-# Claude Code transcripts; anything else is a comment to reword.
+# Attribution. Any hit is a comment to reword. 
 grep -rniE '(claude|ai-generated|authored by)' router/ dashboard/ tools/ scripts/
 ```
 

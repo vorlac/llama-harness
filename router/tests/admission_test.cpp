@@ -3,10 +3,8 @@
 // queue timeout / overflow 503s, and a health endpoint that survives a full
 // queue.
 //
-// This suite is written RED: `router/admission.hpp` does not exist yet, so this
-// translation unit fails to COMPILE. That is the intended red shape. The API
-// below is the exact target the implementer must produce — every name, type and
-// behaviour here is asserted by the cases in this file. One TEST_CASE per
+// The API below is the surface this suite asserts — every name, type and
+// behaviour here is pinned by the cases in this file. One TEST_CASE per
 // assertion id from docs/build/specs/task-11.4.assertions.json, named
 // "[<id>] ...".
 //
@@ -109,8 +107,7 @@
 // that arithmetic cannot reach >= 1 the parse throws ConfigError naming
 // admission.maxQueued.
 //
-// This file's final home is router/tests/admission_test.cpp. CMake wiring is
-// ORCHESTRATOR-ONLY: this file joins the router-tests target source list.
+// admission.hpp is header-only and needs no source-list entry.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns
 // DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN for the whole router-tests binary. This
@@ -509,7 +506,7 @@ namespace {
         std::error_code ec;
         std::filesystem::path dir = std::filesystem::current_path(ec);
         while (!ec && !dir.empty()) {
-            const std::filesystem::path candidate = dir / "src" / "tests" / kRelative;
+            const std::filesystem::path candidate = dir / "router" / "tests" / kRelative;
             if (std::filesystem::exists(candidate))
                 return candidate;
 

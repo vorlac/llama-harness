@@ -1,9 +1,7 @@
 // =============================================================================
-// Task 11.8 — llama-router CLI: the pure argument parse behind src/main.cpp.
+// Task 11.8 — llama-router CLI: the pure argument parse behind router/main.cpp.
 //
-// This suite is written RED: `router/cli.hpp` does not exist yet, so this
-// translation unit fails to COMPILE. That is the intended red shape. The
-// surface below is pinned by docs/build/CORRECTIONS.md C-041 and by spec row
+// The surface below is pinned by docs/build/CORRECTIONS.md C-041 and by spec row
 // 11.8-cli-contract (docs/build/specs/task-11.8.assertions.json, resolutions
 // SG-A / SG-B / SG-I); the cases in this file assert it name by name.
 //
@@ -46,15 +44,13 @@
 //
 //   }  // namespace conductor::router
 //
-// THE ADAPTER SEAM (src/main.cpp, NOT exercised by this suite): main maps a
+// THE ADAPTER SEAM (router/main.cpp, NOT exercised by this suite): main maps a
 // refusal here to the pinned exit code 2 — stderr carries the error naming the
 // flag, then the usage text. The exit-0/3/4 family (clean signal shutdown,
 // ConfigError with field() verbatim, bind failure with host:port) involves the
 // filesystem, parseRouterConfig and a live socket, and is recorded by the 11.8
 // live-smoke artifact, not by doctests — SG-I pins that split.
 //
-// This file's final home is router/tests/cli_test.cpp. CMake wiring is
-// ORCHESTRATOR-ONLY: this file joins the router-tests target source list;
 // cli.hpp is header-only and needs no source-list entry.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns

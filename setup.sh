@@ -206,7 +206,7 @@ while [[ $# -gt 0 ]]; do
     --models=*)      PRESELECTED_MODELS="${1#*=}" ;;
     --benchmark)     RUN_BENCHMARK=1 ;;
     --no-benchmark)  RUN_BENCHMARK=0 ;;
-    -h|--help)       sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)       sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)               die "unknown option: $1 (try --help)" ;;
   esac
   shift

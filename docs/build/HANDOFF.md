@@ -32,7 +32,7 @@ Review steps 2–4 remain the evidence authority: three merged registers under
 `step5-preflight-review.md`'s corrections applied in place. Everything below this block is kept
 unchanged as the 2026-08-14 build-state record, which is still accurate about the build itself.
 
-## Position — 2026-08-14, after the non-live closeout pass. Full history: **`docs/build/COMPLETION-REPORT.md`**
+## Position — 2026-08-14, after the non-live closeout pass
 **The build is NOT complete, and everything still missing needs a live model.** In a fresh detached
 worktree of HEAD (plus `npm install` in `conductor/`), `bash scripts/verify-acceptance.sh` exits 1 —
 **16 PASS / 5 FAIL**. One of those five, **row 3, is environmental**: a worktree has no submodules so
@@ -48,7 +48,7 @@ authoring either is fabrication** (`verify-acceptance.sh:143-147`). The repo own
 back to be scheduled deliberately — do not start either without saying so first.
 
 **The tree matches HEAD.** (The `docs/plans/` and `docs/reviews/` work this line once named as
-untracked is committed as of 2026-08-18.) `STATE.json` is machine truth; `NOW.md` is the human view.
+untracked is committed as of 2026-08-18.) `STATE.json` is machine truth.
 
 ## Do these in this order
 1. **The 22 tools are BOUND — this step is DONE** (C-081, spec
@@ -94,7 +94,7 @@ untracked is committed as of 2026-08-18.) `STATE.json` is machine truth; `NOW.md
    `docs/build/*`. Fix it BEFORE the campaign — afterwards it is a post-hoc shuffle of the measurement.
 
 ## Standing rules — do not re-derive these wrong
-- Plan is **IMMUTABLE**; never tick its checkboxes. `docs/prompt-lifecycle.md` is STALE. Gate EVERY
+- Plan is **IMMUTABLE**; never tick its checkboxes. Gate EVERY
   decision through `bash scripts/test-conductor.sh` — **never** raw `node --test` (node 26.7.0: a dir
   positional is a bogus red, a zero-match glob a vacuous green). It rejects SKIP/TODO at any depth
   (C-015); M5 is `scripts/conductor-gate.sh`. `pytest` = `/usr/bin/python3 -m pytest`; no `timeout`.

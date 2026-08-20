@@ -42,11 +42,10 @@ Two other documents:
 
 - `docs/reviews/2026-08-12-conductor-plan-adversarial-review.md` — the audit that produced
   Revision 5. Useful background; not normative.
-- `docs/prompt-lifecycle.md` — **STALE AND NON-NORMATIVE. Do not implement from it.** It
-  describes per-role model routing and a router schema guard that returns 400 on a missing
-  schema. Revision 5 reversed both (G13: one model for every role; §4.4: the router
-  observes and never rejects). It is the only narrative overview in `docs/`, so it is
-  exactly what you would reach for while orienting. Don't.
+- `docs/prompt-lifecycle.md` — the narrative overview of one prompt's journey, written
+  against the current design (G13: one served model for every role; §4.4: the router
+  observes and never rejects). Accurate, but **non-normative**: it is a reading-length
+  companion, not a spec. Implement from the plan, never from it.
 
 **Every subagent reads the plan itself, at line ranges you cite.** Never paraphrase a spec
 into a subagent brief. The normative content is dense — Task 5.1's git deny matrix, §3.3's

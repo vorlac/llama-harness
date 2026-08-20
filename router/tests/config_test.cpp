@@ -1,10 +1,8 @@
 // =============================================================================
 // Task 11.2 — llama-router `config` + logging.
 //
-// This suite is written RED: `config.hpp` does not exist yet, so it fails to
-// compile. That is the intended red shape. The API below is the exact target the
-// implementer must produce — every name, type, and behaviour here is asserted by
-// the cases in this file.
+// The API below is the surface this suite asserts — every name, type, and
+// behaviour here is pinned by the cases in this file.
 //
 //   // router/config.hpp
 //   #pragma once
@@ -137,7 +135,7 @@ namespace {
         std::error_code ec;
         std::filesystem::path dir = std::filesystem::current_path(ec);
         while (!ec && !dir.empty()) {
-            const std::filesystem::path candidate = dir / "src" / "tests" / kRelative;
+            const std::filesystem::path candidate = dir / "router" / "tests" / kRelative;
             if (std::filesystem::exists(candidate))
                 return candidate;
 

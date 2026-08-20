@@ -2,10 +2,8 @@
 // Task 11.6 — llama-router `schema-observer`: request-side schema presence
 // observation, plus response conformance implemented for completeness.
 //
-// This suite is written RED: `router/schema-observer.hpp` does not exist yet,
-// so this translation unit fails to COMPILE. That is the intended red shape.
-// Everything else this file touches — config.hpp, router.hpp, admission.hpp —
-// is committed code and must keep compiling verbatim. One TEST_CASE per
+// Everything this file touches beyond schema-observer.hpp — config.hpp,
+// router.hpp, admission.hpp — must keep compiling verbatim. One TEST_CASE per
 // assertion id from docs/build/specs/task-11.6.assertions.json (13 rows),
 // named "[<id>] …".
 //
@@ -125,8 +123,7 @@
 //   - streamed responses relay EXACTLY as 11.3 ships them: no SSE parse, no
 //     buffering, no reassembly, no validator; schemaConformed stays empty.
 //
-// This file's final home is router/tests/schema_test.cpp. CMake wiring is
-// ORCHESTRATOR-ONLY: this file joins the router-tests target source list.
+// schema-observer.hpp is header-only and needs no source-list entry.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns
 // DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN for the whole router-tests binary. This

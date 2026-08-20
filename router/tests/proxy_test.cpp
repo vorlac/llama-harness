@@ -1,10 +1,8 @@
 // =============================================================================
 // Task 11.3 — llama-router `router`: proxy pass-through.
 //
-// This suite is written RED: `router.hpp` does not exist yet, so this
-// translation unit fails to COMPILE. That is the intended red shape. The API
-// below is the exact target the implementer must produce — every name, type,
-// and behaviour here is asserted by the cases in this file. One TEST_CASE per
+// The API below is the surface this suite asserts — every name, type, and
+// behaviour here is pinned by the cases in this file. One TEST_CASE per
 // assertion id from task-11.3.assertions.json, named "[<id>] ...".
 //
 //   // router/router.hpp
@@ -99,10 +97,8 @@
 //
 //   }  // namespace conductor::router
 //
-// This file's final home is router/tests/proxy_test.cpp; the module it
-// exercises is router/router.{hpp,cpp}. CMake wiring is ORCHESTRATOR-ONLY:
-// this file joins the router-tests target source list, router.cpp joins both
-// llama-router and router-tests.
+// The module this file exercises is router/router.hpp, which is header-only
+// and needs no source-list entry.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns
 // DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN for the whole router-tests binary. This

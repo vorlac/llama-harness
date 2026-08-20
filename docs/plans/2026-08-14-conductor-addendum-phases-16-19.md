@@ -73,7 +73,7 @@ names `scratchpad/staging/` while the tree has `staging/`.
 
   | Root | Holds | Retention |
   |---|---|---|
-  | `docs/build/` | the build ledger: `STATE.json`, `GATES.json`, `HANDOFF.md`, `NOW.md`, `JOURNAL.jsonl`, `CORRECTIONS.md`, `specs/` | permanent, tracked |
+  | `docs/build/` | the build ledger: `STATE.json`, `GATES.json`, `HANDOFF.md`, `JOURNAL.jsonl`, `CORRECTIONS.md`, `specs/` | permanent, tracked |
   | `docs/build/artifacts/<YYYYMMDD-HHMMSS>-<kind>-<slug>/` | gate transcripts, review outputs, measurement dumps | tracked when cited by a correction; otherwise swept |
   | `staging/task-<id>/` | pre-verified test files awaiting move-in | deleted when the task commits |
   | `.data/`, `.out/` | model weights, build trees | never touched by any tooling (standing rule) |

@@ -1,10 +1,8 @@
 // =============================================================================
 // Task 11.5 — llama-router `affinity`: prefix-group contiguous dequeue.
 //
-// This suite is written RED: `router/affinity.hpp` does not exist yet, so this
-// translation unit fails to COMPILE. That is the intended red shape. Everything
-// else this file touches — config.hpp, router.hpp, admission.hpp — is committed
-// code and must keep compiling verbatim.
+// Everything this file touches beyond affinity.hpp — config.hpp, router.hpp,
+// admission.hpp — must keep compiling verbatim.
 //
 // One TEST_CASE per assertion id from docs/build/specs/task-11.5.assertions.json,
 // named "[<id>] …". Six of the seven rows drive the POLICY directly: it is pure,
@@ -104,8 +102,7 @@
 //   config.affinity.header is blank) or by the x_conductor body fallback. 11.5
 //   introduces no second precedence rule and reads no header of its own.
 //
-// This file's final home is router/tests/affinity_test.cpp. CMake wiring is
-// ORCHESTRATOR-ONLY: this file joins the router-tests target source list.
+// affinity.hpp is header-only and needs no source-list entry.
 //
 // NOTE: doctest's main() comes from scaffold_test.cpp, which owns
 // DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN for the whole router-tests binary. This

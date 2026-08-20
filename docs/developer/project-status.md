@@ -383,9 +383,8 @@ at three; at the cap the phase is parked and its findings are written to the han
 Two authoring-time adversarial reviews of the plan itself are kept in
 [`docs/reviews/`](../reviews/), alongside the full-system review under
 [`docs/reviews/conductor-review/`](../reviews/conductor-review/) whose three registers drive
-the correction campaign. Note that
-[`docs/prompt-lifecycle.md`](../prompt-lifecycle.md) is **stale** — retained for history;
-the orchestrator prompt and `HANDOFF.md` are current.
+the correction campaign. The orchestrator prompt and `HANDOFF.md` are the current
+statements of build process.
 
 **The trust premise underneath all of it**, which is what the correction campaign is
 arranged around: trust lives in the harness, not in the orchestrator. Any prompter should

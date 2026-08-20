@@ -23,7 +23,7 @@
 //     recorded correction that promised a follow-up must say what became of it, so
 //     the MACRO-017 "recorded debt that never lands" cannot hide in the ledger.
 //
-// The register is the tracked-obligation shape (see tests/unreachable-exports.ts):
+// The register is the tracked-obligation shape (see tests/unreachable-exports.test.ts):
 // STATE.json and GATES.json are under docs/ and off-limits to this layer, so the
 // twelve currently-recordless committed tasks are pinned here and REPORTED to the
 // orchestrator to backfill; [not-stale] fails the day one gains a record, so the

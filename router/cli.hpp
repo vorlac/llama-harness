@@ -1,5 +1,5 @@
 // =============================================================================
-// Task 11.8 — llama-router CLI: the pure argument parse behind src/main.cpp.
+// Task 11.8 — llama-router CLI: the pure argument parse behind router/main.cpp.
 //
 // The surface is pinned by docs/build/CORRECTIONS.md C-041 and spec row
 // 11.8-cli-contract (docs/build/specs/task-11.8.assertions.json, SG-A / SG-B /
