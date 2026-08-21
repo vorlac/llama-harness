@@ -276,6 +276,31 @@ record and is not.
 and those records carry `via: "override-grant"` where an ordinary allow carries no `via`. A
 count that ignores the discriminator double-counts every bypassed deny.
 
+### What an observer of a run cannot see
+
+`conductor/tools/observe.ts` derives a run's position and its strain signals from
+the run directory alone, and it is read-only by construction — a separate process that
+opens files, imports no handler and holds no store. What it reports is therefore bounded
+by what was recorded, and four things are not.
+
+Anything the gates never adjudicated leaves **no record at all**, which is different from
+being allowed and different again from being denied. A `git` write outside the enumerated
+globals, or a network program outside `NETWORK_PROGRAMS`, is not in the journal in any
+form. A reader counting denies and allows is counting decisions, not calls.
+
+Anything in a second, ungated session is invisible: the workspace lock means that session
+got no store, so it wrote nothing here.
+
+Allowed reads are journaled at `debug`, and the default `logging.level` is `info`. A run
+gathered at `info` shows the denies and the network allows only. That looks like a
+complete record and is not, and no property of the file distinguishes the two cases — the
+reader says so when it sees no gate decisions at all, which catches the extreme case and
+not the ordinary one.
+
+And the journal records what the harness decided, never what the model was reasoning
+about. That lives in opencode's own session storage, one indirection away through the
+`sessionID` on each fan-out record.
+
 ---
 
 ## How to use this list

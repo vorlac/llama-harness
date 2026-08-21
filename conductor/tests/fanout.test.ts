@@ -904,3 +904,57 @@ test("[21.1-agent] every dispatchable role maps to an agent, and an unmapped rol
   const lastPrompt = sdk.prompts.at(-1)?.body as Record<string, unknown> | undefined;
   assert.equal("agent" in (lastPrompt ?? {}), false, "the prompt body must omit it for the same reason");
 });
+
+// ---------------------------------------------------------------------------
+// 22A.4 / 22B.2 — the wave count.
+//
+// `counters.waves` is read by the bench driver's per-tier cost table and by the
+// observation snapshot, and nothing wrote it: the column rendered `n/a` for every
+// cell. A wave is a fan-out concept, so the engine is the one place that knows
+// when one happened — counting at the seven handler call sites would be seven
+// chances to forget.
+// ---------------------------------------------------------------------------
+
+test("[22A.4-wave-journaled] dispatchWave journals one wave record carrying its size", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState(), "run-1");
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatchWave([readJob({ itemId: "i1" }), readJob({ itemId: "i2" })]);
+
+  const waves = records.filter((r) => r.component === "fanout" && r.event === "wave");
+  assert.equal(waves.length, 1, "one record per WAVE, not one per job");
+  assert.equal(waves[0].data.jobs, 2);
+  assertKnownFanoutEvents(records);
+});
+
+test("[22A.4-wave-count-per-dispatch] a single dispatch is a wave of one, so the count never undercounts", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState(), "run-1");
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatch(readJob());
+  await fanout.dispatch(readJob({ itemId: "i2" }));
+
+  const waves = records.filter((r) => r.component === "fanout" && r.event === "wave");
+  assert.equal(waves.length, 2);
+  assert.deepEqual(waves.map((w) => w.data.jobs), [1, 1]);
+});
+
+test("[22A.4-empty-wave-is-not-a-wave] dispatching no jobs journals nothing", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState(), "run-1");
+
+  await fanout.dispatchWave([]);
+  assert.deepEqual(
+    records.filter((r) => r.component === "fanout" && r.event === "wave"),
+    [],
+    "a caller that computed an empty job list did not dispatch a wave",
+  );
+});

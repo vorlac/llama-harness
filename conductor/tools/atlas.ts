@@ -1523,6 +1523,15 @@ const ENGINE_NODES: readonly AtlasNode[] = [
     logs: [
       {
         component: "fanout",
+        event: "wave",
+        level: "info",
+        means:
+          "A wave was dispatched. `data` carries {jobs, roles, items}. One record per WAVE, not per " +
+          "job — the per-job records cannot be grouped back into waves after the fact, and the " +
+          "per-tier cost table and the observation snapshot both read this.",
+      },
+      {
+        component: "fanout",
         event: "subsession.dispatched",
         level: "info",
         means: "A sub-session started. `data` carries {role, itemId, tree, model}.",

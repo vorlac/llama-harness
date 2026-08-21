@@ -489,6 +489,23 @@ export function createFanout(
 
   const dispatchWave = async (jobs: FanoutJob[]): Promise<FanoutResult[]> => {
     const results: FanoutResult[] = new Array<FanoutResult>(jobs.length);
+    // One record per wave, emitted HERE because this is the only place that knows
+    // a wave happened: the seven handler call sites would each be a chance to
+    // forget, and the per-job records cannot be grouped back into waves after the
+    // fact. An empty job list is a caller that computed no work, not a wave.
+    if (jobs.length > 0) {
+      journal.log(
+        "info",
+        "fanout",
+        "wave",
+        {
+          jobs: jobs.length,
+          roles: jobs.map((job) => job.role),
+          items: [...new Set(jobs.map((job) => job.itemId))],
+        },
+        { runId },
+      );
+    }
     // Drain one model group before the next — the between-group barrier (§4.1).
     for (const group of groupByModel(jobs)) {
       await runGroup(group, results);

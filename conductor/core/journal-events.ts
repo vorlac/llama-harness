@@ -47,6 +47,12 @@ export const FANOUT_HOLD = "subsession.hold";
 export const FANOUT_COMPLETE = "subsession.complete";
 export const FANOUT_RETRY = "subsession.retry";
 export const FANOUT_ABORT = "subsession.abort";
+// §4.2: one record per WAVE the scheduler dispatched, carrying its size. Widened
+// rather than borrowed: subsession.dispatched describes ONE job, and a wave count
+// derived by grouping those records would have to guess where one wave ended and
+// the next began. The per-tier cost table and the observation snapshot both read
+// this, and neither can be computed from the per-job records alone.
+export const FANOUT_WAVE = "wave";
 
 // The closed event vocabulary, one non-empty list per component, derived from
 // the plan's event usage across §2, §3 and §7. Adapters emit only these names;
@@ -66,6 +72,7 @@ export const EVENTS: Record<Component, readonly string[]> = {
     FANOUT_COMPLETE,
     FANOUT_RETRY,
     FANOUT_ABORT,
+    FANOUT_WAVE,
   ],
   // §2.6 evidence kinds: red / green / verify.
   evidence: ["red", "green", "verify"],
