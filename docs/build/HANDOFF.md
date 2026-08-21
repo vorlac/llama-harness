@@ -1,5 +1,107 @@
 # HANDOFF — read this first on every start
 
+## Position — 2026-08-20: the A/B readiness floor is COMPLETE; the next action is LIVE (owner-run)
+
+Phases 20, 21, 22, 22A, 22B and 23.1 of
+[`docs/plans/readonly-capability-plan.md`](../plans/readonly-capability-plan.md) are landed and
+committed on `main`. **The launch runbook is [`docs/build/LAUNCH-RUNBOOK.md`](LAUNCH-RUNBOOK.md)** —
+read that before either live task.
+
+**YOUR NEXT ACTION: run the 13.2 live smoke, then authorize the 14.2 campaign.** Both are
+owner-attended and everything up to the launch is prepared. Authoring either artifact without a real
+run is fabrication and `scripts/verify-acceptance.sh:143-147` treats it as such.
+
+**Gate at HEAD:** `GATE PASS` — node 1916, typecheck OK, bun 8, schema export OK, python 106.
+`M5 PASS` (192 files). `router-tests` builds and `ctest` is 1/1. `verify-acceptance.sh` is
+**17 PASS / 4 FAIL**, and all four failures are the known live rows: row 6 wants `conductor/SMOKE.md`
+(13.2), row 8 wants `docs/build/artifacts/conductor-report.md` (14.2), row 12 lists both missing
+commit messages, and detector E is their union. **Any other failure is a regression.**
+
+### The one thing that is easy to miss
+
+**The campaign must run at `logging.level: "debug"`.** Every allowed call is now journaled, but a
+read allow is `debug` and the default level is `info`. A run gathered at `info` records the denies and
+the network allows and nothing else — which looks like a complete record and is not, and the
+campaign's central question has no data behind it.
+
+### Three measurements that corrected the plan
+
+1. **`agent` on `session.create` is metadata only.** It does not shape the offered tool set; the
+   PROMPT-body `agent` is what governs. The plan's Task 21.1 assumed one field on one call carried
+   the tool and permission posture. Conductor now sets both — create for the child record and the
+   client's labelling, prompt for the posture — and a test pins the difference.
+2. **An unknown agent name is accepted with HTTP 200 and echoed verbatim**, so a typo in the
+   role→agent map is a silent no-op. `ROLE_AGENT` is therefore pinned to `opencode-fragment.json` by
+   a test and registered as a fourth `roles` vocabulary site.
+3. **`webfetch` is allow-by-default in every agent kind** — no narrowing, no permission ask, and a
+   live probe drove it end to end from a bare subagent. The plan's §1.1 premise is confirmed rather
+   than narrowed, which is what made Phase 21.4 load-bearing rather than redundant.
+
+### What Phase 21 removed, and what it did not
+
+The governance floor **revokes** reachable capability. A built-in carrying no declared side-effect
+class is refused; the network class is refused in BOTH lanes (the `webfetch`/`websearch` names and a
+`bash` command whose shape reaches an enumerated network program); a reader role can no longer mint an
+edit override; and every allowed call now leaves a record.
+
+It deliberately did **not** remove reading. `read`, `grep`, `glob`, `todowrite`, `skill` and
+read-shaped `bash` are each explicitly allowed, and `[21.3-still-reads]` and `[21.3-gate-still-reads]`
+exist to prove the tightening did not take the tree away. Both lanes revert independently through
+`config.toolSurface`.
+
+### The banner exists, and it is conditional
+
+opencode 1.18.15 offers **no unconditional channel for operator-visible text**. Four seams were
+probed: a part appended in `chat.message` reaches neither the transcript nor the model; `tui.showToast`
+answers success with no TUI attached, so a 200 proves reachability and not visibility; a plugin tool's
+return string is visible but tied to a call. Only a `tool.execute.after` output mutation works.
+
+So the banner rides the session's **first tool result** and a session that calls no tool shows none.
+That is stated in `OPERATIONS.md`, in HONEST-LIMITS' correction block and in the atlas node rather
+than implied away. The beacon remains the check that does not depend on a tool running.
+
+### Watching a run
+
+`node conductor/tools/observe.ts .conductor/runs/<runId>` — read-only by construction (a separate
+process that opens files, imports no handler, holds no store, takes no lock, registers no hook), so
+polling a live run is the intended use. `--bundle <dir>` packages a run for someone else.
+**[`docs/developer/observing-a-run.md`](../developer/observing-a-run.md)** is the analysis protocol:
+six questions in order, where each fact lives, and what an observer cannot see.
+
+The breakdown thresholds in `conductor/tools/observation.ts` `BREAKDOWN_THRESHOLDS` were committed
+**before** the campaign, deliberately, so the analysis cannot be fitted to the result. A crossed
+threshold is a finding to investigate, never a stop.
+
+### Standing items this session did not close
+
+- **21.6's second rule is not built.** The plan asks that an override become orchestrator-only once a
+  session has received R2/R3 content. There is no R2/R3 content — 21.4 denies the network and no R2
+  lane exists — so the guard would key on a field with no producer and be indistinguishable from
+  working. It lands with the phase that creates the producer.
+- **`reviewFindingsUpheld` is still unmeasured** (pre-existing ISSUE-104): the reviews writer is not
+  landed, so the column reads `n/a`.
+- **`subsession.dispatched` is emitted twice over** — as a real dispatch and as a clamp *warning*
+  with no `role` field (`conductor/adapter/tools.ts:7349`). Both the bench's sub-session count and the
+  observation snapshot filter on `data.role`, so neither miscounts; anyone else counting that event
+  should know.
+- **`qwen3.8-27b` weights are not downloaded.** The catalog entry is complete and every field was
+  verified against the real repository, but a second-model sweep needs `fetch_models.py` first
+  (~22 GB at the default `UD-Q6_K`).
+- **A judgement call worth a second opinion:** every arm now receives `.conductor/config.json` before
+  the seed commit, which makes the trees byte-identical (what 22.2 asks for) but does put a
+  conductor-shaped file in front of arms with no plugin. The alternative is a differing `startHead`.
+  The reasoning is in the code.
+- **`Qwen-AgentWorld-35B-A3B`** is a current, fitting, Apache-2.0 Qwen release that was left out of
+  the catalog on purpose: it is an environment simulator, not an assistant, and filing it under
+  "general" would misdescribe it. If it is wanted, it needs a category.
+
+### Phases 24–27 are NOT started, and that is correct
+
+They are gated on the campaign's evidence. `docs/plans/readonly-capability-plan.md` §9 states it
+plainly: **it is a legitimate outcome of Phase 23 that Phases 24–27 are not built.**
+
+---
+
 ## Position — 2026-08-19: the fix campaign's NON-LIVE work is COMPLETE; the next action is LIVE (owner-run)
 Every code/doc phase of the plan (`docs/build/fix-campaign-plan.md`) that does not need a live model
 is landed and committed — 17 commits from step-5 (`6a55d33`) through MACRO-021 (`464c840`); a
