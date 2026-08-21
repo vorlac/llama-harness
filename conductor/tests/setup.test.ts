@@ -143,8 +143,8 @@
 //   12.2-detect-behavioral-paths      -> per-ecosystem proposals, carried on the ask, never
 //                                        written unanswered; the go ask names the _test.go caveat.
 //   12.2-detect-cargo                 -> cargo proposal, no itemTest, no fifth RUNNER_PROFILE.
-//   12.2-no-build-command             -> scope key sets exactly; a spliced buildCommand fails
-//                                        the registered schema.
+//   12.2-no-build-command             -> scope key sets exactly; setup writes no buildCommand,
+//                                        and a hand-written one VALIDATES.
 //   12.2-smoke-spawn-unspawnable-fails-> an unspawnable argv[0] fails setup, names argv+remedy,
 //                                        writes nothing; coverage over commands/itemTests/rules.
 //   12.2-smoke-spawn-semantics        -> non-zero exit passes; shell metacharacters are one
@@ -1104,7 +1104,7 @@ test("[12.2-detect-cargo] Cargo.toml is detected, proposes cargo test with no it
 // (7) [12.2-no-build-command]
 // ---------------------------------------------------------------------------
 
-test("[12.2-no-build-command] no proposed or written scope ever carries buildCommand, and a config that did would fail its own registered schema", async () => {
+test("[12.2-no-build-command] setup never proposes or writes buildCommand, and a config that carries one is nonetheless VALID", async () => {
   const root = multiFixture("nobuild");
 
   await withStub({}, async (stub) => {
@@ -1131,17 +1131,22 @@ test("[12.2-no-build-command] no proposed or written scope ever carries buildCom
     }
     assert.equal(validate("Config", written).ok, true);
 
-    // The trap, asserted directly: §2.1:483-485 describes buildCommand and
-    // adapter/evidence.ts:338-342 implements it, but core/types.ts:530-540 omits it under
-    // additionalProperties:false — so emitting it would write a config that fails its own gate.
+    // Why setup writes none: it DETECTS test commands and does not detect build
+    // ones, so proposing a build step would be inventing a command nobody named.
+    // That is a different reason from the one this row used to assert — the
+    // schema no longer rejects the key, so a human who needs a build step can add
+    // it and adapter/evidence.ts will run it. Both halves are pinned, because
+    // "setup does not write it" and "nobody may write it" are different claims
+    // and only the first is true.
     const spliced = JSON.parse(JSON.stringify(written)) as Config;
     const first = Object.keys(spliced.verify.scopes)[0];
     (spliced.verify.scopes[first] as Record<string, unknown>).buildCommand = ["make", "-j2"];
     const splicedResult = validate("Config", spliced);
-    assert.equal(splicedResult.ok, false, "SCHEMAS.Config must reject a scope carrying buildCommand");
-    assert.ok(
-      splicedResult.errors.some((error) => error.includes("buildCommand")),
-      `the validator error must name buildCommand: ${splicedResult.errors.join("; ")}`,
+    assert.equal(
+      splicedResult.ok,
+      true,
+      `a hand-written buildCommand must validate — evidence.ts runs it and configuration.md ` +
+        `documents it: ${splicedResult.errors.join("; ")}`,
     );
   });
 });

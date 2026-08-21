@@ -250,7 +250,19 @@ export const NO_TREE: TreePath = treePath("");
 export interface Config {
   version: number;
   verify: {
-    scopes: Record<string, { command: string[]; timeoutMs: number; itemTest?: string[] }>;
+    scopes: Record<
+      string,
+      {
+        command: string[];
+        timeoutMs: number;
+        itemTest?: string[];
+        // Runs before `command`. A non-zero exit makes the scope red with
+        // phase: "build" and the test command is NOT run — a test against a stale
+        // artifact is a false green. An argv array, never a shell string: the
+        // spawn path takes argv, and a string would be an invocation nobody parses.
+        buildCommand?: string[];
+      }
+    >;
     behavioralPaths: string[];
     requiredScopes: Array<{ pattern: string; scopes: string[] }>;
   };
@@ -752,6 +764,7 @@ const configSchema = {
               command: stringArraySchema,
               timeoutMs: numberSchema,
               itemTest: stringArraySchema,
+              buildCommand: stringArraySchema,
             },
             required: ["command", "timeoutMs"],
             additionalProperties: false,

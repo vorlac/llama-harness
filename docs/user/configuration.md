@@ -18,15 +18,16 @@ a warning, and a malformed or invalid config file is never silently replaced by 
 — every failure arm throws and names the file, because a repo whose `git.mode` quietly
 reverts under it is a downgrade nobody asked for.
 
-Three keys are optional. `itemTest` inside a verify scope; `workflow.readSetTokenBudget`;
-and `workflow.implementerAttempts`. The two `workflow` keys read as their own defaults when
-absent (20000 and 3), not as zero. Everything else is required.
+Five keys are optional. `itemTest` and `buildCommand` inside a verify scope;
+`workflow.readSetTokenBudget`; `workflow.implementerAttempts`; and the `toolSurface` block.
+The two `workflow` keys read as their own defaults when absent (20000 and 3), not as zero,
+and an absent `toolSurface` reads as every lane enabled. Everything else is required.
 
-The verify table below lists a fourth optional-looking scope key, `buildCommand`: it is
-specified by plan §2.1 and implemented in the evidence engine
-([`runWithBuild` in `conductor/adapter/evidence.ts`](../../conductor/adapter/evidence.ts)),
-but the exported `Config` schema does not carry it, so a config file that sets it fails
-validation.
+`buildCommand` is specified by plan §2.1, implemented in the evidence engine
+([`runWithBuild` in `conductor/adapter/evidence.ts`](../../conductor/adapter/evidence.ts))
+and carried by the exported `Config` schema. `conductor_setup` does not propose one: setup
+detects test commands and does not detect build ones, so a scope that needs a build step
+gets it by hand.
 
 "Default" in the tables below means *the value first-run setup writes*, not a fallback
 applied when the key is missing. The two differ, and deliberately — see
@@ -269,6 +270,22 @@ count actually reaches it.
 
 One model serves every role. A role selects a doctrine pack, a sampling temperature, a gate
 posture, and a router priority tag — never weights.
+
+### `toolSurface`
+
+| Key                             | Type    | Default | What it changes                                                                                                                                                                                     |
+| ------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `toolSurface.classifyBuiltins`  | boolean | `true`  | Refuse a tool `conductor/core/builtin-surface.ts` declares no side-effect class for, instead of letting it fall through to the read catch-all. Turning it off restores the prior posture for that lane alone. |
+| `toolSurface.denyNetwork`       | boolean | `true`  | Refuse network-class calls: the `webfetch` and `websearch` names, and a `bash` command whose shape reaches an enumerated network program. Turning it off re-opens both lanes.                          |
+
+The whole block is optional and an absent block reads as both lanes enabled, so a config
+written before the block existed gets the governance floor rather than losing it. The two
+flags are independent on purpose: either lane reverts without touching the other.
+
+Denying the name alone would not be a posture — `curl` reaches the same network through the
+`bash` tool — so `denyNetwork` closes both lanes or neither. What it does not cover is
+recorded in [HONEST-LIMITS.md](../../conductor/docs/HONEST-LIMITS.md): the network shapes are
+an enumeration, and `git` and the package managers are outside it.
 
 `models.roles` is read: the fan-out engine resolves each job's model as
 `models.roles[role] ?? models.default`, then groups jobs by resolved model so all of one

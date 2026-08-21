@@ -26,6 +26,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { DEFAULT_CONFIG } from "../adapter/config-io.ts";
 import {
   CONDUCTOR_NAME,
   MAIN_TREE,
@@ -1377,4 +1378,55 @@ test("[21.2-no-restatement] the union is DERIVED from the array, so a member can
   assert.equal(members.includes("network"), false, "a class not in the array is not in the union");
   const effects: readonly string[] = SIDE_EFFECT_CLASSES;
   assert.equal(effects.includes("R4"), false, "a class not in the array is not in the union");
+});
+
+// ---------------------------------------------------------------------------
+// Task 22.4 — buildCommand validates.
+//
+// adapter/evidence.ts implements build-before-test in full (runWithBuild, and
+// three call sites), docs/user/configuration.md documents the key, and
+// SCHEMAS.Config omitted it under additionalProperties:false — so a config
+// carrying the documented key failed its own registered schema. The setup path
+// says so in its own comment and refuses to write one.
+//
+// That is a documentation-honesty defect rather than a capability question: the
+// mechanism ships, and the schema is what made it unreachable.
+// ---------------------------------------------------------------------------
+
+test("[22.4-build-command-validates] a verify scope carrying the documented buildCommand passes the registered schema", () => {
+  const config = structuredClone(DEFAULT_CONFIG) as Config;
+  config.verify.scopes = {
+    cpp: {
+      command: ["ctest", "--test-dir", ".out/build/clang-relwdebinfo"],
+      timeoutMs: 900_000,
+      buildCommand: ["cmake", "--build", ".out/build/clang-relwdebinfo", "--target", "router-tests"],
+    },
+  };
+  const result = validate("Config", config);
+  assert.equal(
+    result.ok,
+    true,
+    `the key adapter/evidence.ts reads and docs/user/configuration.md documents must validate: ` +
+      `${(result.errors ?? []).join("; ")}`,
+  );
+});
+
+test("[22.4-build-command-is-an-argv-array] a shell string is refused, on the same terms as `command`", () => {
+  const config = structuredClone(DEFAULT_CONFIG) as Config;
+  (config.verify.scopes as Record<string, unknown>)["cpp"] = {
+    command: ["ctest"],
+    timeoutMs: 1000,
+    buildCommand: "cmake --build .",
+  };
+  assert.equal(
+    validate("Config", config).ok,
+    false,
+    "an argv array is what the spawn path takes; a string would be a shell invocation nobody parses",
+  );
+});
+
+test("[22.4-build-command-stays-optional] a scope without one still validates", () => {
+  const config = structuredClone(DEFAULT_CONFIG) as Config;
+  config.verify.scopes = { ts: { command: ["node", "--test"], timeoutMs: 1000 } };
+  assert.equal(validate("Config", config).ok, true);
 });

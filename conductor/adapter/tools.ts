@@ -10932,9 +10932,10 @@ export async function handleSetup(input: SetupInput): Promise<SetupResult> {
       command: [...scope.command],
       timeoutMs: scope.timeoutMs,
     };
-    // No buildCommand, ever: §2.1 describes the field and adapter/evidence.ts
-    // implements it, but SCHEMAS.Config omits it under additionalProperties:false,
-    // so a config carrying one fails its own registered schema.
+    // No buildCommand: setup DETECTS test commands and does not detect build
+    // ones, so proposing a build step would be inventing a command nobody named.
+    // The key validates and adapter/evidence.ts runs it, so an operator whose
+    // scope needs a build adds it by hand — see docs/user/configuration.md.
     if (scope.itemTest !== undefined) entry.itemTest = [...scope.itemTest];
     scopeMap[scope.name] = entry;
   }
