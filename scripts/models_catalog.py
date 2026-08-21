@@ -82,13 +82,40 @@ class Model:
         return self.quants[quant or self.default_quant]
 
 
-# Qwen team's published recommendation for the Coder line: greedy-ish, no
-# repetition penalty (it damages code).
-_QWEN_CODER = {"temp": "0.7", "top-p": "0.8", "top-k": "20", "repeat-penalty": "1.05"}
+# Qwen team's published recommendation for
+# the Coder line: greedy-ish, no repetition
+# penalty (it damages code).
+_QWEN_CODER = {
+    "temp": "0.7",
+    "top-p": "0.8",
+    "top-k": "20",
+    "repeat-penalty": "1.05",
+}
+
 # Qwen thinking/instruct line.
-_QWEN_CHAT = {"temp": "0.7", "top-p": "0.8", "top-k": "20", "min-p": "0.0"}
+_QWEN_CHAT = {
+    "temp": "0.7",
+    "top-p": "0.8",
+    "top-k": "20",
+    "min-p": "0.0",
+}
+
+# Qwen3.8 serves with thinking mode enabled, which its
+# card pairs with a hotter, wider profile than the
+# instruct settings above.
+_QWEN_THINKING = {
+    "temp": "1.0",
+    "top-p": "0.95",
+    "top-k": "20",
+    "min-p": "0.0",
+}
+
 # Gemma line.
-_GEMMA = {"temp": "1.0", "top-p": "0.95", "top-k": "64"}
+_GEMMA = {
+    "temp": "1.0",
+    "top-p": "0.95",
+    "top-k": "64",
+}
 
 
 CATALOG: List[Model] = [
@@ -130,7 +157,12 @@ CATALOG: List[Model] = [
         params="35B MoE",
         license="MIT",
         context=262144,
-        quants={"Q4_K_M": 21.17, "Q5_K_M": 24.73, "Q6_K": 28.51, "Q8_0": 36.90},
+        quants={
+            "Q4_K_M": 21.17,
+            "Q5_K_M": 24.73,
+            "Q6_K": 28.51,
+            "Q8_0": 36.90,
+        },
         default_quant="Q5_K_M",
         serve_ctx=65536,
         reasoning=True,
@@ -145,7 +177,12 @@ CATALOG: List[Model] = [
         params="9B",
         license="MIT",
         context=262144,
-        quants={"Q4_K_M": 5.63, "Q5_K_M": 6.47, "Q6_K": 7.36, "Q8_0": 9.53},
+        quants={
+            "Q4_K_M": 5.63,
+            "Q5_K_M": 6.47,
+            "Q6_K": 7.36,
+            "Q8_0": 9.53,
+        },
         default_quant="Q8_0",
         serve_ctx=65536,
         reasoning=True,
@@ -161,7 +198,12 @@ CATALOG: List[Model] = [
         params="80B MoE / 3B active",
         license="Apache-2.0",
         context=262144,
-        quants={"MXFP4_MOE": 48.03, "Q4_K_M": 48.53, "Q5_K_M": 56.85, "Q6_K": 65.61},
+        quants={
+            "MXFP4_MOE": 48.03,
+            "Q4_K_M": 48.53,
+            "Q5_K_M": 56.85,
+            "Q6_K": 65.61,
+        },
         default_quant="MXFP4_MOE",
         serve_ctx=32768,
         notes=(
@@ -200,7 +242,12 @@ CATALOG: List[Model] = [
         params="~32B",
         license="Custom (Kwaipilot)",
         context=131072,
-        quants={"Q4_K_M": 21.39, "Q5_K_M": 25.02, "Q6_K": 30.05, "Q8_0": 36.91},
+        quants={
+            "Q4_K_M": 21.39,
+            "Q5_K_M": 25.02,
+            "Q6_K": 30.05,
+            "Q8_0": 36.91,
+        },
         default_quant="Q6_K",
         serve_ctx=65536,
         notes="Kwaipilot's agentic coder, tuned for real repo-scale edits. "
@@ -237,7 +284,12 @@ CATALOG: List[Model] = [
         params="32B",
         license="Apache-2.0",
         context=131072,
-        quants={"q4_k_m": 19.85, "q5_k_m": 23.26, "q6_k": 26.89, "q8_0": 34.82},
+        quants={
+            "q4_k_m": 19.85,
+            "q5_k_m": 23.26,
+            "q6_k": 26.89,
+            "q8_0": 34.82,
+        },
         default_quant="q6_k",
         serve_ctx=65536,
         notes="Older but extremely well-understood dense coder with excellent "
@@ -252,7 +304,12 @@ CATALOG: List[Model] = [
         params="21B MoE / 3.6B active",
         license="Apache-2.0",
         context=131072,
-        quants={"Q4_K_M": 11.62, "Q5_K_M": 11.72, "Q6_K": 12.04, "Q8_0": 12.11},
+        quants={
+            "Q4_K_M": 11.62,
+            "Q5_K_M": 11.72,
+            "Q6_K": 12.04,
+            "Q8_0": 12.11,
+        },
         default_quant="Q8_0",
         serve_ctx=65536,
         reasoning=True,
@@ -268,7 +325,11 @@ CATALOG: List[Model] = [
         params="Large MoE",
         license="Custom (poolside)",
         context=131072,
-        quants={"UD-Q2_K_XL": 39.68, "UD-IQ3_XXS": 44.28, "UD-IQ3_S": 48.43},
+        quants={
+            "UD-Q2_K_XL": 39.68,
+            "UD-IQ3_XXS": 44.28,
+            "UD-IQ3_S": 48.43,
+        },
         default_quant="UD-IQ3_XXS",
         serve_ctx=16384,
         experimental=True,
@@ -281,6 +342,37 @@ CATALOG: List[Model] = [
     # ======================================================================
     # GENERAL REASONING
     # ======================================================================
+    Model(
+        id="qwen3.8-27b",
+        repo="unsloth/Qwen3.8-27B-GGUF",
+        title="Qwen3.8 27B (dense)",
+        category="general",
+        params="27B",
+        license="Apache-2.0",
+        context=262144,
+        quants={
+            "UD-Q4_K_M": 16.46,
+            "UD-Q4_K_XL": 17.56,
+            "UD-Q5_K_M": 19.77,
+            "UD-Q6_K": 21.98,
+            "UD-Q6_K_XL": 25.30,
+            "Q8_0": 29.05,
+            "UD-Q8_K_XL": 31.46,
+        },
+        default_quant="UD-Q6_K",
+        serve_ctx=65536,
+        reasoning=True,
+        vision=True,
+        mmproj="F16",
+        notes=(
+            "Qwen3.8 dense flagship: hybrid Gated DeltaNet attention, thinking "
+            "mode enabled by default and tunable per call, native image and video "
+            "input. The one model of its generation that fits this box - the "
+            "other 3.8 release is 2.4T parameters. Every quant listed clears the "
+            "Metal budget, so choose on quality rather than on fit."
+        ),
+        sampling=_QWEN_THINKING,
+    ),
     Model(
         id="qwen3.6-27b",
         repo="unsloth/Qwen3.6-27B-GGUF",
@@ -301,8 +393,8 @@ CATALOG: List[Model] = [
         reasoning=True,
         vision=True,
         mmproj="F16",
-        notes="Current-generation Qwen dense model. Strong general reasoning plus "
-        "vision. A good adversarial reviewer to pair against a coding model.",
+        notes="Qwen3.6 dense model. Strong general reasoning plus vision. A good "
+        "adversarial reviewer to pair against a coding model.",
         sampling=_QWEN_CHAT,
     ),
     Model(
@@ -359,7 +451,12 @@ CATALOG: List[Model] = [
         params="32B",
         license="Apache-2.0",
         context=65536,
-        quants={"Q4_K_M": 19.48, "Q5_K_M": 22.86, "Q6_K": 26.45, "Q8_0": 34.25},
+        quants={
+            "Q4_K_M": 19.48,
+            "Q5_K_M": 22.86,
+            "Q6_K": 26.45,
+            "Q8_0": 34.25,
+        },
         default_quant="Q6_K",
         serve_ctx=32768,
         reasoning=True,
@@ -427,7 +524,12 @@ CATALOG: List[Model] = [
         params="12B",
         license="Gemma Terms of Use",
         context=131072,
-        quants={"Q4_K_M": 7.12, "Q5_K_M": 8.41, "Q6_K": 9.79, "Q8_0": 12.67},
+        quants={
+            "Q4_K_M": 7.12,
+            "Q5_K_M": 8.41,
+            "Q6_K": 9.79,
+            "Q8_0": 12.67,
+        },
         default_quant="Q8_0",
         serve_ctx=65536,
         vision=True,
@@ -447,7 +549,10 @@ CATALOG: List[Model] = [
         params="30B MoE / 3B active",
         license="Apache-2.0",
         context=262144,
-        quants={"Q4_K_M": 18.56, "Q8_0": 32.48},
+        quants={
+            "Q4_K_M": 18.56,
+            "Q8_0": 32.48,
+        },
         default_quant="Q8_0",
         serve_ctx=32768,
         vision=True,
@@ -464,7 +569,11 @@ CATALOG: List[Model] = [
         params="30B MoE / 3B active",
         license="NVIDIA Open Model License",
         context=131072,
-        quants={"Q4_K_M": 24.52, "Q6_K": 33.51, "Q8_0": 33.59},
+        quants={
+            "Q4_K_M": 24.52,
+            "Q6_K": 33.51,
+            "Q8_0": 33.59,
+        },
         default_quant="Q6_K",
         serve_ctx=32768,
         reasoning=True,
@@ -481,7 +590,11 @@ CATALOG: List[Model] = [
         params="27B (ternary weights)",
         license="Check model card",
         context=131072,
-        quants={"Q2_0": 7.17, "PQ2_0": 7.17, "Q2_g64": 7.59},
+        quants={
+            "Q2_0": 7.17,
+            "PQ2_0": 7.17,
+            "Q2_g64": 7.59,
+        },
         default_quant="Q2_0",
         serve_ctx=32768,
         vision=True,
@@ -505,7 +618,13 @@ CATALOG: List[Model] = [
         params="8B",
         license="Apache-2.0",
         context=32768,
-        quants={"Q4_K_M": 4.68, "Q5_K_M": 5.42, "Q6_K": 6.21, "Q8_0": 8.05, "f16": 15.14},
+        quants={
+            "Q4_K_M": 4.68,
+            "Q5_K_M": 5.42,
+            "Q6_K": 6.21,
+            "Q8_0": 8.05,
+            "f16": 15.14,
+        },
         default_quant="Q8_0",
         serve_ctx=32768,
         tool_call=False,
@@ -521,7 +640,10 @@ CATALOG: List[Model] = [
         params="0.6B",
         license="Apache-2.0",
         context=32768,
-        quants={"Q8_0": 0.64, "f16": 1.20},
+        quants={
+            "Q8_0": 0.64,
+            "f16": 1.20,
+        },
         default_quant="f16",
         serve_ctx=32768,
         tool_call=False,
@@ -537,7 +659,9 @@ CATALOG: List[Model] = [
         params="300M",
         license="Gemma Terms of Use",
         context=2048,
-        quants={"Q8_0": 0.33},
+        quants={
+            "Q8_0": 0.33,
+        },
         default_quant="Q8_0",
         serve_ctx=2048,
         tool_call=False,
@@ -553,7 +677,9 @@ CATALOG: List[Model] = [
         params="0.6B",
         license="Apache-2.0",
         context=32768,
-        quants={"q8_0": 0.64},
+        quants={
+            "q8_0": 0.64,
+        },
         default_quant="q8_0",
         serve_ctx=32768,
         tool_call=False,

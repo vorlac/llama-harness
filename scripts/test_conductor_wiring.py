@@ -61,6 +61,7 @@ REPO_ROOT = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 import conductor_wiring as cw  # noqa: E402
 import fetch_models as fm  # noqa: E402
+import models_catalog as catalog  # noqa: E402
 import serve  # noqa: E402
 
 ROUTER_SCHEMA = REPO_ROOT / "router" / "tests" / "schemas" / "RouterConfig.schema.json"
@@ -2752,3 +2753,126 @@ class EvictionKnob(unittest.TestCase):
             "fetch_model had zero callers - a restorative half that never ran",
         )
         self.assertNotIn("download_missing", source, "no reader was ever written for the knob")
+
+
+# ---------------------------------------------------------------------------
+# Task 22.7 — the model catalog's entries, and the generation this box serves.
+#
+# scripts/fetch_models.py re-reads every file size and SHA-256 from the
+# HuggingFace tree at download time and verifies the bytes against them, so a
+# catalog entry is a *plan*, not an integrity record: a repo, a set of quant
+# tokens that repo publishes, and a default that fits the machine. These rows
+# hold the plan coherent offline. Nothing here reaches the network.
+# ---------------------------------------------------------------------------
+
+
+class CatalogCurrentGeneration(unittest.TestCase):
+    # The machine models_catalog.py is written for: 64 GiB of unified memory
+    # with Metal wired at the macOS default of 75%. Stated rather than detected
+    # so the fit rows below mean the same thing wherever the suite runs.
+    BUDGET = fm.HostBudget(68.72, 68.72 * 0.75, "64 GB unified memory")
+
+    def test_22_7_entry_invariants(self) -> None:
+        """[22.7-catalog-entry-invariants] every entry is internally coherent."""
+        categories = {name for name, _ in catalog.CATEGORIES}
+        seen: Dict[str, str] = {}
+        for model in catalog.CATALOG:
+            self.assertNotIn(model.id, seen, "duplicate model id %r" % model.id)
+            seen[model.id] = model.repo
+
+            for name in ("id", "repo", "title", "params", "license", "notes"):
+                self.assertTrue(
+                    getattr(model, name), "%s.%s is empty" % (model.id, name)
+                )
+
+            self.assertIn("/", model.repo, "%s.repo is not owner/name" % model.id)
+            self.assertIn(
+                model.category,
+                categories,
+                "%s.category %r is not one of CATEGORIES" % (model.id, model.category),
+            )
+            self.assertGreater(model.context, 0, "%s.context" % model.id)
+            self.assertTrue(model.quants, "%s carries no quants" % model.id)
+
+            for quant, size in model.quants.items():
+                self.assertTrue(quant.strip(), "%s has a blank quant token" % model.id)
+                self.assertIsInstance(size, float, "%s[%s] size" % (model.id, quant))
+                self.assertGreater(size, 0.0, "%s[%s] size" % (model.id, quant))
+
+            self.assertIn(
+                model.default_quant,
+                model.quants,
+                "%s.default_quant %r is not a quant it carries"
+                % (model.id, model.default_quant),
+            )
+            self.assertGreater(model.serve_ctx, 0, "%s.serve_ctx" % model.id)
+            self.assertLessEqual(
+                model.serve_ctx,
+                model.context,
+                "%s serves more context than the model has" % model.id,
+            )
+
+            if model.mmproj:
+                self.assertTrue(
+                    model.vision,
+                    "%s names a projector but is not marked vision" % model.id,
+                )
+
+            for key, value in model.sampling.items():
+                self.assertFalse(
+                    key.startswith("-"),
+                    "%s.sampling key %r keeps its dashes; the preset ini strips them"
+                    % (model.id, key),
+                )
+                self.assertIsInstance(
+                    value, str, "%s.sampling[%s] is not a string" % (model.id, key)
+                )
+
+    def test_22_7_current_generation_entry(self) -> None:
+        """[22.7-current-generation-entry] the current Qwen dense release is carried."""
+        model = catalog.BY_ID.get("qwen3.8-27b")
+        if model is None:
+            self.fail(
+                "the catalog stops at qwen3.6-27b; Qwen3.8-27B is the current dense "
+                "release and the only one of its generation that fits 64 GB"
+            )
+
+        self.assertEqual(model.repo, "unsloth/Qwen3.8-27B-GGUF")
+        self.assertEqual(model.license, "Apache-2.0")
+        self.assertEqual(model.params, "27B")
+        self.assertEqual(model.context, 262144)
+        self.assertTrue(model.vision, "Qwen3.8-27B is a native vision-language model")
+        self.assertTrue(model.reasoning, "thinking mode is on by default")
+        self.assertTrue(model.tool_call)
+        self.assertEqual(model.mmproj, "F16")
+        self.assertFalse(
+            model.experimental,
+            "it shares the qwen3_5 architecture the catalog already serves",
+        )
+
+        # The card's thinking-mode profile, which is hotter and wider than the
+        # instruct profile the earlier Qwen entries carry.
+        self.assertEqual(model.sampling.get("temp"), "1.0")
+        self.assertEqual(model.sampling.get("top-p"), "0.95")
+        self.assertEqual(model.sampling.get("top-k"), "20")
+
+        self.assertEqual(
+            fm.fit_label(model.default_size_gb, self.BUDGET)[0],
+            "ok",
+            "the default quant (%.2f GB) must leave KV-cache headroom on 64 GB"
+            % model.default_size_gb,
+        )
+        for quant, size in model.quants.items():
+            self.assertLessEqual(
+                size,
+                self.BUDGET.vram_budget_gb,
+                "%s is %.2f GB - past the Metal budget, so carrying it is noise"
+                % (quant, size),
+            )
+
+    def test_22_7_previous_generation_kept(self) -> None:
+        """[22.7-previous-generation-kept] the older dense entry stays selectable."""
+        # The catalog's stated reason for keeping a generation behind: a sibling
+        # checkpoint is not a second opinion. Adding 3.8 must not evict 3.6.
+        self.assertIn("qwen3.6-27b", catalog.BY_ID)
+        self.assertEqual(MODEL_ID, "qwen3.6-27b")
