@@ -55,6 +55,7 @@ import { fileURLToPath } from "node:url";
 import { tool } from "@opencode-ai/plugin";
 import type { Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
 
+import { composeSessionBanner } from "../core/banner.ts";
 import { handleChatMessage } from "../adapter/chat-message.ts";
 import type { SessionRegistry, SessionRegistryEntry } from "../adapter/chat-message.ts";
 import {
@@ -709,6 +710,17 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   // registry above. handleOverride mints a grant into it; the gate hook below
   // spends it. Two maps would leave a granted override unspendable.
   const overrideGrants = new Map<string, OverrideGrant>();
+
+  // §3.8 banner state, per plugin process. `bannered` is the once-per-session
+  // latch; `pendingStaleReport` holds the §2.11 exclusions handleChatMessage
+  // computes at intake until a tool result exists to carry them, because the
+  // chat.message hook returns void to opencode and has no channel of its own.
+  // `sessionModel` is the RESOLVED model, observed on the request rather than
+  // read from config: a run against unintended weights is exactly what the
+  // banner has to be able to show.
+  const bannered = new Set<string>();
+  const pendingStaleReport = new Map<string, string>();
+  const sessionModel = new Map<string, string>();
 
   // §4.4's per-session failover latch. Minted ONCE per plugin process, exactly
   // like the continuation state: it IS the session's latch, and a fresh one per
@@ -1588,6 +1600,12 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     // would be substituting its own defaults for the model's under cover of a
     // table that says nothing about them.
     "chat.params": async (hook, output) => {
+      // The resolved model, recorded before the early return: the banner must be
+      // able to name the weights that actually ran even for a session whose
+      // delivery is not composed.
+      if (typeof hook.model?.id === "string" && hook.model.id.length > 0) {
+        sessionModel.set(hook.sessionID, hook.model.id);
+      }
       const delivery = deliveryFor(hook.sessionID, "chat.params");
       if (delivery === null) return;
       output.temperature = delivery.params.temperature;
@@ -1635,6 +1653,13 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         // earlier session. Records already written stay where they were written.
         if (liveRunId !== result.runId) {
           bindRunJournal(ws.root, ws.config, result.runId);
+        }
+        // The §2.11 stale-red exclusions. handleChatMessage has always computed
+        // this and this hook has always dropped it, so the exclusions the module
+        // header promises to report were reported to nobody. Held here until the
+        // banner has a tool result to ride.
+        if (result.staleReport !== null && result.staleReport.length > 0) {
+          pendingStaleReport.set(sessionID, result.staleReport);
         }
         if (result.action === "created") {
           // The resolved workspace root is journaled here because it is the ONE
@@ -1747,6 +1772,56 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     // off the `permission.asked` / `session.idle` BUS events (adapter/wire-notes.md:32
     // — the typed `permission.ask` PLUGIN hook is never dispatched at 1.18.15), so
     // this body parses nothing and decides nothing: it hands the whole event to the
+    // §3.8: the session banner and the §2.11 stale-red report.
+    //
+    // THE SEAM IS THE FINDING. Task 20.5 probed four candidates against the
+    // pinned binary: a part appended inside chat.message reaches neither the
+    // transcript nor the model; tui.showToast answers success with no TUI
+    // attached, so a 200 proves reachability and not visibility; a plugin tool's
+    // own return string is visible but tied to a call. Only a tool.execute.after
+    // output mutation puts plugin-authored text in front of an operator — so the
+    // banner rides the session's FIRST tool result and is conditional on a tool
+    // running. HONEST-LIMITS records that rather than implying otherwise.
+    //
+    // A conductor_* result is never decorated. Those are structured payloads the
+    // orchestrator parses, and prefixing prose to one would break the parse — a
+    // banner that costs the run its state transition is worse than no banner.
+    "tool.execute.after": async (hook, output) => {
+      const sessionID = hook.sessionID;
+      if (bannered.has(sessionID)) return;
+      if (hook.tool.startsWith("conductor_")) return;
+      // Mark before composing: a throw while composing must not arm a second
+      // attempt on every later tool call for the rest of the session.
+      bannered.add(sessionID);
+
+      try {
+        const ws = workspace;
+        const staleReport = pendingStaleReport.get(sessionID) ?? null;
+        pendingStaleReport.delete(sessionID);
+        const banner = composeSessionBanner({
+          version: CONDUCTOR_VERSION,
+          pid: process.pid,
+          runId: liveRunId,
+          model: sessionModel.get(sessionID) ?? ws?.config.models.default ?? "unknown model",
+          staleReport,
+        });
+        output.output = banner + "\n" + output.output;
+      } catch (err) {
+        // G5 fail-soft, on the same terms as every other hook body: a banner
+        // failing must not take the session down. Journaled once and swallowed.
+        journal.log(
+          "error",
+          "state",
+          "hook.failed",
+          {
+            hook: "tool.execute.after",
+            error: err instanceof Error ? err.message : String(err),
+          },
+          { sessionID },
+        );
+      }
+    },
+
     // ONE adapter router, exactly as tool.execute.before delegates to
     // gateBeforeToolCall. The router never throws (G5).
     event: async (hook) => {

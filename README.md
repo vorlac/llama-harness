@@ -21,8 +21,14 @@ nothing. See [the conductor overview](docs/user/conductor-overview.md).
 `llama.cpp` submodule that install, verify, serve and benchmark GGUF models locally. One
 `llama-server` started in *multi-model mode* (llama.cpp's own `--models-preset` mode, which
 upstream also calls router mode — it is not conductor's llama-router) serves every installed
-model at a single endpoint and swaps weights on demand; opencode talks to that endpoint and
-nothing else. No cloud provider is involved and no API key is required.
+model at a single endpoint and swaps weights on demand. No cloud provider is involved and no
+API key is required.
+
+opencode talks to that endpoint for every model request. It is not the only endpoint the
+process can reach: opencode ships a `webfetch` tool and offers it with no permission narrowing
+in any agent kind, and the `bash` tool can run `curl`. Conductor refuses both classes in a
+gated session — see [HONEST-LIMITS.md](conductor/docs/HONEST-LIMITS.md) — but that is
+conductor declining to use a surface that exists, not the surface being absent.
 
 ## Quickstart
 

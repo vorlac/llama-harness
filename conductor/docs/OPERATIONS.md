@@ -10,9 +10,14 @@ ungated one. It is written the first time the plugin opens the workspace — on 
 opencode bus event, chat message or tool call handled by this plugin process — and only
 after the doctrine
 packs have all loaded and the workspace lock has been won, so its presence means a plugin
-that loaded, found its doctrine and owns this workspace. The visible §3.8 session banner
-("no banner, no conductor" — not yet wired) is the intended at-a-glance version of that
-check, but until it ships the beacon is the signal that works. opencode loads a plugin by
+that loaded, found its doctrine and owns this workspace. The visible §3.8 session banner is the
+at-a-glance version of that check — "no banner, no conductor": conductor prefixes `[conductor <version> · pid <pid> ·
+<runId or "no run"> · <model>]` to the session's FIRST tool result, and follows it with the
+§2.11 stale-red exclusions when the run carries any. It is CONDITIONAL — opencode offers no
+unconditional channel for operator-visible text, so a session that calls no tool shows no
+banner, and a `conductor_*` result is never decorated because those are payloads the
+orchestrator parses. The beacon is therefore still the check that does not depend on a tool
+running, and it is the one to reach for when a session has produced no tool output yet. opencode loads a plugin by
 iterating the module's exports; a plugin that throws at construction is skipped whole and
 the session comes up looking completely normal, with every gate in this repository silently
 absent. If the beacon is missing — or names a `pid` that is not running — stop and fix the

@@ -71,6 +71,11 @@ export const WIRING_MANIFEST: readonly Wire[] = [
   { name: "edit-gate", kind: "hook", registration: "tool.execute.before" },
   // §3.7/§3.5(b)/§3.6: the idle engine, ask-gate and fan-out driver bus.
   { name: "event-bus", kind: "hook", registration: "event" },
+  // §3.8: the session banner and the §2.11 stale-red report. Task 20.5 measured
+  // four candidate seams against the pinned binary and this is the only one that
+  // puts plugin-authored text in front of an operator, so the banner is
+  // registered here or it does not exist.
+  { name: "session-banner", kind: "hook", registration: "tool.execute.after" },
   // §3.4: the 22 conductor_* tools, each with a real ToolSpec.
   { name: "conductor-tools", kind: "toolBinding", registration: "CONDUCTOR_TOOL_NAMES" },
   // §5.4: the fan-out engine the event bus drives sub-sessions through.

@@ -81,9 +81,9 @@ function bannerClaimMarked(doc: string): boolean {
 // The registered dishonest claims: asserted flat in the doc while the code
 // contradicts them and no marker hedges them. Each is a sentence the orchestrator
 // must correct in the (off-limits) doc — either wire the mechanism, or add the
-// "(not yet wired)" marker. `banner` was the exemplar; OPERATIONS.md now hedges it as
-// not-yet-wired and elevates the liveness beacon as the working signal, so the claim
-// is honest by MARKER and has been discharged from this register.
+// "(not yet wired)" marker. `banner` was the exemplar, and it is the case that
+// closed: a production module now emits the §3.8 banner, so the claim is honest by
+// BINDING rather than by hedge, and the hedge itself has been removed from the doc.
 const KNOWN_DISHONEST_CLAIMS: ReadonlySet<string> = new Set([]);
 
 function claimHonesty(): { bound: boolean; marked: boolean; teaches: boolean } {
@@ -96,14 +96,16 @@ function claimHonesty(): { bound: boolean; marked: boolean; teaches: boolean } {
   };
 }
 
-test("[macro021-banner-claim-is-dishonest-and-registered] OPERATIONS.md still teaches the §3.8 banner diagnosis and no production module emits a banner, but the doc now hedges the claim as not-yet-wired — so it is honest by MARKER and must be OFF KNOWN_DISHONEST_CLAIMS", () => {
+test("[macro021-banner-claim-is-bound-by-code] OPERATIONS.md teaches the §3.8 banner diagnosis and a production module now EMITS the banner, so the claim is honest by BINDING and must be OFF KNOWN_DISHONEST_CLAIMS", () => {
   const h = claimHonesty();
   assert.equal(h.teaches, true, "the banner diagnosis must still be the doc's teaching for this anchor to be measuring the real claim");
 
-  // The claim is not BOUND by code — nothing emits a §3.8 banner at HEAD — so its
-  // honesty rests entirely on the doc's not-yet-wired MARKER.
-  assert.equal(h.bound, false, "no production module emits a §3.8 banner at HEAD; if one now does, the claim is bound by code instead");
-  assert.equal(h.marked, true, "OPERATIONS.md must hedge the banner claim as not-yet-wired — the marker is what makes the taught-but-unemitted claim honest");
+  // The claim is BOUND: the plugin composes the banner and prefixes it to the
+  // session's first tool result, so a gated session really does show one and its
+  // absence really does mean something. The doc's hedge is therefore gone — a
+  // marker left standing over a mechanism that works is its own small dishonesty.
+  assert.equal(h.bound, true, "a production module must emit the §3.8 banner; without that the doc teaches a diagnosis nothing supports");
+  assert.equal(h.marked, false, "the not-yet-wired hedge must be gone now that the banner is real");
 
   const honest = h.bound || h.marked;
   assert.ok(honest, "a taught banner claim is honest only when bound by code or marked in the doc");

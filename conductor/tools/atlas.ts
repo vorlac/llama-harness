@@ -277,6 +277,24 @@ const HOOK_NODES: readonly AtlasNode[] = [
     source: ["conductor/plugin/index.ts:1666", "conductor/adapter/tools.ts:426"],
   },
   {
+    id: "hook.tool.after",
+    label: "tool.execute.after — the one operator-visible channel",
+    kind: "hook",
+    layer: "opencode",
+    member: "tool.execute.after",
+    what:
+      "Fires after every non-conductor tool call and prefixes the §3.8 session banner — harness " +
+      "version, plugin pid, live runId and resolved model — to the session's FIRST tool result, " +
+      "followed by the §2.11 stale-red exclusions when the run carries any. Once per session. A " +
+      "conductor_* result is never decorated, because those are payloads the orchestrator parses.",
+    enforces:
+      "§3.8 — 'no banner, no conductor' is the ops guide's first rule, and it needs a banner. Four " +
+      "candidate seams were measured against the pinned binary and this is the only one that puts " +
+      "plugin-authored text in front of an operator, so the banner is conditional on a tool running " +
+      "and the beacon file remains the check that is not.",
+    source: ["conductor/plugin/index.ts:1", "conductor/core/banner.ts:1"],
+  },
+  {
     id: "hook.event",
     label: "event — the idle bus",
     kind: "hook",

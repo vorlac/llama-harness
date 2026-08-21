@@ -23,8 +23,14 @@ these corrections in hand:
   the lock advisory. Neither holds. `run.lock` is an OS-level claim published with `linkSync`,
   and `openWorkspace` **refuses** the second session outright — it gets no store at all,
   rather than a demoted one. There is no read-only mode to fall back into.
-- **Limit 11** names a visible session banner. No module emits one, so the beacon file and
-  the opencode log are the whole of that check.
+- **Limit 11** names a visible session banner. One exists, but it is CONDITIONAL, which the
+  limit's wording does not convey. opencode 1.18.15 offers no unconditional channel for
+  operator-visible text: a text part appended inside the `chat.message` hook reaches neither
+  the transcript nor the model, and `tui.showToast` answers success with no TUI attached, so a
+  200 from it proves reachability and not visibility. The one measured channel is a
+  `tool.execute.after` output mutation, so the banner rides the session's FIRST tool result and
+  a session that calls no tool never shows one. The beacon file remains the check that does not
+  depend on a tool running.
 
 ---
 
@@ -211,6 +217,64 @@ Two residuals survive that, and both are over- or under-reach rather than a hole
   rewrites it in place, invoked by a name the extractor's **write-shape** set does not
   enumerate, writes without being recognised as a write. The journal still records the
   command; the edit gate simply did not adjudicate it as an edit.
+
+### The built-in class table reaches the names it declares, and nothing else
+
+Every tool opencode can put in front of the model carries a declared side-effect class, and a
+tool carrying none is refused rather than treated as a harmless read. That is a real
+tightening — the previous posture was a catch-all that classified `webfetch`, `grep`, `skill`
+and every unknown name alike as `read`, which was not a decision to permit them so much as the
+absence of one.
+
+What it does not do is anticipate. The table is keyed by name, and the offered set it is
+written against is the set measured on opencode 1.18.15 and pinned by
+`conductor/tests/wire-contract.test.ts`. An opencode release that adds a tool turns that pin
+red, which is the intended order of events — the tool becomes an explicit decision before it
+becomes reachable. But the refusal in the meantime is indiscriminate: an operator who installs
+a second plugin finds its tools refused in a conductor session, with a message naming the
+missing class rather than the plugin. That is the fail-closed direction and it is deliberate,
+and `toolSurface.classifyBuiltins` turns the lane off for an operator who needs the old
+behaviour back.
+
+### Network detection is an enumeration, and package managers are outside it
+
+A network call is refused in two lanes: the `webfetch` and `websearch` names, and a `bash`
+command whose shape reaches an enumerated network program. The shape is read with the same
+quote-aware tokenizer, operator segmentation and wrapper unwrapping the write-shape extractor
+uses, so `env sh -c "curl …"`, `xargs curl`, `nice -n 10 wget …` and a nested `sh -c` are all
+seen, and so is a network call inside a `node -e` or `python3 -c` one-liner.
+
+The enumeration is `curl`, `wget`, `nc`, `ncat`, `netcat`, `ssh`, `scp`, `sftp`, `rsync`,
+`ftp` and `telnet`. A program not on that list is not detected. Two absences are deliberate
+rather than oversights, and both are real gaps:
+
+- **`git` is excluded** because it has its own gate, which adjudicates the whole command
+  including the subcommands that touch a remote. A second opinion here would deny `git log`
+  for being spelled `git`.
+- **Package managers are excluded.** `npm`, `pip`, `bun`, `uv` and `cargo` all fetch, and all
+  of them are also how a repository's own toolchain runs. Denying them would remove far more
+  than a network lane, so a session that runs one reaches the network through a door this
+  extractor does not watch.
+
+Detection is also the only control. There is no egress proxy in this build, so the refusal
+binds the tool call and nothing binds the process: a program the enumeration misses is not
+stopped by anything else.
+
+### An allowed read is journaled at debug, so a campaign must ask for it
+
+Every call every gate allows now leaves one `gates: allow` record, and the level is chosen for
+volume: a network allow is `warn` because it should be rare, and everything else is `debug`
+because a read allow is the highest-volume event in the system.
+
+The consequence is that at the default `logging.level` of `info` the read allows are filtered
+at the sink and do not reach `journal.jsonl`. A benchmark or an audit that intends to answer
+"what did this session reach" must run at `debug` and know that it is doing so. A transcript
+gathered at `info` shows the denies and the network allows only, which looks like a complete
+record and is not.
+
+`gates: allow` also fires in a second circumstance — an override grant converting a deny —
+and those records carry `via: "override-grant"` where an ordinary allow carries no `via`. A
+count that ignores the discriminator double-counts every bypassed deny.
 
 ---
 

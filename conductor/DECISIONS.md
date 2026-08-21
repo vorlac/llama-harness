@@ -158,3 +158,87 @@ per-runner discovery behaviour for dot-directories is a version-dependent accide
 MUST NOT be relied on (Task 6.2 measures it and records the result). Correctness comes
 from the files being outside the walked tree entirely — mechanical, runner-independent
 validation rather than a lattice of exclusion flags.
+
+## (h) The read and network surface is governed, not granted: a side-effect taxonomy over every visible tool
+
+**Decision.** Every tool a conductor session can see carries exactly one §2 side-effect
+class — R0 pure repo read, R1 derived repo read, R2 machine-local read, R3 network read,
+W write-capable, X structurally unboundable, S session-spawning — recorded in
+`core/builtin-surface.ts` for names and derived per command for `bash`. A tool carrying
+no class is refused. `SIDE_EFFECT_CLASSES` is a registered vocabulary, so widening the
+set is a deliberate two-file act.
+
+**Options.** (1) A class per tool with an enumerated-allow deny point — the winner.
+(2) Leave the existing catch-all and add capability behind config flags, classifying only
+the tools a new lane introduces.
+
+**Why the winner won.** The premise this work started from — that a conductor session
+cannot reach docs, diagnostics or the web — is false, and measuring it is what changed the
+design. `curl`, `man`, `npx tsc` and `eslint --fix` all pass every gate at HEAD, and the
+pinned client offers `webfetch` with no permission narrowing in any agent kind, raising no
+permission ask for it. Four layers decline to restrict a read-class call and the
+composition of those four declinations is not a decision to permit them; it is the absence
+of a decision, which is worse, because nothing records it and nothing fails closed. Option
+(2) would have added lanes on top of an unexamined surface and called the result a
+capability gain. The taxonomy is what makes "R3 off" a statement with a truth value.
+
+## (i) Reviewers never write, and the mechanize lane is withdrawn
+
+**Decision.** I1 gains a second layer and loses a hole. Dispatched readers name their role
+agent on every prompt, so `edit: "deny"` binds at the opencode layer independently of
+conductor's gate; and `conductor_override {gate: "edit"}` from a reader role is refused
+without spending budget or recording taint. Separately, no `conductor_mechanize` lane is
+built.
+
+**Options.** (1) Two layers plus a free refusal — the winner. (2) Keep the single
+conductor-side edit gate and add a model-callable fixer lane for mechanical findings.
+
+**Why the winner won.** I1 was routable around: `conductor_override` carries
+`callers: EITHER`, and neither the mint nor the spend had a role predicate, so a reviewer
+could mint an edit grant and use it. With the opencode layer denying that edit regardless,
+the grant can never convert — and spending both budget meters plus a permanent item taint
+for a bypass that provably cannot happen is ISSUE-007's shape exactly, so it gets
+ISSUE-007's answer. The fixer lane was rejected because the capability already ships:
+`conductor_publish` runs configured formatters and writes their output back, in `stdin`
+mode, where the tool never touches the filesystem and the handler performs exactly one
+write to a path it chose. A registry of argv templates would hand that write back to the
+fixer, whose blast radius is then anything under `cwd`. The proposed safety device —
+`f(f(x)) == f(x)` — is fixpoint, not semantics preservation: `ruff --select F401
+--fix-only` satisfies it and is silently destructive on a registration-side-effect import.
+
+## (j) New capability arrives as a typed tool whose handler owns execution, never as an enabled built-in
+
+**Decision.** R1/R2/R3 capability, when it is built, arrives as `conductor_*` tools with
+handler-owned execution and a `core/tool-legality.ts` row. Built-ins get a class and a deny
+point, never an enablement. `webfetch` stays denied in favour of a future
+`conductor_fetch`.
+
+**Options.** (1) Typed tools with handler-owned execution — the winner. (2) Enable the
+built-ins and rely on the gate to bound them.
+
+**Why the winner won.** Two structural properties, neither of which is available to an
+enabled built-in. A model-composed command line makes the finding the model's claim again,
+which is the failure the whole system exists to prevent (G6); and a `conductor_*` name
+classifies as `conductor` and therefore fails CLOSED on a gate crash, where a read-class
+call fails open. The second is not a preference — it falls out of how `guarded` is
+computed, and it means the fail-open posture is a property of the delivery shape rather
+than of the tool's intent.
+
+## (k) The network is denied at the gate, in both lanes, and re-opens only with an allowlist and a proxy
+
+**Decision.** R3 is denied by default: the `webfetch` and `websearch` names, and any `bash`
+command whose shape reaches an enumerated network program. Re-opening it requires a typed
+`conductor_fetch` with a host allowlist AND the `serve.py` egress proxy as a required
+backstop, not an optional one.
+
+**Options.** (1) Deny both lanes now, re-open through one governed door — the winner.
+(2) Deny the `webfetch` name behind a config flag and leave `bash` alone.
+
+**Why the winner won.** Option (2) is not a posture, it is the appearance of one: the same
+capability remains under a different spelling, and the flag would document a restriction
+the system does not have. A refusal that can be walked around by choosing a wrapper is the
+inverse of the property that justifies the patch refusal — that a refusal not depending on
+the call's arguments cannot be spelled around. The proxy is graded REQUIRED rather than
+optional because the tool gate binds only the tool while the proxy binds the process; both
+are needed and neither is a sandbox, and `curl --noproxy '*'` defeating the proxy is
+precisely why the shape extractor is the layer that has to see it.

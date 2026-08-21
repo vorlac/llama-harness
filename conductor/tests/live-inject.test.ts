@@ -423,6 +423,51 @@ describe("live injection through a real opencode (GAP-003)", { skip: SKIP }, () 
     );
   });
 
+  it("21.7-banner-is-visible: the REAL plugin puts the §3.8 banner into a real tool result", async () => {
+    assert.ok(serve !== undefined);
+    // A fresh session, so the once-per-session latch has not already fired.
+    const created = await httpJson(
+      "POST",
+      `${serve.url}/session?directory=${encodeURIComponent(fixtureDir)}`,
+      { title: "live banner probe" },
+    );
+    assert.equal(created.status, 200, `session.create failed: ${JSON.stringify(created.json)}`);
+    const sessionID = (created.json as { id: string }).id;
+
+    // SCENARIO_CALL_BASH makes the stub emit a real bash tool call, which is what
+    // the banner rides. Without a tool call there is no banner — that IS the
+    // limitation Task 20.5 measured, and this row exercises the case where the
+    // seam exists rather than pretending it always does.
+    const prompted = await httpJson(
+      "POST",
+      `${serve.url}/session/${sessionID}/message?directory=${encodeURIComponent(fixtureDir)}`,
+      { parts: [{ type: "text", text: "SCENARIO_CALL_BASH please run the probe" }] },
+      120_000,
+    );
+    assert.equal(prompted.status, 200, `session.prompt failed: ${JSON.stringify(prompted.json).slice(0, 500)}`);
+
+    const messages = await httpJson(
+      "GET",
+      `${serve.url}/session/${sessionID}/message?directory=${encodeURIComponent(fixtureDir)}`,
+    );
+    assert.equal(messages.status, 200);
+    const entries = messages.json as Array<{ parts: Array<{ type: string; tool?: string; state?: { output?: unknown } }> }>;
+    const toolOutputs = entries
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "tool")
+      .map((p) => JSON.stringify(p.state?.output ?? ""));
+    assert.ok(toolOutputs.length > 0, "the stub did not produce a tool call, so the seam was never exercised");
+
+    const bannered = toolOutputs.filter((o) => o.includes("[conductor "));
+    assert.equal(
+      bannered.length,
+      1,
+      "exactly one tool result must carry the banner — none means the seam is dead, more than one " +
+        `means the once-per-session latch is broken. Tool outputs: ${JSON.stringify(toolOutputs).slice(0, 600)}`,
+    );
+    assert.match(bannered[0], /pid \d+/, "the banner names the plugin pid an operator checks alive.json against");
+  });
+
   it("gap-003-plugin-really-loaded: the conductor tools are registered in the live server", async () => {
     assert.ok(serve !== undefined);
     const res = await httpJson("GET", `${serve.url}/config?directory=${encodeURIComponent(fixtureDir)}`);
