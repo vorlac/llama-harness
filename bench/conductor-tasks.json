@@ -1,19 +1,36 @@
 {
   "version": 1,
   "selectionCriteria": {
-    "languageMix": "ts, python and cpp each appear at least once, so the set covers the three languages this repository is written in.",
-    "difficultySpread": "five one-function tasks and five small multi-file tasks, so a process whose cost is fixed per run is measured against both the work it can help and the work it cannot.",
-    "nonBehavioral": "two tasks (api-docs-ts, docstrings-py) have no test that could be written first, so the non-behavioral trajectory is measured rather than assumed.",
+    "languageMix": "ts, python and cpp each appear at every tier from T0 to T4, so the scope ladder is not confounded with the language.",
+    "difficultySpread": "five one-function tasks and eighteen multi-file ones, so a process whose cost is fixed per run is measured against both the work it can help and the work it cannot.",
+    "nonBehavioral": "three tasks (api-docs-ts, docstrings-py, changelog-ts) have no test that could be written first, and changelog-ts is ambiguous as well, so the non-behavioral trajectory is measured rather than assumed.",
+    "scopeLadder": "T0 stays inside the plugin's own triviality bound and measures the cost floor; T1 produces one item with a real fileScope; T2 produces three to five items with disjoint scopes; T3 produces a dependency chain deep enough for three waves; T4 needs a file no plan would have scoped. A comparison runnable only below the system's triviality threshold cannot answer whether the system helps.",
+    "taskFamilies": "three families, each at two sizes, so the curve has more than one point inside a tier: a Euler-collection program (euler-cli-py, euler-solvers-py, euler-suite-py) with known answers at any scale; a terminal game (snake-board-ts, snake-game-ts, tetris-py) whose logic is scored by scripted play; and a tool with a specified interface and unspecified internals (fieldmask-cpp, logfmt-lenses-ts, textkit-cpp) where correct is partly a judgement.",
+    "mechanismStress": "every mechanism in the corpus is strained by at least one task: no-test-first, ambiguous-requirement, parallel-waves, brief-window, dependency-chain, scope-boundary and missing-dependency. Each names the trajectory it expects, and a run that takes a different one is the finding rather than a pass or a fail.",
     "hiddenTests": "every task's measurement lives in gauge/, which is never seeded into the work tree and is materialized only after the model's process has exited.",
     "seedIsGreen": "each seeded repository passes its own visible suite, so a run starts from a green tree and a red visible test is the arm's doing."
   },
   "defaults": {
     "model": "llamacpp/qwen3.6-27b",
-    "runTimeoutSec": 1800
+    "tierTimeoutSec": {
+      "T0": 1800,
+      "T1": 2700,
+      "T2": 3600,
+      "T3": 7200,
+      "T4": 3600
+    }
   },
   "tasks": [
     {
       "id": "slugify-ts",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "ts",
       "difficulty": "one-function",
       "behavioral": true,
@@ -43,6 +60,14 @@
     },
     {
       "id": "retry-ts",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "ts",
       "difficulty": "multi-file",
       "behavioral": true,
@@ -73,6 +98,14 @@
     },
     {
       "id": "duration-py",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "python",
       "difficulty": "one-function",
       "behavioral": true,
@@ -105,6 +138,14 @@
     },
     {
       "id": "ledger-py",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "python",
       "difficulty": "multi-file",
       "behavioral": true,
@@ -138,6 +179,14 @@
     },
     {
       "id": "clamp-cpp",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "cpp",
       "difficulty": "one-function",
       "behavioral": true,
@@ -169,6 +218,14 @@
     },
     {
       "id": "ring-cpp",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "cpp",
       "difficulty": "multi-file",
       "behavioral": true,
@@ -201,6 +258,14 @@
     },
     {
       "id": "api-docs-ts",
+      "tier": "T0",
+      "mechanism": "no-test-first",
+      "expectedTrajectory": "the item is non-behavioral, so the run takes the no-test-first path rather than a red-green cycle and closes without an evidence pair",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "ts",
       "difficulty": "one-function",
       "behavioral": false,
@@ -231,6 +296,14 @@
     },
     {
       "id": "docstrings-py",
+      "tier": "T0",
+      "mechanism": "no-test-first",
+      "expectedTrajectory": "the item is non-behavioral, so the run takes the no-test-first path rather than a red-green cycle and closes without an evidence pair",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "python",
       "difficulty": "one-function",
       "behavioral": false,
@@ -264,6 +337,14 @@
     },
     {
       "id": "paths-py",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "python",
       "difficulty": "multi-file",
       "behavioral": true,
@@ -297,6 +378,14 @@
     },
     {
       "id": "dedupe-ts",
+      "tier": "T0",
+      "mechanism": "none",
+      "expectedTrajectory": "the item scopes at most a couple of files, so the run classifies trivial and closes at TRIVIAL_DONE without decomposing, planning or scheduling a wave",
+      "expectedStopKinds": [
+        "done",
+        "TRIVIAL_DONE",
+        "REPORTED"
+      ],
       "language": "ts",
       "difficulty": "multi-file",
       "behavioral": true,
@@ -324,6 +413,555 @@
       "behavioralPaths": [
         "src/**"
       ]
+    },
+    {
+      "id": "euler-cli-py",
+      "tier": "T1",
+      "mechanism": "none",
+      "expectedTrajectory": "the run classifies as work, decomposes to a single item scoping src/cli.py, writes a failing test first, implements, and publishes",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The Euler-collection family at its smallest: a registry and two solvers already exist, and one front end has to be built across them. Enough surface to leave the trivial path and produce one item with a real fileScope, with an answer nobody has to judge.",
+      "prompt": "This package solves a collection of Project Euler problems through a solver registry. src/cli.py exports main(argv) and does nothing useful. Make it the front end:\\n- main([\"list\"]) prints every registered solver name, one per line, sorted, and returns 0.\\n- main([\"run\", NAME]) runs that one solver and prints a single line '<name> <answer> <milliseconds>ms', where milliseconds is a whole number, then returns 0.\\n- main([\"run\", \"all\"]) does the same for every solver, in sorted name order.\\n- An unknown solver name prints a message containing that name and returns 2.\\n- No arguments at all returns 2.\\nReach solvers only through src/registry.py, and make sure importing src.cli is enough to have every solver registered. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/registry.py": "\"\"\"The solver registry: one common interface every solver is reached through.\"\"\"\n\n_SOLVERS = {}\n\n\ndef register(name, solve):\n    if name in _SOLVERS:\n        raise ValueError(\"solver %r is already registered\" % name)\n    _SOLVERS[name] = solve\n\n\ndef get(name):\n    if name not in _SOLVERS:\n        raise KeyError(name)\n    return _SOLVERS[name]\n\n\ndef names():\n    return sorted(_SOLVERS)\n",
+        "src/solvers/__init__.py": "from src.solvers import p001, p002  # noqa: F401\n",
+        "src/solvers/p001.py": "from src.registry import register\n\n\ndef solve():\n    return sum(n for n in range(1000) if n % 3 == 0 or n % 5 == 0)\n\n\nregister(\"p001\", solve)\n",
+        "src/solvers/p002.py": "from src.registry import register\n\n\ndef solve():\n    total = 0\n    a, b = 1, 2\n    while b <= 4000000:\n        if b % 2 == 0:\n            total += b\n        a, b = b, a + b\n    return total\n\n\nregister(\"p002\", solve)\n",
+        "src/cli.py": "\"\"\"The command line over the solver registry.\"\"\"\n\nimport sys\n\n\ndef main(argv):\n    sys.stdout.write(\"not runnable yet\\n\")\n    return 1\n",
+        "tests/check_visible.py": "import unittest\n\nimport src.solvers  # noqa: F401\nfrom src.registry import get, names\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_registry_holds_both_solvers(self):\n        self.assertEqual(names(), [\"p001\", \"p002\"])\n\n    def test_solvers_answer(self):\n        self.assertEqual(get(\"p001\")(), 233168)\n        self.assertEqual(get(\"p002\")(), 4613732)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# euler\\n\\nA collection solver: a registry, one solver per problem, and a CLI over both. Run the suite with `python3 tools/run_tests.py tests`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import contextlib\nimport io\nimport re\nimport unittest\n\nfrom src.cli import main\n\n\ndef run(argv):\n    buffer = io.StringIO()\n    with contextlib.redirect_stdout(buffer):\n        code = main(argv)\n    return code, buffer.getvalue()\n\n\nclass SpecTests(unittest.TestCase):\n    def test_list_names_every_solver(self):\n        code, out = run([\"list\"])\n        self.assertEqual(code, 0)\n        self.assertEqual(out.split(), [\"p001\", \"p002\"])\n\n    def test_run_one_prints_answer_and_timing(self):\n        code, out = run([\"run\", \"p001\"])\n        self.assertEqual(code, 0)\n        self.assertRegex(out.strip(), r\"^p001 233168 \\d+ms$\")\n\n    def test_run_all_prints_every_solver_in_order(self):\n        code, out = run([\"run\", \"all\"])\n        self.assertEqual(code, 0)\n        lines = out.strip().splitlines()\n        self.assertEqual(len(lines), 2)\n        self.assertRegex(lines[0], r\"^p001 233168 \\d+ms$\")\n        self.assertRegex(lines[1], r\"^p002 4613732 \\d+ms$\")\n\n    def test_unknown_solver_is_refused(self):\n        code, out = run([\"run\", \"p999\"])\n        self.assertEqual(code, 2)\n        self.assertIn(\"p999\", out)\n\n    def test_no_arguments_is_refused(self):\n        self.assertEqual(run([])[0], 2)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "snake-board-ts",
+      "tier": "T1",
+      "mechanism": "none",
+      "expectedTrajectory": "the run classifies as work, decomposes to a single item scoping src/state.ts, writes a failing test first, implements, and publishes",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The terminal-game family at its smallest, and the piece the rest of it rests on: board state and movement, with rendering deliberately absent so the logic is drivable by a scripted input sequence.",
+      "prompt": "src/state.ts exports step(state, direction), which currently returns its input unchanged. Make it advance one tick of a snake game:\\n- The head moves one cell in the given direction.\\n- Moving onto the food grows the snake by one segment (the tail stays), adds 1 to score, and places the next food at the first free cell scanning row by row from (0,0); a full board leaves food null.\\n- Moving off the board, or onto a cell the snake already occupies, sets alive to false and leaves the snake where it was.\\n- A step on a state that is not alive returns it unchanged.\\n- Otherwise the snake moves: the head is prepended and the tail is dropped.\\nstate.snake is head-first. Do not add rendering or input handling; keep the logic callable from a test. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/geometry.ts": "export type Point = { readonly x: number; readonly y: number };\n\nexport function equals(a: Point, b: Point): boolean {\n  return a.x === b.x && a.y === b.y;\n}\n\nexport function add(a: Point, b: Point): Point {\n  return { x: a.x + b.x, y: a.y + b.y };\n}\n",
+        "src/direction.ts": "import type { Point } from \"./geometry.ts\";\n\nexport type Direction = \"up\" | \"down\" | \"left\" | \"right\";\n\nexport function delta(direction: Direction): Point {\n  switch (direction) {\n    case \"up\":\n      return { x: 0, y: -1 };\n    case \"down\":\n      return { x: 0, y: 1 };\n    case \"left\":\n      return { x: -1, y: 0 };\n    default:\n      return { x: 1, y: 0 };\n  }\n}\n",
+        "src/board.ts": "import type { Point } from \"./geometry.ts\";\n\nexport type Board = { readonly width: number; readonly height: number };\n\nexport function inBounds(board: Board, point: Point): boolean {\n  return point.x >= 0 && point.y >= 0 && point.x < board.width && point.y < board.height;\n}\n\n// The first free cell in row-major order, or null when the board is full.\nexport function firstFreeCell(board: Board, taken: readonly Point[]): Point | null {\n  for (let y = 0; y < board.height; y += 1) {\n    for (let x = 0; x < board.width; x += 1) {\n      if (!taken.some((cell) => cell.x === x && cell.y === y)) return { x, y };\n    }\n  }\n  return null;\n}\n",
+        "src/state.ts": "import type { Board } from \"./board.ts\";\nimport type { Point } from \"./geometry.ts\";\nimport type { Direction } from \"./direction.ts\";\n\nexport type GameState = {\n  board: Board;\n  snake: Point[];\n  food: Point | null;\n  alive: boolean;\n  score: number;\n};\n\nexport function create(width: number, height: number): GameState {\n  const board = { width, height };\n  const snake = [{ x: 1, y: 0 }];\n  return { board, snake, food: { x: 3, y: 0 }, alive: true, score: 0 };\n}\n\nexport function step(state: GameState, direction: Direction): GameState {\n  return state;\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { create } from \"../src/state.ts\";\nimport { inBounds, firstFreeCell } from \"../src/board.ts\";\nimport { delta } from \"../src/direction.ts\";\n\ntest(\"a new game has one segment and one food\", () => {\n  const state = create(5, 4);\n  assert.equal(state.snake.length, 1);\n  assert.ok(state.food);\n  assert.equal(state.alive, true);\n  assert.equal(state.score, 0);\n});\n\ntest(\"bounds and free cells are decided by the board\", () => {\n  const board = { width: 3, height: 2 };\n  assert.equal(inBounds(board, { x: 2, y: 1 }), true);\n  assert.equal(inBounds(board, { x: 3, y: 1 }), false);\n  assert.deepEqual(firstFreeCell(board, [{ x: 0, y: 0 }]), { x: 1, y: 0 });\n});\n\ntest(\"a direction is a unit step\", () => {\n  assert.deepEqual(delta(\"up\"), { x: 0, y: -1 });\n});\n",
+        "README.md": "# snake\\n\\nBoard state and movement for a terminal snake, with rendering kept out of it. Run the suite with `node --test tests/visible.test.ts`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { create, step } from \"../src/state.ts\";\nimport type { Direction } from \"../src/direction.ts\";\n\nfunction play(width: number, height: number, moves: Direction[]) {\n  let state = create(width, height);\n  for (const move of moves) state = step(state, move);\n  return state;\n}\n\ntest(\"the snake advances one cell per step\", () => {\n  const state = play(6, 4, [\"right\"]);\n  assert.deepEqual(state.snake, [{ x: 2, y: 0 }]);\n  assert.equal(state.alive, true);\n});\n\ntest(\"eating grows the snake, scores, and re-seeds the food row-major\", () => {\n  const state = play(6, 4, [\"right\", \"right\"]);\n  assert.equal(state.score, 1);\n  assert.deepEqual(state.snake, [{ x: 3, y: 0 }, { x: 2, y: 0 }]);\n  assert.deepEqual(state.food, { x: 0, y: 0 });\n});\n\ntest(\"a wall ends the game and freezes the snake\", () => {\n  const state = play(6, 4, [\"up\"]);\n  assert.equal(state.alive, false);\n  assert.deepEqual(state.snake, [{ x: 1, y: 0 }]);\n});\n\ntest(\"a dead game ignores further moves\", () => {\n  const state = play(6, 4, [\"up\", \"right\", \"right\"]);\n  assert.equal(state.alive, false);\n  assert.deepEqual(state.snake, [{ x: 1, y: 0 }]);\n});\n\ntest(\"running into itself ends the game\", () => {\n  const moves: Direction[] = [\n    \"right\", \"right\", \"down\", \"left\", \"left\", \"left\", \"up\", \"right\", \"left\",\n  ];\n  const state = play(6, 4, moves);\n  assert.equal(state.alive, false);\n  assert.equal(state.score, 3);\n  assert.deepEqual(state.snake, [\n    { x: 1, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 },\n  ]);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "fieldmask-cpp",
+      "tier": "T1",
+      "mechanism": "ambiguous-requirement",
+      "expectedTrajectory": "clarification is off by default, so the run picks one reading of the mixed mask on its own and completes; whether the guess is caught downstream, and whether the run says which reading it chose, is the observation",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "cpp",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "A small tool with a specified interface and unspecified internals, whose requirement has two defensible readings. The review lanes meet work where 'correct' is partly a judgement, and the clarification path is measured rather than assumed.",
+      "prompt": "src/fieldmask.hpp declares apply_mask(record, mask_text), which returns the record unchanged. Make it select fields:\\n- A mask is a comma-separated list of field names; a name prefixed with '-' names a field to drop.\\n- An empty mask keeps the whole record.\\n- A name that no field matches selects nothing and removes nothing.\\n- Repeating a term changes nothing.\\nKeep the existing signature and keep everything header-only. Parse the mask through src/mask.hpp rather than re-parsing the text. tests/visible.cpp must keep passing.",
+      "seedFiles": {
+        "src/record.hpp": "#pragma once\n\n#include <map>\n#include <string>\n\n// A record is an ordered field map. \"a=1;b=2\" parses to {a:1, b:2}; an empty\n// segment is skipped and a segment with no '=' names a field with no value.\nusing Record = std::map<std::string, std::string>;\n\ninline Record parse_record(const std::string& text) {\n    Record out;\n    std::string::size_type start = 0;\n    while (start <= text.size()) {\n        const std::string::size_type stop = text.find(';', start);\n        const std::string segment =\n            text.substr(start, stop == std::string::npos ? std::string::npos : stop - start);\n        if (!segment.empty()) {\n            const std::string::size_type split = segment.find('=');\n            if (split == std::string::npos) {\n                out[segment] = \"\";\n            } else {\n                out[segment.substr(0, split)] = segment.substr(split + 1);\n            }\n        }\n        if (stop == std::string::npos) break;\n        start = stop + 1;\n    }\n    return out;\n}\n",
+        "src/render.hpp": "#pragma once\n\n#include <string>\n\n#include \"record.hpp\"\n\n// Fields in key order, joined by ';'. A field with no value renders as \"k=\".\ninline std::string render(const Record& record) {\n    std::string out;\n    for (const auto& field : record) {\n        if (!out.empty()) out += ';';\n        out += field.first;\n        out += '=';\n        out += field.second;\n    }\n    return out;\n}\n",
+        "src/mask.hpp": "#pragma once\n\n#include <string>\n#include <vector>\n\n// A mask is a comma-separated field list. A term may carry a leading '-',\n// which names a field to drop rather than a field to keep.\nstruct Mask {\n    std::vector<std::string> keep;\n    std::vector<std::string> drop;\n};\n\ninline Mask parse_mask(const std::string& text) {\n    Mask mask;\n    std::string::size_type start = 0;\n    while (start <= text.size()) {\n        const std::string::size_type stop = text.find(',', start);\n        std::string term =\n            text.substr(start, stop == std::string::npos ? std::string::npos : stop - start);\n        if (!term.empty()) {\n            if (term[0] == '-') {\n                mask.drop.push_back(term.substr(1));\n            } else {\n                mask.keep.push_back(term);\n            }\n        }\n        if (stop == std::string::npos) break;\n        start = stop + 1;\n    }\n    return mask;\n}\n",
+        "src/fieldmask.hpp": "#pragma once\n\n#include <string>\n\n#include \"mask.hpp\"\n#include \"record.hpp\"\n\n// Select fields from a record according to a mask. Unimplemented: the record\n// comes back whole.\ninline Record apply_mask(const Record& record, const std::string& mask_text) {\n    (void)mask_text;\n    return record;\n}\n",
+        "tests/visible.cpp": "#include \"fieldmask.hpp\"\n#include \"mask.hpp\"\n#include \"record.hpp\"\n#include \"render.hpp\"\n\n#include <cstdio>\n\nint main() {\n    const Record parsed = parse_record(\"b=2;a=1;c=\");\n    if (parsed.size() != 3) { std::puts(\"parse failed\"); return 1; }\n    if (render(parsed) != \"a=1;b=2;c=\") { std::puts(\"render failed\"); return 1; }\n    const Mask mask = parse_mask(\"a,-b\");\n    if (mask.keep.size() != 1 || mask.keep[0] != \"a\") { std::puts(\"keep failed\"); return 1; }\n    if (mask.drop.size() != 1 || mask.drop[0] != \"b\") { std::puts(\"drop failed\"); return 1; }\n    return 0;\n}\n",
+        "tools/build_tests.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "README.md": "# fieldmask\\n\\nA field selector over `k=v;k=v` records. Run the suite with `python3 tools/build_tests.py tests/visible.cpp`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/build.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "gauge/spec.cpp": "#include \"fieldmask.hpp\"\n#include \"record.hpp\"\n#include \"render.hpp\"\n\n#include <cstdio>\n#include <string>\n\nstatic int failures = 0;\n\nstatic void check(bool ok, const char* what) {\n    if (!ok) { std::printf(\"FAIL %s\\n\", what); ++failures; }\n}\n\nstatic std::string masked(const char* record, const char* mask) {\n    return render(apply_mask(parse_record(record), mask));\n}\n\nint main() {\n    check(masked(\"a=1;b=2;c=3\", \"a,c\") == \"a=1;c=3\", \"keep only\");\n    check(masked(\"a=1;b=2;c=3\", \"-b\") == \"a=1;c=3\", \"drop only\");\n    check(masked(\"a=1;b=2;c=3\", \"\") == \"a=1;b=2;c=3\", \"empty mask keeps everything\");\n    check(masked(\"a=1;b=2\", \"z\") == \"\", \"an unknown keep selects nothing\");\n    check(masked(\"a=1;b=2;c=3\", \"-z\") == \"a=1;b=2;c=3\", \"an unknown drop removes nothing\");\n    check(masked(\"a=1;b=2;c=3\", \"a,a,c\") == \"a=1;c=3\", \"a repeated term is not a duplicate\");\n\n    // Mixing keeps and drops has two defensible readings: drops applied after\n    // keeps, or drops ignored once any keep is present. Either is accepted; a\n    // third answer is not.\n    const std::string mixed = masked(\"a=1;b=2;c=3\", \"a,b,-b\");\n    check(mixed == \"a=1\" || mixed == \"a=1;b=2\", \"mixed mask\");\n\n    return failures == 0 ? 0 : 1;\n}\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/build.py",
+        "gauge/spec.cpp"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/build_tests.py",
+        "tests/visible.cpp"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "changelog-ts",
+      "tier": "T1",
+      "mechanism": "no-test-first",
+      "expectedTrajectory": "the run classifies as work on a non-behavioral item, takes the no-test-first path rather than a red-green cycle, and publishes three documents; where it puts a note with no kind is the observation",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": false,
+      "rationale": "Three documents with no test that could be written first and a grouping rule with more than one defensible reading. The non-behavioral trajectory is measured on work that is genuinely ambiguous rather than merely mechanical.",
+      "prompt": "The notes/ directory holds one release note per file, each with a version line and sometimes a kind line. Write three documents and change nothing under src/:\\n- docs/CHANGELOG.md: every note, grouped by version with the newest version first, and within a version grouped under a heading for its kind (Added, Removed, and so on).\\n- docs/upgrading.md: what a caller must do for each breaking release only. A release is breaking when src/release.ts says it is.\\n- docs/api.md: every exported function in src/, one heading each, with a one-line summary.\\ntests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/tokens.ts": "export type Token = { readonly kind: \"word\" | \"number\"; readonly text: string };\n\nexport function tokenize(input: string): Token[] {\n  const out: Token[] = [];\n  for (const piece of input.split(/\\s+/).filter((p) => p.length > 0)) {\n    out.push({ kind: /^[0-9]+$/.test(piece) ? \"number\" : \"word\", text: piece });\n  }\n  return out;\n}\n",
+        "src/format.ts": "import type { Token } from \"./tokens.ts\";\n\nexport function joinTokens(tokens: readonly Token[]): string {\n  return tokens.map((token) => token.text).join(\" \");\n}\n\nexport function titleCase(input: string): string {\n  return input.replace(/\\b[a-z]/g, (c) => c.toUpperCase());\n}\n",
+        "src/release.ts": "export type Release = { readonly version: string; readonly date: string };\n\nexport function compareReleases(a: Release, b: Release): number {\n  return a.version < b.version ? -1 : a.version > b.version ? 1 : 0;\n}\n\nexport function isBreaking(version: string): boolean {\n  const [major, minor, patch] = version.split(\".\");\n  return minor === \"0\" && patch === \"0\" && major !== \"0\";\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { tokenize } from \"../src/tokens.ts\";\nimport { joinTokens, titleCase } from \"../src/format.ts\";\nimport { isBreaking } from \"../src/release.ts\";\n\ntest(\"tokenizing splits on whitespace\", () => {\n  assert.equal(tokenize(\"add 2 lenses\").length, 3);\n});\ntest(\"joining round-trips\", () => {\n  assert.equal(joinTokens(tokenize(\"add 2 lenses\")), \"add 2 lenses\");\n});\ntest(\"a major release is breaking\", () => {\n  assert.equal(isBreaking(\"2.0.0\"), true);\n  assert.equal(isBreaking(\"2.1.0\"), false);\n});\n",
+        "notes/001-tokenize.md": "kind: added\nversion: 2.0.0\ntokenize() splits an input string into word and number tokens.\n",
+        "notes/002-splitOn.md": "kind: removed\nversion: 2.0.0\nThe old splitOn() helper is gone; call tokenize() instead.\n",
+        "notes/003-titlecase.md": "version: 1.2.0\ntitleCase() upper-cases the first letter of every word.\n",
+        "README.md": "# notes\\n\\nA small token library whose release notes live in `notes/` and whose documents live in `docs/`. Run the suite with `node --test tests/visible.test.ts`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { readFileSync } from \"node:fs\";\n\nfunction read(path) {\n  try {\n    return readFileSync(path, \"utf8\");\n  } catch {\n    return \"\";\n  }\n}\n\nconst changelog = read(\"docs/CHANGELOG.md\");\nconst upgrading = read(\"docs/upgrading.md\");\nconst api = read(\"docs/api.md\");\n\ntest(\"all three documents exist and are not stubs\", () => {\n  assert.ok(changelog.length > 150, `docs/CHANGELOG.md is ${changelog.length} bytes`);\n  assert.ok(upgrading.length > 80, `docs/upgrading.md is ${upgrading.length} bytes`);\n  assert.ok(api.length > 200, `docs/api.md is ${api.length} bytes`);\n});\n\ntest(\"the changelog groups by version, newest first\", () => {\n  const versions = [...changelog.matchAll(/^#+ .*?(\\d+\\.\\d+\\.\\d+)/gm)].map((m) => m[1]);\n  assert.deepEqual(versions, [\"2.0.0\", \"1.2.0\"]);\n});\n\ntest(\"every note reaches the changelog under some heading\", () => {\n  for (const fragment of [\"tokenize()\", \"splitOn()\", \"titleCase()\"]) {\n    assert.ok(changelog.includes(fragment), `${fragment} is missing`);\n  }\n  assert.match(changelog, /^#+ *Added/mi);\n  assert.match(changelog, /^#+ *Removed/mi);\n});\n\ntest(\"the upgrade note carries the breaking release only\", () => {\n  assert.ok(upgrading.includes(\"2.0.0\"), \"2.0.0 is breaking and must appear\");\n  assert.ok(!upgrading.includes(\"1.2.0\"), \"1.2.0 is not breaking\");\n  assert.ok(upgrading.includes(\"splitOn\"), \"the removal is what breaks callers\");\n});\n\ntest(\"the api document covers every exported function\", () => {\n  for (const name of [\"tokenize\", \"joinTokens\", \"titleCase\", \"compareReleases\", \"isBreaking\"]) {\n    assert.match(api, new RegExp(`^#+ .*${name}`, \"m\"), name);\n  }\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": []
+    },
+    {
+      "id": "euler-solvers-py",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to four independent items with disjoint fileScopes and the scheduler dispatches them in one wave, capped only by maxImplementers",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Four solvers, four files, no shared edit: the wave scheduler has four dependency-ready items with pairwise disjoint scopes and can dispatch them together, and every answer is known so the tier scores objectively.",
+      "prompt": "This package solves Project Euler problems through a registry: one module per problem under src/solvers/, each exporting solve() and registering itself. Add four more, each in its own file, each with no dependency on the others:\\n- src/solvers/p003.py: the largest prime factor of 600851475143.\\n- src/solvers/p004.py: the largest palindrome that is a product of two three-digit numbers.\\n- src/solvers/p005.py: the smallest positive number evenly divisible by every number from 1 to 20.\\n- src/solvers/p006.py: the difference between the square of the sum and the sum of the squares of the first one hundred natural numbers.\\nFollow src/solvers/p001.py exactly: export solve() taking no arguments and returning an int, and register under the module's own name. Add each to the imports in src/solvers/__init__.py so importing the package registers them all. Change nothing in src/registry.py or src/cli.py. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/registry.py": "\"\"\"The solver registry: one common interface every solver is reached through.\"\"\"\n\n_SOLVERS = {}\n\n\ndef register(name, solve):\n    if name in _SOLVERS:\n        raise ValueError(\"solver %r is already registered\" % name)\n    _SOLVERS[name] = solve\n\n\ndef get(name):\n    if name not in _SOLVERS:\n        raise KeyError(name)\n    return _SOLVERS[name]\n\n\ndef names():\n    return sorted(_SOLVERS)\n",
+        "src/solvers/__init__.py": "from src.solvers import p001, p002  # noqa: F401\n",
+        "src/solvers/p001.py": "from src.registry import register\n\n\ndef solve():\n    return sum(n for n in range(1000) if n % 3 == 0 or n % 5 == 0)\n\n\nregister(\"p001\", solve)\n",
+        "src/solvers/p002.py": "from src.registry import register\n\n\ndef solve():\n    total = 0\n    a, b = 1, 2\n    while b <= 4000000:\n        if b % 2 == 0:\n            total += b\n        a, b = b, a + b\n    return total\n\n\nregister(\"p002\", solve)\n",
+        "src/cli.py": "\"\"\"The command line over the solver registry.\"\"\"\n\nimport sys\nimport time\n\nimport src.solvers  # noqa: F401\nfrom src.registry import get, names\n\n\ndef main(argv):\n    if not argv:\n        sys.stdout.write(\"usage: list | run <name|all>\\n\")\n        return 2\n    if argv[0] == \"list\":\n        for name in names():\n            sys.stdout.write(\"%s\\n\" % name)\n        return 0\n    if argv[0] == \"run\" and len(argv) == 2:\n        wanted = names() if argv[1] == \"all\" else [argv[1]]\n        for name in wanted:\n            try:\n                solve = get(name)\n            except KeyError:\n                sys.stdout.write(\"no such solver: %s\\n\" % name)\n                return 2\n            started = time.time()\n            answer = solve()\n            elapsed = int(round((time.time() - started) * 1000.0))\n            sys.stdout.write(\"%s %s %dms\\n\" % (name, answer, elapsed))\n        return 0\n    sys.stdout.write(\"usage: list | run <name|all>\\n\")\n    return 2\n",
+        "tests/check_visible.py": "import contextlib\nimport io\nimport unittest\n\nimport src.solvers  # noqa: F401\nfrom src.cli import main\nfrom src.registry import get, names\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_seeded_solvers_answer(self):\n        self.assertEqual(get(\"p001\")(), 233168)\n        self.assertEqual(get(\"p002\")(), 4613732)\n\n    def test_cli_lists_what_is_registered(self):\n        buffer = io.StringIO()\n        with contextlib.redirect_stdout(buffer):\n            code = main([\"list\"])\n        self.assertEqual(code, 0)\n        self.assertEqual(buffer.getvalue().split(), names())\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# euler\\n\\nA collection solver: a registry, one solver per problem, and a CLI over both. Run the suite with `python3 tools/run_tests.py tests`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import contextlib\nimport io\nimport re\nimport unittest\n\nimport src.solvers  # noqa: F401\nfrom src.cli import main\nfrom src.registry import get, names\n\nANSWERS = {\n    \"p001\": 233168,\n    \"p002\": 4613732,\n    \"p003\": 6857,\n    \"p004\": 906609,\n    \"p005\": 232792560,\n    \"p006\": 25164150,\n}\n\n\nclass SpecTests(unittest.TestCase):\n    def test_every_solver_is_registered(self):\n        self.assertEqual(names(), sorted(ANSWERS))\n\n    def test_every_solver_answers(self):\n        for name in sorted(ANSWERS):\n            self.assertEqual(get(name)(), ANSWERS[name], name)\n\n    def test_each_solver_is_reachable_on_its_own(self):\n        for name in (\"p003\", \"p004\", \"p005\", \"p006\"):\n            module = __import__(\"src.solvers.\" + name, fromlist=[\"solve\"])\n            self.assertTrue(hasattr(module, \"solve\"), name)\n            self.assertEqual(module.solve(), ANSWERS[name], name)\n\n    def test_run_all_covers_the_collection(self):\n        buffer = io.StringIO()\n        with contextlib.redirect_stdout(buffer):\n            code = main([\"run\", \"all\"])\n        self.assertEqual(code, 0)\n        lines = buffer.getvalue().strip().splitlines()\n        self.assertEqual(len(lines), len(ANSWERS))\n        for line, name in zip(lines, sorted(ANSWERS)):\n            self.assertRegex(line, r\"^%s %d \\d+ms$\" % (name, ANSWERS[name]))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "logfmt-lenses-ts",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to four independent items with disjoint fileScopes and the scheduler dispatches them together",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Four report lenses over one shared record type, each in its own file and none importing another: the disjoint-scope case again, in a second language and against a spec where output shape rather than a single number is the answer.",
+      "prompt": "This tool reads logfmt lines into records and reports on them through lenses. A lens is a module under src/lenses/ exporting apply(records) and returning an array of report lines; src/lenses/count.ts is the example. Add four more, each in its own file and none importing another:\\n- src/lenses/errors.ts: one line per record whose level is 'error', oldest first, formatted '<at> <route> <status>'.\\n- src/lenses/latency.ts: exactly three lines, 'count <n>', 'mean <ms>' and 'max <ms>', with mean rounded to the nearest whole millisecond. An empty set gives count 0, mean 0, max 0.\\n- src/lenses/by-status.ts: one line per distinct status, '<status> <count>', ordered by status ascending.\\n- src/lenses/slowest.ts: the three slowest records, slowest first, formatted '<route> <ms>'; fewer than three records gives fewer lines.\\nEvery lens must return an array for an empty record set rather than throwing. Change nothing in src/record.ts. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/record.ts": "export type LogRecord = {\n  readonly at: number;\n  readonly level: string;\n  readonly route: string;\n  readonly status: number;\n  readonly ms: number;\n};\n\n// One logfmt line: `at=3 level=info route=/a status=200 ms=12`. A line missing\n// a field, or carrying an unparsable number, yields null.\nexport function parseLine(line: string): LogRecord | null {\n  const fields = new Map<string, string>();\n  for (const pair of line.trim().split(/\\s+/)) {\n    const split = pair.indexOf(\"=\");\n    if (split > 0) fields.set(pair.slice(0, split), pair.slice(split + 1));\n  }\n  const at = Number(fields.get(\"at\"));\n  const status = Number(fields.get(\"status\"));\n  const ms = Number(fields.get(\"ms\"));\n  const level = fields.get(\"level\");\n  const route = fields.get(\"route\");\n  if (level === undefined || route === undefined) return null;\n  if (!Number.isFinite(at) || !Number.isFinite(status) || !Number.isFinite(ms)) return null;\n  return { at, level, route, status, ms };\n}\n\nexport function parseAll(lines: readonly string[]): LogRecord[] {\n  const out: LogRecord[] = [];\n  for (const line of lines) {\n    const record = parseLine(line);\n    if (record !== null) out.push(record);\n  }\n  return out;\n}\n",
+        "src/lens.ts": "import type { LogRecord } from \"./record.ts\";\n\n// A lens turns a set of records into report lines. Every lens is independent:\n// it reads records and returns text, and knows about no other lens.\nexport type Lens = (records: readonly LogRecord[]) => string[];\n",
+        "src/lenses/count.ts": "import type { LogRecord } from \"../record.ts\";\n\nexport function apply(records: readonly LogRecord[]): string[] {\n  return [`records ${records.length}`];\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { parseLine, parseAll } from \"../src/record.ts\";\nimport { apply as count } from \"../src/lenses/count.ts\";\n\nconst LINES = [\n  \"at=1 level=info route=/a status=200 ms=10\",\n  \"at=2 level=error route=/b status=500 ms=40\",\n  \"nonsense\",\n];\n\ntest(\"a well-formed line parses\", () => {\n  assert.deepEqual(parseLine(LINES[0]), {\n    at: 1,\n    level: \"info\",\n    route: \"/a\",\n    status: 200,\n    ms: 10,\n  });\n});\ntest(\"a malformed line is dropped\", () => {\n  assert.equal(parseLine(\"nonsense\"), null);\n  assert.equal(parseAll(LINES).length, 2);\n});\ntest(\"the count lens reports how many records it saw\", () => {\n  assert.deepEqual(count(parseAll(LINES)), [\"records 2\"]);\n});\n",
+        "README.md": "# logfmt\\n\\nA log reader with one report lens per file under `src/lenses/`. Run the suite with `node --test tests/visible.test.ts`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { parseAll } from \"../src/record.ts\";\nimport { apply as errors } from \"../src/lenses/errors.ts\";\nimport { apply as latency } from \"../src/lenses/latency.ts\";\nimport { apply as byStatus } from \"../src/lenses/by-status.ts\";\nimport { apply as slowest } from \"../src/lenses/slowest.ts\";\n\nconst RECORDS = parseAll([\n  \"at=1 level=info route=/a status=200 ms=10\",\n  \"at=2 level=error route=/b status=500 ms=40\",\n  \"at=3 level=info route=/a status=200 ms=20\",\n  \"at=4 level=warn route=/c status=404 ms=30\",\n  \"at=5 level=error route=/b status=500 ms=90\",\n]);\n\ntest(\"the errors lens lists every error level record, oldest first\", () => {\n  assert.deepEqual(errors(RECORDS), [\"2 /b 500\", \"5 /b 500\"]);\n});\n\ntest(\"the latency lens reports count, mean and max as whole milliseconds\", () => {\n  assert.deepEqual(latency(RECORDS), [\"count 5\", \"mean 38\", \"max 90\"]);\n});\n\ntest(\"the by-status lens counts each status, lowest status first\", () => {\n  assert.deepEqual(byStatus(RECORDS), [\"200 2\", \"404 1\", \"500 2\"]);\n});\n\ntest(\"the slowest lens lists the three slowest, slowest first\", () => {\n  assert.deepEqual(slowest(RECORDS), [\"/b 90\", \"/b 40\", \"/c 30\"]);\n});\n\ntest(\"every lens survives an empty record set\", () => {\n  for (const lens of [errors, latency, byStatus, slowest]) {\n    assert.ok(Array.isArray(lens([])));\n  }\n  assert.deepEqual(latency([]), [\"count 0\", \"mean 0\", \"max 0\"]);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "textkit-cpp",
+      "tier": "T2",
+      "mechanism": "brief-window",
+      "expectedTrajectory": "the run decomposes to four disjoint items and dispatches them together; whether each item's brief carries the whole of its clause, or is truncated against the per-slot window, is the observation",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "cpp",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Four independent transforms behind a specification long enough that one item's brief approaches the 8,192-token per-slot window. The scope is disjoint by construction, so what is under test is whether a brief that large survives the trip to a sub-session intact.",
+      "prompt": "This is a header-only text toolkit. Every transform lives in its own header under src/, is a free function, takes its input by const reference and returns a new string, and depends on nothing but src/text.hpp. Add four transforms, each in its own new header, none including another of the four.\\n\\n1. src/wrap.hpp declares wrap(text, width). Greedy word wrap. Split the input on runs of spaces and tabs into words; a run of blanks is one separator, so 'a  b' has two words. Emit words onto a line while the line plus a single space plus the next word fits within width; otherwise start a new line. A word longer than width goes on a line of its own and is never broken. Lines are joined with a single newline and there is no trailing newline. An empty input returns an empty string. A width of zero, or a negative width, returns the input with its blank runs collapsed to single spaces and no wrapping at all.\\n\\n2. src/dedent.hpp declares dedent(text). Remove the longest run of leading whitespace that every non-blank line shares. A blank line - empty, or only spaces and tabs - takes no part in deciding the common prefix, and comes back as an empty line. Lines that are not blank keep everything after the common prefix, including their own deeper indentation. A trailing newline in the input is a trailing newline in the output. An input with no common prefix comes back unchanged. An empty input returns an empty string. Tabs are compared as literal characters, not expanded.\\n\\n3. src/table.hpp declares render_table(headers, rows). Render a fixed-width table. Every column is as wide as the widest cell in it, headers included. Columns are separated by two spaces. Cells are left-aligned and padded on the right, and the last column on each line is not padded, so no line has trailing whitespace. The header line comes first, then one line per row, joined by single newlines with no trailing newline. A row shorter than the header list is padded with empty cells; a row longer than it is an error you may handle by ignoring the extra cells. Headers with no rows render as the header line alone.\\n\\n4. src/numbering.hpp declares number_lines(text, start). Prefix every line with its number, counting from start. Numbers are right-aligned to the width of the largest number that will be printed, so a file numbered from 9 to 10 prints ' 9' and '10'. The number is followed by two spaces, then the line's own text unchanged. Lines are joined with single newlines and there is no trailing newline. An empty input returns an empty string and numbers nothing. A blank line is still numbered.\\n\\nKeep every header self-contained and compilable on its own, keep the existing helpers in src/text.hpp unchanged, and change nothing under tests/. tests/visible.cpp must keep passing.",
+      "seedFiles": {
+        "src/text.hpp": "#pragma once\n\n#include <string>\n#include <vector>\n\n// Split on a single character, keeping empty pieces. \"a,,b\" -> {\"a\", \"\", \"b\"}.\ninline std::vector<std::string> split(const std::string& text, char separator) {\n    std::vector<std::string> out;\n    std::string::size_type start = 0;\n    while (true) {\n        const std::string::size_type stop = text.find(separator, start);\n        if (stop == std::string::npos) {\n            out.push_back(text.substr(start));\n            return out;\n        }\n        out.push_back(text.substr(start, stop - start));\n        start = stop + 1;\n    }\n}\n\ninline std::string join(const std::vector<std::string>& pieces, const std::string& glue) {\n    std::string out;\n    for (std::vector<std::string>::size_type i = 0; i < pieces.size(); ++i) {\n        if (i != 0) out += glue;\n        out += pieces[i];\n    }\n    return out;\n}\n\n// Every run of spaces and tabs collapsed to one space; ends left alone.\ninline std::string collapse_spaces(const std::string& text) {\n    std::string out;\n    bool in_run = false;\n    for (const char c : text) {\n        const bool blank = c == ' ' || c == '\\t';\n        if (blank) {\n            if (!in_run) out += ' ';\n            in_run = true;\n        } else {\n            out += c;\n            in_run = false;\n        }\n    }\n    return out;\n}\n",
+        "src/upper.hpp": "#pragma once\n\n#include <string>\n\n// Every ASCII lower-case letter raised. Bytes outside a-z are left alone, so\n// this is safe to run over text that is not ASCII.\ninline std::string upper(const std::string& text) {\n    std::string out = text;\n    for (char& c : out) {\n        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - ('a' - 'A'));\n    }\n    return out;\n}\n",
+        "src/squeeze.hpp": "#pragma once\n\n#include <string>\n#include <vector>\n\n#include \"text.hpp\"\n\n// Consecutive blank lines reduced to one. A line of only spaces counts blank.\ninline std::string squeeze_blank_lines(const std::string& text) {\n    const std::vector<std::string> lines = split(text, '\\n');\n    std::vector<std::string> out;\n    bool previous_blank = false;\n    for (const std::string& line : lines) {\n        bool blank = true;\n        for (const char c : line) {\n            if (c != ' ' && c != '\\t') { blank = false; break; }\n        }\n        if (blank && previous_blank) continue;\n        out.push_back(line);\n        previous_blank = blank;\n    }\n    return join(out, \"\\n\");\n}\n",
+        "tests/visible.cpp": "#include \"squeeze.hpp\"\n#include \"text.hpp\"\n#include \"upper.hpp\"\n\n#include <cstdio>\n\nint main() {\n    if (split(\"a,,b\", ',').size() != 3) { std::puts(\"split failed\"); return 1; }\n    if (join({\"a\", \"b\"}, \"-\") != \"a-b\") { std::puts(\"join failed\"); return 1; }\n    if (collapse_spaces(\"a   b\") != \"a b\") { std::puts(\"collapse failed\"); return 1; }\n    if (upper(\"aZ9\") != \"AZ9\") { std::puts(\"upper failed\"); return 1; }\n    if (squeeze_blank_lines(\"a\\n\\n\\nb\") != \"a\\n\\nb\") { std::puts(\"squeeze failed\"); return 1; }\n    return 0;\n}\n",
+        "tools/build_tests.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "README.md": "# textkit\\n\\nHeader-only text transforms, one per header. Run the suite with `python3 tools/build_tests.py tests/visible.cpp`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/build.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "gauge/spec.cpp": "#include \"dedent.hpp\"\n#include \"numbering.hpp\"\n#include \"table.hpp\"\n#include \"wrap.hpp\"\n\n#include <cstdio>\n#include <string>\n#include <vector>\n\nstatic int failures = 0;\n\nstatic void check(bool ok, const char* what) {\n    if (!ok) { std::printf(\"FAIL %s\\n\", what); ++failures; }\n}\n\nint main() {\n    check(wrap(\"one two three four\", 8) == \"one two\\nthree\\nfour\", \"wrap greedy\");\n    check(wrap(\"\", 8) == \"\", \"wrap empty\");\n    check(wrap(\"supercalifragilistic\", 5) == \"supercalifragilistic\", \"wrap long word\");\n    check(wrap(\"a  b\", 8) == \"a b\", \"wrap collapses runs\");\n    check(wrap(\"one two\", 0) == \"one two\", \"wrap zero width\");\n\n    check(dedent(\"    a\\n      b\\n\") == \"a\\n  b\\n\", \"dedent common prefix\");\n    check(dedent(\"a\\n  b\") == \"a\\n  b\", \"dedent nothing common\");\n    check(dedent(\"  a\\n\\n  b\") == \"a\\n\\nb\", \"dedent ignores blank lines\");\n    check(dedent(\"\") == \"\", \"dedent empty\");\n\n    const std::vector<std::string> headers = {\"name\", \"qty\"};\n    const std::vector<std::vector<std::string>> rows = {{\"apple\", \"3\"}, {\"fig\", \"11\"}};\n    check(render_table(headers, rows) ==\n              \"name   qty\\napple  3\\nfig    11\",\n          \"table alignment\");\n    check(render_table({\"a\"}, {}) == \"a\", \"table with no rows\");\n\n    check(number_lines(\"a\\nb\", 1) == \"1  a\\n2  b\", \"numbering from one\");\n    check(number_lines(\"a\\nb\", 9) == \" 9  a\\n10  b\", \"numbering right-aligned\");\n    check(number_lines(\"\", 1) == \"\", \"numbering empty\");\n\n    return failures == 0 ? 0 : 1;\n}\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/build.py",
+        "gauge/spec.cpp"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/build_tests.py",
+        "tests/visible.cpp"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "euler-suite-py",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the run decomposes to items whose dependsOn edges form a chain at least three deep, so the scheduler produces three or more waves and later items are held until their dependency publishes",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The Euler-collection family at full size. Timing, a runner over it, a report over the runner and a command over the report form a chain nothing can reorder, so ordering, held jobs and freeze admission are exercised rather than described - and every answer is still known.",
+      "prompt": "This package solves Project Euler problems through a registry, and it has a CLI that can list and run. Build the reporting suite on top of it. Each piece depends on the one before it, so build them in order:\\n1. src/timing.py exports time_call(fn): call fn with no arguments and return (result, elapsed_ms) where elapsed_ms is a whole number of milliseconds.\\n2. src/runner.py exports run_one(name) and run_all(). run_one returns a record with .name, .answer and .elapsed_ms, timed through src/timing.py, and raises KeyError for a name the registry does not hold. run_all returns one record per registered solver, in sorted name order.\\n3. src/report.py exports format_table(results) and format_summary(results). The table has a header line 'solver answer ms' and one line per result, columns left-aligned and padded so each column is one width. The summary is a single line stating how many solvers ran and how long they took in total, in the form '<n> solvers in <total>ms'.\\n4. src/cli.py gains a 'report' command: main([\"report\"]) prints the table, then the summary, and returns 0. Leave the existing list and run commands alone.\\nAlso add two more solvers, following src/solvers/p001.py exactly and adding them to src/solvers/__init__.py: src/solvers/p003.py for the largest prime factor of 600851475143, and src/solvers/p004.py for the largest palindrome that is a product of two three-digit numbers.\\ntests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/registry.py": "\"\"\"The solver registry: one common interface every solver is reached through.\"\"\"\n\n_SOLVERS = {}\n\n\ndef register(name, solve):\n    if name in _SOLVERS:\n        raise ValueError(\"solver %r is already registered\" % name)\n    _SOLVERS[name] = solve\n\n\ndef get(name):\n    if name not in _SOLVERS:\n        raise KeyError(name)\n    return _SOLVERS[name]\n\n\ndef names():\n    return sorted(_SOLVERS)\n",
+        "src/solvers/__init__.py": "from src.solvers import p001, p002  # noqa: F401\n",
+        "src/solvers/p001.py": "from src.registry import register\n\n\ndef solve():\n    return sum(n for n in range(1000) if n % 3 == 0 or n % 5 == 0)\n\n\nregister(\"p001\", solve)\n",
+        "src/solvers/p002.py": "from src.registry import register\n\n\ndef solve():\n    total = 0\n    a, b = 1, 2\n    while b <= 4000000:\n        if b % 2 == 0:\n            total += b\n        a, b = b, a + b\n    return total\n\n\nregister(\"p002\", solve)\n",
+        "src/cli.py": "\"\"\"The command line over the solver registry.\"\"\"\n\nimport sys\nimport time\n\nimport src.solvers  # noqa: F401\nfrom src.registry import get, names\n\n\ndef main(argv):\n    if not argv:\n        sys.stdout.write(\"usage: list | run <name|all>\\n\")\n        return 2\n    if argv[0] == \"list\":\n        for name in names():\n            sys.stdout.write(\"%s\\n\" % name)\n        return 0\n    if argv[0] == \"run\" and len(argv) == 2:\n        wanted = names() if argv[1] == \"all\" else [argv[1]]\n        for name in wanted:\n            try:\n                solve = get(name)\n            except KeyError:\n                sys.stdout.write(\"no such solver: %s\\n\" % name)\n                return 2\n            started = time.time()\n            answer = solve()\n            elapsed = int(round((time.time() - started) * 1000.0))\n            sys.stdout.write(\"%s %s %dms\\n\" % (name, answer, elapsed))\n        return 0\n    sys.stdout.write(\"usage: list | run <name|all>\\n\")\n    return 2\n",
+        "src/timing.py": "\"\"\"Where the per-solver timing will live.\"\"\"\n",
+        "tests/check_visible.py": "import contextlib\nimport io\nimport unittest\n\nimport src.solvers  # noqa: F401\nfrom src.cli import main\nfrom src.registry import get, names\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_seeded_solvers_answer(self):\n        self.assertEqual(get(\"p001\")(), 233168)\n        self.assertEqual(get(\"p002\")(), 4613732)\n\n    def test_cli_runs_one_solver(self):\n        buffer = io.StringIO()\n        with contextlib.redirect_stdout(buffer):\n            code = main([\"run\", \"p001\"])\n        self.assertEqual(code, 0)\n        self.assertIn(\"233168\", buffer.getvalue())\n\n    def test_cli_lists_what_is_registered(self):\n        buffer = io.StringIO()\n        with contextlib.redirect_stdout(buffer):\n            main([\"list\"])\n        self.assertEqual(buffer.getvalue().split(), names())\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# euler\\n\\nA collection solver: a registry, one solver per problem, a CLI, and a reporting suite over all of it. Run the suite with `python3 tools/run_tests.py tests`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import contextlib\nimport io\nimport re\nimport unittest\n\nimport src.solvers  # noqa: F401\nfrom src.cli import main\nfrom src.report import format_summary, format_table\nfrom src.runner import run_all, run_one\nfrom src.timing import time_call\n\nANSWERS = {\"p001\": 233168, \"p002\": 4613732, \"p003\": 6857, \"p004\": 906609}\n\n\nclass TimingTests(unittest.TestCase):\n    def test_time_call_returns_result_and_whole_milliseconds(self):\n        value, elapsed = time_call(lambda: 7)\n        self.assertEqual(value, 7)\n        self.assertIsInstance(elapsed, int)\n        self.assertGreaterEqual(elapsed, 0)\n\n\nclass RunnerTests(unittest.TestCase):\n    def test_run_one_carries_name_answer_and_timing(self):\n        result = run_one(\"p001\")\n        self.assertEqual(result.name, \"p001\")\n        self.assertEqual(result.answer, 233168)\n        self.assertIsInstance(result.elapsed_ms, int)\n\n    def test_run_one_refuses_an_unknown_solver(self):\n        with self.assertRaises(KeyError):\n            run_one(\"p999\")\n\n    def test_run_all_covers_the_collection_in_name_order(self):\n        results = run_all()\n        self.assertEqual([r.name for r in results], sorted(ANSWERS))\n        for result in results:\n            self.assertEqual(result.answer, ANSWERS[result.name], result.name)\n\n\nclass ReportTests(unittest.TestCase):\n    def test_table_is_aligned_and_headed(self):\n        lines = format_table(run_all()).splitlines()\n        self.assertEqual(lines[0].split(), [\"solver\", \"answer\", \"ms\"])\n        self.assertEqual(len(lines), 1 + len(ANSWERS))\n        starts = {tuple(m.start() for m in re.finditer(r\"\\S+\", line)) for line in lines}\n        self.assertEqual(\n            len(starts), 1, \"every column must start at the same offset on every line\"\n        )\n\n    def test_summary_states_how_many_and_how_long(self):\n        summary = format_summary(run_all())\n        self.assertIn(\"4 solvers\", summary)\n        self.assertIn(\"ms\", summary)\n\n\nclass CliTests(unittest.TestCase):\n    def test_report_command_prints_table_then_summary(self):\n        buffer = io.StringIO()\n        with contextlib.redirect_stdout(buffer):\n            code = main([\"report\"])\n        self.assertEqual(code, 0)\n        text = buffer.getvalue()\n        self.assertIn(\"solver\", text)\n        for name in sorted(ANSWERS):\n            self.assertIn(name, text)\n        self.assertIn(\"4 solvers\", text)\n        self.assertLess(text.index(\"solver\"), text.index(\"4 solvers\"))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "snake-game-ts",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the run decomposes to items chained rules -> loop -> game with the renderer joining late, producing three or more waves",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The terminal-game family at full size, with the dependency structure coming from the problem rather than from the manifest: rules under the loop, the renderer under the game, and the whole thing drivable by a deterministic input sequence so it scores without a person watching it play.",
+      "prompt": "This is a snake game with its board state and movement already working in src/state.ts. Build the rest of the game on top of it, in order, because each piece needs the one before it:\\n1. src/rules.ts exports levelFor(score) and speedMs(level). The level is 1 for a score under 3 and rises by one for every further 3 points, so 3 is level 2 and 6 is level 3. speedMs(1) is 200 and each further level is 20 milliseconds faster, never below 60.\\n2. src/render.ts exports renderFrame(state): an array of text rows. The board is framed by '+' corners and '-' edges on the top and bottom rows and '|' at each side. Inside, an empty cell is '.', the snake's head is 'O', every other snake segment is 'o', and the food is '*'. A board 4 wide renders rows of exactly 6 characters.\\n3. src/loop.ts exports advance(width, height, script): create a game, apply each direction in the script through step(), and return the final state. A script that kills the snake leaves the rest of the moves without effect.\\n4. src/game.ts exports playScript(width, height, script): drive the same script through the loop while collecting a rendered frame for the starting state and one after each move, and return { state, frames, level } where level comes from src/rules.ts and the final score.\\nKeep the game logic separate from the rendering: nothing in src/state.ts, src/rules.ts or src/loop.ts may produce text. Do not change src/state.ts, src/board.ts, src/geometry.ts or src/direction.ts. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/geometry.ts": "export type Point = { readonly x: number; readonly y: number };\n\nexport function equals(a: Point, b: Point): boolean {\n  return a.x === b.x && a.y === b.y;\n}\n\nexport function add(a: Point, b: Point): Point {\n  return { x: a.x + b.x, y: a.y + b.y };\n}\n",
+        "src/direction.ts": "import type { Point } from \"./geometry.ts\";\n\nexport type Direction = \"up\" | \"down\" | \"left\" | \"right\";\n\nexport function delta(direction: Direction): Point {\n  switch (direction) {\n    case \"up\":\n      return { x: 0, y: -1 };\n    case \"down\":\n      return { x: 0, y: 1 };\n    case \"left\":\n      return { x: -1, y: 0 };\n    default:\n      return { x: 1, y: 0 };\n  }\n}\n",
+        "src/board.ts": "import type { Point } from \"./geometry.ts\";\n\nexport type Board = { readonly width: number; readonly height: number };\n\nexport function inBounds(board: Board, point: Point): boolean {\n  return point.x >= 0 && point.y >= 0 && point.x < board.width && point.y < board.height;\n}\n\n// The first free cell in row-major order, or null when the board is full.\nexport function firstFreeCell(board: Board, taken: readonly Point[]): Point | null {\n  for (let y = 0; y < board.height; y += 1) {\n    for (let x = 0; x < board.width; x += 1) {\n      if (!taken.some((cell) => cell.x === x && cell.y === y)) return { x, y };\n    }\n  }\n  return null;\n}\n",
+        "src/state.ts": "import { inBounds, firstFreeCell } from \"./board.ts\";\nimport type { Board } from \"./board.ts\";\nimport { add, equals } from \"./geometry.ts\";\nimport type { Point } from \"./geometry.ts\";\nimport { delta } from \"./direction.ts\";\nimport type { Direction } from \"./direction.ts\";\n\nexport type GameState = {\n  board: Board;\n  snake: Point[];\n  food: Point | null;\n  alive: boolean;\n  score: number;\n};\n\nexport function create(width: number, height: number): GameState {\n  return {\n    board: { width, height },\n    snake: [{ x: 1, y: 0 }],\n    food: { x: 3, y: 0 },\n    alive: true,\n    score: 0,\n  };\n}\n\n// One tick. The head advances; eating grows the snake and re-seeds the food at\n// the first free cell in row-major order; a wall or the snake's own body ends\n// the game and leaves the snake where it was.\nexport function step(state: GameState, direction: Direction): GameState {\n  if (!state.alive) return state;\n  const head = add(state.snake[0], delta(direction));\n  if (!inBounds(state.board, head)) return { ...state, alive: false };\n  const eats = state.food !== null && equals(head, state.food);\n  const body = eats ? state.snake : state.snake.slice(0, state.snake.length - 1);\n  if (body.some((cell) => equals(cell, head))) return { ...state, alive: false };\n  const snake = [head, ...body];\n  return {\n    ...state,\n    snake,\n    food: eats ? firstFreeCell(state.board, snake) : state.food,\n    score: state.score + (eats ? 1 : 0),\n  };\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { create, step } from \"../src/state.ts\";\n\ntest(\"the snake advances one cell per step\", () => {\n  const state = step(create(6, 4), \"right\");\n  assert.deepEqual(state.snake, [{ x: 2, y: 0 }]);\n});\ntest(\"eating scores and grows\", () => {\n  const state = step(step(create(6, 4), \"right\"), \"right\");\n  assert.equal(state.score, 1);\n  assert.equal(state.snake.length, 2);\n});\ntest(\"a wall ends the game\", () => {\n  assert.equal(step(create(6, 4), \"up\").alive, false);\n});\n",
+        "README.md": "# snake\\n\\nA terminal snake: board state and movement are done, the rules, renderer, loop and scripted driver are not. Run the suite with `node --test tests/visible.test.ts`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { levelFor, speedMs } from \"../src/rules.ts\";\nimport { renderFrame } from \"../src/render.ts\";\nimport { advance } from \"../src/loop.ts\";\nimport { playScript } from \"../src/game.ts\";\n\ntest(\"the level rises every three points and sets the tick speed\", () => {\n  assert.equal(levelFor(0), 1);\n  assert.equal(levelFor(2), 1);\n  assert.equal(levelFor(3), 2);\n  assert.equal(levelFor(8), 3);\n  assert.equal(speedMs(1), 200);\n  assert.equal(speedMs(2), 180);\n  assert.ok(speedMs(3) < speedMs(2));\n});\n\ntest(\"a frame is one row of text per board row, with a border\", () => {\n  const { frames } = playScript(4, 3, []);\n  assert.equal(frames.length, 1);\n  assert.deepEqual(frames[0], [\n    \"+----+\",\n    \"|.O.*|\",\n    \"|....|\",\n    \"|....|\",\n    \"+----+\",\n  ]);\n});\n\ntest(\"the frame shows the food and the growing snake\", () => {\n  const { frames } = playScript(6, 3, [\"right\", \"right\"]);\n  assert.equal(frames.length, 3);\n  assert.equal(frames[0][1], \"|.O.*..|\");\n  assert.equal(frames[2][1], \"|*.oO..|\");\n});\n\ntest(\"advance walks a whole script and stops at death\", () => {\n  const state = advance(4, 3, [\"up\", \"right\", \"right\"]);\n  assert.equal(state.alive, false);\n  assert.deepEqual(state.snake, [{ x: 1, y: 0 }]);\n});\n\ntest(\"scripted play reports the finished game\", () => {\n  const script = [\"right\", \"right\", \"down\", \"left\", \"left\", \"left\", \"up\", \"right\", \"left\"];\n  const { state, level } = playScript(6, 4, script);\n  assert.equal(state.score, 3);\n  assert.equal(state.alive, false);\n  assert.equal(level, 2);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "tetris-py",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the run decomposes to items chained bag/rules -> engine -> play, producing three or more waves, with the later items held until their dependencies publish",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The game family's second size, in a second language. The chain runs bag and rules under the engine and the engine under the scripted driver, and the acceptance drives it with a fixed command list, so an arm that welds the rules into the driver cannot pass.",
+      "prompt": "This is a falling-block game with its playfield and its piece shapes already written. Build the game on top of them, in order, because each piece needs the one before it:\\n1. src/bag.py exports piece_at(index): the piece name at that position in the repeating order src/pieces.py declares, so piece_at(0) is 'O', piece_at(1) is 'I' and piece_at(2) is 'O' again.\\n2. src/rules.py exports fits(grid, cells), lock(grid, cells), settle(grid) and score_for(cleared). fits is false when any cell is outside the grid or on a filled cell. lock returns a NEW grid with those cells filled and does not touch the one it was given. settle returns (grid, cleared) with every full row removed and empty rows pushed in at the top. score_for maps 0, 1, 2, 3 and 4 cleared rows to 0, 100, 300, 500 and 800.\\n3. src/engine.py exports start(width, height), spawn(state) and step(state, command). The state is a named tuple with fields grid, piece, origin, index, score and alive. start builds a blank grid and places the piece at bag index 0 with its origin at (0, 0). spawn advances the index by one and places that piece at (0, 0); when it does not fit there, spawn sets alive false and leaves the grid as it is. step handles 'left', 'right', 'tick' and 'drop': left and right move the origin one column when the piece still fits and do nothing when it does not; tick moves the piece down one row when it fits, and otherwise locks it, settles the grid, adds the score for the rows cleared, and spawns the next piece; drop repeats the downward move until the piece cannot fall further, then locks, settles, scores and spawns exactly as tick does. A state that is not alive comes back from step unchanged.\\n4. src/play.py exports play(width, height, commands): start a game, apply every command through the engine, and return the final state.\\nDo not change src/grid.py or src/pieces.py, and keep the rules out of src/play.py: the driver applies commands and nothing else. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/grid.py": "\"\"\"The playfield: a rectangle of 0 (empty) and 1 (filled) cells.\"\"\"\n\n\ndef blank(width, height):\n    return [[0] * width for _ in range(height)]\n\n\ndef width_of(grid):\n    return len(grid[0]) if grid else 0\n\n\ndef height_of(grid):\n    return len(grid)\n\n\ndef occupied(grid, x, y):\n    return grid[y][x] == 1\n\n\ndef render(grid):\n    \"\"\"One text row per grid row, '.' for empty and '#' for filled.\"\"\"\n    return \"\\n\".join(\"\".join(\"#\" if cell else \".\" for cell in row) for row in grid)\n\n\ndef full_rows(grid):\n    \"\"\"The indices of every completely filled row, top to bottom.\"\"\"\n    return [y for y, row in enumerate(grid) if all(row)]\n\n\ndef clear_rows(grid, rows):\n    \"\"\"Drop the named rows and push empty rows in at the top.\"\"\"\n    kept = [list(row) for y, row in enumerate(grid) if y not in set(rows)]\n    empty = [[0] * width_of(grid) for _ in range(len(grid) - len(kept))]\n    return empty + kept\n",
+        "src/pieces.py": "\"\"\"The piece shapes, as cell offsets from the piece origin.\"\"\"\n\nSHAPES = {\n    \"O\": ((0, 0), (1, 0), (0, 1), (1, 1)),\n    \"I\": ((0, 0), (1, 0), (2, 0), (3, 0)),\n}\n\n# The bag repeats forever in this order, so a game is reproducible from its\n# command list alone with no randomness anywhere.\nORDER = (\"O\", \"I\")\n\n\ndef cells(name, origin_x, origin_y):\n    \"\"\"Where a piece's cells sit when its origin is at (origin_x, origin_y).\"\"\"\n    return tuple((origin_x + dx, origin_y + dy) for dx, dy in SHAPES[name])\n",
+        "tests/check_visible.py": "import unittest\n\nfrom src.grid import blank, clear_rows, full_rows, render\nfrom src.pieces import cells\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_a_blank_grid_renders_empty(self):\n        self.assertEqual(render(blank(3, 2)), \"...\\n...\")\n\n    def test_full_rows_are_found_and_cleared(self):\n        grid = [[1, 1], [0, 1]]\n        self.assertEqual(full_rows(grid), [0])\n        self.assertEqual(render(clear_rows(grid, [0])), \"..\\n.#\")\n\n    def test_piece_cells_are_offset_from_the_origin(self):\n        self.assertEqual(cells(\"O\", 2, 1), ((2, 1), (3, 1), (2, 2), (3, 2)))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# blocks\\n\\nA falling-block game: the playfield and the piece shapes are done, the bag, rules, engine and driver are not. Run the suite with `python3 tools/run_tests.py tests`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import unittest\n\nfrom src.bag import piece_at\nfrom src.engine import spawn, start, step\nfrom src.grid import render\nfrom src.play import play\nfrom src.rules import fits, lock, score_for, settle\n\n\nclass BagTests(unittest.TestCase):\n    def test_the_bag_repeats_forever_in_order(self):\n        self.assertEqual([piece_at(i) for i in range(5)], [\"O\", \"I\", \"O\", \"I\", \"O\"])\n\n\nclass RulesTests(unittest.TestCase):\n    def test_fits_refuses_the_walls_the_floor_and_filled_cells(self):\n        grid = [[0, 0], [0, 1]]\n        self.assertTrue(fits(grid, ((0, 0), (1, 0))))\n        self.assertFalse(fits(grid, ((-1, 0),)))\n        self.assertFalse(fits(grid, ((2, 0),)))\n        self.assertFalse(fits(grid, ((0, 2),)))\n        self.assertFalse(fits(grid, ((1, 1),)))\n\n    def test_lock_fills_the_cells_and_leaves_the_input_alone(self):\n        grid = [[0, 0], [0, 0]]\n        locked = lock(grid, ((0, 1),))\n        self.assertEqual(render(locked), \"..\\n#.\")\n        self.assertEqual(render(grid), \"..\\n..\")\n\n    def test_settle_clears_full_rows_and_counts_them(self):\n        grid, cleared = settle([[0, 0], [1, 1]])\n        self.assertEqual(cleared, 1)\n        self.assertEqual(render(grid), \"..\\n..\")\n\n    def test_scoring_follows_the_table(self):\n        self.assertEqual([score_for(n) for n in range(5)], [0, 100, 300, 500, 800])\n\n\nclass EngineTests(unittest.TestCase):\n    def test_a_new_game_has_the_first_piece_at_the_top_left(self):\n        state = start(4, 4)\n        self.assertEqual(state.piece, \"O\")\n        self.assertEqual(state.origin, (0, 0))\n        self.assertEqual(state.score, 0)\n        self.assertTrue(state.alive)\n\n    def test_moving_sideways_is_refused_at_the_wall(self):\n        state = step(start(4, 4), \"left\")\n        self.assertEqual(state.origin, (0, 0))\n        self.assertEqual(step(state, \"right\").origin, (1, 0))\n\n    def test_a_tick_drops_the_piece_one_row(self):\n        self.assertEqual(step(start(4, 4), \"tick\").origin, (0, 1))\n\n    def test_spawning_onto_a_filled_cell_ends_the_game(self):\n        state = start(4, 4)\n        state = spawn(state._replace(grid=lock(state.grid, ((0, 0),))))\n        self.assertFalse(state.alive)\n\n\nclass PlayTests(unittest.TestCase):\n    def test_a_scripted_game_clears_a_line_and_scores(self):\n        state = play(4, 4, [\"drop\", \"drop\"])\n        self.assertEqual(state.score, 100)\n        self.assertEqual(render(state.grid), \"....\\n....\\n##..\\n##..\")\n        self.assertEqual(state.piece, \"O\")\n        self.assertTrue(state.alive)\n\n    def test_a_dead_game_ignores_the_rest_of_the_script(self):\n        state = play(4, 4, [\"drop\", \"drop\", \"drop\", \"drop\", \"drop\", \"drop\", \"drop\"])\n        self.assertFalse(state.alive)\n        dead = play(4, 4, [\"drop\"] * 20)\n        self.assertFalse(dead.alive)\n        self.assertEqual(dead.score, state.score)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "clock-inject-py",
+      "tier": "T4",
+      "mechanism": "scope-boundary",
+      "expectedTrajectory": "the plan scopes src/expiry.py, the implementer finds it cannot pin the clock from there, and the run either amends the queue to add src/clock.py or surfaces the question; a run that silently edits a file outside its scope is the finding",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED",
+        "surfaced"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The requirement is stated over src/expiry.py and cannot be met there: every reader goes through src/clock.py, which a plan taking the instruction literally would leave out of scope. The scope gate, the queue amendment and the surfaced-question path are exercised on work that genuinely needs the file rather than on a contrived reach.",
+      "prompt": "Session expiry in src/expiry.py cannot be tested at a fixed instant, because every reader of the wall clock resolves it at call time. Make the whole package testable against a pinned instant, keeping every existing call site exactly as it is:\\n- set_now(seconds) pins the instant every reader sees.\\n- reset_now() hands the clock back to the real one.\\n- now() returns the pinned instant while one is set, and the real time otherwise.\\nAfter set_now, opening a session, deciding expiry and summarizing must all see the pinned instant. Do not change any function signature, and do not thread a clock argument through the callers. tests/check_visible.py must keep passing.",
+      "seedFiles": {
+        "src/__init__.py": "",
+        "src/clock.py": "\"\"\"The one place this package reads the wall clock.\"\"\"\n\nimport time\n\n\ndef now():\n    return time.time()\n",
+        "src/session.py": "from src.clock import now\n\n\ndef open_session(user):\n    return {\"user\": user, \"opened_at\": now()}\n\n\ndef age_of(session):\n    return now() - session[\"opened_at\"]\n",
+        "src/expiry.py": "from src.clock import now\n\nTTL_SECONDS = 900\n\n\ndef expires_at(session):\n    return session[\"opened_at\"] + TTL_SECONDS\n\n\ndef is_expired(session):\n    return now() >= expires_at(session)\n",
+        "src/summary.py": "from src.expiry import is_expired\n\n\ndef summarize(sessions):\n    live = [s for s in sessions if not is_expired(s)]\n    return \"%d live of %d\" % (len(live), len(sessions))\n",
+        "tests/check_visible.py": "import unittest\n\nfrom src.expiry import TTL_SECONDS, expires_at\nfrom src.session import open_session\nfrom src.summary import summarize\n\n\nclass VisibleTests(unittest.TestCase):\n    def test_a_session_expires_a_ttl_after_it_opened(self):\n        session = {\"user\": \"ada\", \"opened_at\": 100.0}\n        self.assertEqual(expires_at(session), 100.0 + TTL_SECONDS)\n\n    def test_opening_a_session_names_its_user(self):\n        self.assertEqual(open_session(\"ada\")[\"user\"], \"ada\")\n\n    def test_a_summary_counts_what_it_was_given(self):\n        self.assertIn(\"of 0\", summarize([]))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "tools/run_tests.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "README.md": "# sessions\\n\\nSession opening, expiry and a summary over both. Run the suite with `python3 tools/run_tests.py tests`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/run.py": "#!/usr/bin/env python3\n\"\"\"Run every check_*.py in one directory against the checkout at the cwd.\n\nLoaded by path rather than by unittest discovery: discovery would require the\ntest directory to be an importable package, and a missing __init__.py there\nwould look exactly like a failing suite.\n\"\"\"\n\nimport importlib.util\nimport os\nimport sys\nimport unittest\n\ndef main(directory):\n    sys.path.insert(0, os.getcwd())\n    loader = unittest.TestLoader()\n    suite = unittest.TestSuite()\n    names = sorted(\n        name\n        for name in os.listdir(directory)\n        if name.startswith(\"check_\") and name.endswith(\".py\")\n    )\n    if not names:\n        sys.stderr.write(\"no check_*.py under %s\\n\" % directory)\n        return 2\n    for name in names:\n        spec = importlib.util.spec_from_file_location(\n            name[:-3], os.path.join(directory, name)\n        )\n        module = importlib.util.module_from_spec(spec)\n        spec.loader.exec_module(module)\n        suite.addTests(loader.loadTestsFromModule(module))\n    result = unittest.TextTestRunner(verbosity=2).run(suite)\n    if not result.testsRun:\n        return 2\n    return 0 if result.wasSuccessful() else 1\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1]))\n",
+        "gauge/check_spec.py": "import unittest\n\nfrom src.clock import now, reset_now, set_now\nfrom src.expiry import TTL_SECONDS, is_expired\nfrom src.session import open_session\nfrom src.summary import summarize\n\n\nclass SpecTests(unittest.TestCase):\n    def tearDown(self):\n        reset_now()\n\n    def test_a_pinned_clock_is_what_every_reader_sees(self):\n        set_now(1000.0)\n        self.assertEqual(now(), 1000.0)\n        self.assertEqual(open_session(\"ada\")[\"opened_at\"], 1000.0)\n\n    def test_expiry_is_decided_against_the_pinned_instant(self):\n        set_now(1000.0)\n        session = open_session(\"ada\")\n        self.assertFalse(is_expired(session))\n        set_now(1000.0 + TTL_SECONDS - 1)\n        self.assertFalse(is_expired(session))\n        set_now(1000.0 + TTL_SECONDS)\n        self.assertTrue(is_expired(session))\n\n    def test_the_summary_moves_with_the_clock(self):\n        set_now(1000.0)\n        sessions = [open_session(\"ada\"), open_session(\"bob\")]\n        self.assertEqual(summarize(sessions), \"2 live of 2\")\n        set_now(1000.0 + TTL_SECONDS)\n        self.assertEqual(summarize(sessions), \"0 live of 2\")\n\n    def test_resetting_hands_the_clock_back(self):\n        set_now(1000.0)\n        reset_now()\n        self.assertNotEqual(now(), 1000.0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "config-widen-ts",
+      "tier": "T4",
+      "mechanism": "scope-boundary",
+      "expectedTrajectory": "the plan scopes src/, the implementer finds the config refused by the committed schema, and the run amends the queue to bring schema/ into scope before completing; a run that stops at the refusal is the finding",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED",
+        "surfaced"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Adding one optional config key needs a file outside src/ and outside the declared behavioral paths, so the change cannot land inside the scope a plan would naturally draw. It is the same shape as the documentation-honesty defect this repository carries in its own config schema.",
+      "prompt": "This package validates its config against a committed JSON Schema and fills in defaults. Add one optional key:\\n- retries: an integer, not required, defaulting to 2.\\nA config carrying retries must validate; a config without it must come back with retries set to 2; a retries that is not an integer must be refused with a problem naming the key. Leave host, port and timeoutMs exactly as they are, and keep rejecting keys the schema does not declare. tests/visible.test.ts must keep passing.",
+      "seedFiles": {
+        "src/schema.ts": "export type Schema = {\n  required: readonly string[];\n  properties: Record<string, { type: string }>;\n  additionalProperties: boolean;\n};\n\n// A deliberately small validator: enough to enforce the committed schema, and\n// no more. Every refusal names the offending key.\nexport function validate(schema: Schema, value: unknown): string[] {\n  const problems: string[] = [];\n  if (typeof value !== \"object\" || value === null || Array.isArray(value)) {\n    return [\"the config must be an object\"];\n  }\n  const record = value as Record<string, unknown>;\n  for (const key of schema.required) {\n    if (!(key in record)) problems.push(`missing required key ${key}`);\n  }\n  for (const key of Object.keys(record)) {\n    const declared = schema.properties[key];\n    if (declared === undefined) {\n      if (!schema.additionalProperties) problems.push(`unknown key ${key}`);\n      continue;\n    }\n    const actual = typeof record[key] === \"number\"\n      ? Number.isInteger(record[key]) ? \"integer\" : \"number\"\n      : typeof record[key];\n    if (actual !== declared.type) problems.push(`key ${key} must be ${declared.type}`);\n  }\n  return problems;\n}\n",
+        "src/defaults.ts": "export const DEFAULTS: Record<string, number | string> = {\n  timeoutMs: 5000,\n};\n\nexport function withDefaults(record: Record<string, unknown>): Record<string, unknown> {\n  const out: Record<string, unknown> = { ...record };\n  for (const key of Object.keys(DEFAULTS)) {\n    if (out[key] === undefined) out[key] = DEFAULTS[key];\n  }\n  return out;\n}\n",
+        "src/config.ts": "import { readFileSync } from \"node:fs\";\nimport { validate } from \"./schema.ts\";\nimport type { Schema } from \"./schema.ts\";\nimport { withDefaults } from \"./defaults.ts\";\n\nexport function loadSchema(path = \"schema/config.schema.json\"): Schema {\n  return JSON.parse(readFileSync(path, \"utf8\")) as Schema;\n}\n\nexport function parseConfig(text: string): {\n  config: Record<string, unknown> | null;\n  problems: string[];\n} {\n  let raw: unknown;\n  try {\n    raw = JSON.parse(text);\n  } catch (error) {\n    return { config: null, problems: [`the config is not JSON: ${String(error)}`] };\n  }\n  const problems = validate(loadSchema(), raw);\n  if (problems.length > 0) return { config: null, problems };\n  return { config: withDefaults(raw as Record<string, unknown>), problems: [] };\n}\n",
+        "schema/config.schema.json": "{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"type\": \"object\",\n  \"additionalProperties\": false,\n  \"required\": [\"host\", \"port\"],\n  \"properties\": {\n    \"host\": { \"type\": \"string\" },\n    \"port\": { \"type\": \"integer\" },\n    \"timeoutMs\": { \"type\": \"integer\" }\n  }\n}\n",
+        "tests/visible.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { parseConfig } from \"../src/config.ts\";\n\ntest(\"a well-formed config parses and gains its defaults\", () => {\n  const { config, problems } = parseConfig(JSON.stringify({ host: \"a\", port: 1 }));\n  assert.deepEqual(problems, []);\n  assert.equal(config?.timeoutMs, 5000);\n});\ntest(\"a missing required key is refused by name\", () => {\n  const { problems } = parseConfig(JSON.stringify({ host: \"a\" }));\n  assert.equal(problems.length, 1);\n  assert.match(problems[0], /port/);\n});\ntest(\"an unknown key is refused by name\", () => {\n  const { problems } = parseConfig(JSON.stringify({ host: \"a\", port: 1, nope: 2 }));\n  assert.match(problems[0], /nope/);\n});\n",
+        "README.md": "# config\\n\\nA config loader validated against `schema/config.schema.json`. Run the suite with `node --test tests/visible.test.ts`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/spec.test.ts": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { readFileSync } from \"node:fs\";\nimport { parseConfig } from \"../src/config.ts\";\nimport { DEFAULTS } from \"../src/defaults.ts\";\n\ntest(\"a config carrying retries validates\", () => {\n  const { config, problems } = parseConfig(\n    JSON.stringify({ host: \"a\", port: 1, retries: 3 }),\n  );\n  assert.deepEqual(problems, []);\n  assert.equal(config?.retries, 3);\n});\n\ntest(\"retries defaults when it is absent\", () => {\n  const { config } = parseConfig(JSON.stringify({ host: \"a\", port: 1 }));\n  assert.equal(config?.retries, 2);\n  assert.equal(DEFAULTS.retries, 2);\n});\n\ntest(\"a non-integer retries is refused by name\", () => {\n  const { problems } = parseConfig(\n    JSON.stringify({ host: \"a\", port: 1, retries: \"many\" }),\n  );\n  assert.equal(problems.length, 1);\n  assert.match(problems[0], /retries/);\n});\n\ntest(\"the committed schema itself declares the key\", () => {\n  const schema = JSON.parse(readFileSync(\"schema/config.schema.json\", \"utf8\"));\n  assert.equal(schema.properties.retries?.type, \"integer\");\n  assert.ok(!schema.required.includes(\"retries\"), \"retries is optional\");\n});\n\ntest(\"the existing keys are untouched\", () => {\n  const { problems } = parseConfig(JSON.stringify({ host: \"a\", port: 1, nope: 2 }));\n  assert.match(problems[0], /nope/);\n});\n"
+      },
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "tests/visible.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "bounds-cpp",
+      "tier": "T4",
+      "mechanism": "missing-dependency",
+      "expectedTrajectory": "the run finds no JSON library available and writes the small amount of serialization the task needs; a run that stops on the missing dependency, or that adds one to the build, is the finding",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "cpp",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The obvious implementation reaches for a JSON writer, and this tree has none and no way to add one. The work is entirely doable without it, so the task measures what a run does when the thing it wants is not there, rather than punishing it for wanting it.",
+      "prompt": "src/bounds.hpp exports summarize(samples), a one-line human summary. Add summarize_json(samples) beside it, returning a machine-readable summary as one line of JSON with no spaces:\\n{\"count\":N,\"total_ms\":T,\"max_ms\":M,\"mean_ms\":A,\"samples\":[...]}\\nwhere each element of samples is {\"label\":\"...\",\"ms\":N}. A number is written without an exponent, with no trailing zeros after the decimal point and no trailing decimal point, so 30.5 is 30.5 and 10.0 is 10. An empty sample list gives zeroes and an empty array. A label containing a double quote or a backslash is escaped with a backslash.\\nTake the totals from src/stats.hpp rather than recomputing them, keep everything header-only, and leave summarize() exactly as it is. There is no package manager and no vendored library here: the only headers available are this repository's own and the C++ standard library. tests/visible.cpp must keep passing.",
+      "seedFiles": {
+        "src/sample.hpp": "#pragma once\n\n#include <string>\n#include <vector>\n\n// One measurement: a label and the milliseconds it took.\nstruct Sample {\n    std::string label;\n    double ms{};\n};\n\nusing Samples = std::vector<Sample>;\n",
+        "src/stats.hpp": "#pragma once\n\n#include <algorithm>\n#include <vector>\n\n#include \"sample.hpp\"\n\ninline double total_ms(const Samples& samples) {\n    double total = 0.0;\n    for (const Sample& sample : samples) total += sample.ms;\n    return total;\n}\n\ninline double max_ms(const Samples& samples) {\n    double largest = 0.0;\n    for (const Sample& sample : samples) largest = std::max(largest, sample.ms);\n    return largest;\n}\n\ninline double mean_ms(const Samples& samples) {\n    return samples.empty() ? 0.0 : total_ms(samples) / static_cast<double>(samples.size());\n}\n",
+        "src/bounds.hpp": "#pragma once\n\n#include <string>\n\n#include \"sample.hpp\"\n#include \"stats.hpp\"\n\n// A one-line human summary. The machine-readable summary is not written yet.\ninline std::string summarize(const Samples& samples) {\n    return \"samples: \" + std::to_string(samples.size());\n}\n",
+        "tests/visible.cpp": "#include \"bounds.hpp\"\n#include \"sample.hpp\"\n#include \"stats.hpp\"\n\n#include <cstdio>\n\nint main() {\n    const Samples samples = {{\"a\", 10.0}, {\"b\", 30.0}};\n    if (total_ms(samples) != 40.0) { std::puts(\"total failed\"); return 1; }\n    if (max_ms(samples) != 30.0) { std::puts(\"max failed\"); return 1; }\n    if (mean_ms(samples) != 20.0) { std::puts(\"mean failed\"); return 1; }\n    if (summarize(samples) != \"samples: 2\") { std::puts(\"summary failed\"); return 1; }\n    return 0;\n}\n",
+        "tools/build_tests.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "README.md": "# bounds\\n\\nTiming samples and the statistics over them. Run the suite with `python3 tools/build_tests.py tests/visible.cpp`.\\n"
+      },
+      "hiddenFiles": {
+        "gauge/build.py": "#!/usr/bin/env python3\n\"\"\"Compile the C++ sources together with a test translation unit and run it.\"\"\"\n\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport tempfile\n\ndef main(sources):\n    compiler = shutil.which(\"c++\") or shutil.which(\"clang++\") or shutil.which(\"g++\")\n    if compiler is None:\n        sys.stderr.write(\"no C++ compiler on PATH\\n\")\n        return 2\n    out = os.path.join(tempfile.mkdtemp(), \"suite\")\n    argv = [compiler, \"-std=c++20\", \"-I\", \"src\", \"-o\", out] + list(sources)\n    built = subprocess.run(argv)\n    if built.returncode != 0:\n        return built.returncode\n    return subprocess.run([out]).returncode\n\nif __name__ == \"__main__\":\n    sys.exit(main(sys.argv[1:]))\n",
+        "gauge/spec.cpp": "#include \"bounds.hpp\"\n#include \"sample.hpp\"\n\n#include <cstdio>\n#include <string>\n\nstatic int failures = 0;\n\nstatic void check(bool ok, const char* what) {\n    if (!ok) { std::printf(\"FAIL %s\\n\", what); ++failures; }\n}\n\nint main() {\n    const Samples samples = {{\"alpha\", 10.0}, {\"beta\", 30.5}};\n    const std::string json = summarize_json(samples);\n    check(json ==\n              \"{\\\"count\\\":2,\\\"total_ms\\\":40.5,\\\"max_ms\\\":30.5,\\\"mean_ms\\\":20.25,\"\n              \"\\\"samples\\\":[{\\\"label\\\":\\\"alpha\\\",\\\"ms\\\":10},\"\n              \"{\\\"label\\\":\\\"beta\\\",\\\"ms\\\":30.5}]}\",\n          \"json summary\");\n\n    check(summarize_json({}) ==\n              \"{\\\"count\\\":0,\\\"total_ms\\\":0,\\\"max_ms\\\":0,\\\"mean_ms\\\":0,\\\"samples\\\":[]}\",\n          \"json summary of nothing\");\n\n    const Samples quoted = {{\"a\\\"b\\\\c\", 1.0}};\n    check(summarize_json(quoted).find(\"\\\"a\\\\\\\"b\\\\\\\\c\\\"\") != std::string::npos,\n          \"labels are escaped\");\n\n    check(summarize(samples) == \"samples: 2\", \"the human summary is unchanged\");\n    return failures == 0 ? 0 : 1;\n}\n"
+      },
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/build.py",
+        "gauge/spec.cpp"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/build_tests.py",
+        "tests/visible.cpp"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ]
     }
-  ]
+  ],
+  "sweep": {
+    "rationale": "The full crossing is not runnable: three arms by five tiers by three tasks by three repetitions is 135 cells for one model, and a T3 cell runs for tens of minutes. Models are swept across T0 and T1, where cells are cheap and numerous and a model difference shows up as a pass-rate difference; T2, T3 and T4 run on the primary model alone, so the tier curve rather than the full crossing carries the scope story. Cells are ordered by model, because one llama-server in multi-model mode swaps weights on demand and an interleaved order would pay a reload per cell.",
+    "primaryModel": "llamacpp/qwen3.6-27b",
+    "models": [
+      "llamacpp/qwen3.6-27b"
+    ],
+    "sweptTiers": [
+      "T0",
+      "T1"
+    ],
+    "primaryOnlyTiers": [
+      "T2",
+      "T3",
+      "T4"
+    ],
+    "capabilities": [
+      "none"
+    ],
+    "reps": 3
+  }
 }

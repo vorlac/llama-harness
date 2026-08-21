@@ -1,8 +1,10 @@
 """Unit suite for scripts/conductor_bench.py - the Task 14.1 three-arm driver.
 
-One test per row of docs/build/specs/task-14.1.assertions.json; every docstring
-opens with the row id in square brackets so the assertion-coverage check can map
-rows onto tests mechanically.
+Every docstring opens with a row id in square brackets so coverage can be mapped
+onto tests mechanically: a 14.1-* id is a row of
+docs/build/specs/task-14.1.assertions.json, and a 22.*/22A.* id is a clause of
+the bench-integrity and scope-ladder phases in
+docs/plans/readonly-capability-plan.md.
 
 Everything here runs offline. Three tests spawn a process on purpose and nothing
 else does: the wall-clock timeout row (one sleeping child, killed by group), the
@@ -44,9 +46,45 @@ import conductor_bench as cb  # noqa: E402
 FALSE_BIN = "/usr/bin/false"
 TRUE_BIN = "/usr/bin/true"
 
-TASK_IDS = ["bt%02d" % n for n in range(1, 11)]
+# The synthetic set is built to satisfy the module's own per-tier pin, so the
+# loader under test is never handed a shape it would refuse for a reason the
+# test did not intend. The report and plan fixtures below use the first ten of
+# these against the hand-written PATTERN table.
+def _synthetic_tiers() -> List[str]:
+    """The pin's tier counts, dealt round-robin.
+
+    Dealt rather than blocked so the first ten - the slice PATTERN is written
+    for - span every tier, which is what makes the per-tier rollups testable
+    on the same fixture as everything else.
+    """
+    remaining = dict(cb.EXPECTED_TASK_COUNTS)
+    out: List[str] = []
+    while sum(remaining.values()):
+        for tier in cb.TIERS:
+            if remaining[tier]:
+                out.append(tier)
+                remaining[tier] -= 1
+    return out
+
+
+SYNTHETIC_TIERS = _synthetic_tiers()
+TASK_COUNT = len(SYNTHETIC_TIERS)
+TASK_IDS = ["bt%02d" % n for n in range(1, TASK_COUNT + 1)]
 
 SENTINEL_MODEL = "llamacpp/sentinel-model-x"
+SENTINEL_MODEL_B = "llamacpp/sentinel-model-y"
+CAPABILITY = cb.DEFAULT_CAPABILITY
+
+
+def make_cell(
+    arm: str,
+    task_id: str,
+    rep: int,
+    model: str = SENTINEL_MODEL,
+    capability: str = CAPABILITY,
+) -> object:
+    """One cell of the default (model, capability) stratum."""
+    return cb.Cell(model, capability, arm, task_id, rep)
 
 ROUTER_CONFIG = {
     "version": 1,
@@ -86,6 +124,8 @@ BASE_OPENCODE_CONFIG = {
 # Per-arm, per-task repetition outcomes for the report fixtures. "P" is a pass,
 # "F" a fail. Hand-written so every expected number below is computed from THIS
 # table rather than from the module under test.
+PATTERN_TASKS = 10
+
 PATTERN = {
     "baseline": ["FFF", "PPP", "PFF", "FFF", "PFP", "FFF", "FFF", "PPF", "FFF", "FFF"],
     "doctrine": ["FFF", "PPP", "PPF", "FPF", "PPP", "FFF", "PFF", "PPP", "FFF", "PFF"],
@@ -110,6 +150,10 @@ def task_dict(idx: int, **over: object) -> Dict[str, object]:
     """One well-formed manifest task. idx is 0-based."""
     entry = {
         "id": TASK_IDS[idx],
+        "tier": SYNTHETIC_TIERS[idx],
+        "mechanism": "no-test-first" if idx in (0, 4) else "none",
+        "expectedTrajectory": "task %d runs to a report and stops" % idx,
+        "expectedStopKinds": ["done", "REPORTED", "TRIVIAL_DONE"],
         "language": ("ts", "python", "cpp")[idx % 3],
         "difficulty": "one-function" if idx % 2 else "multi-file",
         # Tasks 0 and 4 are the non-behavioral (docs/comment) pair.
@@ -129,16 +173,36 @@ def task_dict(idx: int, **over: object) -> Dict[str, object]:
     return entry
 
 
-def manifest_dict(count: int = 10, **over: object) -> Dict[str, object]:
+def manifest_dict(count: int = TASK_COUNT, **over: object) -> Dict[str, object]:
     doc = {
         "version": 1,
         "selectionCriteria": {
             "languageMix": "ts, python and cpp each appear at least once",
             "difficultySpread": "one-function through small-multi-file",
             "nonBehavioral": "at least two docs/comment tasks",
+            "scopeLadder": "every tier from T0 to T4 carries tasks",
         },
-        "defaults": {"model": cb.DEFAULT_MODEL, "runTimeoutSec": 1800},
+        "defaults": {
+            "model": cb.DEFAULT_MODEL,
+            "tierTimeoutSec": dict(cb.TIER_TIMEOUT_SEC),
+        },
+        "sweep": sweep_dict(),
         "tasks": [task_dict(i) for i in range(count)],
+    }
+    doc.update(over)
+    return doc
+
+
+def sweep_dict(**over: object) -> Dict[str, object]:
+    """A well-formed §22.8 sweep block: one primary model, no second model."""
+    doc = {
+        "rationale": "the synthetic sweep runs one model so the fixture stays cheap",
+        "primaryModel": cb.DEFAULT_MODEL,
+        "models": [cb.DEFAULT_MODEL],
+        "sweptTiers": ["T0", "T1"],
+        "primaryOnlyTiers": ["T2", "T3", "T4"],
+        "capabilities": ["none"],
+        "reps": 3,
     }
     doc.update(over)
     return doc
@@ -152,6 +216,16 @@ def write_manifest(root: Path, doc: Dict[str, object], name: str = "tasks.json")
 
 def load_synthetic(root: Path, doc: Optional[Dict[str, object]] = None) -> List[object]:
     return cb.load_tasks(write_manifest(root, doc if doc is not None else manifest_dict()))
+
+
+def fixture_tasks(root: Path) -> List[object]:
+    """The ten synthetic tasks PATTERN is hand-written for.
+
+    The manifest holds the whole ladder; the aggregation and report fixtures
+    read the first ten so every expected number below stays computable from the
+    hand-written table rather than from a generated one.
+    """
+    return load_synthetic(root)[:PATTERN_TASKS]
 
 
 def snapshot(root: Path) -> Dict[str, int]:
@@ -223,7 +297,7 @@ def fixture_results(
     for rep in (1, 2, 3):
         for t_idx, task in enumerate(tasks):
             for arm in arms:
-                cell = cb.Cell(arm, task.id, rep)
+                cell = make_cell(arm, task.id, rep)
                 if cell.cell_id in drop:
                     continue
                 mark = PATTERN[arm][t_idx][rep - 1]
@@ -233,6 +307,7 @@ def fixture_results(
                         arm,
                         task.id,
                         rep,
+                        tier=task.tier,
                         outcome=OUTCOME_OF[mark],
                         passed=mark == "P",
                         exit_code=0 if mark == "P" else 1,
@@ -247,6 +322,9 @@ def make_result(
     arm: str,
     task_id: str,
     rep: int,
+    model: str = SENTINEL_MODEL,
+    capability: str = CAPABILITY,
+    tier: str = "T0",
     outcome: str = "pass",
     passed: bool = True,
     exit_code: Optional[int] = 0,
@@ -260,9 +338,12 @@ def make_result(
     for the non-conductor arms exactly as the schema requires."""
     conductor = arm == "conductor"
     result = {
-        "cellId": cb.Cell(arm, task_id, rep).cell_id,
+        "cellId": make_cell(arm, task_id, rep, model=model, capability=capability).cell_id,
+        "model": model,
+        "capability": capability,
         "arm": arm,
         "taskId": task_id,
+        "tier": tier,
         "rep": rep,
         "startedIso": "2026-08-14T00:0%d:00Z" % (rep % 10),
         "outcome": outcome,
@@ -280,6 +361,8 @@ def make_result(
         "reviewFindingsUpheld": 1 if conductor else None,
         "overridesUsed": 0 if conductor else None,
         "stopKind": "done" if conductor else None,
+        "subSessions": 4 if conductor else None,
+        "waves": 2 if conductor else None,
         "pluginAbsent": (False if plugin_absent is None else plugin_absent) if conductor else None,
     }
     result.update(over)
@@ -300,17 +383,25 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest.version, 1)
         self.assertTrue(manifest.selection_criteria)
         self.assertIn("model", manifest.defaults)
-        self.assertIn("runTimeoutSec", manifest.defaults)
+        self.assertEqual(
+            sorted(manifest.defaults["tierTimeoutSec"]),
+            sorted(cb.TIERS),
+            "defaults must carry one timeout per tier",
+        )
 
         tasks = cb.load_tasks(path)
-        self.assertEqual(len(tasks), cb.EXPECTED_TASK_COUNT)
-        self.assertEqual(cb.EXPECTED_TASK_COUNT, 10)
+        self.assertEqual(len(tasks), sum(cb.EXPECTED_TASK_COUNTS.values()))
+        self.assertEqual(cb.EXPECTED_TASK_COUNTS["T0"], 10)
         self.assertEqual([t.id for t in tasks], TASK_IDS, "manifest order must be preserved")
-        self.assertEqual(len({t.id for t in tasks}), 10)
+        self.assertEqual(len({t.id for t in tasks}), TASK_COUNT)
 
         first = tasks[0]
         self.assertIn(first.language, cb.LANGUAGES)
         self.assertIn(first.difficulty, cb.DIFFICULTIES)
+        self.assertIn(first.tier, cb.TIERS)
+        self.assertIn(first.mechanism, cb.MECHANISMS)
+        self.assertTrue(first.expected_trajectory.strip())
+        self.assertTrue(first.expected_stop_kinds)
         self.assertIsInstance(first.behavioral, bool)
         self.assertTrue(first.rationale.strip())
         self.assertTrue(first.prompt.strip())
@@ -323,6 +414,10 @@ class ManifestTests(unittest.TestCase):
         bad_cases = {
             "missing-key": self._mutate(0, drop="prompt"),
             "bad-language": self._mutate(0, language="rust"),
+            "bad-tier": self._mutate(0, tier="T9"),
+            "bad-mechanism": self._mutate(0, mechanism="vibes"),
+            "bad-stop-kind": self._mutate(0, expectedStopKinds=["exploded"]),
+            "empty-stop-kinds": self._mutate(0, expectedStopKinds=[]),
             "bad-difficulty": self._mutate(0, difficulty="medium"),
             "string-command": self._mutate(0, hiddenTestCommand="pytest tests"),
             "absolute-seed": self._mutate(0, seedFiles={"/etc/passwd": "x"}),
@@ -342,15 +437,32 @@ class ManifestTests(unittest.TestCase):
             cb.load_tasks(dup_path)
         self.assertIn(TASK_IDS[0], str(ctx.exception))
 
-        for count in (9, 11):
-            short = manifest_dict(count=min(count, 10))
-            if count == 11:
-                short["tasks"].append(task_dict(9, id="bt11"))
-            else:
-                short["tasks"] = short["tasks"][:9]
-            short_path = write_manifest(self.tmp, short, name="bad-count-%d.json" % count)
+        # The count pin is per tier: losing one T3 task and gaining one T2 task
+        # keeps the total unchanged and must still be refused, which a scalar
+        # total could not catch.
+        thin = manifest_dict()
+        dropped = next(i for i, t in enumerate(thin["tasks"]) if t["tier"] == "T3")
+        thin["tasks"].pop(dropped)
+        thin["tasks"].append(task_dict(0, id="bt-extra", tier="T2"))
+        thin_path = write_manifest(self.tmp, thin, name="bad-tier-mix.json")
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(thin_path)
+        self.assertIn("T3", str(ctx.exception))
+
+        for tier in cb.TIERS:
+            missing = manifest_dict()
+            missing["tasks"] = [t for t in missing["tasks"] if t["tier"] != tier]
+            missing_path = write_manifest(self.tmp, missing, name="bad-missing-%s.json" % tier)
             with self.assertRaises(cb.BenchError):
-                cb.load_tasks(short_path)
+                cb.load_tasks(missing_path)
+
+        # defaults carries a timeout per tier, and a tier without one is refused.
+        no_timeout = manifest_dict()
+        no_timeout["defaults"]["tierTimeoutSec"].pop("T3")
+        no_timeout_path = write_manifest(self.tmp, no_timeout, name="bad-timeouts.json")
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(no_timeout_path)
+        self.assertIn("T3", str(ctx.exception))
 
     def _mutate(self, idx: int, drop: Optional[str] = None, **over: object):
         doc = manifest_dict()
@@ -369,7 +481,7 @@ class ManifestTests(unittest.TestCase):
         )
         manifest = cb.load_manifest(cb.MANIFEST_PATH)
         tasks = manifest.tasks
-        self.assertEqual(len(tasks), 10)
+        self.assertEqual(len(tasks), sum(cb.EXPECTED_TASK_COUNTS.values()))
 
         languages = {t.language for t in tasks}
         for lang in ("ts", "python", "cpp"):
@@ -389,6 +501,80 @@ class ManifestTests(unittest.TestCase):
 
         self.assertTrue(manifest.selection_criteria, "selectionCriteria must be present")
         self.assertIsInstance(manifest.selection_criteria, dict)
+
+    def test_manifest_scope_ladder(self):
+        """[22A.1-scope-ladder] the committed manifest carries every scope tier
+        with at least three tasks each, T0 holds the trivial floor set, and each
+        task declares the mechanism it strains and the trajectory expected."""
+        tasks = cb.load_tasks(cb.MANIFEST_PATH)
+        by_tier = cb.tasks_by_tier(tasks)
+        self.assertEqual(sorted(by_tier), sorted(cb.TIERS), "every tier must be populated")
+        for tier in cb.TIERS:
+            self.assertGreaterEqual(
+                len(by_tier[tier]), 3, "tier %s carries fewer than three tasks" % tier
+            )
+            self.assertEqual(len(by_tier[tier]), cb.EXPECTED_TASK_COUNTS[tier], tier)
+        self.assertEqual(len(by_tier["T0"]), 10, "T0 is the ten-task cost floor")
+
+        for task in tasks:
+            self.assertIn(task.mechanism, cb.MECHANISMS, task.id)
+            self.assertTrue(task.expected_trajectory.strip(), task.id)
+            for kind in task.expected_stop_kinds:
+                self.assertIn(kind, cb.STOP_KINDS + cb.TERMINAL_RUN_STATES, task.id)
+
+        # A T0 task stays inside the plugin's own triviality bound; a T1+ task
+        # must not, or the tier measures the same trivial path T0 already does.
+        for task in by_tier["T0"]:
+            self.assertLessEqual(
+                len([p for p in task.seed_files if p.startswith("src/")]),
+                3,
+                "%s is a trivial-tier task with a large source surface" % task.id,
+            )
+        for tier in ("T1", "T2", "T3", "T4"):
+            for task in by_tier[tier]:
+                self.assertGreater(
+                    len([p for p in task.seed_files if p.startswith("src/")]),
+                    cb.TRIVIAL_MAX_FILES,
+                    "%s cannot classify as work: its source surface is within "
+                    "trivialMaxFiles" % task.id,
+                )
+
+        # The mechanism-stress corpus: each named mechanism is actually covered.
+        covered = {task.mechanism for task in tasks}
+        for mechanism in (
+            "no-test-first",
+            "scope-boundary",
+            "missing-dependency",
+            "ambiguous-requirement",
+            "brief-window",
+            "dependency-chain",
+            "parallel-waves",
+        ):
+            self.assertIn(mechanism, covered, "no task strains %r" % mechanism)
+
+    def test_manifest_per_tier_timeouts(self):
+        """[22A.3c-per-tier-timeouts] a task's run timeout comes from its tier,
+        so a T3 build is not scored as a wrong answer for taking longer than a
+        one-function edit."""
+        manifest = cb.load_manifest(cb.MANIFEST_PATH)
+        table = manifest.defaults["tierTimeoutSec"]
+        self.assertEqual(sorted(table), sorted(cb.TIERS))
+        for tier in cb.TIERS:
+            self.assertEqual(table[tier], cb.TIER_TIMEOUT_SEC[tier], tier)
+        for task in manifest.tasks:
+            self.assertEqual(task.run_timeout_sec, table[task.tier], task.id)
+        self.assertGreater(
+            cb.TIER_TIMEOUT_SEC["T3"],
+            cb.TIER_TIMEOUT_SEC["T0"],
+            "a deeper tier needs longer than the trivial floor",
+        )
+
+        # An explicit per-task override still wins over its tier's default.
+        doc = manifest_dict()
+        doc["tasks"][0]["runTimeoutSec"] = 123
+        tasks = cb.load_tasks(write_manifest(self.tmp, doc, name="override.json"))
+        self.assertEqual(tasks[0].run_timeout_sec, 123)
+        self.assertEqual(tasks[1].run_timeout_sec, cb.TIER_TIMEOUT_SEC[tasks[1].tier])
 
     def test_hidden_command_spawnable(self):
         """[14.1-hidden-command-spawnable] every hidden and visible test command
@@ -767,7 +953,7 @@ class PlanAndCellTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cbench-cell-"))
         self.addCleanup(shutil.rmtree, str(self.tmp), True)
-        self.tasks = load_synthetic(self.tmp)
+        self.tasks = fixture_tasks(self.tmp)
 
     def test_run_plan_90_balanced(self):
         """[14.1-run-plan-90-balanced] the plan is 90 uniquely-named cells,
@@ -779,7 +965,17 @@ class PlanAndCellTests(unittest.TestCase):
         self.assertEqual(len(set(ids)), 90)
 
         for cell in plan:
-            self.assertEqual(cell.cell_id, "%s/%s/r%d" % (cell.arm, cell.task_id, cell.rep))
+            self.assertEqual(
+                cell.cell_id,
+                "%s/%s/%s/%s/r%d"
+                % (
+                    cb.model_slug(cell.model),
+                    cell.capability,
+                    cell.arm,
+                    cell.task_id,
+                    cell.rep,
+                ),
+            )
             self.assertIn(cell.rep, (1, 2, 3))
 
         pairs = {}
@@ -812,13 +1008,173 @@ class PlanAndCellTests(unittest.TestCase):
             other = cb.build_run_plan(self.tasks, reps=reps)
             self.assertEqual(len(other), reps * len(self.tasks) * len(cb.ARMS))
 
+    def test_cells_carry_model_and_capability(self):
+        """[22.6-model-dimension] model and capability are matrix dimensions:
+        they are in the cell id, the work tree and the result record, so two
+        models can no longer collide in one cell namespace, and cell ordering
+        groups by model so a multi-model server is not asked to swap weights
+        every cell."""
+        one = make_cell("baseline", TASK_IDS[0], 1)
+        self.assertEqual(one.model, SENTINEL_MODEL)
+        self.assertEqual(one.capability, CAPABILITY)
+        self.assertIn(cb.model_slug(SENTINEL_MODEL), one.cell_id)
+        self.assertIn(CAPABILITY, one.cell_id)
+        self.assertNotIn("/", cb.model_slug(SENTINEL_MODEL), "a slug must not carry a separator")
+
+        other = make_cell("baseline", TASK_IDS[0], 1, model=SENTINEL_MODEL_B)
+        self.assertNotEqual(
+            one.cell_id, other.cell_id, "two models must not share one cell namespace"
+        )
+        root = self.tmp / "work"
+        self.assertNotEqual(cb.cell_dir_for(root, one), cb.cell_dir_for(root, other))
+        self.assertNotEqual(cb.result_path(root, one), cb.result_path(root, other))
+        self.assertIn(cb.model_slug(SENTINEL_MODEL), str(cb.cell_dir_for(root, one)))
+
+        models = [SENTINEL_MODEL, SENTINEL_MODEL_B]
+        plan = cb.build_run_plan(self.tasks, models=models)
+        self.assertEqual(len(plan), 2 * 90)
+        self.assertEqual(len({c.cell_id for c in plan}), 2 * 90)
+
+        # Grouped by model: every cell of the first model precedes every cell
+        # of the second, so the campaign pays one weight load per model rather
+        # than one per cell.
+        order = [c.model for c in plan]
+        self.assertEqual(order, [models[0]] * 90 + [models[1]] * 90)
+
+        # Arm balance still holds inside each model's block.
+        for start in (0, 90):
+            block = plan[start : start + 90]
+            for length in range(0, 91):
+                counts = [sum(1 for c in block[:length] if c.arm == arm) for arm in cb.ARMS]
+                self.assertLessEqual(max(counts) - min(counts), 1, (start, length, counts))
+
+        # The capability dimension is carried by every arm alike.
+        capable = cb.build_run_plan(self.tasks, capabilities=cb.CAPABILITIES)
+        for arm in cb.ARMS:
+            self.assertEqual(
+                sorted({c.capability for c in capable if c.arm == arm}),
+                sorted(cb.CAPABILITIES),
+                "%s does not carry every capability" % arm,
+            )
+        self.assertEqual(cb.CAPABILITIES, ("none",), "no capability is on under this posture")
+
+    def test_sweep_plan_follows_the_declared_shape(self):
+        """[22.8-sweep-shape] the run plan is built from the manifest's declared
+        sweep: the primary model carries every tier, a swept model carries only
+        the cheap tiers, and the cells stay grouped by model."""
+        manifest = cb.load_manifest(
+            write_manifest(
+                self.tmp,
+                manifest_dict(
+                    sweep=sweep_dict(
+                        models=[SENTINEL_MODEL, SENTINEL_MODEL_B],
+                        primaryModel=SENTINEL_MODEL,
+                    )
+                ),
+                name="sweep.json",
+            )
+        )
+        plan = cb.build_sweep_plan(manifest)
+        by_model = {}
+        for c in plan:
+            by_model.setdefault(c.model, []).append(c)
+        self.assertEqual(sorted(by_model), sorted([SENTINEL_MODEL, SENTINEL_MODEL_B]))
+
+        tier_of = dict((task.id, task.tier) for task in manifest.tasks)
+        primary_tiers = {tier_of[c.task_id] for c in by_model[SENTINEL_MODEL]}
+        swept_tiers = {tier_of[c.task_id] for c in by_model[SENTINEL_MODEL_B]}
+        self.assertEqual(sorted(primary_tiers), sorted(cb.TIERS), "the primary model runs it all")
+        self.assertEqual(sorted(swept_tiers), ["T0", "T1"], "a swept model runs the cheap tiers")
+
+        order = [c.model for c in plan]
+        self.assertEqual(
+            order, sorted(order, key=lambda m: [SENTINEL_MODEL, SENTINEL_MODEL_B].index(m))
+        )
+
+        expected = (
+            len(manifest.tasks) * len(cb.ARMS) * manifest.sweep["reps"]
+            + sum(1 for t in manifest.tasks if t.tier in ("T0", "T1"))
+            * len(cb.ARMS)
+            * manifest.sweep["reps"]
+        )
+        self.assertEqual(len(plan), expected)
+        self.assertEqual(len({c.cell_id for c in plan}), len(plan))
+
+        self.assertEqual(
+            cb.models_for_tier(manifest.sweep, "T3"), [SENTINEL_MODEL], "T3 is primary only"
+        )
+        self.assertEqual(
+            cb.models_for_tier(manifest.sweep, "T0"), [SENTINEL_MODEL, SENTINEL_MODEL_B]
+        )
+
+    def test_declared_asymmetries_are_stated_not_denied(self):
+        """[22.1-declared-asymmetries] the arms differ in per-role sampling and
+        in sub-agent availability; both are declared, carried in the run
+        manifest, and printed in the report header rather than papered over."""
+        asymmetries = cb.declared_asymmetries()
+        self.assertTrue(asymmetries, "the campaign has asymmetries and must say so")
+        names = [item["dimension"] for item in asymmetries]
+        self.assertIn("sampling", names)
+        self.assertIn("sub-agent availability", names)
+        for item in asymmetries:
+            for key in ("dimension", "conductor", "pluginAbsent", "why"):
+                self.assertIn(key, item, item)
+                self.assertTrue(str(item[key]).strip(), item)
+
+        sampling = next(i for i in asymmetries if i["dimension"] == "sampling")
+        for role, temperature in cb.ROLE_TEMPERATURE.items():
+            self.assertIn(role, sampling["conductor"], role)
+            self.assertIn(str(temperature), sampling["conductor"], role)
+
+        results = fixture_results(self.tasks, cb.ARMS)
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
+        header = section_of(report, cb.SECTION_ASYMMETRIES)
+        for item in asymmetries:
+            self.assertIn(item["dimension"], header)
+        self.assertLess(
+            report.index(cb.SECTION_ASYMMETRIES),
+            report.index(cb.SECTION_PER_TASK),
+            "the asymmetries belong in the header, above any number they qualify",
+        )
+
+    def test_run_manifest_records_the_design(self):
+        """[22.1-run-manifest] the run records its own design - models,
+        capabilities, arms, repetitions, per-tier timeouts, sweep shape,
+        exclusion policy and declared asymmetries - before any cell runs."""
+        manifest = cb.load_manifest(write_manifest(self.tmp, manifest_dict(), name="rm.json"))
+        run_manifest = cb.build_run_manifest(
+            manifest, models=[SENTINEL_MODEL, SENTINEL_MODEL_B], arms=cb.ARMS, reps=3
+        )
+        self.assertEqual(run_manifest["models"], [SENTINEL_MODEL, SENTINEL_MODEL_B])
+        self.assertEqual(run_manifest["arms"], list(cb.ARMS))
+        self.assertEqual(run_manifest["capabilities"], list(cb.CAPABILITIES))
+        self.assertEqual(run_manifest["reps"], 3)
+        self.assertEqual(run_manifest["tierTimeoutSec"], dict(cb.TIER_TIMEOUT_SEC))
+        self.assertEqual(run_manifest["sweep"], manifest.sweep)
+        self.assertEqual(run_manifest["asymmetries"], cb.declared_asymmetries())
+        self.assertEqual(run_manifest["exclusionReasons"], list(cb.EXCLUSION_REASONS))
+        self.assertEqual(
+            run_manifest["taskIdsByTier"],
+            dict(
+                (tier, [t.id for t in group])
+                for tier, group in cb.tasks_by_tier(manifest.tasks).items()
+            ),
+        )
+
+        target = self.tmp / "nested" / "run-manifest.json"
+        written = cb.write_run_manifest(target, run_manifest)
+        self.assertEqual(written, target)
+        self.assertEqual(json.loads(target.read_text()), run_manifest)
+
     def test_cell_work_tree_fresh(self):
         """[14.1-cell-work-tree-fresh] every cell gets a fresh seeded git work
         tree, so repetition 2 can never inherit repetition 1's edits."""
         task = self.tasks[0]
-        cell_a = cb.cell_dir_for(self.tmp / "work", cb.Cell("baseline", task.id, 1))
-        cell_b = cb.cell_dir_for(self.tmp / "work", cb.Cell("baseline", task.id, 2))
-        cell_c = cb.cell_dir_for(self.tmp / "work", cb.Cell("doctrine", task.id, 1))
+        cell_a = cb.cell_dir_for(self.tmp / "work", make_cell("baseline", task.id, 1))
+        cell_b = cb.cell_dir_for(self.tmp / "work", make_cell("baseline", task.id, 2))
+        cell_c = cb.cell_dir_for(self.tmp / "work", make_cell("doctrine", task.id, 1))
         self.assertEqual(len({cell_a, cell_b, cell_c}), 3, "cells must not share a directory")
 
         calls = []
@@ -848,7 +1204,7 @@ class PlanAndCellTests(unittest.TestCase):
         self.assertEqual((work / "README.md").read_text(), task.seed_files["README.md"])
 
         # Real git: the seeded tree must be a repo with one clean commit.
-        real_cell = cb.cell_dir_for(self.tmp / "gitwork", cb.Cell("baseline", task.id, 3))
+        real_cell = cb.cell_dir_for(self.tmp / "gitwork", make_cell("baseline", task.id, 3))
         real_work = cb.seed_cell(real_cell, task)
         self.assertTrue((real_work / ".git").exists(), "seed_cell must initialize a git repo")
         tracked = subprocess.run(
@@ -958,7 +1314,7 @@ class PlanAndCellTests(unittest.TestCase):
             self.fail("grandchild %d survived the timeout - the process group was not killed" % pid)
 
         task = self.tasks[0]
-        cell = cb.Cell("baseline", task.id, 1)
+        cell = make_cell("baseline", task.id, 1)
         hung = cb.CommandOutcome(
             exit_code=None, timed_out=True, spawn_error=None, wall_clock_ms=2100
         )
@@ -1050,7 +1406,7 @@ class PlanAndCellTests(unittest.TestCase):
             ]
             return cb.CommandOutcome(exit_code=1, timed_out=False, spawn_error=None, wall_clock_ms=3)
 
-        cell = cb.Cell("baseline", task.id, 1)
+        cell = make_cell("baseline", task.id, 1)
         work_cell_dir = cb.cell_dir_for(self.tmp / "ordered", cell)
         result = cb.run_cell(
             cell,
@@ -1121,7 +1477,7 @@ class ResultTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cbench-result-"))
         self.addCleanup(shutil.rmtree, str(self.tmp), True)
-        self.tasks = load_synthetic(self.tmp)
+        self.tasks = fixture_tasks(self.tmp)
 
     def test_result_written_per_cell(self):
         """[14.1-result-written-per-cell] one result file per cell, named for
@@ -1136,9 +1492,10 @@ class ResultTests(unittest.TestCase):
         results_dir = self.tmp / "runs"
         report_path = self.tmp / "out" / "conductor-report.md"
         work_root = self.tmp / "work"
-        cell = cb.Cell("doctrine", TASK_IDS[3], 2)
+        cell = make_cell("doctrine", TASK_IDS[3], 2)
         self.assertEqual(
-            cb.result_path(results_dir, cell), results_dir / "doctrine__bt04__r2.json"
+            cb.result_path(results_dir, cell),
+            results_dir / "llamacpp-sentinel-model-x__none__doctrine__bt04__r2.json",
         )
 
         written = cb.write_result(results_dir, make_result("doctrine", TASK_IDS[3], 2))
@@ -1149,7 +1506,9 @@ class ResultTests(unittest.TestCase):
 
         def fake_runner(cell, task, cell_dir):
             calls.append(cell.cell_id)
-            return make_result(cell.arm, cell.task_id, cell.rep)
+            return make_result(
+                cell.arm, cell.task_id, cell.rep, model=cell.model, capability=cell.capability
+            )
 
         before = snapshot(self.tmp)
         outcome = cb.run_benchmark(
@@ -1157,7 +1516,7 @@ class ResultTests(unittest.TestCase):
             results_dir=results_dir,
             report_path=report_path,
             work_root=work_root,
-            model=SENTINEL_MODEL,
+            models=[SENTINEL_MODEL],
             cell_runner=fake_runner,
         )
         self.assertEqual(len(outcome["results"]), 90)
@@ -1184,8 +1543,11 @@ class ResultTests(unittest.TestCase):
         name and round-tripping unchanged."""
         expected_keys = {
             "cellId",
+            "model",
+            "capability",
             "arm",
             "taskId",
+            "tier",
             "rep",
             "startedIso",
             "outcome",
@@ -1198,6 +1560,8 @@ class ResultTests(unittest.TestCase):
             "reviewFindingsUpheld",
             "overridesUsed",
             "stopKind",
+            "subSessions",
+            "waves",
             "pluginAbsent",
         }
         self.assertEqual(set(cb.RESULT_KEYS), expected_keys)
@@ -1354,16 +1718,16 @@ class ResultTests(unittest.TestCase):
         self.assertEqual(clean["routerErrors"], 0)
 
         results = fixture_results(self.tasks, ("baseline",))
-        flagged = cb.Cell("baseline", TASK_IDS[2], 1).cell_id
+        flagged = make_cell("baseline", TASK_IDS[2], 1).cell_id
         for row in results:
             if row["cellId"] == flagged:
                 row["routerErrors"] = 4
         report = cb.render_report(
-            results, self.tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3
+            results, self.tasks, models=[SENTINEL_MODEL], arms=("baseline",), reps=3
         )
         section = section_of(report, cb.SECTION_ROUTER_ERRORS)
         self.assertIn(flagged, section, "a cell with router errors must be named in the report")
-        agg = cb.aggregate(results, self.tasks, arms=("baseline",), reps=3)
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3)
         self.assertIn(flagged, agg["armTotals"]["baseline"]["routerErrorCells"])
 
 
@@ -1485,7 +1849,7 @@ class MetricsTests(unittest.TestCase):
             make_result("doctrine", TASK_IDS[0], 1),
             make_result("conductor", TASK_IDS[0], 1),
         ]
-        report = cb.render_report(results, tasks[:1], model=SENTINEL_MODEL, arms=cb.ARMS, reps=1)
+        report = cb.render_report(results, tasks[:1], models=[SENTINEL_MODEL], arms=cb.ARMS, reps=1)
         self.assertEqual(cb.format_metric(None), cb.NA)
         self.assertEqual(cb.NA, "n/a")
         self.assertIn(cb.NA, report, "null process metrics must render as n/a")
@@ -1504,32 +1868,37 @@ class MetricsTests(unittest.TestCase):
             self.assertIsNone(metrics[key], key)
         self.assertIsNone(cb.collect_metrics("baseline", empty)["pluginAbsent"])
 
-        tasks = load_synthetic(self.tmp)
+        tasks = fixture_tasks(self.tmp)
         results = fixture_results(tasks, ("conductor",))
         absent = [
-            cb.Cell("conductor", TASK_IDS[0], 1).cell_id,
-            cb.Cell("conductor", TASK_IDS[0], 2).cell_id,
+            make_cell("conductor", TASK_IDS[0], 1).cell_id,
+            make_cell("conductor", TASK_IDS[0], 2).cell_id,
         ]
         for row in results:
             if row["cellId"] in absent:
                 row["pluginAbsent"] = True
-        agg = cb.aggregate(results, tasks, arms=("conductor",), reps=3)
+        agg = cb.aggregate(results, tasks, model=SENTINEL_MODEL, arms=("conductor",), reps=3)
         group = agg["groups"]["conductor"][TASK_IDS[0]]
 
         # PATTERN conductor task 0 is "PPP"; two of its three cells are ungated.
-        self.assertEqual(group["recorded"], 1, "ungated cells leave the denominator")
+        self.assertEqual(group["scored"], 1, "ungated cells leave the denominator")
         self.assertEqual(group["passes"], 1)
         self.assertEqual(group["excluded"], 2)
 
         totals = agg["armTotals"]["conductor"]
         planned_recorded = sum(PATTERN["conductor"][i].count("P") for i in range(10))
         self.assertEqual(totals["passes"], planned_recorded - 2)
-        self.assertEqual(sorted(totals["excludedPluginAbsent"]), sorted(absent))
+        self.assertEqual(
+            sorted(row["cellId"] for row in totals["excludedCells"]), sorted(absent)
+        )
+        self.assertEqual(
+            {row["reason"] for row in totals["excludedCells"]}, {"plugin-absent"}
+        )
 
         report = cb.render_report(
-            results, tasks, model=SENTINEL_MODEL, arms=("conductor",), reps=3
+            results, tasks, models=[SENTINEL_MODEL], arms=("conductor",), reps=3
         )
-        section = section_of(report, cb.SECTION_PLUGIN_ABSENT)
+        section = section_of(report, cb.SECTION_EXCLUSIONS)
         for cell_id in absent:
             self.assertIn(cell_id, section)
         # The count is stated somewhere other than the cell-id listing itself.
@@ -1544,7 +1913,7 @@ class ReportTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cbench-report-"))
         self.addCleanup(shutil.rmtree, str(self.tmp), True)
-        self.tasks = load_synthetic(self.tmp)
+        self.tasks = fixture_tasks(self.tmp)
 
     def test_aggregate_per_task_spread(self):
         """[14.1-aggregate-per-task-spread] aggregate reports spread, not just
@@ -1552,7 +1921,7 @@ class ReportTests(unittest.TestCase):
         group, so a 1/3-vs-2/3 difference can never look stable."""
         results = fixture_results(self.tasks, ("baseline",))
         self.assertEqual(len(results), 30)
-        agg = cb.aggregate(results, self.tasks, arms=("baseline",), reps=3)
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3)
 
         for idx, task in enumerate(self.tasks):
             pattern = PATTERN["baseline"][idx]
@@ -1596,7 +1965,9 @@ class ReportTests(unittest.TestCase):
         comparison without them."""
         results = fixture_results(self.tasks, cb.ARMS)
         self.assertEqual(len(results), 90)
-        report = cb.render_report(results, self.tasks, model=SENTINEL_MODEL, arms=cb.ARMS, reps=3)
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
 
         self.assertIn(cb.SECTION_PER_TASK, report)
         self.assertIn(cb.SECTION_ARM_TOTALS, report)
@@ -1646,7 +2017,7 @@ class ReportTests(unittest.TestCase):
             for arm in cb.ARMS
         ]
         clean = cb.render_report(
-            separated, self.tasks[:3], model=SENTINEL_MODEL, arms=cb.ARMS, reps=3
+            separated, self.tasks[:3], models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
         )
         self.assertNotIn(
             cb.NOISE_NOTE, clean, "cleanly separated arms must not be described as within noise"
@@ -1655,7 +2026,7 @@ class ReportTests(unittest.TestCase):
         one_arm = cb.render_report(
             fixture_results(self.tasks, ("baseline",)),
             self.tasks,
-            model=SENTINEL_MODEL,
+            models=[SENTINEL_MODEL],
             arms=("baseline",),
             reps=3,
         )
@@ -1676,7 +2047,7 @@ class ReportTests(unittest.TestCase):
         results = fixture_results(self.tasks, ("baseline",), drop=dropped)
         self.assertEqual(len(results), 22)
 
-        agg = cb.aggregate(results, self.tasks, arms=("baseline",), reps=3)
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3)
         totals = agg["armTotals"]["baseline"]
         self.assertEqual(totals["planned"], 30)
         self.assertEqual(totals["recorded"], 22)
@@ -1687,7 +2058,7 @@ class ReportTests(unittest.TestCase):
         self.assertLess(totals["passes"], sum(p.count("P") for p in PATTERN["baseline"]))
 
         report = cb.render_report(
-            results, self.tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3
+            results, self.tasks, models=[SENTINEL_MODEL], arms=("baseline",), reps=3
         )
         # Pinned to a literal, not to format_recorded's own output: a report
         # that claimed "30 of 30 recorded" for 22 recorded cells is the exact
@@ -1701,9 +2072,9 @@ class ReportTests(unittest.TestCase):
             rows = [line for line in table.splitlines() if task.id in line]
             self.assertEqual(len(rows), 1, task.id)
             self.assertIn(
-                cb.format_rate(group["passes"], group["recorded"]),
+                cb.format_rate(group["passes"], group["scored"]),
                 rows[0],
-                "%s must report over recorded cells only" % task.id,
+                "%s must report over scored cells only" % task.id,
             )
             if group["recorded"] != group["planned"]:
                 self.assertIn(cb.format_recorded(group["recorded"], group["planned"]), rows[0])
@@ -1715,9 +2086,11 @@ class ReportTests(unittest.TestCase):
     def test_report_cost_and_method(self):
         """[14.1-report-cost-and-method] the report carries the cost side and
         its own methodology, so the deliverable is quality delta VERSUS cost."""
-        partial_cell = cb.Cell("baseline", TASK_IDS[5], 2).cell_id
+        partial_cell = make_cell("baseline", TASK_IDS[5], 2).cell_id
         results = fixture_results(self.tasks, cb.ARMS, partial_cell=partial_cell)
-        report = cb.render_report(results, self.tasks, model=SENTINEL_MODEL, arms=cb.ARMS, reps=3)
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
 
         method = section_of(report, cb.SECTION_METHOD)
         self.assertIn(SENTINEL_MODEL, method, "the model must be named")
@@ -1737,7 +2110,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(cb.format_tokens(4500, False), "4500")
         self.assertEqual(cb.format_tokens(4500, True), "4500 (partial)")
 
-        agg = cb.aggregate(results, self.tasks, arms=cb.ARMS, reps=3)
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=cb.ARMS, reps=3)
         cost = section_of(report, cb.SECTION_COST)
         for arm in cb.ARMS:
             wall = [1000 + 10 * i + r for i in range(10) for r in (1, 2, 3)]
@@ -1762,7 +2135,7 @@ class DriverTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cbench-driver-"))
         self.addCleanup(shutil.rmtree, str(self.tmp), True)
-        self.tasks = load_synthetic(self.tmp)
+        self.tasks = fixture_tasks(self.tmp)
 
     def test_resume_and_report_only(self):
         """[14.1-resume-and-report-only] an overnight that dies is resumable:
@@ -1772,13 +2145,19 @@ class DriverTests(unittest.TestCase):
         report_path = self.tmp / "conductor-report.md"
         work_root = self.tmp / "work"
 
-        plan = cb.build_run_plan(self.tasks)
+        plan = cb.build_run_plan(self.tasks, models=[SENTINEL_MODEL])
         self.assertEqual(len(plan), 90)
         done = plan[:12]
         preexisting = {}
         for cell in done:
             row = make_result(
-                cell.arm, cell.task_id, cell.rep, wall_clock_ms=4242, startedIso="2026-01-01T00:00:00Z"
+                cell.arm,
+                cell.task_id,
+                cell.rep,
+                model=cell.model,
+                capability=cell.capability,
+                wall_clock_ms=4242,
+                startedIso="2026-01-01T00:00:00Z",
             )
             preexisting[cell.cell_id] = row
             cb.write_result(results_dir, row)
@@ -1789,14 +2168,21 @@ class DriverTests(unittest.TestCase):
         def counting_runner(cell, task, cell_dir):
             calls.append(cell.cell_id)
             Path(cell_dir).mkdir(parents=True, exist_ok=True)
-            return make_result(cell.arm, cell.task_id, cell.rep, wall_clock_ms=7)
+            return make_result(
+                cell.arm,
+                cell.task_id,
+                cell.rep,
+                model=cell.model,
+                capability=cell.capability,
+                wall_clock_ms=7,
+            )
 
         outcome = cb.run_benchmark(
             self.tasks,
             results_dir=results_dir,
             report_path=report_path,
             work_root=work_root,
-            model=SENTINEL_MODEL,
+            models=[SENTINEL_MODEL],
             cell_runner=counting_runner,
         )
         self.assertEqual(len(calls), 78, "12 completed cells must be skipped, not re-run")
@@ -1830,7 +2216,7 @@ class DriverTests(unittest.TestCase):
             results_dir=fresh_results,
             report_path=fresh_report,
             work_root=self.tmp / "work-12",
-            model=SENTINEL_MODEL,
+            models=[SENTINEL_MODEL],
             report_only=True,
             cell_runner=counting_runner,
         )
@@ -1845,6 +2231,283 @@ class DriverTests(unittest.TestCase):
             self.assertNotIn(
                 cell_id, section_of(text, cb.SECTION_MISSING), "%s was recorded" % cell_id
             )
+
+
+class IntegrityTests(unittest.TestCase):
+    """Phase 22 and 22A: the corrections that make the output believable."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cbench-integrity-"))
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+        self.tasks = fixture_tasks(self.tmp)
+
+    def test_exclusions_are_arm_symmetric(self):
+        """[22.2-symmetric-exclusions] a cell is excluded by one predicate for
+        every arm, an exclusion takes its arm-symmetric counterparts with it,
+        and the counts are reported per arm."""
+        for reason, row in (
+            ("plugin-absent", make_result("conductor", TASK_IDS[0], 1, plugin_absent=True)),
+            (
+                "harness-error",
+                make_result(
+                    "baseline", TASK_IDS[0], 1, outcome="harness-error", passed=False,
+                    exit_code=None,
+                ),
+            ),
+        ):
+            self.assertEqual(cb.exclusion_reason(row), reason)
+        self.assertIsNone(cb.exclusion_reason(make_result("baseline", TASK_IDS[0], 1)))
+        self.assertIsNone(
+            cb.exclusion_reason(make_result("conductor", TASK_IDS[0], 1)),
+            "a gated conductor cell is a measurement, not an exclusion",
+        )
+
+        results = fixture_results(self.tasks, cb.ARMS)
+        by_id = {row["cellId"]: row for row in results}
+        ungated = make_cell("conductor", TASK_IDS[1], 2).cell_id
+        by_id[ungated]["pluginAbsent"] = True
+
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=cb.ARMS, reps=3)
+        for arm in cb.ARMS:
+            group = agg["groups"][arm][TASK_IDS[1]]
+            self.assertEqual(
+                group["excluded"],
+                1,
+                "%s kept a cell whose arm-symmetric counterpart was excluded" % arm,
+            )
+            self.assertEqual(group["scored"], 2, arm)
+            self.assertEqual(
+                agg["armTotals"][arm]["excluded"], 1, "%s excluded count" % arm
+            )
+            excluded_ids = [row["cellId"] for row in agg["armTotals"][arm]["excludedCells"]]
+            self.assertEqual(
+                excluded_ids, [make_cell(arm, TASK_IDS[1], 2).cell_id], arm
+            )
+
+        # PATTERN task 1 is PPP for all three arms, so dropping repetition 2
+        # costs each arm exactly one pass - the same one.
+        for arm in cb.ARMS:
+            self.assertEqual(agg["groups"][arm][TASK_IDS[1]]["passes"], 2, arm)
+
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
+        section = section_of(report, cb.SECTION_EXCLUSIONS)
+        for arm in cb.ARMS:
+            self.assertIn(make_cell(arm, TASK_IDS[1], 2).cell_id, section, arm)
+        self.assertIn("plugin-absent", section, "the reason must be named")
+
+    def test_arms_are_seeded_identically(self):
+        """[22.2-identical-seeds] every arm's work tree starts from the same
+        file set and the same commit, so no arm is compared against a different
+        tree from the others."""
+        task = self.tasks[0]
+        listings = {}
+        heads = {}
+        for arm in cb.ARMS:
+            cell = make_cell(arm, task.id, 1)
+            directory = cb.cell_dir_for(self.tmp / "seeds", cell)
+            cb.run_cell(
+                cell,
+                task,
+                cell_dir=directory,
+                model=SENTINEL_MODEL,
+                router_config=ROUTER_CONFIG,
+                base_config=BASE_OPENCODE_CONFIG,
+                timeout_sec=5,
+                runner=lambda invocation: cb.CommandOutcome(0, False, None, 1),
+                test_runner=lambda argv, cwd, timeout_sec: cb.CommandOutcome(1, False, None, 1),
+            )
+            work = directory / "repo"
+            listings[arm] = sorted(
+                subprocess.run(
+                    ["git", "-C", str(work), "ls-files"],
+                    stdout=subprocess.PIPE,
+                    check=True,
+                ).stdout.decode().split()
+            )
+            heads[arm] = subprocess.run(
+                ["git", "-C", str(work), "rev-parse", "HEAD:"],
+                stdout=subprocess.PIPE,
+                check=True,
+            ).stdout.decode().strip()
+
+        first = cb.ARMS[0]
+        for arm in cb.ARMS[1:]:
+            self.assertEqual(listings[arm], listings[first], "%s file listing differs" % arm)
+            self.assertEqual(heads[arm], heads[first], "%s seed tree hash differs" % arm)
+        self.assertIn(".conductor/config.json", listings[first])
+
+    def test_timeout_is_its_own_outcome(self):
+        """[22A.3c-timeout-outcome] a timeout is reported as a timeout, never
+        folded into the pass rate, so a tier that runs longer is not scored as
+        a tier that answered wrongly."""
+        results = fixture_results(self.tasks, ("conductor",))
+        by_id = {row["cellId"]: row for row in results}
+        timed_out = make_cell("conductor", TASK_IDS[1], 3).cell_id
+        by_id[timed_out].update({"outcome": "timeout", "passed": False, "exitCode": None})
+
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=("conductor",), reps=3)
+        group = agg["groups"]["conductor"][TASK_IDS[1]]
+        self.assertEqual(group["timeouts"], 1)
+        self.assertEqual(group["scored"], 2, "a timeout leaves the pass-rate denominator")
+        self.assertEqual(group["passes"], 2)
+        self.assertIn("timeout", group["outcomes"], "the spread still shows it")
+        self.assertEqual(agg["armTotals"]["conductor"]["timeouts"], 1)
+
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=("conductor",), reps=3
+        )
+        self.assertIn(cb.TIMEOUT_NOTE, report)
+        self.assertIn(timed_out, section_of(report, cb.SECTION_TIMEOUTS))
+
+    def test_report_states_separability_not_a_verdict(self):
+        """[22.3-separability] the headline readout is whether the arms are
+        separable at all; the report states plainly that it computes no
+        win/tie/loss, and carries wall clock as its own axis."""
+        results = fixture_results(self.tasks, cb.ARMS)
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
+        self.assertIn(cb.NO_VERDICT_NOTE, report)
+        for word in ("win", "tie", "loss", "winner"):
+            self.assertNotIn(
+                "## %s" % word, report.lower(), "the report must not adjudicate a %s" % word
+            )
+        separability = section_of(report, cb.SECTION_SEPARABILITY)
+        # Task 2 is baseline 1/3 vs doctrine 2/3: different, and overlapping.
+        self.assertIn(TASK_IDS[2], separability)
+        self.assertIn(cb.NOISE_NOTE, report)
+
+        cost = section_of(report, cb.SECTION_COST)
+        for arm in cb.ARMS:
+            self.assertIn(arm, cost, "%s wall clock is its own axis" % arm)
+
+    def test_cost_curve_by_tier(self):
+        """[22A.4-cost-per-tier] wall clock, tokens, sub-sessions and waves are
+        reported per tier per arm, so the deliverable is a curve against scope
+        rather than one win rate."""
+        results = fixture_results(self.tasks, cb.ARMS)
+        agg = cb.aggregate(results, self.tasks, model=SENTINEL_MODEL, arms=cb.ARMS, reps=3)
+        tiers = {task.tier for task in self.tasks}
+        self.assertGreater(len(tiers), 1, "the fixture must span more than one tier")
+        for tier in tiers:
+            for arm in cb.ARMS:
+                row = agg["tierTotals"][tier][arm]
+                members = [t for t in self.tasks if t.tier == tier]
+                expected_wall = sum(
+                    1000 + 10 * self.tasks.index(t) + r for t in members for r in (1, 2, 3)
+                )
+                self.assertEqual(row["wallClockMsTotal"], expected_wall, (tier, arm))
+                self.assertEqual(row["tokensTotal"], len(members) * 3 * 150, (tier, arm))
+                self.assertEqual(row["scored"], len(members) * 3, (tier, arm))
+        t0 = [t for t in self.tasks if t.tier == "T0"]
+        self.assertEqual(agg["tierTotals"]["T0"]["conductor"]["subSessions"], 4 * 3 * len(t0))
+        self.assertEqual(agg["tierTotals"]["T0"]["conductor"]["waves"], 2 * 3 * len(t0))
+        self.assertIsNone(agg["tierTotals"]["T0"]["baseline"]["subSessions"])
+
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
+        section = section_of(report, cb.SECTION_TIER)
+        for tier in tiers:
+            self.assertIn(tier, section)
+        for label in cb.TIER_COST_LABELS:
+            self.assertIn(label, section)
+
+    def test_mechanism_trajectories_are_compared(self):
+        """[22A.3-mechanism-stress] a stress task declares the trajectory it
+        expects, and a run that took a different one is surfaced as the finding
+        rather than as a pass or a fail."""
+        doc = manifest_dict()
+        doc["tasks"][0]["mechanism"] = "scope-boundary"
+        doc["tasks"][0]["expectedStopKinds"] = ["surfaced"]
+        tasks = cb.load_tasks(write_manifest(self.tmp, doc, name="stress.json"))[:PATTERN_TASKS]
+        results = fixture_results(tasks, ("conductor",))
+        by_id = {row["cellId"]: row for row in results}
+        by_id[make_cell("conductor", TASK_IDS[0], 1).cell_id]["stopKind"] = "surfaced"
+
+        divergences = cb.trajectory_divergences(results, tasks, arms=("conductor",))
+        diverged = [row["cellId"] for row in divergences]
+        self.assertNotIn(make_cell("conductor", TASK_IDS[0], 1).cell_id, diverged)
+        for rep in (2, 3):
+            self.assertIn(make_cell("conductor", TASK_IDS[0], rep).cell_id, diverged)
+        for row in divergences:
+            self.assertEqual(row["taskId"], TASK_IDS[0])
+            self.assertEqual(row["expected"], ["surfaced"])
+            self.assertEqual(row["observed"], "done")
+            self.assertEqual(row["mechanism"], "scope-boundary")
+
+        report = cb.render_report(
+            results, tasks, models=[SENTINEL_MODEL], arms=("conductor",), reps=3
+        )
+        section = section_of(report, cb.SECTION_TRAJECTORIES)
+        self.assertIn("scope-boundary", section)
+        self.assertIn(make_cell("conductor", TASK_IDS[0], 2).cell_id, section)
+
+    def test_rubric_lane_beside_the_pass_fail_lane(self):
+        """[22A.3b-rubric] a human-scored rubric rides beside the objective
+        lane, an absent rubric reads as unmeasured rather than as zero, and the
+        review sample is stratified rather than exhaustive."""
+        for criterion in cb.RUBRIC_CRITERIA:
+            self.assertTrue(criterion.strip())
+        cell_id = make_cell("conductor", TASK_IDS[0], 1).cell_id
+        row = {
+            "cellId": cell_id,
+            "reviewer": "owner",
+            "scores": dict((c, 2) for c in cb.RUBRIC_CRITERIA),
+            "findings": ["game logic is welded to the renderer"],
+            "notes": "kept, with reservations",
+        }
+        cb.validate_rubric(row)
+        for broken, why in (
+            ({"scores": {}}, "no scores"),
+            ({"scores": dict((c, 9) for c in cb.RUBRIC_CRITERIA)}, "out of range"),
+            ({"cellId": ""}, "no cell"),
+        ):
+            bad = dict(row)
+            bad.update(broken)
+            with self.assertRaises(cb.BenchError, msg=why):
+                cb.validate_rubric(bad)
+
+        directory = self.tmp / "rubrics"
+        cb.write_rubric(directory, row)
+        loaded = cb.load_rubrics(directory)
+        self.assertEqual(loaded, [row])
+        self.assertEqual(cb.load_rubrics(self.tmp / "absent"), [])
+
+        results = fixture_results(self.tasks, cb.ARMS)
+        summary = cb.aggregate_rubrics(loaded, results, arms=cb.ARMS)
+        self.assertEqual(summary["conductor"]["reviewed"], 1)
+        for criterion in cb.RUBRIC_CRITERIA:
+            self.assertEqual(summary["conductor"]["medians"][criterion], 2)
+        self.assertEqual(summary["baseline"]["reviewed"], 0)
+        self.assertIsNone(summary["baseline"]["medians"][cb.RUBRIC_CRITERIA[0]])
+        self.assertEqual(summary["conductor"]["findings"], row["findings"])
+
+        plan = cb.build_run_plan(self.tasks, models=[SENTINEL_MODEL])
+        sample = cb.stratified_review_sample(plan, self.tasks, per_stratum=1)
+        self.assertEqual(
+            sample,
+            cb.stratified_review_sample(plan, self.tasks, per_stratum=1),
+            "the sample must be deterministic",
+        )
+        tiers = {task.tier for task in self.tasks}
+        self.assertEqual(len(sample), len(tiers) * len(cb.ARMS))
+        strata = {(row["tier"], row["arm"]) for row in sample}
+        self.assertEqual(strata, {(tier, arm) for tier in tiers for arm in cb.ARMS})
+        self.assertLess(len(sample), len(plan), "review is stratified, never exhaustive")
+
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3, rubrics=loaded
+        )
+        section = section_of(report, cb.SECTION_RUBRIC)
+        self.assertIn(cb.RUBRIC_CRITERIA[0], section)
+        self.assertIn(row["findings"][0], section)
+        bare = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=3
+        )
+        self.assertIn(cb.NA, section_of(bare, cb.SECTION_RUBRIC))
 
 
 class ModuleHygieneTests(unittest.TestCase):
@@ -1923,7 +2586,7 @@ class ModuleHygieneTests(unittest.TestCase):
                         )
 
         # The pure functions write nothing.
-        tasks = load_synthetic(self.tmp)
+        tasks = fixture_tasks(self.tmp)
         ledger = self.tmp / "metrics.jsonl"
         ledger.write_text(_ledger_line(promptTokens=1, completionTokens=1) + "\n")
         results = fixture_results(tasks, ("baseline",))
@@ -1940,8 +2603,8 @@ class ModuleHygieneTests(unittest.TestCase):
             )
             cb.summarize_ledger_window(ledger, 0)
             cb.score_cell(0, False, None)
-            cb.aggregate(results, tasks, arms=("baseline",), reps=3)
-            cb.render_report(results, tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3)
+            cb.aggregate(results, tasks, model=SENTINEL_MODEL, arms=("baseline",), reps=3)
+            cb.render_report(results, tasks, models=[SENTINEL_MODEL], arms=("baseline",), reps=3)
         self.assertEqual(snapshot(self.tmp), before, "a pure function wrote to disk")
         self.assertFalse((self.tmp / "unwritten-cell").exists())
 
@@ -2008,3 +2671,62 @@ def _first_non_empty_line(path: Path) -> str:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WaveCountFromJournal(unittest.TestCase):
+    """[22A.4-wave-count] the wave count is read from the journal record the
+    fan-out engine emits, which is the source that exists.
+
+    The counter this reader originally looked for, ``counters.waves`` in
+    ``run.json``, was never written by anything: the per-tier cost column
+    rendered ``n/a`` for every cell. ``conductor/adapter/fanout.ts``
+    ``dispatchWave`` emits one ``fanout``/``wave`` journal record per wave,
+    carrying its size, so that is what a wave count reads.
+    """
+
+    def _run_dir(self, records):
+        root = Path(tempfile.mkdtemp(prefix="cbench-waves-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        (root / "run.json").write_text(json.dumps({"runId": "r", "counters": {}}))
+        (root / "journal.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n"
+        )
+        return root
+
+    def test_counts_wave_records(self):
+        run_dir = self._run_dir(
+            [
+                {"component": "fanout", "event": "wave", "data": {"jobs": 6}},
+                {"component": "fanout", "event": "subsession.dispatched", "data": {"role": "reviewer"}},
+                {"component": "fanout", "event": "wave", "data": {"jobs": 1}},
+            ]
+        )
+        self.assertEqual(cb.read_wave_count(run_dir), 2)
+
+    def test_absent_journal_is_not_measured(self):
+        root = Path(tempfile.mkdtemp(prefix="cbench-waves-none-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        self.assertIsNone(
+            cb.read_wave_count(root),
+            "an absent journal is 'not measured', never a fabricated 0 that a cost "
+            "table would render as a run that scheduled nothing",
+        )
+
+    def test_torn_line_does_not_lose_the_whole_count(self):
+        root = Path(tempfile.mkdtemp(prefix="cbench-waves-torn-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        (root / "journal.jsonl").write_text(
+            json.dumps({"component": "fanout", "event": "wave", "data": {"jobs": 2}})
+            + "\n"
+            + '{"component":"fanout","event":"wa'
+        )
+        self.assertEqual(cb.read_wave_count(root), 1)
+
+    def test_a_run_with_no_waves_measured_zero(self):
+        run_dir = self._run_dir([{"component": "evidence", "event": "green", "data": {}}])
+        self.assertEqual(
+            cb.read_wave_count(run_dir),
+            0,
+            "a journal that exists and carries no wave record measured zero waves, "
+            "which is a different fact from not having measured",
+        )

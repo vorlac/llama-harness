@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""The Task 14.1 three-arm conductor benchmark driver.
+"""The three-arm conductor benchmark driver.
 
 Three arms - plain opencode, opencode carrying the doctrine packs, and opencode
-carrying the conductor plugin - run the same ten tasks against the same model
-through the same router, three times each: ninety headless runs. This module
-owns the manifest, the arm construction, the run plan, one result file per cell,
-and the report. The ninety live runs themselves are Task 14.2.
+carrying the conductor plugin - run the same task set through the same router,
+several times each. A cell is one (model, capability, arm, task, repetition)
+point of that matrix. This module owns the manifest, the arm construction, the
+run plan, one result file per cell, the run manifest that records the campaign's
+own design, and the report. The live runs themselves are somebody else's job.
+
+The tasks are a scope ladder: T0 stays inside the plugin's own triviality bound
+and measures the cost floor, and each tier above it reaches further into the
+process under test. That matters because a comparison runnable only on work
+below the system's triviality threshold cannot answer whether the system helps.
 
 The pure parts (manifest load, arm construction, run plan, ledger window,
 scoring, aggregation, report) touch no process and no filesystem, which is what
@@ -14,7 +20,9 @@ layer over them and is injectable, so the suite drives the driver without ever
 starting opencode, llama-server, llama-router or a model.
 
 Scoring is the hidden test command's exit status, passed through. There is no
-partial credit and nothing model-graded anywhere in this file.
+partial credit and nothing model-graded anywhere in this file. Beside it rides
+a hand-scored rubric lane, which is the only thing here that reads a judgement,
+and it is entered by a person rather than derived.
 """
 
 from __future__ import annotations
@@ -51,7 +59,9 @@ CELL_PATH = os.environ.get("PATH") or os.defpath
 BENCH_DIR = REPO_ROOT / ".data" / "benchmark"
 REPORT_PATH = BENCH_DIR / "conductor-report.md"
 RESULTS_DIR = BENCH_DIR / "conductor" / "runs"
+RUBRIC_DIR = BENCH_DIR / "conductor" / "rubrics"
 WORK_ROOT = BENCH_DIR / "conductor" / "work"
+RUN_MANIFEST_PATH = BENCH_DIR / "conductor-run-manifest.json"
 
 MANIFEST_PATH = REPO_ROOT / "bench" / "conductor-tasks.json"
 DOCTRINE_DIR = REPO_ROOT / "conductor" / "doctrine"
@@ -63,10 +73,29 @@ SEED_COMMIT_MESSAGE = "bench seed"
 
 DEFAULT_MODEL = "llamacpp/qwen3.6-27b"
 DEFAULT_REPS = 3
-DEFAULT_TIMEOUT_SEC = 1800
+
+# A hidden test run against an untouched seed either fails in seconds or is
+# broken; it never needs a campaign-sized wall clock.
+VERIFY_TIMEOUT_SEC = 600
+
+# conductor/adapter/config-io.ts:102. A run whose single item scopes more files
+# than this escapes the plugin's trivial path, which is the line the scope
+# ladder below is built around: T0 sits under it and every higher tier sits
+# over it.
+TRIVIAL_MAX_FILES = 2
 
 # The closed arm vocabulary, in the order the run plan interleaves them.
 ARMS = ("baseline", "doctrine", "conductor")
+
+# The capability dimension, carried symmetrically by every arm. Under the
+# governance posture this campaign measures, the only value is `none` - no arm
+# is given a read-only capability. The dimension exists so a later
+# capability-on campaign is a config change and its data is comparable with
+# this one's, rather than a redesign that makes the two incomparable.
+# Named `capability` and not `preset`: scripts/bench_presets.py already owns
+# "preset" for llama.cpp sampling and runtime profiles.
+CAPABILITIES = ("none",)
+DEFAULT_CAPABILITY = "none"
 
 # One agent name per arm. baseline and doctrine both use opencode's own primary
 # agent; only the doctrine arm's config gives that agent a prompt.
@@ -76,11 +105,60 @@ ARM_AGENTS = {
     "conductor": "conductor-orchestrator",
 }
 
-EXPECTED_TASK_COUNT = 10
+# The scope ladder. A tier is a declared statement about how much of the
+# process under test a task can reach: T0 stays inside the plugin's trivial
+# path and measures the cost floor, T1 produces one real item, T2 several
+# independent ones, T3 a dependency chain, and T4 work that needs a file no
+# plan would have scoped.
+TIERS = ("T0", "T1", "T2", "T3", "T4")
+
+# The task-set pin, per tier. A scalar total cannot tell a lost T3 task from a
+# gained T2 one, and the tier a task sits in is the whole point of the set.
+EXPECTED_TASK_COUNTS = {
+    "T0": 10,
+    "T1": 4,
+    "T2": 3,
+    "T3": 3,
+    "T4": 3,
+}
+
+# One wall clock per tier. A T3 build that ran out of half an hour is a cost
+# datum, and scoring it as a wrong answer would convert process cost into
+# measured quality loss.
+TIER_TIMEOUT_SEC = {
+    "T0": 1800,
+    "T1": 2700,
+    "T2": 3600,
+    "T3": 7200,
+    "T4": 3600,
+}
+
+# The mechanism a task is written to strain. `none` means the task is in the
+# set for coverage rather than for stress; every other value names a path whose
+# expected trajectory the task also declares, so a run that takes a DIFFERENT
+# trajectory is the finding rather than a scoring accident.
+MECHANISMS = (
+    "none",
+    "no-test-first",
+    "scope-boundary",
+    "missing-dependency",
+    "ambiguous-requirement",
+    "brief-window",
+    "dependency-chain",
+    "parallel-waves",
+)
+
 LANGUAGES = ("ts", "python", "cpp")
 DIFFICULTIES = ("one-function", "multi-file")
 
 OUTCOMES = ("pass", "fail", "timeout", "harness-error")
+
+# Why a recorded cell can leave the pass rate. Both reasons are decided by the
+# SAME predicate for every arm, and a cell excluded in one arm takes its
+# arm-symmetric counterparts with it: dropping only the arm that tripped would
+# leave the others carrying whatever made it trip, which biases the dropped
+# arm's rate upward by exactly the cells it found hardest.
+EXCLUSION_REASONS = ("harness-error", "plugin-absent")
 
 # conductor/core/stops.ts STOP_KINDS, verbatim.
 STOP_KINDS = ("done", "noop", "blocked", "surfaced", "env", "interrupt")
@@ -91,8 +169,11 @@ TERMINAL_RUN_STATES = ("REPORTED", "TRIVIAL_DONE", "ANSWERED")
 
 RESULT_KEYS = (
     "cellId",
+    "model",
+    "capability",
     "arm",
     "taskId",
+    "tier",
     "rep",
     "startedIso",
     "outcome",
@@ -105,12 +186,28 @@ RESULT_KEYS = (
     "reviewFindingsUpheld",
     "overridesUsed",
     "stopKind",
+    "subSessions",
+    "waves",
     "pluginAbsent",
 )
 TOKEN_KEYS = ("prompt", "completion", "total", "partial")
 
+SWEEP_REQUIRED_KEYS = (
+    "rationale",
+    "primaryModel",
+    "models",
+    "sweptTiers",
+    "primaryOnlyTiers",
+    "capabilities",
+    "reps",
+)
+
 TASK_REQUIRED_KEYS = (
     "id",
+    "tier",
+    "mechanism",
+    "expectedTrajectory",
+    "expectedStopKinds",
     "language",
     "difficulty",
     "behavioral",
@@ -123,22 +220,74 @@ TASK_REQUIRED_KEYS = (
     "behavioralPaths",
 )
 
+# conductor/adapter/inject.ts:53-61, verbatim. The plugin sets
+# output.temperature per request from this table; an arm running without the
+# plugin runs the server default instead. That is a real difference between the
+# arms and part of the process under test, so it is declared rather than
+# described as parity the campaign does not have.
+ROLE_TEMPERATURE = {
+    "orchestrator": 0.4,
+    "planner": 0.7,
+    "testWriter": 0.5,
+    "implementer": 0.4,
+    "reviewer": 0.3,
+    "skeptic": 0.3,
+    "mechanical": 0.1,
+}
+
 NA = "n/a"
 PARTIAL_MARKER = "(partial)"
 
 SECTION_METHOD = "## Method"
+SECTION_ASYMMETRIES = "## Declared asymmetries"
+SECTION_SWEEP = "## Sweep shape"
 SECTION_PER_TASK = "## Per-task pass rates"
 SECTION_ARM_TOTALS = "## Arm totals"
+SECTION_SEPARABILITY = "## Separability"
 SECTION_COST = "## Cost"
+SECTION_TIER = "## Cost and quality by tier"
 SECTION_PROCESS = "## Process metrics"
+SECTION_TIMEOUTS = "## Timed-out cells"
+SECTION_TRAJECTORIES = "## Mechanism trajectories"
+SECTION_RUBRIC = "## Rubric"
 SECTION_ROUTER_ERRORS = "## Router-error cells"
-SECTION_PLUGIN_ABSENT = "## Ungated conductor cells"
+SECTION_EXCLUSIONS = "## Excluded cells"
 SECTION_MISSING = "## Missing cells"
+
+TIER_COST_LABELS = (
+    "pass rate",
+    "timeouts",
+    "total wall clock",
+    "median cell wall clock",
+    "total tokens",
+    "sub-sessions",
+    "waves",
+)
+
+# The rubric lane. Pass rate answers "is it better on average"; these answer
+# "is the result something a person would keep", which is the question the
+# harness exists to move and which no exit status reaches.
+RUBRIC_CRITERIA = ("structure", "decomposition", "testQuality", "deadCode", "overBuilding")
+RUBRIC_SCORES = (0, 1, 2, 3)
 
 NOISE_NOTE = (
     "At least one arm pair differs on a task while their per-repetition ranges "
     "overlap: those differences are within noise at three repetitions and are "
     "not separable."
+)
+
+NO_VERDICT_NOTE = (
+    "This report states whether two arms are separable, and never who won. At "
+    "three repetitions of a binary outcome, calling 2/3 against 1/3 a result "
+    "would be reading noise as a finding. Raise the repetition count, or add a "
+    "continuous per-task score, before any comparative claim is made."
+)
+
+TIMEOUT_NOTE = (
+    "A timed-out cell is counted here and nowhere else. It is not a pass and "
+    "not a wrong answer: it is the arm's process cost exceeding its tier's "
+    "wall clock, and folding it into the pass rate would report cost as "
+    "quality."
 )
 
 PROCESS_METRIC_LABELS = (
@@ -173,22 +322,82 @@ class BenchError(Exception):
     """A benchmark input or invariant the driver refuses to proceed past."""
 
 
-class Cell(NamedTuple):
-    """One (arm, task, repetition) triple: the unit of work and of reporting."""
+def model_slug(model: str) -> str:
+    """A model id usable as one path and cell-id segment.
 
+    A model is spelled `<provider>/<model>`, and the separator is the same one
+    the cell id and the work tree use, so it is folded to a dash rather than
+    left to split one segment into two.
+    """
+    return model.replace("/", "-")
+
+
+class Cell(NamedTuple):
+    """One (model, capability, arm, task, repetition) point of the matrix.
+
+    Model and capability lead the tuple because the plan is ordered by them:
+    one llama-server in multi-model mode swaps weights on demand, so an
+    interleaved order would pay a weight reload per cell.
+    """
+
+    model: str
+    capability: str
     arm: str
     task_id: str
     rep: int
 
     @property
     def cell_id(self) -> str:
-        return "%s/%s/r%d" % (self.arm, self.task_id, self.rep)
+        return "%s/%s/%s/%s/r%d" % (
+            model_slug(self.model),
+            self.capability,
+            self.arm,
+            self.task_id,
+            self.rep,
+        )
+
+
+def declared_asymmetries() -> List[Dict[str, Any]]:
+    """Every way the arms are NOT alike, stated as data.
+
+    Both entries are properties of the process under test rather than defects
+    in the harness, and neither can be removed without changing conductor. They
+    ride the run manifest and the report header so no number below is read as
+    coming from arms that differ only in their process.
+    """
+    sampling = ", ".join(
+        "%s %s" % (role, ROLE_TEMPERATURE[role]) for role in sorted(ROLE_TEMPERATURE)
+    )
+    return [
+        {
+            "dimension": "sampling",
+            "conductor": "per-role output.temperature: %s" % sampling,
+            "pluginAbsent": "the server default temperature for every request",
+            "why": (
+                "the plugin sets temperature per request from its own role table; "
+                "an arm with no plugin has no role and no table"
+            ),
+        },
+        {
+            "dimension": "sub-agent availability",
+            "conductor": "the `task` tool is denied in every session",
+            "pluginAbsent": "the `task` tool is available as opencode ships it",
+            "why": (
+                "conductor spawns its own sub-sessions and denies the built-in "
+                "spawner; a vanilla session keeps it"
+            ),
+        },
+    ]
 
 
 class Task(NamedTuple):
     """One manifest entry, with the JSON key names mapped onto python ones."""
 
     id: str
+    tier: str
+    mechanism: str
+    expected_trajectory: str
+    expected_stop_kinds: List[str]
     language: str
     difficulty: str
     behavioral: bool
@@ -206,6 +415,7 @@ class Manifest(NamedTuple):
     version: int
     selection_criteria: Dict[str, Any]
     defaults: Dict[str, Any]
+    sweep: Dict[str, Any]
     tasks: List[Task]
 
 
@@ -235,8 +445,14 @@ class CellInvocation(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def load_manifest(path: Any) -> Manifest:
-    """Parse and fully validate the task manifest at ``path``."""
+def load_manifest(path: Any, expected_counts: Optional[Dict[str, int]] = None) -> Manifest:
+    """Parse and fully validate the task manifest at ``path``.
+
+    ``expected_counts`` is the per-tier pin the set must match; it defaults to
+    this module's own, which is what the committed manifest is held to.
+    """
+    if expected_counts is None:
+        expected_counts = EXPECTED_TASK_COUNTS
     manifest_path = Path(path)
     try:
         raw = manifest_path.read_text()
@@ -263,26 +479,20 @@ def load_manifest(path: Any) -> Manifest:
     defaults = document.get("defaults")
     if not isinstance(defaults, dict):
         raise BenchError("%s: defaults must be an object" % manifest_path)
-    for key in ("model", "runTimeoutSec"):
-        if key not in defaults:
-            raise BenchError("%s: defaults is missing %r" % (manifest_path, key))
-    default_timeout = defaults["runTimeoutSec"]
-    if not isinstance(default_timeout, int) or isinstance(default_timeout, bool):
-        raise BenchError("%s: defaults.runTimeoutSec must be an integer" % manifest_path)
+    if "model" not in defaults:
+        raise BenchError("%s: defaults is missing 'model'" % manifest_path)
+    tier_timeouts = _parse_tier_timeouts(defaults.get("tierTimeoutSec"), manifest_path)
+
+    sweep = _parse_sweep(document.get("sweep"), manifest_path)
 
     entries = document.get("tasks")
     if not isinstance(entries, list):
         raise BenchError("%s: tasks must be an array" % manifest_path)
-    if len(entries) != EXPECTED_TASK_COUNT:
-        raise BenchError(
-            "%s: the POC set is exactly %d tasks, found %d"
-            % (manifest_path, EXPECTED_TASK_COUNT, len(entries))
-        )
 
     tasks: List[Task] = []
     seen: Dict[str, int] = {}
     for index, entry in enumerate(entries):
-        task = _parse_task(entry, index, default_timeout)
+        task = _parse_task(entry, index, tier_timeouts)
         if task.id in seen:
             raise BenchError(
                 "task %r appears twice (positions %d and %d): task ids must be unique"
@@ -291,20 +501,149 @@ def load_manifest(path: Any) -> Manifest:
         seen[task.id] = index
         tasks.append(task)
 
+    _check_tier_counts(tasks, expected_counts, manifest_path)
+
     return Manifest(
         version=version,
         selection_criteria=criteria,
         defaults=defaults,
+        sweep=sweep,
         tasks=tasks,
     )
 
 
-def load_tasks(path: Any) -> List[Task]:
+def _parse_tier_timeouts(value: Any, manifest_path: Any) -> Dict[str, int]:
+    """One positive run timeout per tier, with no tier left to a global default."""
+    if not isinstance(value, dict):
+        raise BenchError(
+            "%s: defaults.tierTimeoutSec must be an object mapping every tier to "
+            "a run timeout" % manifest_path
+        )
+    out: Dict[str, int] = {}
+    for tier in TIERS:
+        if tier not in value:
+            raise BenchError(
+                "%s: defaults.tierTimeoutSec has no entry for tier %s" % (manifest_path, tier)
+            )
+        seconds = value[tier]
+        if not isinstance(seconds, int) or isinstance(seconds, bool) or seconds <= 0:
+            raise BenchError(
+                "%s: defaults.tierTimeoutSec[%s] must be a positive integer"
+                % (manifest_path, tier)
+            )
+        out[tier] = seconds
+    for tier in value:
+        if tier not in TIERS:
+            raise BenchError(
+                "%s: defaults.tierTimeoutSec names %r, which is outside %s"
+                % (manifest_path, tier, ", ".join(TIERS))
+            )
+    return out
+
+
+def _parse_sweep(value: Any, manifest_path: Any) -> Dict[str, Any]:
+    """The declared model-sweep shape, validated as a design rather than a wish.
+
+    The full crossing of models, tiers, tasks, arms and repetitions is not
+    runnable, so the shape actually intended is recorded here BEFORE the
+    campaign and the run plan is built from it - which is what stops the
+    coverage claim from becoming an artefact of what happened to finish.
+    """
+    if not isinstance(value, dict):
+        raise BenchError("%s: sweep must be an object" % manifest_path)
+    for key in SWEEP_REQUIRED_KEYS:
+        if key not in value:
+            raise BenchError("%s: sweep is missing %r" % (manifest_path, key))
+    rationale = value["rationale"]
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise BenchError(
+            "%s: sweep.rationale must state why the shape is this one" % manifest_path
+        )
+    models = value["models"]
+    if (
+        not isinstance(models, list)
+        or not models
+        or not all(isinstance(item, str) and item.strip() for item in models)
+    ):
+        raise BenchError(
+            "%s: sweep.models must be a non-empty list of model ids" % manifest_path
+        )
+    if len(set(models)) != len(models):
+        raise BenchError("%s: sweep.models repeats a model id" % manifest_path)
+    primary = value["primaryModel"]
+    if primary not in models:
+        raise BenchError(
+            "%s: sweep.primaryModel %r is not in sweep.models" % (manifest_path, primary)
+        )
+    swept = value["sweptTiers"]
+    primary_only = value["primaryOnlyTiers"]
+    for field, tiers in (("sweptTiers", swept), ("primaryOnlyTiers", primary_only)):
+        if not isinstance(tiers, list) or not all(item in TIERS for item in tiers):
+            raise BenchError(
+                "%s: sweep.%s must list tiers from %s"
+                % (manifest_path, field, ", ".join(TIERS))
+            )
+    overlap = sorted(set(swept) & set(primary_only))
+    if overlap:
+        raise BenchError(
+            "%s: sweep names %s as both swept and primary-only"
+            % (manifest_path, ", ".join(overlap))
+        )
+    if sorted(set(swept) | set(primary_only)) != sorted(TIERS):
+        raise BenchError(
+            "%s: sweep must place every tier in exactly one of sweptTiers and "
+            "primaryOnlyTiers" % manifest_path
+        )
+    capabilities = value["capabilities"]
+    if (
+        not isinstance(capabilities, list)
+        or not capabilities
+        or not all(item in CAPABILITIES for item in capabilities)
+    ):
+        raise BenchError(
+            "%s: sweep.capabilities must be a non-empty subset of %s"
+            % (manifest_path, ", ".join(CAPABILITIES))
+        )
+    reps = value["reps"]
+    if not isinstance(reps, int) or isinstance(reps, bool) or reps < 1:
+        raise BenchError("%s: sweep.reps must be a positive integer" % manifest_path)
+    return dict(value)
+
+
+def _check_tier_counts(
+    tasks: Sequence[Task], expected_counts: Dict[str, int], manifest_path: Any
+) -> None:
+    """Refuse a set whose per-tier shape is not the declared one."""
+    counted = dict((tier, 0) for tier in TIERS)
+    for task in tasks:
+        counted[task.tier] += 1
+    # Every mismatching tier is named in one message: a set that traded a T3
+    # task for a T2 one is off in two places at once, and reporting only the
+    # first would describe half the defect.
+    off = [
+        "%s is pinned at %d task(s), found %d"
+        % (tier, expected_counts.get(tier, 0), counted[tier])
+        for tier in TIERS
+        if counted[tier] != expected_counts.get(tier, 0)
+    ]
+    if off:
+        raise BenchError("%s: %s" % (manifest_path, "; ".join(off)))
+
+
+def tasks_by_tier(tasks: Sequence[Task]) -> Dict[str, List[Task]]:
+    """The task set grouped by tier, in manifest order inside each tier."""
+    out: Dict[str, List[Task]] = dict((tier, []) for tier in TIERS)
+    for task in tasks:
+        out[task.tier].append(task)
+    return out
+
+
+def load_tasks(path: Any, expected_counts: Optional[Dict[str, int]] = None) -> List[Task]:
     """The manifest's tasks, in manifest order."""
-    return load_manifest(path).tasks
+    return load_manifest(path, expected_counts=expected_counts).tasks
 
 
-def _parse_task(entry: Any, index: int, default_timeout: int) -> Task:
+def _parse_task(entry: Any, index: int, tier_timeouts: Dict[str, int]) -> Task:
     """One validated task record; every rejection names the task and the field."""
     if not isinstance(entry, dict):
         raise BenchError("task at position %d is not an object" % index)
@@ -315,6 +654,37 @@ def _parse_task(entry: Any, index: int, default_timeout: int) -> Task:
     for key in TASK_REQUIRED_KEYS:
         if key not in entry:
             raise BenchError("task %r is missing the required field %r" % (task_id, key))
+
+    tier = entry["tier"]
+    if tier not in TIERS:
+        raise BenchError(
+            "task %r: field 'tier' is %r, which is outside %s"
+            % (task_id, tier, ", ".join(TIERS))
+        )
+    mechanism = entry["mechanism"]
+    if mechanism not in MECHANISMS:
+        raise BenchError(
+            "task %r: field 'mechanism' is %r, which is outside %s"
+            % (task_id, mechanism, ", ".join(MECHANISMS))
+        )
+    trajectory = entry["expectedTrajectory"]
+    if not isinstance(trajectory, str) or not trajectory.strip():
+        raise BenchError(
+            "task %r: field 'expectedTrajectory' must say what the run is expected "
+            "to do, so a run that does something else is a finding" % task_id
+        )
+    expected_stops = entry["expectedStopKinds"]
+    if not isinstance(expected_stops, list) or not expected_stops:
+        raise BenchError(
+            "task %r: field 'expectedStopKinds' must be a non-empty list" % task_id
+        )
+    for kind in expected_stops:
+        if kind not in STOP_KINDS + TERMINAL_RUN_STATES:
+            raise BenchError(
+                "task %r: field 'expectedStopKinds' names %r, which is outside the "
+                "closed stop vocabulary %s and the terminal run states %s"
+                % (task_id, kind, ", ".join(STOP_KINDS), ", ".join(TERMINAL_RUN_STATES))
+            )
 
     language = entry["language"]
     if language not in LANGUAGES:
@@ -359,12 +729,16 @@ def _parse_task(entry: Any, index: int, default_timeout: int) -> Task:
     ):
         raise BenchError("task %r: field 'behavioralPaths' must be a list of globs" % task_id)
 
-    timeout = entry.get("runTimeoutSec", default_timeout)
+    timeout = entry.get("runTimeoutSec", tier_timeouts[tier])
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise BenchError("task %r: field 'runTimeoutSec' must be a positive integer" % task_id)
 
     return Task(
         id=task_id,
+        tier=tier,
+        mechanism=mechanism,
+        expected_trajectory=trajectory,
+        expected_stop_kinds=list(expected_stops),
         language=language,
         difficulty=difficulty,
         behavioral=behavioral,
@@ -410,12 +784,13 @@ def _parse_command(value: Any, task_id: str, field: str) -> List[str]:
     """An argv LIST. A shell string here would need shell=True to run at all."""
     if not isinstance(value, list) or not value:
         raise BenchError(
-            "task %r: field %r must be a non-empty argv list, not %r"
-            % (task_id, field, value)
+            "task %r: field %r must be a non-empty argv list, not %r" % (task_id, field, value)
         )
     for token in value:
         if not isinstance(token, str):
-            raise BenchError("task %r: field %r contains a non-string token" % (task_id, field))
+            raise BenchError(
+                "task %r: field %r contains a non-string token" % (task_id, field)
+            )
     return [str(token) for token in value]
 
 
@@ -524,9 +899,7 @@ def build_arm_config(
     from the same code path so the experiment keeps its control.
     """
     if arm not in ARMS:
-        raise BenchError(
-            "unknown arm %r: the closed set is %s" % (arm, ", ".join(ARMS))
-        )
+        raise BenchError("unknown arm %r: the closed set is %s" % (arm, ", ".join(ARMS)))
     config = copy.deepcopy(dict(base_config))
 
     provider_id, _, model_name = model.partition("/")
@@ -580,8 +953,7 @@ def build_opencode_argv(arm: str, model: str, work_dir: Any, prompt: str) -> Lis
     if not os.path.isabs(str(work_dir)):
         raise BenchError(
             "the cell work tree %r must be absolute: opencode is launched with it "
-            "as cwd and a relative path would resolve against the driver's own"
-            % str(work_dir)
+            "as cwd and a relative path would resolve against the driver's own" % str(work_dir)
         )
     return [
         "opencode",
@@ -663,29 +1035,127 @@ def validate_config_file_refs(config: Dict[str, Any]) -> None:
 
 
 def build_run_plan(
-    tasks: Sequence[Task], arms: Sequence[str] = ARMS, reps: int = DEFAULT_REPS
+    tasks: Sequence[Task],
+    arms: Sequence[str] = ARMS,
+    reps: int = DEFAULT_REPS,
+    models: Sequence[str] = (DEFAULT_MODEL,),
+    capabilities: Sequence[str] = (DEFAULT_CAPABILITY,),
 ) -> List[Cell]:
-    """Every cell, repetition-major and arm-interleaved.
+    """Every cell, model-major, then repetition-major and arm-interleaved.
 
-    Truncating the plan at any prefix leaves the arms balanced to within one
-    cell, so an overnight that dies half way through is still comparable.
+    Model leads so a multi-model server loads each set of weights once rather
+    than once per cell. Inside one model, truncating at any prefix leaves the
+    arms balanced to within one cell, so an overnight that dies half way
+    through is still comparable.
     """
+    return _plan_cells(
+        [(model, capability, list(tasks)) for model in models for capability in capabilities],
+        arms=arms,
+        reps=reps,
+    )
+
+
+def _plan_cells(
+    blocks: Sequence[Tuple[str, str, Sequence[Task]]],
+    arms: Sequence[str],
+    reps: int,
+) -> List[Cell]:
+    """The shared plan body: one arm-interleaved block per (model, capability)."""
     if reps < 1:
         raise BenchError("reps must be at least 1, got %r" % reps)
     for arm in arms:
         if arm not in ARMS:
             raise BenchError("unknown arm %r: the closed set is %s" % (arm, ", ".join(ARMS)))
     plan: List[Cell] = []
-    for rep in range(1, reps + 1):
-        for task in tasks:
-            for arm in arms:
-                plan.append(Cell(arm, task.id, rep))
+    for model, capability, tasks in blocks:
+        if capability not in CAPABILITIES:
+            raise BenchError(
+                "unknown capability %r: the closed set is %s"
+                % (capability, ", ".join(CAPABILITIES))
+            )
+        for rep in range(1, reps + 1):
+            for task in tasks:
+                for arm in arms:
+                    plan.append(Cell(model, capability, arm, task.id, rep))
     return plan
+
+
+def models_for_tier(sweep: Dict[str, Any], tier: str) -> List[str]:
+    """Which models a tier is run on under the declared sweep shape.
+
+    The cheap tiers are swept across every model; the expensive ones run on the
+    primary model alone, so the tier curve rather than the full crossing
+    carries the scope story.
+    """
+    if tier not in TIERS:
+        raise BenchError("unknown tier %r: the closed set is %s" % (tier, ", ".join(TIERS)))
+    if tier in sweep["primaryOnlyTiers"]:
+        return [sweep["primaryModel"]]
+    return list(sweep["models"])
+
+
+def build_sweep_plan(manifest: Manifest, arms: Sequence[str] = ARMS) -> List[Cell]:
+    """The campaign the manifest's sweep block declares, grouped by model."""
+    sweep = manifest.sweep
+    blocks: List[Tuple[str, str, List[Task]]] = []
+    for model in sweep["models"]:
+        for capability in sweep["capabilities"]:
+            tasks = [
+                task for task in manifest.tasks if model in models_for_tier(sweep, task.tier)
+            ]
+            if tasks:
+                blocks.append((model, capability, tasks))
+    return _plan_cells(blocks, arms=arms, reps=sweep["reps"])
+
+
+def build_run_manifest(
+    manifest: Manifest,
+    models: Sequence[str],
+    arms: Sequence[str] = ARMS,
+    reps: int = DEFAULT_REPS,
+    capabilities: Sequence[str] = CAPABILITIES,
+) -> Dict[str, Any]:
+    """What this campaign is, recorded before any cell runs.
+
+    A coverage claim written after the fact describes what finished in time.
+    This is the design, and the report is rendered against it.
+    """
+    return {
+        "startedIso": utc_now_iso(),
+        "models": list(models),
+        "capabilities": list(capabilities),
+        "arms": list(arms),
+        "reps": reps,
+        "tiers": list(TIERS),
+        "tierTimeoutSec": dict(manifest.defaults["tierTimeoutSec"]),
+        "sweep": dict(manifest.sweep),
+        "asymmetries": declared_asymmetries(),
+        "exclusionReasons": list(EXCLUSION_REASONS),
+        "taskIdsByTier": dict(
+            (tier, [task.id for task in group])
+            for tier, group in tasks_by_tier(manifest.tasks).items()
+        ),
+    }
+
+
+def write_run_manifest(path: Any, run_manifest: Dict[str, Any]) -> Path:
+    """Write the run manifest beside the report it qualifies."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(run_manifest, indent=2) + "\n")
+    return target
 
 
 def cell_dir_for(work_root: Any, cell: Cell) -> Path:
     """One directory per cell, shared by no other cell."""
-    return Path(work_root) / cell.arm / cell.task_id / ("r%d" % cell.rep)
+    return (
+        Path(work_root)
+        / model_slug(cell.model)
+        / cell.capability
+        / cell.arm
+        / cell.task_id
+        / ("r%d" % cell.rep)
+    )
 
 
 def materialize_files(root: Any, files: Dict[str, str]) -> List[Path]:
@@ -779,7 +1249,7 @@ def build_conductor_cell_config(task: Task) -> Dict[str, Any]:
         "format": {"rules": []},
         "git": {"mode": "commit", "branchPolicy": "pin", "preexistingDirty": "refuse"},
         "workflow": {
-            "trivialMaxFiles": 2,
+            "trivialMaxFiles": TRIVIAL_MAX_FILES,
             "planReviewers": 4,
             "planReviewMaxRounds": 3,
             "itemReviewers": 6,
@@ -926,14 +1396,17 @@ def run_cell(
     directory = Path(cell_dir)
     directory.mkdir(parents=True, exist_ok=True)
 
-    extra: Optional[Dict[str, str]] = None
-    if cell.arm == "conductor":
-        extra = {
-            ".conductor/config.json": json.dumps(
-                build_conductor_cell_config(task), indent=2
-            )
-            + "\n"
-        }
+    # Every arm is seeded with the SAME file set, conductor's config included.
+    # The alternative - writing it only for the conductor arm - gives that arm a
+    # different startHead and a different file listing from the others, so the
+    # trees the arms are compared on are not the same tree. Writing it after the
+    # seed commit instead is worse still: an uncommitted file leaves the tree
+    # dirty, which conductor's own `preexistingDirty: refuse` would then refuse.
+    # The arms with no plugin never read the file.
+    extra = {
+        ".conductor/config.json": json.dumps(build_conductor_cell_config(task), indent=2)
+        + "\n"
+    }
     work = seed_cell(directory, task, git_runner=git_runner, extra_files=extra)
 
     if cell.arm == "doctrine":
@@ -950,7 +1423,13 @@ def run_cell(
     config_path.write_text(json.dumps(config, indent=2) + "\n")
 
     env = build_cell_env(directory, config_path)
-    for key in ("HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
+    for key in (
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_STATE_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+    ):
         Path(env[key]).mkdir(parents=True, exist_ok=True)
 
     ledger = ledger_path_of(router_config)
@@ -971,7 +1450,9 @@ def run_cell(
     wall_clock_ms = run_outcome.wall_clock_ms
 
     if run_outcome.timed_out or run_outcome.spawn_error:
-        score = score_cell(run_outcome.exit_code, run_outcome.timed_out, run_outcome.spawn_error)
+        score = score_cell(
+            run_outcome.exit_code, run_outcome.timed_out, run_outcome.spawn_error
+        )
     else:
         materialize_files(work, task.hidden_files)
         tester = default_test_runner if test_runner is None else test_runner
@@ -986,8 +1467,11 @@ def run_cell(
 
     result = {
         "cellId": cell.cell_id,
+        "model": cell.model,
+        "capability": cell.capability,
         "arm": cell.arm,
         "taskId": cell.task_id,
+        "tier": task.tier,
         "rep": cell.rep,
         "startedIso": started_iso,
         "outcome": score["outcome"],
@@ -1005,6 +1489,8 @@ def run_cell(
         "reviewFindingsUpheld": metrics["reviewFindingsUpheld"],
         "overridesUsed": metrics["overridesUsed"],
         "stopKind": metrics["stopKind"],
+        "subSessions": metrics["subSessions"],
+        "waves": metrics["waves"],
         "pluginAbsent": metrics["pluginAbsent"],
     }
     validate_result(result)
@@ -1023,7 +1509,10 @@ def utc_now_iso() -> str:
 
 def result_path(results_dir: Any, cell: Cell) -> Path:
     """One file per cell, named for the cell. One writer, one file."""
-    return Path(results_dir) / ("%s__%s__r%d.json" % (cell.arm, cell.task_id, cell.rep))
+    return Path(results_dir) / (
+        "%s__%s__%s__%s__r%d.json"
+        % (model_slug(cell.model), cell.capability, cell.arm, cell.task_id, cell.rep)
+    )
 
 
 def validate_result(result: Any) -> None:
@@ -1060,7 +1549,13 @@ def write_result(results_dir: Any, result: Dict[str, Any]) -> Path:
     validate_result(result)
     directory = Path(results_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    cell = Cell(result["arm"], result["taskId"], result["rep"])
+    cell = Cell(
+        result["model"],
+        result["capability"],
+        result["arm"],
+        result["taskId"],
+        result["rep"],
+    )
     target = result_path(directory, cell)
     target.write_text(json.dumps(result, indent=2) + "\n")
     return target
@@ -1169,6 +1664,8 @@ def collect_metrics(arm: str, work_dir: Any) -> Dict[str, Any]:
             "reviewFindingsUpheld": None,
             "overridesUsed": None,
             "stopKind": None,
+            "subSessions": None,
+            "waves": None,
             "pluginAbsent": None,
         }
     return collect_conductor_metrics(work_dir)
@@ -1188,6 +1685,8 @@ def collect_conductor_metrics(work_dir: Any) -> Dict[str, Any]:
             "reviewFindingsUpheld": None,
             "overridesUsed": None,
             "stopKind": None,
+            "subSessions": None,
+            "waves": None,
             "pluginAbsent": True,
         }
     return {
@@ -1195,6 +1694,8 @@ def collect_conductor_metrics(work_dir: Any) -> Dict[str, Any]:
         "reviewFindingsUpheld": _count_upheld_findings(run_dir / "reviews"),
         "overridesUsed": _read_overrides_used(run_dir / "run.json"),
         "stopKind": _read_stop_kind(run_dir / "run.json"),
+        "subSessions": _count_sub_sessions(run_dir / "journal.jsonl"),
+        "waves": read_wave_count(run_dir),
         "pluginAbsent": False,
     }
 
@@ -1230,6 +1731,76 @@ def _count_schema_retries(journal_path: Path) -> int:
         if entry.get("component") == "fanout" and entry.get("event") == "subsession.retry":
             count += 1
     return count
+
+
+def _count_sub_sessions(journal_path: Path) -> int:
+    """How many sub-sessions the fan-out engine actually dispatched.
+
+    A dispatch record names the role it dispatched. The same event name also
+    carries a clamp warning that dispatches nothing, so counting the event
+    alone would count a warning as a sub-session; the role field is what
+    separates them.
+    """
+    count = 0
+    try:
+        text = journal_path.read_text()
+    except OSError:
+        return 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            entry = json.loads(stripped)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("component") != "fanout" or entry.get("event") != "subsession.dispatched":
+            continue
+        data = entry.get("data")
+        if isinstance(data, dict) and isinstance(data.get("role"), str):
+            count += 1
+    return count
+
+
+def read_wave_count(run_dir: Path) -> Optional[int]:
+    """How many waves the scheduler dispatched, from the run's journal.
+
+    The source is one ``fanout``/``wave`` record per wave, emitted by
+    ``dispatchWave`` in ``conductor/adapter/fanout.ts`` — the only place that
+    knows a wave happened. The per-job ``subsession.dispatched`` records cannot
+    be grouped back into waves after the fact, which is why the engine emits a
+    record of its own.
+
+    An absent journal reads as None — "not measured" — rather than a fabricated 0
+    that a per-tier cost table would render as a run that scheduled nothing. A
+    journal that exists and carries no wave record measured zero, which is a
+    different fact and is reported as one. A torn trailing line is the normal
+    state of a file being appended to and costs only that line.
+    """
+    journal = Path(run_dir) / "journal.jsonl"
+    if not journal.is_file():
+        return None
+    try:
+        text = journal.read_text()
+    except OSError:
+        return None
+    waves = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if (
+            isinstance(record, dict)
+            and record.get("component") == "fanout"
+            and record.get("event") == "wave"
+        ):
+            waves += 1
+    return waves
 
 
 def _count_upheld_findings(reviews_dir: Path) -> Optional[int]:
@@ -1314,24 +1885,70 @@ def within_noise(group_a: Dict[str, Any], group_b: Dict[str, Any]) -> bool:
     )
 
 
+def exclusion_reason(row: Dict[str, Any]) -> Optional[str]:
+    """Why this recorded cell leaves the pass rate, or None when it stays.
+
+    One predicate for every arm. `harness-error` is the driver failing to run
+    the cell at all, which is never a model result; `plugin-absent` is a
+    conductor session nothing gated, which is a fact about the harness rather
+    than about the work. Neither is reachable by only one arm through this
+    function: a baseline cell that spawn-failed excludes exactly as a conductor
+    one does.
+    """
+    if row.get("outcome") == "harness-error":
+        return "harness-error"
+    if row.get("pluginAbsent") is True:
+        return "plugin-absent"
+    return None
+
+
 def aggregate(
     results: Sequence[Dict[str, Any]],
     tasks: Sequence[Task],
+    model: str = DEFAULT_MODEL,
     arms: Sequence[str] = ARMS,
     reps: int = DEFAULT_REPS,
+    capability: str = DEFAULT_CAPABILITY,
 ) -> Dict[str, Any]:
-    """Per-(arm, task) spread and per-arm totals over RECORDED cells only.
+    """Per-(arm, task) spread and per-arm totals over ONE (model, capability).
 
-    Missing cells are named rather than counted either way, and a conductor cell
-    that ran ungated leaves both the numerator and the denominator.
+    Exclusion is by stratum, not by cell: when any arm's cell at a given
+    (task, repetition) is excluded, every arm's cell there is excluded with it.
+    Dropping only the arm that tripped would leave the other arms carrying
+    whatever made it trip, which moves that arm's rate for a reason that has
+    nothing to do with its output.
+
+    A timeout leaves the pass-rate denominator and is counted on its own axis:
+    the timeout is a cost datum, and scoring it as a wrong answer would turn
+    process cost into measured quality loss.
     """
     by_id: Dict[str, Dict[str, Any]] = {}
     for row in results:
         by_id[row["cellId"]] = row
 
     task_ids = [task.id for task in tasks]
+    tier_of = dict((task.id, task.tier) for task in tasks)
+    tiers = [tier for tier in TIERS if tier in set(tier_of.values())]
+
+    def cell_id_at(arm: str, task_id: str, rep: int) -> str:
+        return Cell(model, capability, arm, task_id, rep).cell_id
+
+    excluded_strata: Dict[Tuple[str, int], str] = {}
+    for task_id in task_ids:
+        for rep in range(1, reps + 1):
+            for arm in arms:
+                row = by_id.get(cell_id_at(arm, task_id, rep))
+                if row is None:
+                    continue
+                reason = exclusion_reason(row)
+                if reason is not None and (task_id, rep) not in excluded_strata:
+                    excluded_strata[(task_id, rep)] = reason
+
     groups: Dict[str, Dict[str, Any]] = {}
     arm_totals: Dict[str, Any] = {}
+    tier_totals: Dict[str, Dict[str, Any]] = dict(
+        (tier, dict((arm, _empty_tier_row()) for arm in arms)) for tier in tiers
+    )
     missing: List[str] = []
 
     for arm in arms:
@@ -1339,12 +1956,15 @@ def aggregate(
         arm_walls: List[int] = []
         totals = {
             "passes": 0,
+            "scored": 0,
             "recorded": 0,
             "planned": 0,
             "excluded": 0,
+            "timeouts": 0,
             "perTaskPasses": {},
             "routerErrorCells": [],
-            "excludedPluginAbsent": [],
+            "excludedCells": [],
+            "timeoutCells": [],
             "tokensTotal": 0,
             "tokensPartial": False,
         }
@@ -1356,48 +1976,69 @@ def aggregate(
         stop_kinds: List[str] = []
 
         for task_id in task_ids:
+            tier_row = tier_totals[tier_of[task_id]][arm]
             passes = 0
+            scored = 0
             recorded = 0
             excluded = 0
+            timeouts = 0
             outcomes: List[str] = []
             walls: List[int] = []
             for rep in range(1, reps + 1):
-                cell_id = Cell(arm, task_id, rep).cell_id
+                cell_id = cell_id_at(arm, task_id, rep)
                 row = by_id.get(cell_id)
                 if row is None:
                     missing.append(cell_id)
                     continue
+                recorded += 1
                 if row.get("routerErrors"):
                     totals["routerErrorCells"].append(cell_id)
-                if row.get("pluginAbsent") is True:
+                stratum = excluded_strata.get((task_id, rep))
+                if stratum is not None:
                     excluded += 1
-                    totals["excludedPluginAbsent"].append(cell_id)
+                    totals["excludedCells"].append({"cellId": cell_id, "reason": stratum})
                     continue
-                recorded += 1
                 outcomes.append(row["outcome"])
                 walls.append(row["wallClockMs"])
-                if row["passed"]:
-                    passes += 1
                 tokens = row.get("tokens") or {}
                 if isinstance(tokens.get("total"), int) and not isinstance(
                     tokens.get("total"), bool
                 ):
                     totals["tokensTotal"] += tokens["total"]
+                    tier_row["tokensTotal"] += tokens["total"]
                 if tokens.get("partial"):
                     totals["tokensPartial"] = True
+                    tier_row["tokensPartial"] = True
                 for key in metric_values:
                     value = row.get(key)
                     if isinstance(value, int) and not isinstance(value, bool):
                         metric_values[key].append(value)
+                for key in ("subSessions", "waves"):
+                    value = row.get(key)
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        tier_row[key] = (tier_row[key] or 0) + value
                 if isinstance(row.get("stopKind"), str):
                     stop_kinds.append(row["stopKind"])
+                tier_row["walls"].append(row["wallClockMs"])
+                if row["outcome"] == "timeout":
+                    timeouts += 1
+                    totals["timeoutCells"].append(cell_id)
+                    tier_row["timeouts"] += 1
+                    continue
+                scored += 1
+                tier_row["scored"] += 1
+                if row["passed"]:
+                    passes += 1
+                    tier_row["passes"] += 1
 
-            flags = [1 if outcome == "pass" else 0 for outcome in outcomes]
+            flags = [1 if outcome == "pass" else 0 for outcome in outcomes if outcome != "timeout"]
             groups[arm][task_id] = {
                 "passes": passes,
+                "scored": scored,
                 "recorded": recorded,
                 "planned": reps,
                 "excluded": excluded,
+                "timeouts": timeouts,
                 "outcomes": outcomes,
                 "minPass": min(flags) if flags else 0,
                 "maxPass": max(flags) if flags else 0,
@@ -1405,9 +2046,11 @@ def aggregate(
                 "wallClockMsMedian": median_int(walls),
             }
             totals["passes"] += passes
+            totals["scored"] += scored
             totals["recorded"] += recorded
             totals["planned"] += reps
             totals["excluded"] += excluded
+            totals["timeouts"] += timeouts
             totals["perTaskPasses"][task_id] = passes
             arm_walls.extend(walls)
 
@@ -1419,18 +2062,224 @@ def aggregate(
         totals["stopKinds"] = stop_kinds
         arm_totals[arm] = totals
 
+    for tier in tiers:
+        for arm in arms:
+            row = tier_totals[tier][arm]
+            row["wallClockMsTotal"] = sum(row["walls"])
+            row["wallClockMsMedian"] = median_int(row["walls"])
+            del row["walls"]
+
     return {
+        "model": model,
+        "capability": capability,
         "groups": groups,
         "armTotals": arm_totals,
+        "tierTotals": tier_totals,
+        "excludedStrata": [
+            {"taskId": task_id, "rep": rep, "reason": reason}
+            for (task_id, rep), reason in sorted(excluded_strata.items())
+        ],
         "missingCells": missing,
         "arms": list(arms),
         "taskIds": task_ids,
+        "tiers": tiers,
         "reps": reps,
     }
 
 
-def format_rate(passes: int, recorded: int) -> str:
-    return "%d/%d" % (passes, recorded)
+def _empty_tier_row() -> Dict[str, Any]:
+    """One (tier, arm) accumulator. subSessions and waves start unmeasured."""
+    return {
+        "passes": 0,
+        "scored": 0,
+        "timeouts": 0,
+        "tokensTotal": 0,
+        "tokensPartial": False,
+        "subSessions": None,
+        "waves": None,
+        "walls": [],
+    }
+
+
+def trajectory_divergences(
+    results: Sequence[Dict[str, Any]], tasks: Sequence[Task], arms: Sequence[str] = ARMS
+) -> List[Dict[str, Any]]:
+    """Every stress cell whose run took a trajectory the task did not expect.
+
+    A stress task is written to strain a named mechanism, and the trajectory it
+    declares is the claim under test. A cell that stopped somewhere else is the
+    finding - which is a different thing from a cell that failed its hidden
+    test, and is reported as one.
+    """
+    by_task = dict((task.id, task) for task in tasks)
+    out: List[Dict[str, Any]] = []
+    for row in results:
+        if row["arm"] not in arms:
+            continue
+        task = by_task.get(row["taskId"])
+        if task is None or task.mechanism == "none":
+            continue
+        observed = row.get("stopKind")
+        if not isinstance(observed, str) or observed in task.expected_stop_kinds:
+            continue
+        out.append(
+            {
+                "cellId": row["cellId"],
+                "arm": row["arm"],
+                "taskId": task.id,
+                "tier": task.tier,
+                "mechanism": task.mechanism,
+                "expected": list(task.expected_stop_kinds),
+                "observed": observed,
+                "why": task.expected_trajectory,
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Rubric lane
+# ---------------------------------------------------------------------------
+
+
+def validate_rubric(row: Any) -> None:
+    """Every pinned rubric key present, every score inside the closed range."""
+    if not isinstance(row, dict):
+        raise BenchError("a rubric record must be an object")
+    cell_id = row.get("cellId")
+    if not isinstance(cell_id, str) or not cell_id.strip():
+        raise BenchError("a rubric record must name the cell it scores")
+    reviewer = row.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer.strip():
+        raise BenchError("rubric %s: 'reviewer' must name who scored it" % cell_id)
+    scores = row.get("scores")
+    if not isinstance(scores, dict):
+        raise BenchError("rubric %s: 'scores' must be an object" % cell_id)
+    for criterion in RUBRIC_CRITERIA:
+        if criterion not in scores:
+            raise BenchError("rubric %s: no score for %r" % (cell_id, criterion))
+        value = scores[criterion]
+        if value not in RUBRIC_SCORES or isinstance(value, bool):
+            raise BenchError(
+                "rubric %s: %r scored %r, which is outside %s"
+                % (cell_id, criterion, value, ", ".join(str(s) for s in RUBRIC_SCORES))
+            )
+    for criterion in scores:
+        if criterion not in RUBRIC_CRITERIA:
+            raise BenchError(
+                "rubric %s: %r is outside the criteria %s"
+                % (cell_id, criterion, ", ".join(RUBRIC_CRITERIA))
+            )
+    findings = row.get("findings")
+    if not isinstance(findings, list) or not all(isinstance(item, str) for item in findings):
+        raise BenchError("rubric %s: 'findings' must be a list of strings" % cell_id)
+    if not isinstance(row.get("notes"), str):
+        raise BenchError("rubric %s: 'notes' must be text" % cell_id)
+
+
+def rubric_path(rubric_dir: Any, cell_id: str) -> Path:
+    """One file per reviewed cell, named for the cell."""
+    return Path(rubric_dir) / ("%s.json" % cell_id.replace("/", "__"))
+
+
+def write_rubric(rubric_dir: Any, row: Dict[str, Any]) -> Path:
+    """Write one validated rubric record."""
+    validate_rubric(row)
+    target = rubric_path(rubric_dir, row["cellId"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(row, indent=2) + "\n")
+    return target
+
+
+def load_rubrics(rubric_dir: Any) -> List[Dict[str, Any]]:
+    """Every rubric record on disk, in filename order; none is not an error."""
+    directory = Path(rubric_dir)
+    if not directory.is_dir():
+        return []
+    rows: List[Dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            row = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            raise BenchError("cannot read the rubric %s: %s" % (path, exc))
+        validate_rubric(row)
+        rows.append(row)
+    return rows
+
+
+def aggregate_rubrics(
+    rubrics: Sequence[Dict[str, Any]],
+    results: Sequence[Dict[str, Any]],
+    arms: Sequence[str] = ARMS,
+) -> Dict[str, Any]:
+    """Per-arm rubric medians over the cells a human actually reviewed.
+
+    An arm with no reviewed cell reports None per criterion - not measured -
+    rather than a zero a table would render as a real score.
+    """
+    arm_of = dict((row["cellId"], row["arm"]) for row in results)
+    scored: Dict[str, List[Dict[str, Any]]] = dict((arm, []) for arm in arms)
+    for row in rubrics:
+        arm = arm_of.get(row["cellId"])
+        if arm in scored:
+            scored[arm].append(row)
+    out: Dict[str, Any] = {}
+    for arm in arms:
+        reviewed = scored[arm]
+        out[arm] = {
+            "reviewed": len(reviewed),
+            "medians": dict(
+                (
+                    criterion,
+                    median_int([row["scores"][criterion] for row in reviewed])
+                    if reviewed
+                    else None,
+                )
+                for criterion in RUBRIC_CRITERIA
+            ),
+            "findings": [finding for row in reviewed for finding in row["findings"]],
+        }
+    return out
+
+
+def stratified_review_sample(
+    plan: Sequence[Cell], tasks: Sequence[Task], per_stratum: int = 1
+) -> List[Dict[str, Any]]:
+    """Which cells a human should read, one stratum at a time.
+
+    A full campaign is far too large to hand-review, and reviewing whatever is
+    convenient is how a sample stops representing the campaign. The sample is a
+    pure function of the plan, so two people asking for it get the same cells.
+    """
+    if per_stratum < 1:
+        raise BenchError("per_stratum must be at least 1, got %r" % per_stratum)
+    tier_of = dict((task.id, task.tier) for task in tasks)
+    strata: Dict[Tuple[str, str], List[Cell]] = {}
+    for cell in plan:
+        tier = tier_of.get(cell.task_id)
+        if tier is None:
+            continue
+        strata.setdefault((tier, cell.arm), []).append(cell)
+    out: List[Dict[str, Any]] = []
+    for tier, arm in sorted(strata):
+        for cell in strata[(tier, arm)][:per_stratum]:
+            out.append(
+                {
+                    "tier": tier,
+                    "arm": arm,
+                    "model": cell.model,
+                    "capability": cell.capability,
+                    "taskId": cell.task_id,
+                    "rep": cell.rep,
+                    "cellId": cell.cell_id,
+                }
+            )
+    return out
+
+
+def format_rate(passes: int, scored: int) -> str:
+    return "%d/%d" % (passes, scored)
+
 
 
 def format_recorded(recorded: int, planned: int) -> str:
@@ -1465,180 +2314,512 @@ def _format_stop_kinds(stop_kinds: Sequence[str]) -> str:
 def render_report(
     results: Sequence[Dict[str, Any]],
     tasks: Sequence[Task],
-    model: str,
+    models: Sequence[str],
     arms: Sequence[str] = ARMS,
     reps: int = DEFAULT_REPS,
+    capabilities: Sequence[str] = (DEFAULT_CAPABILITY,),
+    rubrics: Sequence[Dict[str, Any]] = (),
+    sweep: Optional[Dict[str, Any]] = None,
 ) -> str:
     """The markdown report: per-task spread first, comparison only after it.
 
     A bare aggregate delta over ten tasks and three repetitions is exactly the
     number this benchmark exists not to produce, so every arm-level line lives
-    below the table that shows what it is made of.
+    below the table that shows what it is made of - and the asymmetries the
+    arms carry are printed above all of it, because they qualify every number
+    underneath.
     """
-    agg = aggregate(results, tasks, arms=arms, reps=reps)
-    task_ids = agg["taskIds"]
-    groups = agg["groups"]
-    totals = agg["armTotals"]
+    strata = [(model, capability) for model in models for capability in capabilities]
+    aggs = dict(
+        (
+            (model, capability),
+            aggregate(results, tasks, model=model, arms=arms, reps=reps, capability=capability),
+        )
+        for model, capability in strata
+    )
+    task_ids = [task.id for task in tasks]
+    tier_of = dict((task.id, task.tier) for task in tasks)
     lines: List[str] = ["# Conductor three-arm benchmark", ""]
 
-    lines.append(SECTION_METHOD)
-    lines.append("")
-    lines.append("- Model: `%s`. Every arm ran that one model." % model)
-    lines.append("- Repetitions: %d per (arm, task) cell." % reps)
+    lines.extend(_method_lines(models, capabilities, arms, reps))
+    lines.extend(_asymmetry_lines())
+    if sweep is not None:
+        lines.extend(_sweep_lines(sweep))
+    lines.extend(_per_task_lines(aggs, strata, task_ids, arms))
+    if len(arms) > 1:
+        lines.extend(_arm_total_lines(aggs, strata, task_ids, arms))
+    lines.extend(_separability_lines(aggs, strata, task_ids, arms))
+    lines.extend(_cost_lines(aggs, strata, task_ids, arms))
+    lines.extend(_tier_lines(aggs, strata, arms))
+    lines.extend(_process_lines(aggs, strata, arms))
+    lines.extend(_timeout_lines(aggs, strata, arms))
+    lines.extend(_trajectory_lines(results, tasks, arms))
+    lines.extend(_rubric_lines(rubrics, results, arms))
+    lines.extend(_router_error_lines(aggs, strata, arms))
+    lines.extend(_exclusion_lines(aggs, strata, arms))
+    lines.extend(_missing_lines(aggs, strata))
+    return "\n".join(lines)
+
+
+def _stratum_label(model: str, capability: str) -> str:
+    return "### %s / capability %s" % (model, capability)
+
+
+def _method_lines(
+    models: Sequence[str],
+    capabilities: Sequence[str],
+    arms: Sequence[str],
+    reps: int,
+) -> List[str]:
+    lines = [SECTION_METHOD, ""]
+    lines.append(
+        "- Models: %s. Cells are ordered by model, so one server loads each set "
+        "of weights once." % ", ".join("`%s`" % model for model in models)
+    )
+    lines.append(
+        "- Capabilities: %s. Every arm carries the dimension alike."
+        % ", ".join("`%s`" % capability for capability in capabilities)
+    )
+    lines.append("- Repetitions: %d per (model, capability, arm, task) cell." % reps)
     lines.append(
         "- Arms: `baseline` is plain opencode; `doctrine` is plain opencode with "
         "every doctrine pack injected as one prompt file; `conductor` is the "
         "plugin loaded from the committed opencode fragment."
     )
+    lines.append("- Arms reported: %s." % ", ".join(arms))
     lines.append(
         "- Every arm issued every request through the llama-router listen address, "
         "so token accounting is uniform across arms."
+    )
+    lines.append(
+        "- Every arm's work tree is seeded from the same file set and the same "
+        "commit, conductor's `.conductor/config.json` included."
     )
     lines.append(
         "- Scoring is the hidden test command's exit status, passed through. No "
         "partial credit, no output parsing, nothing model-graded."
     )
     lines.append(
-        "- The baseline and doctrine arms ran no plugin, so the four process "
+        "- The baseline and doctrine arms ran no plugin, so the process "
         "metrics below are structurally unavailable for them and render as %s "
         "rather than zero." % NA
     )
     lines.append("")
+    return lines
 
-    lines.append(SECTION_PER_TASK)
-    lines.append("")
-    for arm in arms:
-        lines.append(
-            "- %s: %s" % (arm, format_recorded(totals[arm]["recorded"], totals[arm]["planned"]))
-        )
-    lines.append("")
-    lines.append("| Task | %s |" % " | ".join(arms))
-    lines.append("|---|%s" % ("---|" * len(arms)))
-    for task_id in task_ids:
-        cells: List[str] = []
-        for arm in arms:
-            group = groups[arm][task_id]
-            text = "%s (%s)" % (
-                format_rate(group["passes"], group["recorded"]),
-                format_outcomes(group["outcomes"]),
-            )
-            if group["recorded"] != group["planned"]:
-                text += " %s" % format_recorded(group["recorded"], group["planned"])
-            cells.append(text)
-        lines.append("| %s | %s |" % (task_id, " | ".join(cells)))
-    lines.append("")
 
-    if len(arms) > 1:
-        lines.append(SECTION_ARM_TOTALS)
+def _asymmetry_lines() -> List[str]:
+    lines = [SECTION_ASYMMETRIES, ""]
+    lines.append(
+        "The arms are not identical, and these are the ways they are not. Both "
+        "are part of the process under test and neither can be removed without "
+        "changing conductor, so they qualify every number below."
+    )
+    lines.append("")
+    for item in declared_asymmetries():
+        lines.append("- **%s** - %s" % (item["dimension"], item["why"]))
+        lines.append("  - conductor: %s" % item["conductor"])
+        lines.append("  - plugin-absent arms: %s" % item["pluginAbsent"])
+    lines.append("")
+    return lines
+
+
+def _sweep_lines(sweep: Dict[str, Any]) -> List[str]:
+    lines = [SECTION_SWEEP, ""]
+    lines.append("%s" % sweep["rationale"])
+    lines.append("")
+    lines.append("- Primary model: `%s`" % sweep["primaryModel"])
+    lines.append("- Models swept: %s" % ", ".join("`%s`" % m for m in sweep["models"]))
+    lines.append("- Tiers swept across every model: %s" % ", ".join(sweep["sweptTiers"]))
+    lines.append("- Tiers on the primary model only: %s" % ", ".join(sweep["primaryOnlyTiers"]))
+    lines.append("- Repetitions: %d" % sweep["reps"])
+    lines.append("")
+    return lines
+
+
+def _per_task_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    task_ids: Sequence[str],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_PER_TASK, ""]
+    for model, capability in strata:
+        agg = aggs[(model, capability)]
+        totals = agg["armTotals"]
+        groups = agg["groups"]
+        lines.append(_stratum_label(model, capability))
         lines.append("")
-        lines.append(
-            "Read every line here against the per-task table above; none of it "
-            "stands on its own."
-        )
         for arm in arms:
-            total = totals[arm]
+            lines.append(
+                "- %s: %s"
+                % (arm, format_recorded(totals[arm]["recorded"], totals[arm]["planned"]))
+            )
+        lines.append("")
+        lines.append("| Task | %s |" % " | ".join(arms))
+        lines.append("|---|%s" % ("---|" * len(arms)))
+        for task_id in task_ids:
+            cells: List[str] = []
+            for arm in arms:
+                group = groups[arm][task_id]
+                text = "%s (%s)" % (
+                    format_rate(group["passes"], group["scored"]),
+                    format_outcomes(group["outcomes"]),
+                )
+                if group["recorded"] != group["planned"]:
+                    text += " %s" % format_recorded(group["recorded"], group["planned"])
+                cells.append(text)
+            lines.append("| %s | %s |" % (task_id, " | ".join(cells)))
+        lines.append("")
+    return lines
+
+
+def _arm_total_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    task_ids: Sequence[str],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_ARM_TOTALS, ""]
+    lines.append(
+        "Read every line here against the per-task table above; none of it "
+        "stands on its own."
+    )
+    overlapping = False
+    for model, capability in strata:
+        agg = aggs[(model, capability)]
+        lines.append("")
+        lines.append(_stratum_label(model, capability))
+        lines.append("")
+        for arm in arms:
+            total = agg["armTotals"][arm]
             lines.append(
                 "- %s: %s over %s"
                 % (
                     arm,
-                    format_rate(total["passes"], total["recorded"]),
+                    format_rate(total["passes"], total["scored"]),
                     format_recorded(total["recorded"], total["planned"]),
                 )
             )
-        if _has_overlapping_pair(groups, task_ids, arms):
-            lines.append("")
-            lines.append(NOISE_NOTE)
+        if _has_overlapping_pair(agg["groups"], task_ids, arms):
+            overlapping = True
+    if overlapping:
         lines.append("")
+        lines.append(NOISE_NOTE)
+    lines.append("")
+    return lines
 
-    lines.append(SECTION_COST)
+
+def _separability_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    task_ids: Sequence[str],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_SEPARABILITY, ""]
+    lines.append(NO_VERDICT_NOTE)
     lines.append("")
-    lines.append("| Arm | total wall clock | median cell wall clock | total tokens |")
+    if len(arms) < 2:
+        lines.append("One arm was reported, so there is no pair to separate.")
+        lines.append("")
+        return lines
+    lines.append("| Task | Arm pair | ranges | separable |")
     lines.append("|---|---|---|---|")
-    for arm in arms:
-        total = totals[arm]
-        lines.append(
-            "| %s | %s | %s | %s |"
-            % (
-                arm,
-                format_ms(total["wallClockMsTotal"]),
-                format_ms(total["wallClockMsMedian"]),
-                format_tokens(total["tokensTotal"], total["tokensPartial"]),
-            )
-        )
+    for model, capability in strata:
+        groups = aggs[(model, capability)]["groups"]
+        for task_id in task_ids:
+            for first in range(len(arms)):
+                for second in range(first + 1, len(arms)):
+                    left = groups[arms[first]][task_id]
+                    right = groups[arms[second]][task_id]
+                    if left["passes"] == right["passes"]:
+                        continue
+                    separable = "no - within noise" if within_noise(left, right) else "yes"
+                    lines.append(
+                        "| %s | %s vs %s | %s vs %s | %s |"
+                        % (
+                            task_id,
+                            arms[first],
+                            arms[second],
+                            format_rate(left["passes"], left["scored"]),
+                            format_rate(right["passes"], right["scored"]),
+                            separable,
+                        )
+                    )
     lines.append("")
-    lines.append("| Task | Arm | total wall clock | median cell wall clock |")
-    lines.append("|---|---|---|---|")
-    for task_id in task_ids:
+    return lines
+
+
+def _cost_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    task_ids: Sequence[str],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_COST, ""]
+    lines.append(
+        "Wall clock is an axis of its own here, never a discount on the quality "
+        "column: conductor's process cost is reported as cost."
+    )
+    lines.append("")
+    lines.append("| Model | Arm | total wall clock | median cell wall clock | total tokens |")
+    lines.append("|---|---|---|---|---|")
+    for model, capability in strata:
         for arm in arms:
-            group = groups[arm][task_id]
+            total = aggs[(model, capability)]["armTotals"][arm]
             lines.append(
-                "| %s | %s | %s | %s |"
+                "| %s | %s | %s | %s | %s |"
                 % (
-                    task_id,
+                    model,
                     arm,
-                    format_ms(group["wallClockMsTotal"]),
-                    format_ms(group["wallClockMsMedian"]),
+                    format_ms(total["wallClockMsTotal"]),
+                    format_ms(total["wallClockMsMedian"]),
+                    format_tokens(total["tokensTotal"], total["tokensPartial"]),
                 )
             )
     lines.append("")
-
-    lines.append(SECTION_PROCESS)
+    lines.append("| Task | Arm | total wall clock | median cell wall clock |")
+    lines.append("|---|---|---|---|")
+    for model, capability in strata:
+        groups = aggs[(model, capability)]["groups"]
+        for task_id in task_ids:
+            for arm in arms:
+                group = groups[arm][task_id]
+                lines.append(
+                    "| %s | %s | %s | %s |"
+                    % (
+                        task_id,
+                        arm,
+                        format_ms(group["wallClockMsTotal"]),
+                        format_ms(group["wallClockMsMedian"]),
+                    )
+                )
     lines.append("")
-    lines.append("| Arm | %s |" % " | ".join(PROCESS_METRIC_LABELS))
-    lines.append("|---|%s" % ("---|" * len(PROCESS_METRIC_LABELS)))
+    return lines
+
+
+def _tier_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_TIER, ""]
+    lines.append(
+        "Quality and cost against scope. The tier at which the curves cross is "
+        "the number this campaign exists to find; a single win rate is not."
+    )
+    lines.append("")
+    lines.append("| Model | Tier | Arm | %s |" % " | ".join(TIER_COST_LABELS))
+    lines.append("|---|---|---|%s" % ("---|" * len(TIER_COST_LABELS)))
+    for model, capability in strata:
+        agg = aggs[(model, capability)]
+        for tier in agg["tiers"]:
+            for arm in arms:
+                row = agg["tierTotals"][tier][arm]
+                lines.append(
+                    "| %s | %s | %s | %s | %d | %s | %s | %s | %s | %s |"
+                    % (
+                        model,
+                        tier,
+                        arm,
+                        format_rate(row["passes"], row["scored"]),
+                        row["timeouts"],
+                        format_ms(row["wallClockMsTotal"]),
+                        format_ms(row["wallClockMsMedian"]),
+                        format_tokens(row["tokensTotal"], row["tokensPartial"]),
+                        format_metric(row["subSessions"]),
+                        format_metric(row["waves"]),
+                    )
+                )
+    lines.append("")
+    return lines
+
+
+def _process_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_PROCESS, ""]
+    lines.append("| Model | Arm | %s |" % " | ".join(PROCESS_METRIC_LABELS))
+    lines.append("|---|---|%s" % ("---|" * len(PROCESS_METRIC_LABELS)))
+    for model, capability in strata:
+        for arm in arms:
+            total = aggs[(model, capability)]["armTotals"][arm]
+            lines.append(
+                "| %s | %s | %s | %s | %s | %s |"
+                % (
+                    model,
+                    arm,
+                    format_metric(total["metrics"]["schemaRetries"]),
+                    format_metric(total["metrics"]["reviewFindingsUpheld"]),
+                    format_metric(total["metrics"]["overridesUsed"]),
+                    _format_stop_kinds(total["stopKinds"]),
+                )
+            )
+    lines.append("")
+    return lines
+
+
+def _timeout_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_TIMEOUTS, ""]
+    lines.append(TIMEOUT_NOTE)
+    lines.append("")
+    cells: List[Tuple[str, str]] = []
+    for model, capability in strata:
+        for arm in arms:
+            for cell_id in aggs[(model, capability)]["armTotals"][arm]["timeoutCells"]:
+                cells.append((arm, cell_id))
+    lines.append("%d cell(s) ran out of their tier's wall clock." % len(cells))
+    for arm, cell_id in cells:
+        lines.append("- %s" % cell_id)
+    lines.append("")
+    return lines
+
+
+def _trajectory_lines(
+    results: Sequence[Dict[str, Any]], tasks: Sequence[Task], arms: Sequence[str]
+) -> List[str]:
+    lines = [SECTION_TRAJECTORIES, ""]
+    divergences = trajectory_divergences(results, tasks, arms=arms)
+    lines.append(
+        "%d stress cell(s) took a trajectory their task did not expect. A "
+        "divergence here is the finding; it is neither a pass nor a fail."
+        % len(divergences)
+    )
+    if divergences:
+        lines.append("")
+        lines.append("| Cell | Mechanism | expected stop | observed stop | expected trajectory |")
+        lines.append("|---|---|---|---|---|")
+        for row in divergences:
+            lines.append(
+                "| %s | %s | %s | %s | %s |"
+                % (
+                    row["cellId"],
+                    row["mechanism"],
+                    ", ".join(row["expected"]),
+                    row["observed"],
+                    row["why"],
+                )
+            )
+    lines.append("")
+    return lines
+
+
+def _rubric_lines(
+    rubrics: Sequence[Dict[str, Any]],
+    results: Sequence[Dict[str, Any]],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_RUBRIC, ""]
+    lines.append(
+        "Hand-scored on a stratified sample. The pass rate answers whether an "
+        "arm is better on average; this answers whether its output is something "
+        "a person would keep."
+    )
+    lines.append("")
+    summary = aggregate_rubrics(rubrics, results, arms=arms)
+    lines.append("| Arm | cells reviewed | %s |" % " | ".join(RUBRIC_CRITERIA))
+    lines.append("|---|---|%s" % ("---|" * len(RUBRIC_CRITERIA)))
     for arm in arms:
-        total = totals[arm]
+        row = summary[arm]
         lines.append(
-            "| %s | %s | %s | %s | %s |"
+            "| %s | %d | %s |"
             % (
                 arm,
-                format_metric(total["metrics"]["schemaRetries"]),
-                format_metric(total["metrics"]["reviewFindingsUpheld"]),
-                format_metric(total["metrics"]["overridesUsed"]),
-                _format_stop_kinds(total["stopKinds"]),
+                row["reviewed"],
+                " | ".join(format_metric(row["medians"][c]) for c in RUBRIC_CRITERIA),
             )
         )
+    findings = [(arm, finding) for arm in arms for finding in summary[arm]["findings"]]
+    if findings:
+        lines.append("")
+        lines.append(
+            "Findings a score cannot carry - output whose shape, rather than "
+            "whose answer, is the result:"
+        )
+        for arm, finding in findings:
+            lines.append("- %s: %s" % (arm, finding))
     lines.append("")
+    return lines
 
-    lines.append(SECTION_ROUTER_ERRORS)
-    lines.append("")
-    router_cells: List[str] = []
-    for arm in arms:
-        router_cells.extend(totals[arm]["routerErrorCells"])
+
+def _router_error_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_ROUTER_ERRORS, ""]
+    cells: List[str] = []
+    for model, capability in strata:
+        for arm in arms:
+            cells.extend(aggs[(model, capability)]["armTotals"][arm]["routerErrorCells"])
     lines.append(
         "%d cell(s) saw a non-2xx router response. Their pass or fail is recorded "
         "but the infrastructure failure is named here rather than averaged in."
-        % len(router_cells)
+        % len(cells)
     )
-    for cell_id in router_cells:
+    for cell_id in cells:
         lines.append("- %s" % cell_id)
     lines.append("")
+    return lines
 
-    lines.append(SECTION_PLUGIN_ABSENT)
-    lines.append("")
-    absent: List[str] = []
-    for arm in arms:
-        absent.extend(totals[arm]["excludedPluginAbsent"])
+
+def _exclusion_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]],
+    strata: Sequence[Tuple[str, str]],
+    arms: Sequence[str],
+) -> List[str]:
+    lines = [SECTION_EXCLUSIONS, ""]
     lines.append(
-        "%d conductor cell(s) produced no run directory: the plugin never gated "
-        "them, so they are excluded from both the numerator and the denominator "
-        "of that arm." % len(absent)
+        "Exclusion is arm-symmetric: one predicate decides it for every arm, "
+        "and an excluded cell takes its counterparts in the other arms with it, "
+        "so no arm keeps the cells another arm found impossible."
     )
-    for cell_id in absent:
-        lines.append("- %s" % cell_id)
     lines.append("")
+    total = 0
+    for model, capability in strata:
+        for arm in arms:
+            total += len(aggs[(model, capability)]["armTotals"][arm]["excludedCells"])
+    lines.append("%d cell(s) left both the numerator and the denominator." % total)
+    lines.append("")
+    lines.append("| Arm | excluded | cells |")
+    lines.append("|---|---|---|")
+    for model, capability in strata:
+        for arm in arms:
+            rows = aggs[(model, capability)]["armTotals"][arm]["excludedCells"]
+            lines.append(
+                "| %s | %d | %s |"
+                % (
+                    arm,
+                    len(rows),
+                    ", ".join("%s (%s)" % (r["cellId"], r["reason"]) for r in rows) or NA,
+                )
+            )
+    lines.append("")
+    return lines
 
-    lines.append(SECTION_MISSING)
-    lines.append("")
+
+def _missing_lines(
+    aggs: Dict[Tuple[str, str], Dict[str, Any]], strata: Sequence[Tuple[str, str]]
+) -> List[str]:
+    lines = [SECTION_MISSING, ""]
+    cells: List[str] = []
+    for model, capability in strata:
+        cells.extend(aggs[(model, capability)]["missingCells"])
     lines.append(
         "%d planned cell(s) have no recorded result. They are counted neither as "
-        "passes nor as failures." % len(agg["missingCells"])
+        "passes nor as failures." % len(cells)
     )
-    for cell_id in agg["missingCells"]:
+    for cell_id in cells:
         lines.append("- %s" % cell_id)
     lines.append("")
+    return lines
 
-    return "\n".join(lines)
 
 
 def _has_overlapping_pair(
@@ -1663,18 +2844,21 @@ def _has_overlapping_pair(
 
 
 def make_cell_runner(
-    model: str,
     router_config: Dict[str, Any],
     base_config: Dict[str, Any],
 ) -> Callable[[Cell, Task, Any], Dict[str, Any]]:
-    """The live cell runner: one closure over the run-wide settings."""
+    """The live cell runner: one closure over the run-wide settings.
+
+    The model comes from the cell rather than from this closure, because model
+    is a matrix dimension: one plan carries several of them.
+    """
 
     def runner(cell: Cell, task: Task, cell_dir: Any) -> Dict[str, Any]:
         return run_cell(
             cell,
             task,
             cell_dir=cell_dir,
-            model=model,
+            model=cell.model,
             router_config=router_config,
             base_config=base_config,
             timeout_sec=task.run_timeout_sec,
@@ -1688,9 +2872,13 @@ def run_benchmark(
     results_dir: Any,
     report_path: Any,
     work_root: Any,
-    model: str,
+    models: Sequence[str],
     arms: Sequence[str] = ARMS,
     reps: int = DEFAULT_REPS,
+    capabilities: Sequence[str] = (DEFAULT_CAPABILITY,),
+    plan: Optional[Sequence[Cell]] = None,
+    sweep: Optional[Dict[str, Any]] = None,
+    rubric_dir: Optional[Any] = None,
     report_only: bool = False,
     cell_runner: Optional[Callable[[Cell, Task, Any], Dict[str, Any]]] = None,
     router_config: Optional[Dict[str, Any]] = None,
@@ -1704,7 +2892,13 @@ def run_benchmark(
     results_path = Path(results_dir)
     report = Path(report_path)
     root = Path(work_root)
-    plan = build_run_plan(tasks, arms=arms, reps=reps)
+    cells = (
+        list(plan)
+        if plan is not None
+        else build_run_plan(
+            tasks, arms=arms, reps=reps, models=models, capabilities=capabilities
+        )
+    )
     by_task = dict((task.id, task) for task in tasks)
 
     executed: List[str] = []
@@ -1717,13 +2911,14 @@ def run_benchmark(
         runner = cell_runner
         if runner is None:
             runner = make_cell_runner(
-                model=model,
-                router_config=router_config
-                if router_config is not None
-                else load_router_config(ROUTER_CONFIG_PATH),
+                router_config=(
+                    router_config
+                    if router_config is not None
+                    else load_router_config(ROUTER_CONFIG_PATH)
+                ),
                 base_config=base_config if base_config is not None else DEFAULT_BASE_CONFIG,
             )
-        for cell in plan:
+        for cell in cells:
             recorded = result_path(results_path, cell)
             if recorded.is_file():
                 skipped.append(cell.cell_id)
@@ -1735,19 +2930,31 @@ def run_benchmark(
             rows.append(row)
 
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(render_report(rows, tasks, model=model, arms=arms, reps=reps))
+    report.write_text(
+        render_report(
+            rows,
+            tasks,
+            models=models,
+            arms=arms,
+            reps=reps,
+            capabilities=capabilities,
+            rubrics=load_rubrics(rubric_dir) if rubric_dir is not None else (),
+            sweep=sweep,
+        )
+    )
     return {
         "results": rows,
         "skipped": skipped,
         "executed": executed,
         "reportPath": report,
+        "plan": cells,
     }
 
 
 def verify_tasks(
     tasks: Sequence[Task],
     work_root: Any,
-    timeout_sec: float = DEFAULT_TIMEOUT_SEC,
+    timeout_sec: float = VERIFY_TIMEOUT_SEC,
     test_runner: Optional[Callable[[Sequence[str], Any, float], CommandOutcome]] = None,
 ) -> Dict[str, Any]:
     """Prove every hidden test FAILS on its unmodified seed.
@@ -1777,6 +2984,39 @@ def verify_tasks(
     }
 
 
+def verify_seed_green(
+    tasks: Sequence[Task],
+    work_root: Any,
+    timeout_sec: float = VERIFY_TIMEOUT_SEC,
+    test_runner: Optional[Callable[[Sequence[str], Any, float], CommandOutcome]] = None,
+) -> Dict[str, Any]:
+    """Prove every seeded repository PASSES its own visible suite untouched.
+
+    A seed that starts red makes a red visible test ambiguous: nobody can tell
+    the arm's damage from the task's. The hidden files are not materialized
+    here, so this is the tree the model is handed, exactly.
+    """
+    runner = default_test_runner if test_runner is None else test_runner
+    exit_codes: Dict[str, int] = {}
+    started_red: List[str] = []
+    for task in tasks:
+        scratch = Path(work_root) / task.id
+        if scratch.exists():
+            shutil.rmtree(str(scratch))
+        scratch.mkdir(parents=True)
+        materialize_files(scratch, task.seed_files)
+        outcome = runner(list(task.repo_test_command), scratch, timeout_sec)
+        code = outcome.exit_code if outcome.exit_code is not None else -1
+        exit_codes[task.id] = code
+        if code != 0:
+            started_red.append(task.id)
+    return {
+        "ok": not started_red,
+        "startedRed": started_red,
+        "exitCodes": exit_codes,
+    }
+
+
 def load_router_config(path: Any) -> Dict[str, Any]:
     """The router config this run's arms are pointed at."""
     config_path = Path(path)
@@ -1800,20 +3040,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-root", default=str(WORK_ROOT), dest="work_root")
     parser.add_argument("--results-dir", default=str(RESULTS_DIR), dest="results_dir")
     parser.add_argument("--report", default=str(REPORT_PATH))
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--run-manifest", default=str(RUN_MANIFEST_PATH), dest="run_manifest")
+    parser.add_argument("--rubric-dir", default=str(RUBRIC_DIR), dest="rubric_dir")
+    parser.add_argument("--seed-green", action="store_true", dest="seed_green")
+    parser.add_argument("--plan-only", action="store_true", dest="plan_only")
+    parser.add_argument("--sweep", action="store_true", dest="sweep")
+    # Repeatable: model is a matrix dimension, and the plan is grouped by it.
+    parser.add_argument("--model", action="append", dest="models")
+    parser.add_argument("--capability", action="append", dest="capabilities")
+    parser.add_argument("--review-sample", type=int, default=0, dest="review_sample")
     parser.add_argument("--reps", type=int, default=DEFAULT_REPS)
-    parser.add_argument("--router-config", default=str(ROUTER_CONFIG_PATH), dest="router_config")
+    parser.add_argument(
+        "--router-config", default=str(ROUTER_CONFIG_PATH), dest="router_config"
+    )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    """The command line: --verify-tasks, --report-only, or the full run."""
+    """The command line: a task check, a dry run, a report rebuild, or a run."""
     args = build_parser().parse_args(list(argv) if argv is not None else None)
     try:
-        tasks = load_tasks(Path(args.manifest))
+        manifest = load_manifest(Path(args.manifest))
     except BenchError as exc:
         print("bench: %s" % exc)
         return 2
+    tasks = manifest.tasks
 
     problems = check_commands_spawnable(tasks)
     if problems:
@@ -1837,6 +3088,53 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         return 1
 
+    if args.seed_green:
+        green = verify_seed_green(tasks, work_root=Path(args.work_root))
+        for task in tasks:
+            print(
+                "%s: visible suite exited %d on the unmodified seed"
+                % (task.id, green["exitCodes"][task.id])
+            )
+        if green["ok"]:
+            print("every seeded repository starts green")
+            return 0
+        print(
+            "these seeds do not start green, so a red visible test would not be "
+            "the arm's doing: %s" % ", ".join(green["startedRed"])
+        )
+        return 1
+
+    if args.sweep:
+        models = list(manifest.sweep["models"])
+        capabilities = list(manifest.sweep["capabilities"])
+        reps = manifest.sweep["reps"]
+        plan = build_sweep_plan(manifest)
+    else:
+        models = list(args.models) if args.models else [DEFAULT_MODEL]
+        capabilities = list(args.capabilities) if args.capabilities else [DEFAULT_CAPABILITY]
+        reps = args.reps
+        plan = build_run_plan(tasks, reps=reps, models=models, capabilities=capabilities)
+
+    run_manifest = build_run_manifest(
+        manifest, models=models, reps=reps, capabilities=capabilities
+    )
+    write_run_manifest(Path(args.run_manifest), run_manifest)
+
+    if args.review_sample:
+        for row in stratified_review_sample(plan, tasks, per_stratum=args.review_sample):
+            print("review %s (tier %s, arm %s)" % (row["cellId"], row["tier"], row["arm"]))
+        return 0
+
+    if args.plan_only:
+        print("run manifest at %s" % args.run_manifest)
+        for model in models:
+            grouped = [cell for cell in plan if cell.model == model]
+            print("%s: %d cell(s)" % (model, len(grouped)))
+            for cell in grouped:
+                print("  %s" % cell.cell_id)
+        print("%d cell(s) planned over %d model(s)" % (len(plan), len(models)))
+        return 0
+
     try:
         router_config = load_router_config(Path(args.router_config))
     except BenchError as exc:
@@ -1848,8 +3146,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         results_dir=Path(args.results_dir),
         report_path=Path(args.report),
         work_root=Path(args.work_root),
-        model=args.model,
-        reps=args.reps,
+        models=models,
+        reps=reps,
+        capabilities=capabilities,
+        plan=plan,
+        sweep=manifest.sweep,
+        rubric_dir=Path(args.rubric_dir),
         report_only=args.report_only,
         router_config=router_config,
     )
