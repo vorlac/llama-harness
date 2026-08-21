@@ -1731,6 +1731,10 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         // §3.6: the ONE grant map conductor_override mints into. A second map
         // here would leave every granted override unspendable.
         overrideGrants,
+        // §2 tool-surface posture from the repo's own config. Threading it here
+        // rather than letting the gate read a default is what makes the lane
+        // revertible from a config file instead of from a code edit.
+        toolSurface: config.toolSurface ?? DEFAULT_CONFIG.toolSurface,
         journal,
         corr,
       });

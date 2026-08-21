@@ -88,7 +88,8 @@ import type { CreatedFile } from "../core/review-witness.ts";
 import { findingSubjects, floorExclusions, receiptFloor } from "../core/receipt-floor.ts";
 import { concernNamesFinding } from "../core/reply-protocol.ts";
 import { MAIN_TREE, NO_TREE, SCHEMAS, treePath, treeSlug, validate } from "../core/types.ts";
-import type { ToolClass } from "../core/types.ts";
+import type { SideEffectClass, ToolClass } from "../core/types.ts";
+import { builtinSideEffect, decideBuiltinSurface } from "../core/builtin-surface.ts";
 import type {
   AnomalyRecord,
   AnswerChannel,
@@ -310,9 +311,25 @@ export interface GateHookInput {
   // §3.6: the caller-owned map handleOverride writes one-shot grants into. A
   // grant bypasses exactly ONE otherwise-denied decision of its named gate.
   overrideGrants?: Map<string, OverrideGrant>;
+  // The §2 tool-surface lane flags, each individually revertible. ABSENT READS AS
+  // ENABLED: a composition root that forgets to pass them gets the governance
+  // floor rather than losing it, which is the only default a fail-closed gate can
+  // have. config.toolSurface is what the plugin threads in.
+  toolSurface?: { classifyBuiltins: boolean };
   journal: GateJournal;
   corr: Corr;
   deps?: GateDeps;
+}
+
+// The §2 class of a bash call, derived from its command rather than its name. A
+// command with a write-shaped target is W; everything else this phase can decide
+// is R0. The R1/R2/R3 discriminations belong to the extractors Task 21.4 adds,
+// and until they exist a read-shaped bash is R0 — which is the honest statement
+// that this layer cannot yet tell `ls` from `curl`, rather than a claim that it
+// can.
+function bashSideEffect(command: string, writeTargets: readonly string[]): SideEffectClass {
+  if (writeTargets.length > 0) return "W";
+  return interpreterStateAreaScript(command) !== null ? "W" : "R0";
 }
 
 // True iff the command contains at least one git segment, computed with the SAME
@@ -432,16 +449,26 @@ export function gateBeforeToolCall(input: GateHookInput): void {
   const gitSegmentPresent = command !== undefined && hasGitSegment(command);
   const writeTargets = command !== undefined ? writeShapedPaths(command) : [];
   const toolClass = classifyTool(input.toolName, command);
+  // §2 side-effect class. A bash call has none by name — `ls` is R0 and `curl` is
+  // R3 — so it is classified from its command by the extractors below; every
+  // other name reads its class from the table.
+  const sideEffect =
+    input.toolName === "bash"
+      ? bashSideEffect(command ?? "", writeTargets)
+      : builtinSideEffect(input.toolName);
 
   // The fail-closed guardedness flag (G5), computed ONCE from the real parse:
   // anything that could write, advance conductor state, or spawn a child must
-  // fail closed on a gate crash; only a harmless read fails open.
+  // fail closed on a gate crash; only a harmless read fails open. An unclassified
+  // tool is guarded too: the whole point of refusing it is that nobody can say
+  // what it reaches, which is not a claim that it reaches nothing.
   const guarded =
     gitSegmentPresent ||
     writeTargets.length > 0 ||
     toolClass === "write" ||
     toolClass === "conductor" ||
-    toolClass === "spawn";
+    toolClass === "spawn" ||
+    sideEffect === undefined;
 
   // (a0) The patch tools, refused before every other gate and in every session
   //      (D8). There is no adjudicable payload to reach a scope decision with: a
@@ -456,6 +483,26 @@ export function gateBeforeToolCall(input: GateHookInput): void {
         input.toolName +
         " tool is denied in every session: a patch body carries its own write targets in a form no gate adjudicates, so the edit-scope gate cannot bound it. Use the edit/write tools, whose target is a single path this session's scope is checked against",
     );
+  }
+
+  // (a1) The §2 tool-surface gate. A property of the TOOL, not of the session, so
+  //      it sits beside the patch refusal rather than inside the registry gate: a
+  //      stray unregistered reader and a dispatched implementer meet the same
+  //      table. It is grant-consumable on the same terms as every other deny —
+  //      §3.6 is a budgeted, taint-recording hatch, not an exemption.
+  const surfaceDecision = guardedDecide(
+    input,
+    guarded,
+    { gate: "session", toolName: input.toolName, toolClass },
+    () =>
+      decideBuiltinSurface({
+        toolName: input.toolName,
+        ...(sideEffect === undefined ? {} : { commandClass: sideEffect }),
+        classifyBuiltins: input.toolSurface?.classifyBuiltins ?? true,
+      }),
+  );
+  if (surfaceDecision.action === "deny" && !consumeOverrideGrant(input, "session")) {
+    denyThrow(input, reasonOf(surfaceDecision, "the tool-surface gate denied this call"));
   }
 
   const decideSessionFn: (i: SessionInput) => Decision =

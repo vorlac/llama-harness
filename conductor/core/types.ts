@@ -291,6 +291,15 @@ export interface Config {
     subSessionTimeoutMs: number;
   };
   models: { default: string; roles: Record<string, string> };
+  // §2 tool-surface posture, one flag per lane so each is revertible without
+  // touching the others. Absent reads as every lane ENABLED: a config written
+  // before the block existed still validates, and gets the governance floor
+  // rather than losing it.
+  toolSurface?: {
+    // Refuse a built-in core/builtin-surface.ts declares no side-effect class
+    // for, instead of letting it fall through to the read catch-all.
+    classifyBuiltins: boolean;
+  };
   ponytail: PonytailLevel;
   retention: { keepRuns: number; maxRunDirBytes: number; pruneOnRunCreate: boolean };
   logging: { level: LogLevel; components: Record<string, LogLevel> };
@@ -842,6 +851,12 @@ const configSchema = {
         roles: { type: "object", additionalProperties: stringSchema },
       },
       required: ["default", "roles"],
+      additionalProperties: false,
+    },
+    toolSurface: {
+      type: "object",
+      properties: { classifyBuiltins: booleanSchema },
+      required: ["classifyBuiltins"],
       additionalProperties: false,
     },
     ponytail: { enum: PONYTAIL_LEVELS },

@@ -524,6 +524,14 @@ function readJournalFile(runDirPath: string): JournalRecord[] {
 //                               /v1/models list at setup and at every run start.
 //                               Naming a model nobody chose would let a run talk
 //                               to weights the user never picked; "" fails loudly.
+//   toolSurface.classifyBuiltins true  §2's governance floor: a built-in carrying
+//                               no declared side-effect class is refused rather
+//                               than falling through to the read catch-all. The
+//                               safe direction is ON — an unclassified tool is one
+//                               nobody can say the reach of, and defaulting it to
+//                               "harmless" is the absence of a decision rather
+//                               than a decision. The flag exists so the lane can
+//                               be turned OFF for a rollback, never to opt in.
 //
 // The whole object is unreachable in practice until conductor_setup runs —
 // legalTools(…, repoConfigured=false, …) (core/gates-phase.ts:299) leaves only
@@ -552,6 +560,7 @@ const DOCUMENTED_DEFAULT_CONFIG: Config = {
   },
   parallel: { writes: "off", maxImplementers: 2, maxReaders: 6, subSessionTimeoutMs: 900000 },
   models: { default: "", roles: {} },
+  toolSurface: { classifyBuiltins: true },
   ponytail: "full",
   retention: { keepRuns: 20, maxRunDirBytes: 268435456, pruneOnRunCreate: true },
   logging: { level: "info", components: {} },
