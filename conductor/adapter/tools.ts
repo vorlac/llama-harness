@@ -452,6 +452,39 @@ function consumeOverrideGrant(input: GateHookInput, gate: string): boolean {
   return true;
 }
 
+// The §7.4 record for a call every gate allowed (Task 21.5).
+//
+// `gates: allow` already existed and fired in exactly one circumstance — an
+// override grant being SPENT — so an ordinary allowed read left no trace. The
+// campaign asks what each arm reached and whether reaching it correlated with
+// passing, and only the denies could answer that.
+//
+// A network allow is `warn` because it should be rare and each one is worth an
+// operator's attention; everything else is `debug`, because a read allow is the
+// highest-volume event in the system and belongs behind a verbosity a campaign
+// turns up deliberately. An ordinary allow carries no `via`, which is what keeps
+// it distinguishable from the grant-spend record that shares its name.
+function journalAllow(
+  input: GateHookInput,
+  toolClass: ToolClass,
+  sideEffect: SideEffectClass | undefined,
+  networkPrograms: readonly string[],
+): void {
+  const data: Record<string, unknown> = {
+    toolName: input.toolName,
+    toolClass,
+    sideEffect: sideEffect ?? null,
+  };
+  if (networkPrograms.length > 0) {
+    data.networkPrograms = [...networkPrograms];
+    // The command is the evidence for a network allow and nothing else needs it,
+    // so it rides only that record, bounded.
+    const command = input.command ?? "";
+    data.command = command.length > 500 ? command.slice(0, 500) + "…" : command;
+  }
+  input.journal.log(sideEffect === "R3" ? "warn" : "debug", "gates", "allow", data, input.corr);
+}
+
 export function gateBeforeToolCall(input: GateHookInput): void {
   const entry = input.registry.get(input.sessionID);
   const registered = entry !== undefined;
@@ -564,8 +597,14 @@ export function gateBeforeToolCall(input: GateHookInput): void {
   //     commands, so running it over every bash command is how a git write hidden
   //     in a compound command such as `ls && git commit` is still caught), then
   //     the edit-scope gate over each write-shaped target.
+  // Every path that reaches here has passed every gate. Routing each exit through
+  // one closure is what makes the record per CALL rather than per gate.
+  const allow = (): void => {
+    journalAllow(input, toolClass, sideEffect, networkPrograms);
+  };
+
   if (input.toolName === "bash") {
-    if (command === undefined) return;
+    if (command === undefined) return allow();
 
     const gitDecision = guardedDecide(
       input,
@@ -606,7 +645,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
         denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this write"));
       }
     }
-    return;
+    return allow();
   }
 
   // (c) edit/write/patch tool: the edit-scope gate over the edited path.
@@ -622,6 +661,8 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this edit"));
     }
   }
+
+  allow();
 }
 
 // ===========================================================================

@@ -114,6 +114,7 @@ import {
   classifyTool,
   CONDUCTOR_TOOL_NAMES,
 } from "../adapter/tools.ts";
+import type { OverrideGrant } from "../adapter/tools.ts";
 import { ConductorPlugin } from "../plugin/index.ts";
 import { treePath, TOOL_CLASSES } from "../core/types.ts";
 import type { TreePath } from "../core/types.ts";
@@ -207,6 +208,8 @@ interface GateHookInput {
   testScope: string[];
   verifyInFlightTree: TreePath | null;
   inlineClaimScope: string[] | null;
+  overrideGrants?: Map<string, OverrideGrant>;
+  toolSurface?: { classifyBuiltins: boolean; denyNetwork: boolean };
   journal: GateJournal;
   corr: Corr;
   deps?: GateDeps;
@@ -756,4 +759,113 @@ test("[21.4-gate-refuses-curl] a network-shaped bash command is refused by the h
     const err = expectThrow(() => surfaceGate({ toolName: "bash", command }), command);
     assert.match(err.message, /conductor_fetch/, `not refused: ${command}`);
   }
+});
+
+// ===========================================================================
+// Task 21.5 — every ALLOWED call leaves a record.
+//
+// `gates: allow` already existed in the §7.4 vocabulary and was emitted in
+// exactly one circumstance: when an override grant was SPENT. So an allowed read,
+// and an allowed network call, left no journal entry at all — and the campaign
+// this phase exists to make readable asks precisely "what did the arms reach, and
+// did reaching it correlate with passing". Without this record that question has
+// no data behind it, only the denies.
+//
+// Levels are chosen so the volume is right: a network allow is `warn`, because it
+// should be rare and every one is worth an operator's attention; everything else
+// is `debug`, because a read allow is the highest-volume event in the system and
+// belongs behind a verbosity the campaign turns up deliberately.
+// ===========================================================================
+
+function allowRecords(records: CapturedRecord[]): CapturedRecord[] {
+  return records.filter((r) => r.component === "gates" && r.event === "allow");
+}
+
+test("[21.5-read-allow-journaled] an allowed read leaves one gates:allow record at debug", () => {
+  const { journal, records } = makeJournal();
+  gateBeforeToolCall(hookInput({ toolName: "read", gitMode: "read-only", journal }));
+
+  const allows = allowRecords(records);
+  assert.equal(allows.length, 1, `expected exactly one allow record, got ${allows.length}`);
+  const record = allows[0];
+  assert.equal(record.level, "debug", "a read allow is the highest-volume event; it belongs at debug");
+  assert.equal(record.data.toolName, "read");
+  assert.equal(record.data.sideEffect, "R0", "the record carries the §2 class, which is what the campaign groups by");
+});
+
+test("[21.5-network-allow-journaled-loudly] an allowed network call is warn, not debug", () => {
+  const { journal, records } = makeJournal();
+  gateBeforeToolCall(
+    hookInput({
+      toolName: "bash",
+      command: "curl https://example.com",
+      gitMode: "read-only",
+      journal,
+      // The lane reverted: this is the ONLY way a network call is allowed, and it
+      // is exactly the circumstance an operator must not be able to miss.
+      toolSurface: { classifyBuiltins: true, denyNetwork: false },
+    }),
+  );
+
+  const allows = allowRecords(records);
+  assert.equal(allows.length, 1);
+  assert.equal(allows[0].level, "warn", "an allowed network call must be as visible as a deny");
+  assert.equal(allows[0].data.sideEffect, "R3");
+  assert.deepEqual(allows[0].data.networkPrograms, ["curl"], "and it names what was reached");
+});
+
+test("[21.5-denied-calls-do-not-journal-an-allow] a refusal produces a deny record and no allow", () => {
+  const { journal, records } = makeJournal();
+  expectThrow(
+    () => gateBeforeToolCall(hookInput({ toolName: "webfetch", gitMode: "read-only", journal })),
+    "webfetch",
+  );
+  assert.deepEqual(allowRecords(records), [], "a denied call must not also report itself allowed");
+  assert.ok(
+    records.some((r) => r.component === "gates" && r.event === "deny"),
+    "and the deny is still recorded",
+  );
+});
+
+test("[21.5-one-record-per-call] a bash call that passes several gates journals ONE allow, not one per gate", () => {
+  const { journal, records } = makeJournal();
+  gateBeforeToolCall(
+    hookInput({ toolName: "bash", command: "ls -la && grep -rn foo src/", gitMode: "read-only", journal }),
+  );
+  assert.equal(allowRecords(records).length, 1, "the record is per CALL; a per-gate record would be unreadable");
+});
+
+test("[21.5-grant-spend-still-distinguishable] a bypassed deny and a plain allow share an event name but not a shape", () => {
+  // `gates: allow` now fires in TWO circumstances: an override grant converting a
+  // deny, and a call every gate permitted. They must stay tellable apart, or a
+  // campaign counting allows cannot distinguish a clean call from a bypassed one.
+  // The discriminator is `via`, which only the grant-spend record carries.
+  const { journal, records } = makeJournal();
+  const grants = new Map<string, OverrideGrant>();
+  grants.set("ses_registered::edit::I1", {
+    sessionID: REG_SESSION,
+    gate: "edit",
+    itemId: "I1",
+    reason: "probe",
+    grantedAction: "edit",
+    tsMs: 0,
+  });
+  gateBeforeToolCall(
+    hookInput({
+      toolName: "edit",
+      editPath: "/repo/lib/out-of-scope.ts",
+      gitMode: "read-only",
+      overrideGrants: grants,
+      journal,
+    }),
+  );
+
+  const allows = allowRecords(records);
+  const viaGrant = allows.filter((r) => r.data.via === "override-grant");
+  const plain = allows.filter((r) => r.data.via === undefined);
+  assert.equal(viaGrant.length, 1, "the grant spend is recorded, as it was before");
+  assert.equal(viaGrant[0].level, "warn", "a bypassed deny stays as loud as a deny");
+  assert.equal(plain.length, 1, "and the call itself is recorded, once");
+  assert.equal(plain[0].data.toolName, "edit");
+  assert.equal(grants.size, 0, "the grant was consumed, not merely read");
 });
