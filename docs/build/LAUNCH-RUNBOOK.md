@@ -13,24 +13,35 @@ treats it as such — it requires a command transcript, not prose.
 
 Measured 2026-08-20 on this machine; re-check before each launch.
 
-| Check | Command | Last observed |
-|---|---|---|
-| Test gate | `bash scripts/test-conductor.sh` | `GATE PASS`, 1916 tests |
-| Mechanical scan | `bash scripts/conductor-gate.sh` | `M5 PASS`, 192 files |
-| C++ side | `cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo` | 1/1 passed |
-| Acceptance | `bash scripts/verify-acceptance.sh` | 17 PASS, 4 FAIL — all four are 13.2/14.2 |
-| opencode | `opencode --version` | `1.18.15` (the version the wire contract is pinned against) |
-| Model on disk | `ls .data/models` | `qwen3.6-27b` present |
-| Disk | `df -h .` | 376 GiB free |
-| Port | `lsof -nP -iTCP:8080 -sTCP:LISTEN` | free — `llama-server` is not running |
-| Hidden-test floor | `python3 scripts/conductor_bench.py --verify-tasks --work-root <scratch>` | every hidden test exits non-zero on its unmodified seed |
-| Seed-green floor | `python3 scripts/conductor_bench.py --seed-green --work-root <scratch>` | every seeded repo passes its own visible suite |
+| Check                   | Command                                                                                                             | Last observed                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Test gate               | `bash scripts/test-conductor.sh`                                                                                    | `GATE PASS`, 1916 tests                                                                                                                                                                                                                                                                                                  |
+| Mechanical scan         | `bash scripts/conductor-gate.sh`                                                                                    | `M5 PASS`, 192 files                                                                                                                                                                                                                                                                                                     |
+| C++ side                | `cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo` | 1/1 passed                                                                                                                                                                                                                                                                                                               |
+| Acceptance              | `bash scripts/verify-acceptance.sh`                                                                                 | 17 PASS, 4 FAIL — all four are 13.2/14.2                                                                                                                                                                                                                                                                                 |
+| opencode                | `opencode --version`                                                                                                | `1.18.15` (the version the wire contract is pinned against)                                                                                                                                                                                                                                                              |
+| Model on disk           | `ls .data/models`                                                                                                   | `qwen3.6-27b` present                                                                                                                                                                                                                                                                                                    |
+| llama.cpp tools current | `python3 -c 'import sys; sys.path.insert(0,"scripts"); import fetch_models as fm; print(fm.tools_state())'`         | `(True, 'up to date with submodule …')` — otherwise `serve.py` rebuilds nine binaries at launch and the llama-server under test is not the one the contract was measured on (the 13.2 smoke launched into exactly that: build 10298 on disk, submodule at 521a64cd0197, rebuilt to build 10542 before the model started) |
+| Disk                    | `df -h .`                                                                                                           | 376 GiB free                                                                                                                                                                                                                                                                                                             |
+| Port                    | `lsof -nP -iTCP:8080 -sTCP:LISTEN`                                                                                  | free — `llama-server` is not running                                                                                                                                                                                                                                                                                     |
+| Hidden-test floor       | `python3 scripts/conductor_bench.py --verify-tasks --work-root <scratch>`                                           | every hidden test exits non-zero on its unmodified seed                                                                                                                                                                                                                                                                  |
+| Seed-green floor        | `python3 scripts/conductor_bench.py --seed-green --work-root <scratch>`                                             | every seeded repo passes its own visible suite                                                                                                                                                                                                                                                                           |
 
 **Never run a bare `cmake --build` with no `--target`** — the default target
 reaches vendored llama.cpp, which `scripts/verify-acceptance.sh` records as
 pre-broken in this configuration.
 
 ---
+
+## The per-slot window is the opencode model limit
+
+`serve.py` serves every slot `PER_SLOT_CONTEXT_TOKENS` (32768; `--ctx N` overrides it) and
+writes that same window into the session config as every model's `limit` — opencode compacts
+against the slot it actually has. The bench driver probes the window from llama-server's
+`/props?model=<name>` before its first cell and writes the same limit into every arm. The 13.2
+smoke found the 8192-token default refusing the orchestrator's first request (11,441 tokens) and
+opencode looping through compaction against a catalog limit of 65,536 it had no way to know was
+wrong; see `router/UPSTREAM_CONTRACT.md` (d).
 
 ## Set the logging level to `debug` before either run
 
@@ -95,11 +106,11 @@ The full crossing is not runnable. The shape recorded in
 `bench/conductor-tasks.json`'s `sweep` block is: **sweep models across T0/T1,
 run T2–T4 on the primary model only.**
 
-| | cells | ceiling (every cell times out) | expected |
-|---|---|---|---|
-| Primary model, all tiers, 3 reps | 207 | 180 h | ~60 h |
-| Each extra swept model (T0+T1) | 126 | 72 h | ~24 h |
-| Two models | 333 | 252 h | ~84 h |
+|                                  | cells | ceiling (every cell times out) | expected |
+| -------------------------------- | ----- | ------------------------------ | -------- |
+| Primary model, all tiers, 3 reps | 207   | 180 h                          | ~60 h    |
+| Each extra swept model (T0+T1)   | 126   | 72 h                           | ~24 h    |
+| Two models                       | 333   | 252 h                          | ~84 h    |
 
 **Recommended: run a reps=1 pilot on the primary model first — 69 cells, ~20 h —
 and calibrate `TIER_TIMEOUT_SEC` from the observed medians before committing to

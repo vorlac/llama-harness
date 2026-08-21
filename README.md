@@ -241,7 +241,8 @@ names the model you picked as the default, and drops you
 into a subshell with `OPENCODE_CONFIG` exported. Because `--models-max 1`, switching models
 transparently evicts the previous one — which matters when a single model occupies 30 GB of a
 64 GB machine. The server is sized for the harness's own fan-out: `--parallel` and a total
-`--ctx-size` are derived from `--max-readers` (6 by default) at 8192 tokens per slot. `serve.py`
+`--ctx-size` are derived from `--max-readers` (6 by default) at 32768 tokens per slot, and that
+per-slot window is written into the session's opencode config as the model `limit`. `serve.py`
 launches `llama-router` under a restart supervisor and points opencode at it when the session
 opens a shell, a `llama-router` binary is found, and the exported
 `router/tests/schemas/RouterConfig.schema.json` exists; if any of those is missing it prints a

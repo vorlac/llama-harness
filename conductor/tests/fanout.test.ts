@@ -60,7 +60,7 @@ import type {
   TreeState,
 } from "../adapter/fanout.ts";
 
-import { validate, SCHEMAS } from "../core/types.ts";
+import { describeSchema, validate, SCHEMAS } from "../core/types.ts";
 import type { Config } from "../core/types.ts";
 import { isKnownEvent } from "../core/journal-events.ts";
 import type { Journal, Corr } from "../adapter/journal.ts";
@@ -187,7 +187,7 @@ function makeConfig(over: {
       subSessionTimeoutMs: 60_000,
       ...over.parallel,
     },
-    models: over.models ?? { default: "model-A", roles: {} },
+    models: over.models ?? { default: "llamacpp/model-A", roles: {} },
     ponytail: "full",
     retention: { keepRuns: 20, maxRunDirBytes: 268_435_456, pruneOnRunCreate: true },
     logging: { level: "info", components: {} },
@@ -287,6 +287,100 @@ test("[7.1-api] createFanout exposes dispatch + dispatchWave; a job yields {sess
 });
 
 // ---------------------------------------------------------------------------
+// smoke-F06 — the prompt body's model field carries the shape opencode accepts, or nothing.
+//
+// Measured on the 13.2 smoke (2026-08-21, opencode 1.18.15): a body carrying
+// `model: ""` is refused by opencode's payload schema before any model is reached —
+// `message="schema rejection" kind=Payload reason="Expected object | null, got ..."`
+// at ["model"] — and the engine, seeing an error envelope with no text parts, reported
+// it as an unparseable receipt and spent its whole retry budget in 3 ms. The shipped
+// `models.default` IS "" (adapter/config-io.ts), so every sub-session of every role was
+// refused in every live run. The same reasoning the engine already applies to `parentID`
+// applies here: "" is not a weaker version of the request, it is an invalid one.
+// ---------------------------------------------------------------------------
+test("[smoke-F06] an unresolved model omits the body field entirely rather than sending an empty string", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const config = makeConfig({ models: { default: "", roles: {} } });
+  const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: JSON.stringify({ ok: true, note: "i1" }) }));
+  await fanout.dispatch(readJob());
+
+  assert.equal(sdk.prompts.length, 1, "one attempt: nothing was refused");
+  assert.equal(
+    Object.hasOwn(sdk.prompts[0]!.body, "model"),
+    false,
+    "an unresolved model leaves the field off the body, so the sub-session inherits the session's model (G13)",
+  );
+});
+
+test("[smoke-F06] a provider-qualified model rides as {providerID, modelID}, never as a string", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const config = makeConfig({ models: { default: "llamacpp/qwen3.6-27b", roles: {} } });
+  const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: JSON.stringify({ ok: true, note: "i1" }) }));
+  await fanout.dispatch(readJob());
+
+  assert.deepEqual(
+    sdk.prompts[0]!.body["model"],
+    { providerID: "llamacpp", modelID: "qwen3.6-27b" },
+    "adapter/wire-notes.md pins the object form as the one that reaches the provider",
+  );
+});
+
+test("[smoke-F06] a model named without a provider is inherited rather than sent in a shape the API refuses", async () => {
+  // `conductor_setup` derives models.default from GET /v1/models, which lists bare
+  // model ids. Under G13 every sub-session runs the session's model anyway, so a bare
+  // id means inherit — the alternative is a body opencode rejects outright.
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const config = makeConfig({ models: { default: "qwen3.6-27b", roles: {} } });
+  const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: JSON.stringify({ ok: true, note: "i1" }) }));
+  await fanout.dispatch(readJob());
+
+  assert.equal(Object.hasOwn(sdk.prompts[0]!.body, "model"), false);
+});
+
+// ---------------------------------------------------------------------------
+// smoke-F07 — an error envelope is a failed dispatch, not a bad receipt.
+// ---------------------------------------------------------------------------
+test("[smoke-F07] a prompt that returns an error envelope is reported as a failed dispatch, once, with the API's own message", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "error", error: { message: "Expected object | null, got empty string" } }));
+  const results = await fanout.dispatchWave([readJob()]);
+
+  assert.equal(sdk.prompts.length, 1, "a transport failure is not a re-promptable receipt: no retry storm");
+  assert.equal(results[0]!.value, undefined);
+  const complete = records.filter((r) => r.event === "subsession.complete");
+  assert.equal(complete.length, 1);
+  assert.equal(
+    (complete[0]!.data as { reason?: string }).reason,
+    "dispatch-failed",
+    "the record names the failed CALL, never the sub-session's output",
+  );
+  assert.equal(
+    records.filter((r) => r.event === "subsession.retry").length,
+    0,
+    "receiptRetries stays clean: nothing was received to retry",
+  );
+  assert.ok(
+    JSON.stringify(complete[0]!.data).includes("Expected object"),
+    "the API's own message survives into the record",
+  );
+});
+
 // 7.1-grouping — mixed-model jobs dispatch AABB (not ABAB) with a between-group barrier.
 // ---------------------------------------------------------------------------
 test("[7.1-grouping] mixed-model jobs dispatch grouped AABB (not ABAB) with a barrier between model groups", async () => {
@@ -295,7 +389,7 @@ test("[7.1-grouping] mixed-model jobs dispatch grouped AABB (not ABAB) with a ba
   const { journal } = makeRecordingJournal();
   const config = makeConfig({
     parallel: { maxReaders: 6 },
-    models: { default: "model-A", roles: { alpha: "model-A", beta: "model-B" } },
+    models: { default: "llamacpp/model-A", roles: { alpha: "llamacpp/model-A", beta: "llamacpp/model-B" } },
   });
   const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
 
@@ -315,7 +409,7 @@ test("[7.1-grouping] mixed-model jobs dispatch grouped AABB (not ABAB) with a ba
   assert.equal(sdk.prompts.length, 2, "only the first model group is dispatched before its drain");
   assert.deepEqual(
     sdk.prompts.map((p) => p.model),
-    ["model-A", "model-A"],
+    ["llamacpp/model-A", "llamacpp/model-A"],
     "the first group is all model-A (AA), never interleaved with model-B",
   );
 
@@ -325,7 +419,7 @@ test("[7.1-grouping] mixed-model jobs dispatch grouped AABB (not ABAB) with a ba
   assert.equal(sdk.prompts.length, 4, "the second model group dispatches only after the first drains");
   assert.deepEqual(
     sdk.prompts.map((p) => p.model),
-    ["model-A", "model-A", "model-B", "model-B"],
+    ["llamacpp/model-A", "llamacpp/model-A", "llamacpp/model-B", "llamacpp/model-B"],
     "recorded prompt order is AABB, not ABAB",
   );
 
@@ -345,7 +439,7 @@ test("[7.1-grouping] a single-model wave dispatches in one group with no barrier
   const { journal } = makeRecordingJournal();
   // maxReaders high enough that concurrency is NOT the limiter — so if all four are in
   // flight at once, it is because there is one group and no barrier (G13 identity).
-  const config = makeConfig({ parallel: { maxReaders: 10 }, models: { default: "model-A", roles: {} } });
+  const config = makeConfig({ parallel: { maxReaders: 10 }, models: { default: "llamacpp/model-A", roles: {} } });
   const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
 
   sdk.setResponder(() => ({ kind: "pending" }));
@@ -363,7 +457,7 @@ test("[7.1-grouping] a single-model wave dispatches in one group with no barrier
   assert.equal(sdk.inFlightCount(), 4);
   assert.deepEqual(
     sdk.prompts.map((p) => p.model),
-    ["model-A", "model-A", "model-A", "model-A"],
+    ["llamacpp/model-A", "llamacpp/model-A", "llamacpp/model-A", "llamacpp/model-A"],
     "every job resolved to the single default model",
   );
 
@@ -674,7 +768,7 @@ test("[7.1-concurrency] in-flight sub-sessions never exceed parallel.maxReaders"
   const registry = makeRegistry();
   const sdk = makeFakeSdk({ registry });
   const { journal } = makeRecordingJournal();
-  const config = makeConfig({ parallel: { maxReaders: 2 }, models: { default: "model-A", roles: {} } });
+  const config = makeConfig({ parallel: { maxReaders: 2 }, models: { default: "llamacpp/model-A", roles: {} } });
   const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
 
   sdk.setResponder(() => ({ kind: "pending" }));
@@ -719,7 +813,7 @@ test("[7.1-cleanup] the registry is populated during flight then cleaned; journa
   const registry: SessionRegistry & Map<string, RegistryEntry> = makeRegistry();
   const sdk = makeFakeSdk({ registry });
   const { journal, records } = makeRecordingJournal();
-  const config = makeConfig({ parallel: { maxReaders: 6 }, models: { default: "model-A", roles: {} } });
+  const config = makeConfig({ parallel: { maxReaders: 6 }, models: { default: "llamacpp/model-A", roles: {} } });
   const fanout: Fanout = createFanout(sdk.client, config, journal, registry, makeFakeTreeState());
 
   sdk.setResponder(() => ({ kind: "pending" }));
@@ -956,5 +1050,231 @@ test("[22A.4-empty-wave-is-not-a-wave] dispatching no jobs journals nothing", as
     records.filter((r) => r.component === "fanout" && r.event === "wave"),
     [],
     "a caller that computed an empty job list did not dispatch a wave",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// smoke-F08b — a fenced receipt is a receipt
+//
+// The protocol asks for a single JSON object and a local model routinely answers
+// with one inside a markdown fence. Measured in the 13.2 live smoke: every planner
+// dispatch across two runs lost attempt 1 to
+// `response was not parseable JSON: JSON Parse error: Unrecognized token '`'`
+// before its content was looked at — a third of the retry budget spent on three
+// backticks. The fence is stripped, never the protocol relaxed: a reply that
+// parses bare is still parsed bare, and a fenced reply that does not satisfy the
+// schema still fails on ITS OWN content rather than on the fence.
+// ---------------------------------------------------------------------------
+
+test("[smoke-F08b] a receipt wrapped in a markdown fence validates on the first attempt", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: "```json\n" + VALID + "\n```" }));
+  const result = await fanout.dispatch(readJob());
+
+  assert.equal(sdk.prompts.length, 1, "the fence costs no attempt");
+  assert.deepEqual(result.value, VALID_VALUE, "the fenced object is the receipt");
+  assert.equal(
+    records.filter((r) => r.event === "subsession.retry").length,
+    0,
+    "no retry is journaled for a well-formed fenced receipt",
+  );
+});
+
+test("[smoke-F08b] prose around the fence does not defeat it, and a bare object is still read bare", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({
+    kind: "reply",
+    text: "Here is the receipt you asked for:\n\n```\n" + VALID + "\n```\n\nLet me know if anything is off.",
+  }));
+  assert.deepEqual((await fanout.dispatch(readJob())).value, VALID_VALUE, "the first fenced block is the receipt");
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  assert.deepEqual((await fanout.dispatch(readJob())).value, VALID_VALUE, "a bare object is unaffected");
+});
+
+test("[smoke-F08b] a fenced reply that fails the schema fails on its own content, not on the backticks", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: "```json\n" + INVALID + "\n```" }));
+  await fanout.dispatch(readJob());
+
+  const errors = records
+    .filter((r) => r.event === "subsession.retry" || r.event === "subsession.complete")
+    .flatMap((r) => (r.data as { errors?: string[] }).errors ?? []);
+  assert.ok(errors.length > 0, "the failure is reported");
+  assert.ok(
+    errors.every((e) => !e.includes("Unrecognized token")),
+    "no error blames the fence: " + JSON.stringify(errors),
+  );
+  assert.ok(
+    errors.some((e) => e.includes("note")),
+    "the reported error names the missing property: " + JSON.stringify(errors),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// smoke-F13 — the dispatch record carries the brief's size
+//
+// conductor/tools/observation.ts reads `promptChars` off subsession.dispatched to
+// derive the largest brief as a fraction of the per-slot window, and
+// BREAKDOWN_THRESHOLDS.largestBriefWindowFraction is declared against it. Nothing
+// wrote the field, so the 13.2 live smoke observed `largest brief 0 chars (0% of
+// the effective per-slot window)` over two real dispatches — a declared threshold
+// that could never cross.
+// ---------------------------------------------------------------------------
+
+test("[smoke-F13] subsession.dispatched records the brief's character count", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  const prompt = "review the change, and here is a brief long enough to measure: " + "x".repeat(500);
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatch(readJob({ prompt }));
+
+  const dispatched = records.find((r) => r.event === "subsession.dispatched");
+  assert.ok(dispatched, "the dispatch is journaled");
+  const sent = JSON.parse(JSON.stringify(sdk.prompts[0]!.body)) as { parts: Array<{ text: string }> };
+  assert.equal(
+    (dispatched.data as { promptChars?: number }).promptChars,
+    sent.parts[0]!.text.length,
+    "the record carries the size of what was SENT — the only place an observer can read it",
+  );
+  assert.ok(
+    (dispatched.data as { promptChars?: number }).promptChars! > prompt.length,
+    "and the schema shape rides with the brief, so it is larger than the brief alone",
+  );
+});
+
+test("[smoke-F18] a wave names the items it sends to review, and a run-level review names none", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatchWave([
+    readJob({ role: "reviewer", itemId: "I1" }),
+    readJob({ role: "reviewer", itemId: "I1" }),
+    readJob({ role: "skeptic", itemId: "I2" }),
+  ]);
+  const itemWave = records.find((r) => r.event === "wave");
+  assert.deepEqual(
+    (itemWave?.data as { reviewItems?: string[] }).reviewItems,
+    ["I1"],
+    "two reviewers on one item are one item's round, and the skeptic is not a review",
+  );
+
+  const { journal: j2, records: r2 } = makeRecordingJournal();
+  const fanout2: Fanout = createFanout(sdk.client, makeConfig(), j2, makeRegistry(), makeFakeTreeState());
+  await fanout2.dispatchWave([readJob({ role: "reviewer", itemId: "" }), readJob({ role: "reviewer", itemId: "" })]);
+  assert.deepEqual(
+    (r2.find((r) => r.event === "wave")?.data as { reviewItems?: string[] }).reviewItems,
+    [],
+    "a run-level plan review names no item: it is nobody's second look",
+  );
+});
+
+test("[smoke-F17] a dispatch carries the shape its receipt will be judged against, once, ahead of the retries", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  // Two attempts: the first reply is schema-invalid, so the retry prompt is also
+  // inspected — a shape delivered only on the first attempt would leave the
+  // re-prompt telling the sub-session what was wrong without saying what is right.
+  let call = 0;
+  sdk.setResponder(() => ({ kind: "reply", text: (call += 1) === 1 ? INVALID : VALID }));
+  await fanout.dispatch(readJob());
+
+  assert.equal(sdk.prompts.length, 2, "premise: one invalid reply, then a good one");
+  const shape = describeSchema(PROBE);
+  assert.ok(shape.length > 0, "premise: the probe schema renders");
+  for (const [i, sent] of sdk.prompts.entries()) {
+    const text = JSON.stringify(sent.body);
+    assert.ok(text.includes(PROBE), `attempt ${i + 1} names the schema`);
+    assert.ok(
+      text.includes(JSON.stringify(shape).slice(1, -1)),
+      `attempt ${i + 1} carries the rendered shape, not a prose paraphrase of it`,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// smoke-F21 — a receipt whose strings carry raw line breaks
+//
+// A local model writing a plan body into a JSON string writes it the way it would
+// write prose, with real line breaks in it. JSON forbids a raw control character
+// inside a string, so the reply fails as `Unterminated string` and the retry says
+// exactly that — the parser's vocabulary, naming a symptom the model cannot act
+// on. Measured in the 13.2 live smoke, run r-20260821-113c: three consecutive
+// plan-stage attempts, all identical, and then the orchestrator retried the whole
+// stage.
+//
+// The repair is narrow ON PURPOSE: raw control characters INSIDE a string become
+// their escapes, and nothing else is touched. It cannot turn an invalid document
+// into a different valid one, because the only characters it rewrites are ones
+// JSON does not permit where they stand.
+// ---------------------------------------------------------------------------
+
+test("[smoke-F21] a receipt whose string values carry raw line breaks is read, not refused", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  // Exactly the shape the live planner produced: a prose value written across lines.
+  const raw = '{"ok": true, "note": "first line\nsecond line\tand a tab"}';
+  assert.throws(() => JSON.parse(raw), "premise: this is not valid JSON as sent");
+
+  sdk.setResponder(() => ({ kind: "reply", text: raw }));
+  const result = await fanout.dispatch(readJob());
+
+  assert.equal(sdk.prompts.length, 1, "the repair costs no attempt");
+  assert.deepEqual(
+    result.value,
+    { ok: true, note: "first line\nsecond line\tand a tab" },
+    "the line breaks survive as content, escaped rather than dropped",
+  );
+  assert.equal(
+    records.filter((r) => r.event === "subsession.retry").length,
+    0,
+    "and no retry is journaled",
+  );
+});
+
+test("[smoke-F21] the repair rewrites nothing outside a string, and a truly broken reply still fails", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal, records } = makeRecordingJournal();
+  const fanout: Fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  // Pretty-printed JSON: every line break here is BETWEEN tokens, not inside a
+  // string, and must be left exactly as it is.
+  sdk.setResponder(() => ({ kind: "reply", text: '{\n  "ok": true,\n  "note": "fine"\n}' }));
+  assert.deepEqual((await fanout.dispatch(readJob())).value, { ok: true, note: "fine" }, "pretty JSON is untouched");
+
+  // A reply that is not a JSON document at all is still refused, with its own error.
+  sdk.setResponder(() => ({ kind: "reply", text: '{"ok": true, "note": ' }));
+  await fanout.dispatch(readJob());
+  const errors = records
+    .filter((r) => r.event === "subsession.complete")
+    .flatMap((r) => (r.data as { errors?: string[] }).errors ?? []);
+  assert.ok(
+    errors.some((e) => e.includes("not parseable JSON")),
+    "a genuinely truncated reply is still reported as unparseable: " + JSON.stringify(errors),
   );
 });

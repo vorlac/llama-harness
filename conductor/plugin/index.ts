@@ -1059,6 +1059,7 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         state: run.state,
         stop: run.stop === null ? null : { kind: run.stop.kind },
         classification: run.classification === null ? null : { kind: run.classification.kind },
+        classified: run.classified === true,
       },
       items,
       questions,
@@ -1098,6 +1099,11 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
         registryEntry,
         packs,
         state: deliveryStateFor(ws),
+        // §4.4: the schema tag rides the registry entry the fan-out wrote, because
+        // an injection hook is handed a sessionID and must recover everything else
+        // from there. Without it the router's conformance dataset is empty for
+        // every run, however the run went.
+        job: { schema: registryEntry.schema === true },
       });
     } catch (err) {
       journal.log(
@@ -1648,6 +1654,11 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
           prompt,
           journal,
         });
+        // A fan-out sub-session's brief. The hook's whole body is about operator
+        // prompts: this one is conductor talking to itself, the registry entry
+        // belongs to adapter/fanout.ts, and there is no run to bind, report or
+        // announce.
+        if (result.action === "subsession") return;
         // Rebind the journal to whichever run this prompt belongs to — the one
         // just created, or a live one this plugin instance inherited from an
         // earlier session. Records already written stay where they were written.

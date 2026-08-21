@@ -33,6 +33,7 @@ import {
   SCHEMAS,
   SIDE_EFFECT_CLASSES,
   TOOL_CLASSES,
+  describeSchema,
   validate,
 } from "../core/types.ts";
 import type {
@@ -1429,4 +1430,44 @@ test("[22.4-build-command-stays-optional] a scope without one still validates", 
   const config = structuredClone(DEFAULT_CONFIG) as Config;
   config.verify.scopes = { ts: { command: ["node", "--test"], timeoutMs: 1000 } };
   assert.equal(validate("Config", config).ok, true);
+});
+
+// ---------------------------------------------------------------------------
+// smoke-F17 — the shape a receipt is judged against, rendered FROM the schema
+//
+// A brief that names fields in prose is a second spelling of the schema, and it
+// drifts: the 13.2 live smoke watched a planner guess `ladderRung` values it had
+// never been shown ("likely: essential, required, optional") and a classifier
+// answer `confidence` with a number against a string schema. Both receipts were
+// judged by SCHEMAS; only SCHEMAS can say what they had to satisfy.
+// ---------------------------------------------------------------------------
+
+describe("describeSchema (the receipt shape, single-sourced)", () => {
+  test("[smoke-F17] names every required field, its type, and every enum member, at any depth", () => {
+    const text = describeSchema("Classification");
+
+    for (const field of ["kind", "rationale", "confidence", "trivialItem"]) {
+      assert.ok(text.includes(field), `names the top-level field ${field}: ${text}`);
+    }
+    assert.ok(/confidence[^\n]*string/.test(text), `says confidence is a string: ${text}`);
+    for (const kind of ["question", "trivial", "work"]) {
+      assert.ok(text.includes(`"${kind}"`), `names the classification kind ${kind}: ${text}`);
+    }
+    // The nested item, three levels down, is where the live failures happened.
+    assert.ok(text.includes("ponytail"), "reaches the nested ponytail record");
+    assert.ok(text.includes("ladderRung"), "reaches the field the live classifier guessed");
+    for (const rung of ["skip", "reuse", "stdlib", "platform", "dependency", "one-liner", "minimal-code"]) {
+      assert.ok(text.includes(`"${rung}"`), `names the ladder rung ${rung}: ${text}`);
+    }
+    assert.ok(text.includes("null"), "says trivialItem may be null");
+  });
+
+  test("[smoke-F17] renders every registered schema without throwing, and never returns nothing", () => {
+    for (const name of Object.keys(SCHEMAS)) {
+      const text = describeSchema(name);
+      assert.ok(text.length > 0, `${name} renders to something`);
+      assert.ok(text.startsWith(name), `${name} names itself first: ${text.slice(0, 40)}`);
+    }
+    assert.equal(describeSchema("NoSuchSchema"), "", "an unregistered name renders to nothing, never a guess");
+  });
 });

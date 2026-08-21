@@ -160,16 +160,26 @@ of the previous section and answer the questions Phases 21 and 22B are gated on.
   schema makes `permission` a required field, so the ruleset is always readable without
   driving a prompt.
 
-### 20.3 Fan-out sub-sessions select no agent
+### 20.3 Fan-out sub-sessions select their role's agent
 
-- Measured from code, not from the binary: `conductor/adapter/fanout.ts` creates every
-  sub-session with `client.session.create({ body: { title } })` and prompts with
-  `{ parts, model }`. Neither call names an `agent`. **The six subagent blocks in
-  `conductor/opencode-fragment.json` are therefore selected by nothing**, and their
-  `"edit": "deny"` and `tools: {"task": false}` rows bind the orchestrator session only.
-  Enforcement is unaffected — conductor's registry and edit gates bind on the session
-  registry regardless of agent — but nobody should "harden" a block no session reads.
-  The same fact is recorded in `conductor/docs/OPERATIONS.md`.
+- `conductor/adapter/fanout.ts` creates every sub-session with
+  `client.session.create({ body: { title, parentID, agent } })`, where `agent` is
+  `ROLE_AGENT[job.role]` — the names `conductor/opencode-fragment.json` declares. **The six
+  subagent blocks are therefore in force for the sessions that do the work**, including
+  their `"edit": "deny"` and `tools: {"task": false}` rows.
+- Measured from the binary in the 13.2 live smoke, run `r-20260821-c82b`, reading opencode's
+  own `session` table after a plan-review fan-out:
+
+  ```
+  {"id": "ses_fdd723764ffeV26O6uhnL1gEY0", "parent_id": null, "agent": "conductor-orchestrator"}
+  {"id": "ses_fdd70ac05ffedmwDnDF0fQpor3", "parent_id": "ses_fdd723764ffeV26O6uhnL1gEY0", "agent": "conductor-planner"}
+  {"id": "ses_fdd62784fffe6CiLpepzyPdeR0", "parent_id": "ses_fdd723764ffeV26O6uhnL1gEY0", "agent": "conductor-reviewer"}
+  ```
+
+- A wrong agent name is silent (opencode accepts an unknown agent with 200 and echoes it),
+  which is why `conductor/tests/fragment.test.ts` pins `ROLE_AGENT`'s values to the fragment.
+  Enforcement does not rest on the agent either way: conductor's registry and edit gates bind
+  on the session registry.
 
 ### 20.4 Side-effect class per offered tool (§2 of the read-only capability plan)
 

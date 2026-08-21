@@ -514,10 +514,11 @@ test("[inject-wiring-system-transform] the transform hook appends the role's pac
     "the LIVE STATE BLOCK is the last append entry (§6.4), re-stated every request; got: " + last.slice(0, 200),
   );
   assert.ok(
-    last.includes("Recommended next tool: conductor_decompose"),
-    "the block must name the ONE recommended next tool from the gate's own legality verdict — an " +
-      "INTAKE run carrying adapter/chat-message.ts's provisional work classification recommends " +
-      "conductor_decompose. Got:\n" + last,
+    last.includes("Recommended next tool: conductor_classify"),
+    "the block must name the ONE recommended next tool from the gate's own legality verdict — a " +
+      "freshly created run has not been classified (adapter/chat-message.ts writes a PLACEHOLDER " +
+      "classification, and run.classified is the receipt that says the classifier has spoken), so " +
+      "the recommendation is conductor_classify. Got:\n" + last,
   );
   assert.ok(
     last.split("\n").length <= 30,
@@ -786,6 +787,14 @@ test("[inject-wiring-subsession-role] a REGISTERED sub-session receives ITS role
       headersOut.headers["X-Conductor-Group"],
       root,
       "§4.4 prefix affinity: the group is the tree the fan-out registered for this sub-session",
+    );
+    assert.equal(
+      headersOut.headers["X-Conductor-Schema"],
+      "required",
+      "§4.4 observe-not-enforce: every fan-out dispatch asks for a schema-shaped receipt, and the " +
+        "router's conformance dataset is exactly the requests that said so. Untagged, the router " +
+        "reports schemaConformed 0 / schemaMissing 0 / rate null no matter how the run went. Got: " +
+        JSON.stringify(headersOut.headers),
     );
 
     // (d) the receipt names the sub-session's own packs.

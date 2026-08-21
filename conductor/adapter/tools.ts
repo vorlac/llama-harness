@@ -358,11 +358,20 @@ function hasGitSegment(command: string): boolean {
   return false;
 }
 
-// The §7.4 input snapshot for a deny: enough context (toolName, raw args, the
-// repro command/path, and the reason) to reproduce the decision through the pure
-// core function in a test.
-function denySnapshot(input: GateHookInput, reason: string): Record<string, unknown> {
+// Which of the gate stack's tables refused. The observer groups denies by this
+// name and the whole reading of a deny rate rests on it — `edit` says the plan's
+// scopes are wrong, `git` says the session reached for a commit it may not make,
+// `session` says something called from an unregistered session
+// (docs/developer/observing-a-run.md). The reason string carries the argument;
+// this carries the table, because a prose reason cannot be grouped.
+type DenyGate = "tool" | "surface" | "session" | "git" | "edit";
+
+// The §7.4 input snapshot for a deny: enough context (the refusing gate, toolName,
+// raw args, the repro command/path, and the reason) to reproduce the decision
+// through the pure core function in a test.
+function denySnapshot(input: GateHookInput, gate: DenyGate, reason: string): Record<string, unknown> {
   const data: Record<string, unknown> = {
+    gate,
     toolName: input.toolName,
     args: input.args,
     reason,
@@ -374,8 +383,8 @@ function denySnapshot(input: GateHookInput, reason: string): Record<string, unkn
 
 // Journal the deny snapshot (gates/deny) and throw the reason. A deny is a
 // security refusal, logged at `warn` so the journal always persists it (§7.4).
-function denyThrow(input: GateHookInput, reason: string): never {
-  input.journal.log("warn", "gates", "deny", denySnapshot(input, reason), input.corr);
+function denyThrow(input: GateHookInput, gate: DenyGate, reason: string): never {
+  input.journal.log("warn", "gates", "deny", denySnapshot(input, gate, reason), input.corr);
   throw new Error(reason);
 }
 
@@ -532,6 +541,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
   if (DENIED_TOOLS.includes(input.toolName)) {
     denyThrow(
       input,
+      "tool",
       "the " +
         input.toolName +
         " tool is denied in every session: a patch body carries its own write targets in a form no gate adjudicates, so the edit-scope gate cannot bound it. Use the edit/write tools, whose target is a single path this session's scope is checked against",
@@ -557,7 +567,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       }),
   );
   if (surfaceDecision.action === "deny" && !consumeOverrideGrant(input, "session")) {
-    denyThrow(input, reasonOf(surfaceDecision, "the tool-surface gate denied this call"));
+    denyThrow(input, "surface", reasonOf(surfaceDecision, "the tool-surface gate denied this call"));
   }
 
   const decideSessionFn: (i: SessionInput) => Decision =
@@ -581,7 +591,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
     () => decideSessionFn({ registered, role, toolName: input.toolName, toolClass }),
   );
   if (sessionDecision.action === "deny" && !consumeOverrideGrant(input, "session")) {
-    denyThrow(input, reasonOf(sessionDecision, "the session-registry gate denied this call"));
+    denyThrow(input, "session", reasonOf(sessionDecision, "the session-registry gate denied this call"));
   }
 
   const editInputFor = (path: string): EditInput => ({
@@ -615,7 +625,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       () => decideGitFn(command, role ?? "", input.gitMode, input.runActive, input.branchPolicy),
     );
     if (gitDecision.action === "deny" && !consumeOverrideGrant(input, "git")) {
-      denyThrow(input, reasonOf(gitDecision, "the git gate denied this command"));
+      denyThrow(input, "git", reasonOf(gitDecision, "the git gate denied this command"));
     }
 
     // The state area, ahead of every path-shaped decision. An interpreter program
@@ -629,6 +639,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
     if (stateAreaScript !== null && !consumeOverrideGrant(input, "edit")) {
       denyThrow(
         input,
+        "edit",
         "an interpreter one-liner naming the .conductor state area is denied outright: the state " +
           "area is handler-written only, and a program text can build the path it writes to, so " +
           "the mention itself is the refusal. The offending program was: " +
@@ -644,7 +655,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
         () => decideEditFn(editInputFor(target)),
       );
       if (editDecision.action === "deny" && !consumeOverrideGrant(input, "edit")) {
-        denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this write"));
+        denyThrow(input, "edit", reasonOf(editDecision, "the edit-scope gate denied this write"));
       }
     }
     return allow();
@@ -660,7 +671,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
       () => decideEditFn(editInputFor(editPath)),
     );
     if (editDecision.action === "deny" && !consumeOverrideGrant(input, "edit")) {
-      denyThrow(input, reasonOf(editDecision, "the edit-scope gate denied this edit"));
+      denyThrow(input, "edit", reasonOf(editDecision, "the edit-scope gate denied this edit"));
     }
   }
 
@@ -1978,7 +1989,10 @@ export async function handleDecompose(input: DecomposeInput): Promise<DecomposeR
 
   // (1) legality FIRST, before a single sub-session is spent: only an INTAKE run
   //     classified `work` decomposes (§3.1's classification-selected exit).
-  const edge = advanceRun(run, "DECOMPOSED", { classification: run.classification.kind });
+  const edge = advanceRun(run, "DECOMPOSED", {
+    classification: run.classification.kind,
+    classified: run.classified === true,
+  });
   if (!edge.ok) {
     throw new Error("conductor_decompose: " + edge.why);
   }
@@ -3248,6 +3262,7 @@ function requireStageTool(
     state: run.state,
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
   // §2.4 paths are repo-relative and stay inside the run's tree. Asserted HERE, at
   // the legality step, because this is the last point before the two things that
@@ -3396,6 +3411,7 @@ export function requireToolLegal(input: ToolLegalityInput): void {
     state: run.state,
     stop: position.stop,
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
   const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
   const offer = legalTools(
@@ -6083,6 +6099,7 @@ export function waveVerdict(store: StateStore, runId: string, runDir: string, qu
     state: run.state,
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
   const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
   return legalTools(gateRun, gateItemsOf(store, runId, queue), questions, true, isRepo(store.root));

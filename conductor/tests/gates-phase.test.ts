@@ -38,9 +38,12 @@ import { legalTools } from "../core/gates-phase.ts";
 interface RunLike {
   state: string;
   stop: { kind: string } | null;
-  // null before conductor_classify records it — this is how legalTools tells
-  // UNCLASSIFIED INTAKE from an INTAKE already classified `work` (§3.4).
+  // The recorded kind. A live run carries one from creation (the intake
+  // placeholder), so its presence says nothing about whether the classifier ran.
   classification: { kind: string } | null;
+  // The receipt that does say so — how legalTools tells UNCLASSIFIED INTAKE from
+  // an INTAKE already classified `work` (§3.4).
+  classified: boolean;
 }
 
 interface ItemLike {
@@ -116,6 +119,9 @@ const run = (over: Partial<RunLike> = {}): RunLike => ({
   state: "EXECUTING",
   stop: null,
   classification: { kind: "work" },
+  // The receipt, not the classification, is what says the classifier has spoken.
+  // A run anywhere past INTAKE has one by construction.
+  classified: true,
   ...over,
 });
 
@@ -199,7 +205,12 @@ test("[3.2-always-tools] conductor_answer is legal exactly when an open question
 // ===========================================================================
 
 test("[3.2-intake] UNCLASSIFIED INTAKE offers conductor_classify as the sole stage tool and recommends it", () => {
-  const result = legalTools(run({ state: "INTAKE", classification: null }), [], [], true);
+  const result = legalTools(
+    run({ state: "INTAKE", classification: null, classified: false }),
+    [],
+    [],
+    true,
+  );
 
   assert.ok(result.legal.has(T.classify), "conductor_classify is legal in unclassified INTAKE");
   assert.notEqual(result.recommended, null, "an unclassified INTAKE recommends its next tool");
@@ -209,6 +220,38 @@ test("[3.2-intake] UNCLASSIFIED INTAKE offers conductor_classify as the sole sta
   assert.equal(result.legal.has(T.decompose), false, "conductor_decompose NOT yet legal (unclassified)");
   assert.equal(result.legal.has(T.plan), false, "conductor_plan NOT yet legal (unclassified)");
   assert.equal(result.legal.has(T.dispatchWave), false, "conductor_dispatch_wave NOT yet legal (unclassified)");
+});
+
+// The intake placeholder. adapter/chat-message.ts writes a schema-valid
+// classification the moment a run is created, so `classification === null` is a
+// shape the live system never produces and the receipt for "the classifier has
+// spoken" is run.classified. Measured in the 13.2 live smoke: every run reached
+// conductor_decompose with classification "work" and check.agreed false, and
+// conductor_classify was never offered, never recommended and never ran — the
+// trivial and question routes with it.
+test("[smoke-F12] INTAKE carrying the intake placeholder (classified false) offers conductor_classify and recommends it", () => {
+  const result = legalTools(
+    run({ state: "INTAKE", classification: { kind: "work" }, classified: false }),
+    [],
+    [],
+    true,
+  );
+
+  assert.ok(result.legal.has(T.classify), "conductor_classify is legal while the placeholder stands");
+  assert.equal(result.recommended?.tool, T.classify, "and it is the recommended next tool");
+  assert.equal(result.legal.has(T.decompose), false, "conductor_decompose is NOT yet legal");
+});
+
+test("[smoke-F12] INTAKE once the classifier has spoken (classified true, kind 'work') recommends conductor_decompose", () => {
+  const result = legalTools(
+    run({ state: "INTAKE", classification: { kind: "work" }, classified: true }),
+    [],
+    [],
+    true,
+  );
+
+  assert.equal(result.recommended?.tool, T.decompose, "the recorded work classification advances to decompose");
+  assert.equal(result.legal.has(T.classify), false, "conductor_classify is not re-offered once it has run");
 });
 
 test("[3.2-intake] INTAKE with classification.kind === 'work' recommends conductor_decompose", () => {

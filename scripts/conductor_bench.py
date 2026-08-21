@@ -891,12 +891,18 @@ def build_arm_config(
     router_config: Dict[str, Any],
     cell_dir: Any,
     base_config: Dict[str, Any],
+    per_slot_ctx: int,
 ) -> Dict[str, Any]:
     """The opencode config for one arm of one cell.
 
     The arms differ in exactly one thing: what process the model is running
-    inside. Provider, base URL, model selection and every other key are built
-    from the same code path so the experiment keeps its control.
+    inside. Provider, base URL, model selection, the served model limit and every
+    other key are built from the same code path so the experiment keeps its
+    control. ``per_slot_ctx`` is the window llama-server serves each slot, probed
+    from the server by served_per_slot_context: opencode compacts against the
+    limit it is told, and a cell that does not tell it discovers the slot by
+    being refused, then loops through a compaction that cannot shrink the
+    system prompt (the 13.2 smoke, 2026-08-21).
     """
     if arm not in ARMS:
         raise BenchError("unknown arm %r: the closed set is %s" % (arm, ", ".join(ARMS)))
@@ -917,10 +923,9 @@ def build_arm_config(
     options["baseURL"] = router_base_url(router_config)
 
     models = provider.get("models")
-    if isinstance(models, dict):
-        provider["models"] = {model_name: copy.deepcopy(models.get(model_name) or {})}
-    else:
-        provider["models"] = [model_name]
+    entry = copy.deepcopy(models.get(model_name) or {}) if isinstance(models, dict) else {}
+    entry["limit"] = conductor_wiring.opencode_model_limit(per_slot_ctx)
+    provider["models"] = {model_name: entry}
 
     config["model"] = model
     config["small_model"] = model
@@ -939,6 +944,59 @@ def build_arm_config(
         config = conductor_wiring.merge_opencode_fragment(config, fragment)
 
     return config
+
+
+def parse_served_context(payload: Any) -> int:
+    """The per-slot window out of llama-server's /props body, or a refusal.
+
+    /props for a served model reports default_generation_settings.n_ctx, which
+    is the slot's window after --parallel has divided --ctx-size (the parent's
+    own /props, with no model named, reports 0). A zero or missing value means
+    no served model answered, and a campaign must not guess a window.
+    """
+    settings = payload.get("default_generation_settings") if isinstance(payload, dict) else None
+    n_ctx = settings.get("n_ctx") if isinstance(settings, dict) else None
+    if isinstance(n_ctx, bool) or not isinstance(n_ctx, int) or n_ctx <= 0:
+        raise BenchError(
+            "llama-server's /props did not report a served per-slot context "
+            "(default_generation_settings.n_ctx = %r); is the model loaded?" % (n_ctx,)
+        )
+    return n_ctx
+
+
+def _fetch_bytes(url: str) -> bytes:
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read()
+
+
+def served_per_slot_context(
+    router_config: Dict[str, Any],
+    model: str,
+    fetch: Optional[Callable[[str], bytes]] = None,
+) -> int:
+    """Ask llama-server what window it serves the model with, through the router's upstream.
+
+    The router proxies /v1/* only, so the probe goes to the upstream llama-server
+    the router config names. One probe per run: the window is a server fact, not
+    a cell fact, and it is what every arm's opencode limit is set from.
+    """
+    upstream = router_config.get("upstream")
+    if not isinstance(upstream, dict):
+        raise BenchError("the router config has no upstream block")
+    host = upstream.get("host")
+    port = upstream.get("port")
+    if not isinstance(host, str) or not host or isinstance(port, bool) or not isinstance(port, int):
+        raise BenchError("the router config has no upstream.host / integer upstream.port")
+    _, _, model_name = model.partition("/")
+    url = "http://%s:%d/props?model=%s" % (host, port, model_name)
+    try:
+        raw = (_fetch_bytes if fetch is None else fetch)(url)
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BenchError("cannot probe the served context at %s: %s" % (url, exc))
+    return parse_served_context(payload)
 
 
 def build_opencode_argv(arm: str, model: str, work_dir: Any, prompt: str) -> List[str]:
@@ -1244,7 +1302,13 @@ def build_conductor_cell_config(task: Task) -> Dict[str, Any]:
                 }
             },
             "behavioralPaths": list(task.behavioral_paths),
-            "requiredScopes": [],
+            # The cell's runner is the task's whole visible suite, so the scope
+            # that covers one path covers all of them. An empty list here is not a
+            # neutral default: conductor_submit_test and conductor_mark_green both
+            # refuse an item that selects no scope - a verify over an empty scope
+            # map would be vacuously green - so a cell with no entry wedges every
+            # behavioral item at RED and scores the arm on a wedge.
+            "requiredScopes": [{"pattern": "**", "scopes": ["repo"]}],
         },
         "format": {"rules": []},
         "git": {"mode": "commit", "branchPolicy": "pin", "preexistingDirty": "refuse"},
@@ -1384,6 +1448,7 @@ def run_cell(
     router_config: Dict[str, Any],
     base_config: Dict[str, Any],
     timeout_sec: float,
+    per_slot_ctx: int,
     runner: Optional[Callable[[CellInvocation], CommandOutcome]] = None,
     test_runner: Optional[Callable[[Sequence[str], Any, float], CommandOutcome]] = None,
     git_runner: Optional[Callable[[Sequence[str], Any], None]] = None,
@@ -1417,6 +1482,7 @@ def run_cell(
         router_config=router_config,
         cell_dir=directory,
         base_config=base_config,
+        per_slot_ctx=per_slot_ctx,
     )
     validate_config_file_refs(config)
     config_path = directory / ("%s.json" % cell.arm)
@@ -2846,11 +2912,13 @@ def _has_overlapping_pair(
 def make_cell_runner(
     router_config: Dict[str, Any],
     base_config: Dict[str, Any],
+    per_slot_ctx: int,
 ) -> Callable[[Cell, Task, Any], Dict[str, Any]]:
     """The live cell runner: one closure over the run-wide settings.
 
     The model comes from the cell rather than from this closure, because model
-    is a matrix dimension: one plan carries several of them.
+    is a matrix dimension: one plan carries several of them. The served window
+    is run-wide: one server, one slot size, probed once before the first cell.
     """
 
     def runner(cell: Cell, task: Task, cell_dir: Any) -> Dict[str, Any]:
@@ -2862,6 +2930,7 @@ def make_cell_runner(
             router_config=router_config,
             base_config=base_config,
             timeout_sec=task.run_timeout_sec,
+            per_slot_ctx=per_slot_ctx,
         )
 
     return runner
@@ -2883,6 +2952,7 @@ def run_benchmark(
     cell_runner: Optional[Callable[[Cell, Task, Any], Dict[str, Any]]] = None,
     router_config: Optional[Dict[str, Any]] = None,
     base_config: Optional[Dict[str, Any]] = None,
+    per_slot_ctx: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Execute the plan, skipping cells already on disk, then write the report.
 
@@ -2910,13 +2980,17 @@ def run_benchmark(
     else:
         runner = cell_runner
         if runner is None:
+            live_router_config = (
+                router_config if router_config is not None else load_router_config(ROUTER_CONFIG_PATH)
+            )
             runner = make_cell_runner(
-                router_config=(
-                    router_config
-                    if router_config is not None
-                    else load_router_config(ROUTER_CONFIG_PATH)
-                ),
+                router_config=live_router_config,
                 base_config=base_config if base_config is not None else DEFAULT_BASE_CONFIG,
+                per_slot_ctx=(
+                    per_slot_ctx
+                    if per_slot_ctx is not None
+                    else served_per_slot_context(live_router_config, models[0])
+                ),
             )
         for cell in cells:
             recorded = result_path(results_path, cell)

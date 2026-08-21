@@ -631,7 +631,7 @@ test("[C032-D3-testscope-escape] a testScope entry that escapes the repo is refu
 // ---------------------------------------------------------------------------
 
 test("[C032-D4-deferred-dep-wedge] an item stalled behind a DEFERRED dependency counts as settled, so the run can still report", () => {
-  const run: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" } };
+  const run: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" }, classified: true };
   const items: GateItem[] = [
     {
       id: "I1",

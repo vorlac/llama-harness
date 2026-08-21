@@ -23,6 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_PER_SLOT_CONTEXT_TOKENS,
   BREAKDOWN_THRESHOLDS,
   crossedThresholds,
   deriveSnapshot,
@@ -139,18 +140,66 @@ test("[22B.2-overrides-minted-and-spent] both meters are reported, because a min
 });
 
 test("[22B.2-fix-rounds-against-the-cap] review rounds per item are reported against reviewMaxRounds", () => {
+  // A ROUND is one wave, however many reviewers config sends into it. Counting the
+  // reviewers instead measures `workflow.itemReviewers`, which is a config value and
+  // not a strain signal: with the bench's itemReviewers of 6 the first round of the
+  // first item would cross a threshold of 3 in every cell of every campaign.
   const signals = deriveStrainSignals({
     ...EMPTY,
     reviewMaxRounds: 3,
     journal: [
+      record("fanout", "wave", { jobs: 3, roles: ["reviewer", "reviewer", "reviewer"], items: ["I1"], reviewItems: ["I1"] }),
       record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "I1" }),
       record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "I1" }),
       record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "I1" }),
+      record("fanout", "wave", { jobs: 1, roles: ["reviewer"], items: ["I2"], reviewItems: ["I2"] }),
       record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "I2" }),
     ],
   });
-  assert.equal(signals.reviewDispatchesByItem["I1"], 3);
-  assert.equal(signals.reviewDispatchesByItem["I2"], 1);
+  assert.equal(signals.reviewRoundsByItem["I1"], 1, "three reviewers in one wave are ONE round");
+  assert.equal(signals.reviewRoundsByItem["I2"], 1);
+});
+
+test("[smoke-F18] a run-level plan-review wave contributes no per-item review round, and rounds cross the threshold only when an item is sent back", () => {
+  // Plan review is a run-level stage: its jobs carry no itemId, so it belongs to no
+  // item's fix loop. A signal that buckets those reviewers under a placeholder item
+  // reports non-convergence for a run whose first item has not been reviewed once.
+  const planReviewOnly = deriveStrainSignals({
+    ...EMPTY,
+    reviewMaxRounds: 3,
+    journal: [
+      record("fanout", "wave", {
+        jobs: 4,
+        roles: ["reviewer", "reviewer", "reviewer", "reviewer"],
+        items: [""],
+        reviewItems: [],
+      }),
+      record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "" }),
+      record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "" }),
+      record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "" }),
+      record("fanout", "subsession.dispatched", { role: "reviewer", itemId: "" }),
+    ],
+  });
+  assert.deepEqual(planReviewOnly.reviewRoundsByItem, {}, "a plan review is not an item's review round");
+  assert.ok(
+    !crossedThresholds(planReviewOnly).includes("reviewRoundsPerItem"),
+    "and it crosses nothing: " + JSON.stringify(crossedThresholds(planReviewOnly)),
+  );
+
+  const sentBackThrice = deriveStrainSignals({
+    ...EMPTY,
+    reviewMaxRounds: 3,
+    journal: [
+      record("fanout", "wave", { jobs: 6, roles: ["reviewer"], items: ["I1"], reviewItems: ["I1"] }),
+      record("fanout", "wave", { jobs: 6, roles: ["reviewer"], items: ["I1"], reviewItems: ["I1"] }),
+      record("fanout", "wave", { jobs: 6, roles: ["reviewer"], items: ["I1"], reviewItems: ["I1"] }),
+    ],
+  });
+  assert.equal(sentBackThrice.reviewRoundsByItem["I1"], 3, "three trips through review is three rounds");
+  assert.ok(
+    crossedThresholds(sentBackThrice).includes("reviewRoundsPerItem"),
+    "and THAT is the non-convergence the threshold exists to catch",
+  );
 });
 
 test("[22B.2-stuck-items] items reaching blocked or stuck are named, not merely counted", () => {
@@ -187,7 +236,7 @@ test("[22B.2-retries-and-disengage] receipt retries, aborts, idles and disengage
 });
 
 test("[22B.2-brief-size-against-the-window] the largest brief is reported against the EFFECTIVE per-slot window", () => {
-  // scripts/conductor_wiring.py sets PER_SLOT_CONTEXT_TOKENS = 8192, so the
+  // A deliberately small 8192-token window for the fixture (not the served default), so the
   // effective window is 8,192 tokens and not the 65,536 the model preset
   // declares. A brief that displaces the source it is about degrades quality
   // while looking like added capability.
@@ -374,4 +423,16 @@ test("[22B.4-bundle-is-self-contained] the bundle carries the derivation and the
   assert.equal(round.runId, "r-b");
   rmSync(dir, { recursive: true, force: true });
   rmSync(out, { recursive: true, force: true });
+});
+
+test("observation: the observer's default per-slot window is the one scripts/conductor_wiring.py serves", () => {
+  // Two copies of one number in two languages; this is the only thing that keeps
+  // them equal. The smoke measured an 8192-token slot refusing the orchestrator's
+  // 11,441-token first request, so a stale default here would report brief
+  // fractions against a window nobody serves.
+  const py = readFileSync(new URL("../../scripts/conductor_wiring.py", import.meta.url), "utf8");
+  const match = /^PER_SLOT_CONTEXT_TOKENS = (\d+)$/m.exec(py);
+  assert.ok(match, "conductor_wiring.py must declare PER_SLOT_CONTEXT_TOKENS on its own line");
+  assert.equal(DEFAULT_PER_SLOT_CONTEXT_TOKENS, Number(match![1]));
+  assert.ok(DEFAULT_PER_SLOT_CONTEXT_TOKENS > 11441, "the default window must hold the measured first request");
 });

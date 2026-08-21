@@ -50,6 +50,9 @@ function syntheticRun(state: string, classification: string | null): GateRun {
     state,
     stop: null,
     classification: classification === null ? null : { kind: classification },
+    // A synthetic position with no classification IS the unclassified one; the
+    // receipt and the field move together here because both are made up.
+    classified: classification !== null,
   };
 }
 

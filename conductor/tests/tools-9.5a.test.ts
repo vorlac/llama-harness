@@ -1134,6 +1134,7 @@ function gateRunOf(bench: Bench): GateRun {
     state: run.state,
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
 }
 

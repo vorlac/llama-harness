@@ -75,8 +75,8 @@ own. Conductor itself registers six of them plus the `tool` map:
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tool`                               | Registers the `conductor_*` tool inventory                                                                                                                                                                    |
 | `tool.execute.before`                | Runs the gate stack; a throw denies the call                                                                                                                                                                  |
-| `tool.execute.after`                 | Nothing — the hook fires on 1.18.15 and is coverage-asserted, but conductor registers no handler for it: every gate decision is made before the call, not after it                                            |
-| `chat.message`                       | Creates a run when no live run exists, routes a mid-run prompt into the live one, and writes the orchestrator's session-registry entry ([`adapter/chat-message.ts`](../../conductor/adapter/chat-message.ts)) |
+| `tool.execute.after`                 | The §3.8 session banner, prefixed to the session's FIRST non-`conductor_*` tool result — the one seam that puts plugin-authored text in front of an operator (`conductor/docs/HONEST-LIMITS.md`). No gate decision is made here: those are all made before the call                                            |
+| `chat.message`                       | Creates a run when no live run exists, routes a mid-run prompt into the live one, and writes the orchestrator's session-registry entry. It fires for the fan-out's sub-sessions too, and a session already carrying a non-orchestrator role is left exactly as the fan-out wrote it ([`adapter/chat-message.ts`](../../conductor/adapter/chat-message.ts)) |
 | `chat.params`                        | Per-role sampling temperature (`paramsForRole` in [`adapter/inject.ts`](../../conductor/adapter/inject.ts))                                                                                                   |
 | `chat.headers`                       | The router tags `X-Conductor-Role`, `X-Conductor-Priority`, and `X-Conductor-Group` (`headersFor`)                                                                                                            |
 | `event`                              | `session.idle` drives continuation; `permission.asked` and `permission.replied` drive the ask-gate; `session.created` is observed                                                                             |
@@ -287,11 +287,15 @@ substituted for this repository's absolute path at generation time. It contribut
 
 Four things about that table:
 
-- **The prompt file reference.** The orchestrator carries
-  `"prompt": "{file:${LLAMA_HARNESS_ROOT}/conductor/doctrine/core.md}"`. Verified: the
-  brace-file reference resolves an absolute path and the file's content becomes the agent's
-  system message, *replacing* opencode's default system prompt. serve.py's
-  inline-the-content fallback is not needed.
+- **The orchestrator prompt is a one-line pointer, not the pack.** The orchestrator's
+  `prompt` says the doctrine and live state arrive appended to the system prompt, and nothing
+  more. The pack itself (`core.md`) reaches the session once, through the plugin's
+  `experimental.chat.system.transform` hook (`adapter/inject.ts` `ROLE_PACKS`), journaled with
+  its digest. Verified on the 13.2 smoke: a `{file:...core.md}` prompt *also* delivered the pack
+  as the agent's own system message, so every orchestrator request carried it twice (~1.7k
+  tokens); and an agent with no prompt at all gets opencode's 9.7k-character default system
+  prompt instead, which is larger than the pack it displaced. A non-empty prompt that loads no
+  file is the configuration that delivers the doctrine exactly once.
 - **The per-agent spawn denial** is `tools: {"task": false}` on every agent — the exact key
   is discovery (iii) below. Agent permissions are defense-in-depth; the session-registry
   gate is the enforcement, and it denies spawning in every session, registered or not.

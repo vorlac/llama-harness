@@ -907,7 +907,7 @@ could contradict the recommendation. A missing doctrine pack is a startup error 
 the liveness beacon is written, so the beacon's absence proves init failed. See
 [doctrine-system.md](doctrine-system.md).
 
-### adapter/chat-message.ts — 138 lines
+### adapter/chat-message.ts — 165 lines
 
 The `chat.message` hook body, factored as a testable function:
 `handleChatMessage(input) -> ChatMessageResult`. A thin composition over `state.ts` and
@@ -916,6 +916,13 @@ The `chat.message` hook body, factored as a testable function:
 **Easy to get wrong:** a prompt arriving during a live run must be routed into it as orchestrator
 context and journaled `user.midrun-prompt` — it must never start a second run. Only a prompt with
 no run, or with a terminal one by `isTerminal`, creates a run.
+
+**Easy to get wrong twice:** opencode fires `chat.message` for every session, so the fan-out's own
+briefs arrive here as well. The registry has two writers with one rule between them — this hook owns
+the orchestrator's entry, `fanout.ts` owns each sub-session's `{role, itemId, tree}` — and a session
+already carrying a non-orchestrator role is the fan-out's. Overwriting it costs the sub-session its
+doctrine pack, its temperature, its `X-Conductor-Priority` tag and its tree binding, and makes it
+look like an orchestrator to the idle engine.
 
 ### adapter/continuation.ts — 1502 lines
 

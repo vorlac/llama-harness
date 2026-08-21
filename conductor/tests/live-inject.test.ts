@@ -269,11 +269,10 @@ describe("live injection through a real opencode (GAP-003)", { skip: SKIP }, () 
 
     stub = await startStubLlmServer({ editTargetPath: join(fixtureDir, "unused.txt") });
 
-    // Deliberately NO `agent` block: conductor/opencode-fragment.json's
-    // orchestrator agent loads core.md as its own system prompt via {file:...}, and
-    // an agent that already carries the pack would make "the doctrine arrived"
-    // unfalsifiable. Here the ONLY path core.md can take into the request is the
-    // §6.4 transform hook.
+    // Deliberately NO `agent` block: an agent prompt that carried the pack would
+    // make "the doctrine arrived" unfalsifiable (and would deliver it twice — the
+    // fragment's orchestrator prompt is a one-line pointer for that reason). Here the
+    // ONLY path core.md can take into the request is the §6.4 transform hook.
     writeFileSync(
       configPath,
       JSON.stringify(
@@ -377,9 +376,10 @@ describe("live injection through a real opencode (GAP-003)", { skip: SKIP }, () 
     );
     assert.match(
       block as string,
-      /Recommended next tool: conductor_decompose/,
-      "a fresh INTAKE run carrying adapter/chat-message.ts's provisional work classification " +
-        "recommends conductor_decompose, from the gate's own legality verdict:\n" + String(block),
+      /Recommended next tool: conductor_classify/,
+      "a fresh INTAKE run has not been classified — adapter/chat-message.ts's classification is a " +
+        "PLACEHOLDER and run.classified is the receipt — so the gate's own legality verdict " +
+        "recommends conductor_classify:\n" + String(block),
     );
   });
 

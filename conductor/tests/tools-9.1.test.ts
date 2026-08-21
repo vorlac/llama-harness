@@ -893,7 +893,7 @@ test("[9.1-defer] sets deferred + a decision record; report's precondition accep
 
     // conductor_report's precondition (legalTools' isSettled) accepts a deferred item as a
     // settled disposition: an EXECUTING run whose ONLY item is deferred legalizes report.
-    const gRun: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" } };
+    const gRun: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" }, classified: true };
     const gItem: GateItem = {
       id: "I1",
       state: item.state,

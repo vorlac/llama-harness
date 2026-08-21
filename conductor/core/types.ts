@@ -1693,6 +1693,68 @@ function checkValue(schema: unknown, value: unknown, path: string, errors: strin
 // kind = "trivial", null otherwise — plan lines 937, 2080-2081) is hand-coded
 // here because no subset keyword can express it; the completeness half is the
 // trivialItem subschema's own required list.
+// The shape a receipt must satisfy, rendered FROM the schema it will be judged
+// against. A dispatch brief that spells the shape out in prose is a second copy of
+// the schema and drifts from it silently: the 13.2 live smoke watched a planner
+// invent `ladderRung` values it had never been shown, and a classifier answer
+// `confidence` with a number against a string schema. Neither had been told. This
+// is what tells them, and it cannot disagree with the validator because it reads
+// the validator's own table.
+//
+// Compact by construction — one line per field, enum members named in full,
+// nesting by indent — because it rides in front of a brief inside a per-slot
+// window the source also has to fit into. An unregistered name renders to the
+// empty string: a caller with no schema says nothing rather than something made up.
+export function describeSchema(schemaName: string): string {
+  if (!Object.hasOwn(SCHEMAS, schemaName)) return "";
+  const lines: string[] = [];
+  renderSchemaNode(SCHEMAS[schemaName], schemaName, 0, lines);
+  return lines.join("\n");
+}
+
+// The scalar description of one node: its declared type(s), or its enum members
+// spelled out. An enum is named in full because a closed set the reader cannot see
+// is a set the reader guesses at.
+function schemaTypeText(schema: Record<string, unknown>): string {
+  const enumMembers = schema["enum"];
+  if (Array.isArray(enumMembers)) {
+    return "one of " + enumMembers.map((m) => (m === null ? "null" : JSON.stringify(m))).join(" | ");
+  }
+  const declared = schema["type"];
+  const types = Array.isArray(declared) ? declared : declared === undefined ? [] : [declared];
+  const text = types.filter((t): t is string => typeof t === "string").join(" | ");
+  return text.length > 0 ? text : "any";
+}
+
+// Depth is bounded so a schema that ever gains a cycle renders truncated rather
+// than not at all.
+const MAX_SCHEMA_RENDER_DEPTH = 8;
+
+function renderSchemaNode(node: unknown, label: string, depth: number, lines: string[]): void {
+  if (!isRecord(node) || depth > MAX_SCHEMA_RENDER_DEPTH) return;
+  const indent = "  ".repeat(depth);
+  const items = node["items"];
+  const isArray = schemaTypeText(node).includes("array") && isRecord(items);
+  const typeText = isArray ? "array of " + schemaTypeText(items) : schemaTypeText(node);
+  lines.push(indent + label + ": " + typeText);
+
+  if (isArray && isRecord(items) && isRecord(items["properties"])) {
+    renderSchemaProperties(items, depth + 1, lines);
+    return;
+  }
+  renderSchemaProperties(node, depth + 1, lines);
+}
+
+function renderSchemaProperties(node: Record<string, unknown>, depth: number, lines: string[]): void {
+  const props = node["properties"];
+  if (!isRecord(props)) return;
+  const required = Array.isArray(node["required"]) ? node["required"] : [];
+  for (const [name, sub] of Object.entries(props)) {
+    const optional = !required.includes(name);
+    renderSchemaNode(sub, optional ? name + " (optional)" : name, depth, lines);
+  }
+}
+
 export function validate(schemaName: string, value: unknown): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
   if (!Object.hasOwn(SCHEMAS, schemaName)) {

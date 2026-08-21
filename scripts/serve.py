@@ -267,13 +267,15 @@ def reported_model(entries, preferred: Optional[str]) -> Tuple[object, Dict[str,
     )
 
 
-def write_session_opencode_config(model_id: str, base_url: str) -> Path:
+def write_session_opencode_config(model_id: str, base_url: str, per_slot_ctx: int) -> Path:
     """A session-scoped opencode config defaulting to the served model.
 
     Written beside - never over - the main opencode.json, so switching models
     for one session cannot corrupt the checked-in-style config. ``base_url`` is
     the routing decision already made: the router origin when the router is up,
     the llama-server origin otherwise, so this function never has to guess.
+    ``per_slot_ctx`` is the window each slot is being served with, which becomes
+    the model limit opencode compacts against.
     """
     base_path = fm.CONFIGS_DIR / "opencode.json"
     config: Dict[str, object] = {}
@@ -287,7 +289,7 @@ def write_session_opencode_config(model_id: str, base_url: str) -> Path:
             fm.red("error: ") + "no opencode config yet - run: scripts/fetch_models.py config"
         )
 
-    config = cw.apply_conductor_wiring(config, base_url, root=REPO_ROOT)
+    config = cw.apply_conductor_wiring(config, base_url, root=REPO_ROOT, per_slot_ctx=per_slot_ctx)
 
     provider = (config.get("provider") or {}).get(fm.PROVIDER_ID)
     models = (provider or {}).get("models") or {}
@@ -686,9 +688,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     cmd = build_server_command(model.id, host, port, models_max, ctx, slots)
+    per_slot_ctx = cw.PER_SLOT_CONTEXT_TOKENS if ctx is None else int(ctx)
 
     if args.no_shell:
-        write_session_opencode_config(model.id, cw.openai_base_url(host, port))
+        write_session_opencode_config(model.id, cw.openai_base_url(host, port), per_slot_ctx)
         info("%s %s on http://%s:%d" % (bold("serving"), cyan(model.id), host, port))
         os.execv(cmd[0], cmd)
         return 0  # unreachable
@@ -750,7 +753,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # Written only once the routing decision is final: a session config aimed
         # at a router that never came up 502s from its first prompt.
-        config_path = write_session_opencode_config(model.id, routing.base_url)
+        config_path = write_session_opencode_config(model.id, routing.base_url, per_slot_ctx)
         env = cw.session_env(
             model.id,
             config_path,

@@ -51,7 +51,7 @@ import { handleVetTest } from "../adapter/tools.ts";
 import { openWorkspace } from "../adapter/state.ts";
 import type { OpenOptions, StateStore } from "../adapter/state.ts";
 import { readQuestions } from "../adapter/questions.ts";
-import { createFanout } from "../adapter/fanout.ts";
+import { SCHEMA_SHAPE_HEADING, createFanout } from "../adapter/fanout.ts";
 import type { Fanout, TreeState } from "../adapter/fanout.ts";
 import { extractMechanics, packSection } from "../core/mechanics.ts";
 import { readFanout } from "../core/schedule.ts";
@@ -467,7 +467,15 @@ test("[vet-criteria-prompt-composed] the dispatched vet-critic prompt carries th
 
     const critics = wiring.byRole("reviewer");
     assert.equal(critics.length, 1, "one critic prompt to inspect");
-    const prompt = critics[0].text;
+    // The engine appends the receipt's SHAPE, rendered from the schema, after the
+    // brief. That block declares field names and types; it teaches no criterion,
+    // and the one-list rule below is about the criteria doctrine, so the brief is
+    // what it is asserted over. That the shape arrives at all is asserted too:
+    // dropping it is what let a live sub-session guess an enum it had never seen.
+    const composed = critics[0].text;
+    const shapeAt = composed.indexOf(SCHEMA_SHAPE_HEADING);
+    assert.notEqual(shapeAt, -1, "the dispatch carries the shape its receipt is judged against");
+    const prompt = composed.slice(0, shapeAt);
 
     const section = packSection(readPack("test-vet.md"), VET_CRITERIA_HEADING);
     assert.notEqual(section, null, "premise: the pack carries the criteria section");

@@ -53,12 +53,21 @@ const SETUP = "conductor_setup";
 // ---------------------------------------------------------------------------
 
 // §2.3 run, gate subset: FSM position, the terminal stop record (its PRESENCE is
-// all this gate reads — §2.3 terminality), and the recorded classification
-// (null until conductor_classify records it).
+// all this gate reads — §2.3 terminality), the recorded classification, and the
+// receipt saying whether the classifier is what recorded it.
+//
+// `classified` is that receipt and the ONLY answer to "has conductor_classify
+// run?". adapter/chat-message.ts writes a schema-valid placeholder classification
+// the instant a run is created, so `classification` is non-null from the run's
+// first millisecond and its presence answers nothing; a gate that reads the
+// placeholder as an answer never offers the classifier, and the trivial and
+// question routes it selects are then unreachable. REQUIRED, not optional: an
+// absent flag would read as "unclassified" at every call site that forgot it.
 export interface GateRun {
   state: string;
   stop: { kind: string } | null;
   classification: { kind: string } | null;
+  classified: boolean;
 }
 
 // §2.5 item, gate subset: identity, FSM position, behavioral kind, the scheduler
@@ -313,14 +322,15 @@ export function legalTools(
 
   switch (run.state) {
     case "INTAKE": {
-      if (run.classification === null) {
+      if (!run.classified) {
         // Unclassified: conductor_classify is the sole pipeline tool and the
         // recommendation. No later pipeline tool is legal until the run is
-        // classified (§3.2).
+        // classified (§3.2). The test is the receipt, never the placeholder
+        // classification standing in for it — see GateRun.
         legal.set(CLASSIFY, {});
         recommended = { tool: CLASSIFY, args: {} };
         why = "INTAKE unclassified: conductor_classify is the only pipeline tool until the run is classified (§3.2).";
-      } else if (run.classification.kind === "work") {
+      } else if (run.classification === null || run.classification.kind === "work") {
         // Classified work stays in INTAKE with conductor_decompose the
         // recommended and only pipeline-advancing tool; the already-performed
         // classify is not re-offered (§3.2, §3.4).

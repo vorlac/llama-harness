@@ -1329,8 +1329,13 @@ test("[9.4c-binding-p3-transition-context] MANDATORY DEFERRED BINDING (P3): the 
 // ===========================================================================
 
 test("[9.4c-gate-offers-wave-while-schedulable] the Gap-1 fix asserted through the PURE gate: core/gates-phase legalTools offers conductor_dispatch_wave in EXECUTING whenever the wave is non-empty, and does NOT offer it once every item is settled — while `recommended` is UNCHANGED in both cases, so a second dispatch_wave call on a multi-wave run passes the same legality step the first did", () => {
-  const EXECUTING_RUN: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" } };
-  const PLAN_REVIEWED_RUN: GateRun = { state: "PLAN_REVIEWED", stop: null, classification: { kind: "work" } };
+  const EXECUTING_RUN: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" }, classified: true };
+  const PLAN_REVIEWED_RUN: GateRun = {
+    state: "PLAN_REVIEWED",
+    stop: null,
+    classification: { kind: "work" },
+    classified: true,
+  };
 
   const item = (id: string, state: string, over: Partial<GateItem> = {}): GateItem => ({
     id,

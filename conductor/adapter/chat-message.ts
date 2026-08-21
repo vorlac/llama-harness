@@ -9,7 +9,22 @@
 //     at it) and reports any §2.11 stale-red exclusions in its first response;
 //   - a prompt arriving DURING a live (non-terminal) run is routed into it as
 //     orchestrator context — journaled `user.midrun-prompt` — and NEVER starts a
-//     fresh run (plan line 1073).
+//     fresh run (plan line 1073);
+//   - a prompt arriving in a session the FAN-OUT registered is the fan-out's own
+//     brief, not operator context, and this hook does nothing with it at all.
+//
+// THE TWO-WRITER PROTOCOL (§3.5). Two engines write the session registry: this
+// hook owns the orchestrator's entry, adapter/fanout.ts owns each sub-session's
+// `{role, itemId, tree}` and writes it BEFORE its first prompt. opencode fires
+// `chat.message` for every session, the fan-out's included, so an unconditional
+// `register(sessionID, ORCHESTRATOR)` here overwrites the fan-out's entry — and
+// with it the itemId and the tree, since the plugin's registry view copies only
+// what it is handed. A session already carrying a non-orchestrator role is
+// therefore left exactly as the fan-out wrote it. What rides on that entry:
+// adapter/inject.ts selects the doctrine pack, the sampling temperature and the
+// §4.4 priority tag by role; adapter/continuation.ts's idle engine re-prompts
+// ONLY a session whose role is orchestrator; the §3.5 gates judge writes by the
+// tree it names.
 //
 // ADAPTER (G14): a THIN composition over subjects that already exist —
 // adapter/state.ts (openWorkspace -> StateStore, which owns run creation and the
@@ -30,6 +45,9 @@ import type { CreateRunInput, StateStore } from "./state.ts";
 export interface SessionRegistryEntry {
   role: string;
   itemId?: string;
+  // Set by the fan-out on a dispatch that asked for a schema-shaped receipt; the
+  // §6.4 injection layer turns it into `X-Conductor-Schema: required` (§4.4).
+  schema?: boolean;
   // The tree PATH the §3.5 gates judge the session against (core/types.ts brands
   // it apart from the evidence layer's marker slug). Absent until
   // adapter/continuation.ts resolveSessionTree records the workspace root onto
@@ -71,8 +89,12 @@ export interface HandleChatMessageInput {
 //                     is the user-facing exclusion notice (null when none in force).
 //  - "routed-midrun": no run created; runId is the LIVE run the prompt was routed
 //                     into; staleReport is null.
+//  - "subsession":    the prompt arrived in a fan-out sub-session; nothing was
+//                     created, journaled or registered. runId names the live run
+//                     when there is one and is "" otherwise, so a caller binding a
+//                     journal by runId has nothing to rebind.
 export interface ChatMessageResult {
-  action: "created" | "routed-midrun";
+  action: "created" | "routed-midrun" | "subsession";
   runId: string;
   staleReport: string | null;
 }
@@ -112,6 +134,14 @@ export function handleChatMessage(input: HandleChatMessageInput): ChatMessageRes
 
   const live = store.currentRun();
   const hasLiveRun = live !== null && !isTerminal(live);
+
+  // A session the fan-out registered is a sub-session receiving its brief. It is
+  // not operator context, it starts no run, and its entry is the fan-out's to
+  // own — see THE TWO-WRITER PROTOCOL above.
+  const registered = registry.get(sessionID);
+  if (registered !== undefined && registered.role !== ORCHESTRATOR.role) {
+    return { action: "subsession", runId: hasLiveRun ? live.runId : "", staleReport: null };
+  }
 
   if (hasLiveRun) {
     // A prompt arriving DURING a live run is routed into it as orchestrator

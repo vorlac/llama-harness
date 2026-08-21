@@ -614,7 +614,7 @@ Two of the recorded findings are load-bearing on this repo's own code:
 
 - **`--ctx-size` is llama-server's TOTAL context, divided among slots.** `--ctx-size 8192
   --parallel 6` served 1536 tokens per slot; the intended 8192 needed `--ctx-size 49152`.
-  So `parallel_server_args` multiplies a per-slot window (8192 tokens) by the slot count
+  So `parallel_server_args` multiplies a per-slot window (`PER_SLOT_CONTEXT_TOKENS`, 32768) by the slot count
   rather than passing `--parallel` bare, which would silently cut every sub-session's
   window by a factor of N. At one slot with no explicit context it emits no `--ctx-size`
   at all.

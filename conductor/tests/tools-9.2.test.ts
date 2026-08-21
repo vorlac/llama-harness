@@ -241,14 +241,19 @@ function openStore(root: string, journal: JournalSink, config: Config): StateSto
   return openWorkspace(opts);
 }
 
-// Create a run at INTAKE with a schema-valid `work` classification (the state decompose
-// legally advances from). Returns the run id.
+// Create the run decompose legally advances from: at INTAKE, classified `work` BY THE
+// CLASSIFIER. The kind alone is not that state — adapter/chat-message.ts writes a
+// schema-valid `work` classification at run creation — so the receipt is recorded
+// here too, and the INTAKE edge reads it. Returns the run id.
 function createIntakeRun(store: StateStore): string {
   const run = store.createRun({
     prompt: "do the thing",
     sessionID: "ses_orchestrator",
-    classification: { kind: "work", rationale: "intake placeholder", check: { agreed: true, note: "" } },
+    classification: { kind: "work", rationale: "a change to the beta parser", check: { agreed: true, note: "" } },
   });
+  const classified = store.loadRun(run.runId);
+  classified.classified = true;
+  store.saveRun(classified);
   return run.runId;
 }
 

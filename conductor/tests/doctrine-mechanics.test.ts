@@ -126,6 +126,7 @@ test("I4B-1B: the mechanics derivation matches an INDEPENDENT walk of the legali
     state,
     stop: null,
     classification: classification === null ? null : { kind: classification },
+    classified: classification !== null,
   });
   const asItem = (state: string, behavioral: boolean): GateItem => ({
     id: "I1",

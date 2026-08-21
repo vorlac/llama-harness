@@ -73,6 +73,7 @@ TASK_IDS = ["bt%02d" % n for n in range(1, TASK_COUNT + 1)]
 
 SENTINEL_MODEL = "llamacpp/sentinel-model-x"
 SENTINEL_MODEL_B = "llamacpp/sentinel-model-y"
+SERVED_CTX = 32768
 CAPABILITY = cb.DEFAULT_CAPABILITY
 
 
@@ -649,6 +650,7 @@ class ArmTests(unittest.TestCase):
             router_config=ROUTER_CONFIG,
             cell_dir=self.cell_dir if cell_dir is None else cell_dir,
             base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
         )
 
     def test_arms_exactly_three(self):
@@ -859,6 +861,7 @@ class ArmTests(unittest.TestCase):
                 router_config=moved,
                 cell_dir=self.cell_dir,
                 base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
             )
             self.assertIn("http://127.0.0.1:9412/v1", json.dumps(cfg), arm)
 
@@ -903,6 +906,7 @@ class ArmTests(unittest.TestCase):
                 router_config=ROUTER_CONFIG,
                 cell_dir=self.cell_dir,
                 base_config=with_true,
+            per_slot_ctx=SERVED_CTX,
             )
             self.assertIs(cfg["autoupdate"], False, "%s did not override a base true" % arm)
 
@@ -1251,6 +1255,26 @@ class PlanAndCellTests(unittest.TestCase):
                 # cell away from the served --parallel / admission sizing. maxReaders
                 # and subSessionTimeoutMs are asserted equal to conductor_wiring's
                 # single source, so the two spellings cannot diverge silently.
+                # smoke-F19: the conductor arm cannot finish a behavioral item
+                # unless some requiredScopes entry covers the item's paths.
+                # conductor_submit_test refuses an item that selects no scope, on
+                # purpose - a verify over an empty scope map is vacuously green -
+                # so a cell whose requiredScopes is empty wedges every behavioral
+                # item at RED, in every task, for every model and every rep.
+                required = cfg["verify"]["requiredScopes"]
+                self.assertTrue(required, "a cell with no requiredScopes entry can finish no item")
+                scope_names = set(cfg["verify"]["scopes"])
+                for entry in required:
+                    self.assertIn("pattern", entry)
+                    self.assertTrue(
+                        set(entry["scopes"]) <= scope_names,
+                        "every required scope must name a scope the cell defines: %r vs %r"
+                        % (entry["scopes"], sorted(scope_names)),
+                    )
+                self.assertTrue(
+                    any(e["pattern"] == "**" for e in required),
+                    "the cell's runner is whole-repo, so its coverage is the whole repo",
+                )
                 self.assertEqual(cfg["git"]["mode"], "commit")
                 self.assertEqual(cfg["parallel"]["writes"], "off")
                 self.assertEqual(cfg["parallel"]["maxImplementers"], 1)
@@ -1325,6 +1349,7 @@ class PlanAndCellTests(unittest.TestCase):
             model=SENTINEL_MODEL,
             router_config=ROUTER_CONFIG,
             base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
             timeout_sec=2,
             runner=lambda invocation: hung,
             test_runner=lambda argv, cwd, timeout_sec: cb.CommandOutcome(0, False, None, 1),
@@ -1373,6 +1398,7 @@ class PlanAndCellTests(unittest.TestCase):
                 router_config=ROUTER_CONFIG,
                 cell_dir=cell_dir,
                 base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
             )
             argv = cb.build_opencode_argv(
                 arm, model=SENTINEL_MODEL, work_dir=cell_dir, prompt=task.prompt
@@ -1415,6 +1441,7 @@ class PlanAndCellTests(unittest.TestCase):
             model=SENTINEL_MODEL,
             router_config=ROUTER_CONFIG,
             base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
             timeout_sec=30,
             runner=observing_runner,
             test_runner=observing_test_runner,
@@ -2314,6 +2341,7 @@ class IntegrityTests(unittest.TestCase):
                 model=SENTINEL_MODEL,
                 router_config=ROUTER_CONFIG,
                 base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
                 timeout_sec=5,
                 runner=lambda invocation: cb.CommandOutcome(0, False, None, 1),
                 test_runner=lambda argv, cwd, timeout_sec: cb.CommandOutcome(1, False, None, 1),
@@ -2600,6 +2628,7 @@ class ModuleHygieneTests(unittest.TestCase):
                 router_config=ROUTER_CONFIG,
                 cell_dir=self.tmp / "unwritten-cell",
                 base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
             )
             cb.summarize_ledger_window(ledger, 0)
             cb.score_cell(0, False, None)
@@ -2730,3 +2759,67 @@ class WaveCountFromJournal(unittest.TestCase):
             "a journal that exists and carries no wave record measured zero waves, "
             "which is a different fact from not having measured",
         )
+
+
+class ServedWindowTests(unittest.TestCase):
+    """The cell's opencode config must declare the window llama-server actually serves.
+
+    Measured on the 13.2 smoke (2026-08-21): a conductor cell written with
+    `models: {"qwen3.6-27b": {}}` gave opencode no limit at all, so it never
+    compacted, sent max_tokens 32000, and looped 400 -> compaction -> 400 once the
+    orchestrator's first request (11,441 tokens) met an 8192-token slot.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cbench-window-"))
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+
+    def test_smoke_arm_config_carries_the_served_window(self):
+        """[smoke-F03] every arm's model entry carries limit = opencode_model_limit(served), identically."""
+        limits = set()
+        for arm in cb.ARMS:
+            cfg = cb.build_arm_config(
+                arm,
+                model=SENTINEL_MODEL,
+                router_config=ROUTER_CONFIG,
+                cell_dir=self.tmp,
+                base_config=BASE_OPENCODE_CONFIG,
+                per_slot_ctx=4096,
+            )
+            models = cfg["provider"]["llamacpp"]["models"]
+            self.assertIsInstance(models, dict, "%s: opencode's provider.models is a record, never a list" % arm)
+            self.assertEqual(models["sentinel-model-x"]["limit"], {"context": 4096, "output": 1024}, arm)
+            limits.add(json.dumps(models["sentinel-model-x"]["limit"], sort_keys=True))
+        self.assertEqual(len(limits), 1, "the arms must agree on the limit byte-for-byte")
+        with self.assertRaises(TypeError):
+            cb.build_arm_config(  # the served window is not optional: a cell without it is the loop above
+                "baseline",
+                model=SENTINEL_MODEL,
+                router_config=ROUTER_CONFIG,
+                cell_dir=self.tmp,
+                base_config=BASE_OPENCODE_CONFIG,
+            )
+
+    def test_smoke_served_context_is_probed_from_the_upstream(self):
+        """[smoke-F03] the per-slot window comes from llama-server's own /props for the served model, via the router's upstream."""
+        payload = {"default_generation_settings": {"n_ctx": 32768, "params": {}}, "total_slots": 6}
+        self.assertEqual(cb.parse_served_context(payload), 32768)
+        for bad in ({}, {"default_generation_settings": {"n_ctx": 0}}, {"default_generation_settings": None}, {"default_generation_settings": {"n_ctx": "32768"}}):
+            with self.assertRaises(cb.BenchError, msg=repr(bad)):
+                cb.parse_served_context(bad)
+
+        seen = []
+
+        def fetch(url):
+            seen.append(url)
+            return json.dumps(payload).encode("utf-8")
+
+        self.assertEqual(cb.served_per_slot_context(ROUTER_CONFIG, SENTINEL_MODEL, fetch=fetch), 32768)
+        self.assertEqual(seen, ["http://127.0.0.1:8080/props?model=sentinel-model-x"])
+
+        def down(url):
+            raise OSError("connection refused")
+
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.served_per_slot_context(ROUTER_CONFIG, SENTINEL_MODEL, fetch=down)
+        self.assertIn("/props", str(ctx.exception))

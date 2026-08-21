@@ -180,7 +180,7 @@ class WiringTestCase(unittest.TestCase):
 
     def session_config(self, base_url: str) -> Dict[str, object]:
         self.write_base_config()
-        written = serve.write_session_opencode_config(MODEL_ID, base_url)
+        written = serve.write_session_opencode_config(MODEL_ID, base_url, cw.PER_SLOT_CONTEXT_TOKENS)
         return json.loads(Path(written).read_text())
 
     def plant_router_binary(self, root: Path, relpath: str) -> Path:
@@ -613,10 +613,9 @@ class FragmentMerge(WiringTestCase):
         self.assertNotIn(cw.HARNESS_ROOT_TOKEN, serialized)
         self.assertNotIn("LLAMA_HARNESS_ROOT", serialized)
         self.assertEqual(merged["plugin"], [str(root / "conductor" / "plugin" / "index.ts")])
-        self.assertEqual(
-            merged["agent"]["conductor-orchestrator"]["prompt"],
-            "{file:%s}" % (root / "conductor" / "doctrine" / "core.md"),
-        )
+        prompt = merged["agent"]["conductor-orchestrator"]["prompt"]
+        self.assertIsInstance(prompt, str)
+        self.assertNotIn("{file:", prompt, "the orchestrator prompt names no file: the packs arrive by injection")
 
         # Substitution reaches any depth and any string, not just the two known ones.
         nested = {"a": {"b": [cw.HARNESS_ROOT_TOKEN + "/x", {"c": cw.HARNESS_ROOT_TOKEN}]}}
@@ -726,14 +725,16 @@ class SessionConfig(WiringTestCase):
         base["model"] = "%s/other" % fm.PROVIDER_ID
         (self.configs / "opencode.json").write_text(json.dumps(base, indent=2) + "\n")
         written = serve.write_session_opencode_config(
-            MODEL_ID, cw.openai_base_url(LISTEN_HOST, LISTEN_PORT)
+            MODEL_ID, cw.openai_base_url(LISTEN_HOST, LISTEN_PORT), cw.PER_SLOT_CONTEXT_TOKENS
         )
         self.assertEqual(json.loads(Path(written).read_text())["model"], "%s/other" % fm.PROVIDER_ID)
 
         # The absent-base remedy is retained verbatim.
         (self.configs / "opencode.json").unlink()
         with self.assertRaises(SystemExit) as caught:
-            serve.write_session_opencode_config(MODEL_ID, cw.openai_base_url(LISTEN_HOST, LISTEN_PORT))
+            serve.write_session_opencode_config(
+                MODEL_ID, cw.openai_base_url(LISTEN_HOST, LISTEN_PORT), cw.PER_SLOT_CONTEXT_TOKENS
+            )
         self.assertIn("scripts/fetch_models.py config", str(caught.exception))
 
         writers = [
@@ -2876,3 +2877,86 @@ class CatalogCurrentGeneration(unittest.TestCase):
         # checkpoint is not a second opinion. Adding 3.8 must not evict 3.6.
         self.assertIn("qwen3.6-27b", catalog.BY_ID)
         self.assertEqual(MODEL_ID, "qwen3.6-27b")
+
+
+class ServedWindow(WiringTestCase):
+    """The per-slot window and the opencode model limit are one derivation.
+
+    Measured on the 13.2 smoke (2026-08-21, llama-server build 10542): the
+    orchestrator's FIRST request is 11,441 tokens - two system messages, the
+    prompt, and 31 tool schemas - and the recorded 8192-token default slot
+    refused it with `exceed_context_size_error`; opencode then looped through
+    compaction and retry because its declared model limit (65,536 from the
+    catalog, or none at all in a bench cell) never told it the slot was smaller.
+    opencode 1.18.15 session/overflow.ts: usable = context - min(20000,
+    min(limit.output, 32000) || 32000); a session compacts only once its tokens
+    reach `usable`, and a limit.context of 0 disables compaction entirely.
+    """
+
+    def usable(self, limit: Dict[str, int]) -> int:
+        output = min(limit["output"], cw.OPENCODE_OUTPUT_TOKEN_MAX) or cw.OPENCODE_OUTPUT_TOKEN_MAX
+        return limit["context"] - min(cw.OPENCODE_COMPACTION_BUFFER, output)
+
+    def test_smoke_per_slot_window_holds_the_orchestrator_request(self) -> None:
+        """[smoke-F01] the default slot holds the measured first request twice over under opencode's usable-window rule."""
+        self.assertEqual(cw.ORCHESTRATOR_FIRST_REQUEST_TOKENS, 11441)
+        limit = cw.opencode_model_limit(cw.PER_SLOT_CONTEXT_TOKENS)
+        self.assertGreaterEqual(
+            self.usable(limit),
+            2 * cw.ORCHESTRATOR_FIRST_REQUEST_TOKENS,
+            "the served slot must leave the orchestrator at least one first-request of working room "
+            "past its own system prompt: usable %d against a %d-token first request"
+            % (self.usable(limit), cw.ORCHESTRATOR_FIRST_REQUEST_TOKENS),
+        )
+        # The recorded 8192 default is what the smoke refuted; it must never come back.
+        self.assertLess(self.usable(cw.opencode_model_limit(8192)), cw.ORCHESTRATOR_FIRST_REQUEST_TOKENS)
+
+    def test_smoke_opencode_model_limit_derivation(self) -> None:
+        """[smoke-F03] limit.output is a quarter of the slot, so usable = 3/4 of it; bad input is refused."""
+        self.assertEqual(cw.opencode_model_limit(32768), {"context": 32768, "output": 8192})
+        self.assertEqual(cw.opencode_model_limit(8192), {"context": 8192, "output": 2048})
+        self.assertEqual(self.usable(cw.opencode_model_limit(32768)), 24576)
+        for bad in (0, -4096, True, "32768", None, 4096.0):
+            with self.assertRaises(cw.WiringError, msg=repr(bad)):
+                cw.opencode_model_limit(bad)  # type: ignore[arg-type]
+
+    def test_smoke_session_config_carries_the_served_limit(self) -> None:
+        """[smoke-F03] apply_conductor_wiring writes the served window into EVERY provider model's limit, replacing the catalog's."""
+        base = base_opencode_config(UPSTREAM_HOST, UPSTREAM_PORT)
+        base["provider"][fm.PROVIDER_ID]["models"][MODEL_ID]["limit"] = {"context": 65536, "output": 16384}
+        base["provider"][fm.PROVIDER_ID]["models"]["other-model"] = {"id": "other-model"}
+        url = cw.openai_base_url(UPSTREAM_HOST, UPSTREAM_PORT)
+
+        explicit = cw.apply_conductor_wiring(base, url, root=REPO_ROOT, per_slot_ctx=4096)
+        models = explicit["provider"][fm.PROVIDER_ID]["models"]
+        self.assertEqual(models[MODEL_ID]["limit"], {"context": 4096, "output": 1024})
+        self.assertEqual(models["other-model"]["limit"], {"context": 4096, "output": 1024})
+        self.assertEqual(models[MODEL_ID]["id"], MODEL_ID, "the rest of the model entry survives")
+
+        default = cw.apply_conductor_wiring(base, url, root=REPO_ROOT)
+        self.assertEqual(
+            default["provider"][fm.PROVIDER_ID]["models"][MODEL_ID]["limit"],
+            cw.opencode_model_limit(cw.PER_SLOT_CONTEXT_TOKENS),
+        )
+        # Non-mutating, as the rest of the wiring is.
+        self.assertEqual(
+            base["provider"][fm.PROVIDER_ID]["models"][MODEL_ID]["limit"],
+            {"context": 65536, "output": 16384},
+        )
+
+
+class ServeMainServedLimit(ServeMainCase):
+    def test_smoke_main_writes_the_ctx_it_serves_into_the_session_config(self) -> None:
+        """[smoke-F03] serve.py --ctx N reaches the session opencode config as the model limit, and the default does too."""
+        self.install_models()
+        self.write_base_config()
+        port = free_port()
+        run = self.drive_main(
+            [P12_MODEL_A, "--no-build-check", "--no-router", "--port", str(port), "--ctx", "4096"]
+        )
+        self.assertIsInstance(run.raised, _ExecvReached, repr(run))
+        written = json.loads(Path(serve.SESSION_OPENCODE).read_text())
+        models = written["provider"][fm.PROVIDER_ID]["models"]
+        self.assertEqual(models[P12_MODEL_A]["limit"], {"context": 4096, "output": 1024})
+        argv = self.spawned[0]["argv"]
+        self.assertEqual(argv[argv.index("--ctx-size") + 1], str(4096 * cw.derive_slots(cw.DEFAULT_MAX_READERS)))

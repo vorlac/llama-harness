@@ -370,6 +370,7 @@ function gateOffersPublish(bench: Bench): boolean {
     state: run.state,
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
   const items: GateItem[] = bench.queue.items.map((qi) => {
     const item = bench.store.loadItem(bench.runId, qi.id);

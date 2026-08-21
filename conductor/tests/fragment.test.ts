@@ -15,6 +15,8 @@ import { ROLE_AGENT } from "../adapter/fanout.ts";
 const FRAGMENT_URL = new URL("../opencode-fragment.json", import.meta.url);
 
 const ORCHESTRATOR = "conductor-orchestrator";
+const ORCHESTRATOR_PROMPT =
+  "You are the conductor orchestrator. The conductor doctrine and the live run state are appended to this system prompt on every request; follow them.";
 
 const SUBAGENT_NAMES: readonly string[] = [
   "conductor-implementer",
@@ -108,7 +110,7 @@ test("fragment: agent object has exactly the seven conductor agent definitions",
   );
 });
 
-test("fragment: conductor-orchestrator is the primary agent with ask-edit, git-commit/push denied, and a {file:...core.md} prompt", () => {
+test("fragment: conductor-orchestrator is the primary agent with ask-edit, git-commit/push denied, and a prompt that carries no doctrine pack", () => {
   const fragment = readFragment();
   const orchestrator = agentEntry(fragment, ORCHESTRATOR);
   assert.equal(orchestrator["mode"], "primary");
@@ -122,9 +124,22 @@ test("fragment: conductor-orchestrator is the primary agent with ask-edit, git-c
   assert.equal(bash["git commit *"], "deny");
   assert.equal(bash["git push *"], "deny");
 
+  // The doctrine reaches the orchestrator ONCE, by the plugin's system-append
+  // (adapter/inject.ts ROLE_PACKS.orchestrator = core.md), journaled with a pack
+  // digest. A prompt that ALSO loaded core.md delivered it twice per request —
+  // measured at ~1.7k tokens of duplicate on the 13.2 smoke. The prompt is still
+  // non-empty, because an agent with no prompt gets opencode's own 9.7k-char
+  // default system prompt instead, which is larger than the pack it displaced.
   const prompt = orchestrator["prompt"];
   assert.equal(typeof prompt, "string", "orchestrator prompt must be a string");
-  assert.equal(prompt, "{file:${LLAMA_HARNESS_ROOT}/conductor/doctrine/core.md}");
+  assert.equal(prompt, ORCHESTRATOR_PROMPT);
+  assert.ok(!prompt.includes("{file:"), "the orchestrator prompt must not load a file: packs arrive by injection");
+});
+
+test("fragment: no string anywhere in the fragment names a doctrine pack, so no pack can arrive twice", () => {
+  const blob = JSON.stringify(readFragment());
+  assert.ok(!blob.includes("/doctrine/"), "fragment must not reference conductor/doctrine/* — injection owns the packs");
+  assert.ok(!/\b(core|decompose|plan|tdd|review|test-vet|skeptic|debug|receive-review)\.md\b/.test(blob));
 });
 
 test("fragment: each of the six subagent definitions has mode subagent and question ask", () => {

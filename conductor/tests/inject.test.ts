@@ -124,6 +124,7 @@ const run = (over: Partial<GateRun> = {}): GateRun => ({
   state: "EXECUTING",
   stop: null,
   classification: { kind: "work" },
+  classified: true,
   ...over,
 });
 

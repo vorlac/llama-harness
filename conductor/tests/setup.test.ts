@@ -2149,7 +2149,7 @@ test("[12.2-setup-legality] setup runs while .conductor/config.json is absent an
 
   // The committed gate, CONSUMED and not duplicated: gates-phase.ts:246-253 already legalizes
   // exactly conductor_setup + conductor_status and recommends setup when repoConfigured is false.
-  const gateRun: GateRun = { state: "INTAKE", stop: null, classification: null };
+  const gateRun: GateRun = { state: "INTAKE", stop: null, classification: null, classified: false };
   const verdict = legalTools(gateRun, [], [], false);
   assert.deepEqual([...verdict.legal.keys()].sort(), ["conductor_setup", "conductor_status"]);
   assert.ok(verdict.recommended !== null, "the unconfigured branch recommends a tool");

@@ -12,7 +12,7 @@
           "git push *": "deny"
         }
       },
-      "prompt": "{file:${LLAMA_HARNESS_ROOT}/conductor/doctrine/core.md}",
+      "prompt": "You are the conductor orchestrator. The conductor doctrine and the live run state are appended to this system prompt on every request; follow them.",
       "tools": { "task": false }
     },
     "conductor-implementer": {

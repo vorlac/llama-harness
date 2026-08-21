@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import * as path from "node:path";
 
 import {
+  DEFAULT_PER_SLOT_CONTEXT_TOKENS,
   BREAKDOWN_THRESHOLDS,
   crossedThresholds,
   deriveSnapshot,
@@ -177,8 +178,7 @@ export function observeRunDir(
     journal: readJsonl(path.join(runDir, "journal.jsonl")) as ObservedRecord[],
     // conductor/adapter/config-io.ts DEFAULT_CONFIG.workflow.reviewMaxRounds.
     reviewMaxRounds: options.reviewMaxRounds ?? 3,
-    // scripts/conductor_wiring.py PER_SLOT_CONTEXT_TOKENS.
-    perSlotContextTokens: options.perSlotContextTokens ?? 8192,
+    perSlotContextTokens: options.perSlotContextTokens ?? DEFAULT_PER_SLOT_CONTEXT_TOKENS,
     ...(options.tailEvents === undefined ? {} : { tailEvents: options.tailEvents }),
   };
 

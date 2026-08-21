@@ -73,8 +73,12 @@ if [ "$EC" -ne 0 ] && [ "$BAD" -eq 0 ]; then
 fi
 
 if [ "$BAD" -ne 0 ]; then
-  echo "---- failure excerpt (non-ok lines) ----"
-  printf '%s\n' "$OUT" | grep -vE '^ok ' | tail -60
+  # Each failing test with its diagnostic block, NOT the tail of the stream: with
+  # ~1900 tests the last 60 non-ok lines are the trailer and the subtest headers
+  # around it, so the one line naming what failed is thousands of lines earlier and
+  # a reader of a red gate learns nothing from it.
+  echo "---- failing tests, each with its TAP diagnostic block ----"
+  printf '%s\n' "$OUT" | grep -E -A 22 '^[[:space:]]*not ok [0-9]+' | head -300
   exit 1
 fi
 

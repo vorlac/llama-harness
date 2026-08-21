@@ -645,6 +645,7 @@ const NOWHERE_IN_PARTICULAR: GateRun = {
   state: "EXECUTING",
   stop: null,
   classification: { kind: "work" },
+  classified: true,
 };
 
 /**

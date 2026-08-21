@@ -1112,3 +1112,48 @@ test("[21.4-reports-what-it-saw] the extractor names the program it found, so th
   // De-duplicated, first-seen order, like writeShapedPaths.
   assert.deepEqual(networkShapedCommands("curl https://a ; curl https://b"), ["curl"]);
 });
+
+// ===========================================================================
+// smoke-F20 — the null device is not a write target
+//
+// `cmd 2>/dev/null` is how a shell command says "I do not care about stderr". The
+// redirect extractor took the token after `>` as a written path, so the null device
+// read as a write to a path outside the session's tree and a plain `ls` was refused.
+// Measured in the 13.2 live smoke, run r-20260821-113c:
+//
+//   seq 48 gates deny {"gate": "edit", "toolName": "bash",
+//     "command": "ls .../src/ 2>/dev/null && ls .../tests/ 2>/dev/null",
+//     "reason": "the path is outside this session's tree; an edit is confined to the
+//                tree the session was dispatched into (§3.5), and no item scope can widen that"}
+//
+// Bytes written to the null device reach no tree, so exempting it removes a refusal
+// and no protection. Every OTHER out-of-tree redirect stays a write.
+// ===========================================================================
+
+test("[smoke-F20] a redirect to the null device is not a write, and every other redirect still is", () => {
+  for (const command of [
+    "ls src/ 2>/dev/null",
+    "ls src/ 2>/dev/null && ls tests/ 2>/dev/null",
+    "cat package.json >/dev/null",
+    "node --test 1>/dev/null 2>/dev/null",
+    "grep -r foo . 2>>/dev/null",
+  ]) {
+    assert.deepEqual(
+      writeShapedPaths(command),
+      [],
+      `discarding output is not a write: ${command}`,
+    );
+  }
+
+  assert.deepEqual(writeShapedPaths("echo x > out.txt"), ["out.txt"], "a real redirect is still a write");
+  assert.deepEqual(
+    writeShapedPaths("echo x > /dev/nullish"),
+    ["/dev/nullish"],
+    "and a path that merely looks like the null device is not exempt",
+  );
+  assert.deepEqual(
+    writeShapedPaths("ls src/ 2>/dev/null && echo x > out.txt"),
+    ["out.txt"],
+    "the exemption hides nothing: the real write in the same command line still surfaces",
+  );
+});

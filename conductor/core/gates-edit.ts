@@ -298,6 +298,12 @@ const OPERATOR_CHARS = ";&|<>()";
 // and the bash force-overwrite forms `>|` / `&>|` (a trailing `|` on the run).
 // Deliberately NOT `>&` (that duplicates a file descriptor, not a file).
 const REDIRECT_TO_FILE = /^&?>>?\|?$/;
+// The null device. Bytes redirected here reach no tree, so a redirect naming it is
+// not a write and adjudicating it as one refuses `cmd 2>/dev/null` — the ordinary
+// way a shell command says it does not care about stderr — as an out-of-tree write.
+// Matched exactly, so a path that merely starts with it (`/dev/nullish`) is a write
+// like any other.
+const NULL_DEVICE = "/dev/null";
 // A shell env-assignment token in command-prefix position (`NAME=value`).
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // Leading command wrappers that pass their tail through to another command.
@@ -750,7 +756,7 @@ function collectWriteTargets(command: string, out: string[], depth: number): voi
   for (let i = 0; i < tokens.length; i++) {
     if (REDIRECT_TO_FILE.test(tokens[i])) {
       const next = tokens[i + 1];
-      if (next !== undefined && !isOperatorRun(next)) {
+      if (next !== undefined && !isOperatorRun(next) && next !== NULL_DEVICE) {
         out.push(next);
       }
     }

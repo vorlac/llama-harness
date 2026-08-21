@@ -26,6 +26,13 @@ export type RunState = (typeof RUN_STATES)[number];
 // param type demanding a full §2.3 run.json would reject the FSM's own fixtures.
 export type RunTransitionContext = {
   classification?: "work" | "trivial" | "question";
+  // Whether the CLASSIFIER recorded that classification, as opposed to the intake
+  // placeholder standing in for it. adapter/chat-message.ts writes a schema-valid
+  // `work` classification when a run is created, so the kind alone cannot say
+  // whether conductor_classify has ever run — and every INTAKE exit rests on its
+  // answer. core/tool-legality.ts delegates conductor_decompose's entire phase
+  // check to this edge on exactly that promise.
+  classified?: boolean;
   survivingMajors?: number;
   round?: number;
   max?: number;
@@ -117,6 +124,15 @@ export function legalRunTransition(
       // The classification selects the ONE legal exit (§3.2): work->DECOMPOSED,
       // trivial->EXECUTING, question->ANSWERED. Any other target is off-route.
       const cls = context.classification;
+      if (context.classified !== true) {
+        return {
+          ok: false,
+          why:
+            "INTAKE cannot advance until conductor_classify has recorded a classification: the " +
+            "kind an unclassified run carries is the intake placeholder, not a verdict, and every " +
+            "exit from INTAKE is selected by that verdict (§3.2)",
+        };
+      }
       const route =
         cls === "work"
           ? "DECOMPOSED"

@@ -285,7 +285,8 @@ contents, so the test is where you start.
 
 **The registry entry.** A session is `{ role, itemId?, tree? }`. The fan-out engine writes the
 entry *before* the sub-session's first prompt (registry-before-prompt); the `chat.message` hook
-writes the orchestrator's. A session with no entry is unregistered and its writes are denied.
+writes the orchestrator's, and leaves any session already carrying a non-orchestrator role to the
+fan-out. A session with no entry is unregistered and its writes are denied.
 
 **Gates.** `fragment.test.ts`, `inject.test.ts`, `gates-edit.test.ts`, then the suite.
 

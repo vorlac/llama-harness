@@ -80,7 +80,7 @@ The strain block. Read it as a set of ratios rather than counts:
 | `aborts` | The watchdog killed a hung sub-session. Never routine. |
 | `idle` / `reprompts` / `disengages` | The continuation engine is having to push. A local model stopping mid-run is the normal case, but repeated disengagement is the model losing the thread. |
 | `gate crashes` | A defect in conductor, not in the work. Always worth a bug. |
-| `largest brief` as a window fraction | A brief filling more than half the effective 8,192-token per-slot window leaves the sub-session too little room for the source it is supposed to read. |
+| `largest brief` as a window fraction | A brief filling more than half the effective per-slot window (`scripts/conductor_wiring.py` `PER_SLOT_CONTEXT_TOKENS`, 32,768 by default; pass the served value if `serve.py --ctx` changed it) leaves the sub-session too little room for the source it is supposed to read. |
 
 ### 6. Did any declared threshold cross?
 

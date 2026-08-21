@@ -190,8 +190,12 @@ export interface StrainSignals {
   // never spent is a different story from one converted into a write.
   overridesMinted: number;
   overridesSpent: number;
-  // The fix loop, per item, against the configured cap.
-  reviewDispatchesByItem: Record<string, number>;
+  // The fix loop, per item, against the configured cap. A ROUND is one review
+  // wave, however many reviewers `workflow.itemReviewers` sends into it: counting
+  // the reviewers would measure a config value, and any campaign whose config
+  // exceeds the threshold would cross it in every cell before any item had been
+  // sent back even once.
+  reviewRoundsByItem: Record<string, number>;
   reviewMaxRounds: number;
   // Items that stopped moving, named rather than counted.
   blockedItems: readonly string[];
@@ -232,7 +236,7 @@ const CHARS_PER_TOKEN = 4;
 /** Every strain signal, derived from records alone. */
 export function deriveStrainSignals(input: ObservationInput): StrainSignals {
   const deniesByGate: Record<string, number> = {};
-  const reviewDispatchesByItem: Record<string, number> = {};
+  const reviewRoundsByItem: Record<string, number> = {};
   let denies = 0;
   let allowedCalls = 0;
   let overridesMinted = 0;
@@ -282,16 +286,22 @@ export function deriveStrainSignals(input: ObservationInput): StrainSignals {
       if (role.length === 0) continue; // the clamp warning, not a dispatch
       const promptChars = num(data["promptChars"]);
       if (promptChars > largestBriefChars) largestBriefChars = promptChars;
-      if (role === "reviewer") {
-        const itemId = str(data["itemId"]);
-        const key = itemId.length > 0 ? itemId : "unnamed";
-        reviewDispatchesByItem[key] = (reviewDispatchesByItem[key] ?? 0) + 1;
-      }
       continue;
     }
     if (isEvent(record, "fanout", "wave")) {
       waves += 1;
       if (num(data["jobs"]) === 1) serializedWaves += 1;
+      // The wave names the items it sent to review, which is what makes a round a
+      // round: a run-level plan review names none, and its four reviewers are not
+      // any item's second look.
+      const reviewItems = data["reviewItems"];
+      if (Array.isArray(reviewItems)) {
+        for (const entry of reviewItems) {
+          const itemId = typeof entry === "string" ? entry : "";
+          if (itemId.length === 0) continue;
+          reviewRoundsByItem[itemId] = (reviewRoundsByItem[itemId] ?? 0) + 1;
+        }
+      }
       continue;
     }
     if (isEvent(record, "fanout", "subsession.retry")) receiptRetries += 1;
@@ -316,7 +326,7 @@ export function deriveStrainSignals(input: ObservationInput): StrainSignals {
     denyRate: adjudicated === 0 ? 0 : denies / adjudicated,
     overridesMinted,
     overridesSpent,
-    reviewDispatchesByItem,
+    reviewRoundsByItem,
     reviewMaxRounds: input.reviewMaxRounds,
     blockedItems: input.items
       .filter((item) => item.blocked !== null && item.blocked !== undefined)
@@ -352,6 +362,11 @@ export function deriveStrainSignals(input: ObservationInput): StrainSignals {
 // could use to make it do more.
 // ---------------------------------------------------------------------------
 
+// scripts/conductor_wiring.py PER_SLOT_CONTEXT_TOKENS, the window each slot is
+// served by default. Two copies of one number in two languages; the parity test
+// in tests/observation.test.ts is what keeps them equal.
+export const DEFAULT_PER_SLOT_CONTEXT_TOKENS = 32768;
+
 export const BREAKDOWN_THRESHOLDS = {
   // Above this share of adjudicated calls refused, the session is spending its
   // turns arguing with the gates rather than working. Chosen at a third because
@@ -363,9 +378,10 @@ export const BREAKDOWN_THRESHOLDS = {
   // Any spend is worth an investigation: it is a deny that was bypassed, and the
   // item carries permanent taint for it.
   overridesSpent: 1,
-  // Reviewers re-dispatched on ONE item at the configured cap means the fix loop
-  // is not converging, which is the failure the cap exists to bound.
-  reviewDispatchesPerItem: 3,
+  // ONE item sent back through review this many times means the fix loop is not
+  // converging, which is the failure the cap exists to bound. Rounds, never
+  // reviewers: the reviewer count per round is a config value.
+  reviewRoundsPerItem: 3,
   // A single blocked item is a legitimate surfaced question. Two is a pattern.
   blockedItems: 2,
   // Receipts that fail schema validation and retry: the sub-session is not
@@ -395,9 +411,9 @@ export function crossedThresholds(signals: StrainSignals): string[] {
   if (signals.denyRate > BREAKDOWN_THRESHOLDS.denyRate) crossed.push("denyRate");
   if (signals.overridesMinted > BREAKDOWN_THRESHOLDS.overridesMinted) crossed.push("overridesMinted");
   if (signals.overridesSpent >= BREAKDOWN_THRESHOLDS.overridesSpent) crossed.push("overridesSpent");
-  const worstReview = Math.max(0, ...Object.values(signals.reviewDispatchesByItem));
-  if (worstReview >= BREAKDOWN_THRESHOLDS.reviewDispatchesPerItem) {
-    crossed.push("reviewDispatchesPerItem");
+  const worstReview = Math.max(0, ...Object.values(signals.reviewRoundsByItem));
+  if (worstReview >= BREAKDOWN_THRESHOLDS.reviewRoundsPerItem) {
+    crossed.push("reviewRoundsPerItem");
   }
   if (signals.blockedItems.length >= BREAKDOWN_THRESHOLDS.blockedItems) crossed.push("blockedItems");
   if (signals.receiptRetries >= BREAKDOWN_THRESHOLDS.receiptRetries) crossed.push("receiptRetries");

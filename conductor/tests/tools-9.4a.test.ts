@@ -769,7 +769,7 @@ function gateItemsOf(store: StateStore, runId: string, queue: Queue): GateItem[]
   });
 }
 
-const EXECUTING_RUN: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" } };
+const EXECUTING_RUN: GateRun = { state: "EXECUTING", stop: null, classification: { kind: "work" }, classified: true };
 
 // ---------------------------------------------------------------------------
 // Fixture sanity: every canned payload must satisfy the schema the fan-out engine

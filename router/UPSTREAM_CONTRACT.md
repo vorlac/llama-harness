@@ -128,7 +128,7 @@ EFFECTIVE_SLOT_COUNT: 6
 CTX_PER_SLOT_NO_PARALLEL: 8192
 CTX_PER_SLOT_WITH_PARALLEL: 1536
 CTX_PER_SLOT_PINNED_ARGV: 8192
-PER_SLOT_CONTEXT_ARGV: --parallel <slots> --ctx-size 49152
+PER_SLOT_CONTEXT_ARGV: --parallel <slots> --ctx-size 196608
 AUTOLOAD_LATENCY_MS: 9120
 ```
 
@@ -209,6 +209,32 @@ slots      = max(1, parallel.maxReaders)
 
 Config (c) above is that formula at `per_slot_context = 8192`, and it produced exactly the
 intended `n_slots = 6, n_ctx_slot = 8192`.
+
+**(d) The served default after the 13.2 smoke — `per_slot_context = 32768`, `--ctx-size 196608`
+(measured 2026-08-21, llama-server build 10542, commit 521a64cd0, qwen3.6-27b Q6_K on a 64 GB
+M4 Max).** The 8192 window of (c) refused the orchestrator's first request outright — the agent
+prompt, the injected doctrine and state block, the user prompt and 31 tool schemas are 11,441
+tokens before the model says a word — so `PER_SLOT_CONTEXT_TOKENS` is four times that
+measurement, and the derivation is unchanged:
+
+```
+$ /usr/bin/python3 scripts/serve.py qwen3.6-27b --ctx 32768
+$ ps -axo command | grep 'llama-server --models-preset' | grep -v grep
+… --models-max 1 --models-autoload --host 127.0.0.1 --port 8080 --jinja --parallel 6 --ctx-size 196608
+
+[49283] 0.03.536.151 I srv    load_model: initializing, n_slots = 6, n_ctx_slot = 32768, kv_unified = 'false'
+
+$ curl -s "http://127.0.0.1:8080/props?model=qwen3.6-27b" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['default_generation_settings']['n_ctx'], d['total_slots'])"
+32768 6
+
+$ ps -axo pid,rss,command | grep llama-server | grep -v grep | awk '{printf "%s rss=%.1fGB\n",$1,$2/1048576}'
+95941 rss=0.0GB
+96502 rss=34.1GB
+```
+
+`/props?model=<name>` is how `scripts/conductor_bench.py` learns the served window before a
+campaign (`served_per_slot_context`): the parent's own `/props`, with no model named, reports
+`default_generation_settings.n_ctx = 0`.
 
 Also worth recording: `kv_unified` flips from `'true'` to `'false'` the moment `--parallel` is
 passed. The default configuration shares one KV cache across 4 slots; the parallel configuration

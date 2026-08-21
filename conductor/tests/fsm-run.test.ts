@@ -12,6 +12,8 @@ import { RUN_STATES, legalRunTransition } from "../core/fsm-run.ts";
 // purpose: a param type demanding a full §2.3 run.json would reject these fixtures.
 type RunContext = {
   classification?: "work" | "trivial" | "question";
+  // The classifier's receipt: the kind alone is the intake placeholder.
+  classified?: boolean;
   survivingMajors?: number;
   round?: number;
   max?: number;
@@ -45,9 +47,10 @@ const RUN_SUCCESSORS: Record<RunState, RunState[]> = {
 
 // Context that SATISFIES each legal pair's requirement.
 const RUN_LEGAL_CONTEXT: Record<string, RunContext> = {
-  "INTAKE->DECOMPOSED": { classification: "work" },
-  "INTAKE->ANSWERED": { classification: "question" },
-  "INTAKE->EXECUTING": { classification: "trivial" },
+  // Every INTAKE exit needs the classifier's verdict, not just a kind.
+  "INTAKE->DECOMPOSED": { classification: "work", classified: true },
+  "INTAKE->ANSWERED": { classification: "question", classified: true },
+  "INTAKE->EXECUTING": { classification: "trivial", classified: true },
   "DECOMPOSED->PLANNED": {},
   "PLANNED->PLAN_REVIEWED": { survivingMajors: 0 },
   "PLAN_REVIEWED->EXECUTING": { survivingMajors: 0 },
@@ -59,6 +62,7 @@ const RUN_LEGAL_CONTEXT: Record<string, RunContext> = {
 // require is already satisfied here, so a rejection can only be the pair not existing.
 const PERMISSIVE: RunContext = {
   classification: "work",
+  classified: true,
   survivingMajors: 0,
   round: 99,
   max: 0,
@@ -105,11 +109,11 @@ for (const from of EXPECTED_RUN_STATES) {
 
 // ── 3.1-decomposed ─────────────────────────────────────────────────────────────
 test("3.1-decomposed: INTAKE->DECOMPOSED with classification work => legal", () => {
-  const res = legalRunTransition("INTAKE", "DECOMPOSED", { classification: "work" });
+  const res = legalRunTransition("INTAKE", "DECOMPOSED", { classification: "work", classified: true });
   assert.equal(res.ok, true, `why=${res.why}`);
 });
 test("3.1-decomposed: INTAKE->DECOMPOSED with classification trivial => rejected", () => {
-  const res = legalRunTransition("INTAKE", "DECOMPOSED", { classification: "trivial" });
+  const res = legalRunTransition("INTAKE", "DECOMPOSED", { classification: "trivial", classified: true });
   assert.equal(res.ok, false);
   assert.ok((res.why ?? "").length > 0, "rejection must explain the classification requirement");
 });
@@ -121,11 +125,11 @@ test("3.1-decomposed: INTAKE->DECOMPOSED with classification question => rejecte
 
 // ── 3.1-trivial ────────────────────────────────────────────────────────────────
 test("3.1-trivial: INTAKE->EXECUTING with classification trivial => legal", () => {
-  const res = legalRunTransition("INTAKE", "EXECUTING", { classification: "trivial" });
+  const res = legalRunTransition("INTAKE", "EXECUTING", { classification: "trivial", classified: true });
   assert.equal(res.ok, true, `why=${res.why}`);
 });
 test("3.1-trivial: INTAKE->EXECUTING with classification work => rejected (names DECOMPOSED)", () => {
-  const res = legalRunTransition("INTAKE", "EXECUTING", { classification: "work" });
+  const res = legalRunTransition("INTAKE", "EXECUTING", { classification: "work", classified: true });
   assert.equal(res.ok, false);
   assert.ok((res.why ?? "").includes("DECOMPOSED"), `why should route work runs to DECOMPOSED; got: ${res.why}`);
 });
@@ -169,3 +173,50 @@ for (const [from, to] of [
     assert.ok((res.why ?? "").length > 0);
   });
 }
+
+// ── smoke-F22 ──────────────────────────────────────────────────────────────────
+// The INTAKE edge's gate is the CLASSIFIER's verdict, not the placeholder standing
+// in for it. adapter/chat-message.ts writes a schema-valid `work` classification the
+// moment a run is created, so a gate that reads only `classification` admits a run
+// the classifier has never looked at — and `conductor_decompose` delegates its whole
+// phase check to this edge (core/tool-legality.ts: "the run-FSM edge already refuses
+// a decompose from anywhere but a CLASSIFIED INTAKE").
+//
+// Measured in the 13.2 live smoke, run r-20260821-47df: conductor_classify refused
+// its own trivialItem on a real size violation, so nothing was recorded — and the
+// orchestrator's next call was conductor_decompose, which the gate allowed.
+//
+//   seq 32 fsm guard-reject {"stage": "classify", "violations": ["item \"I1\" is too large ..."]}
+//   seq 34 gates allow {"toolName": "conductor_decompose", "toolClass": "conductor"}
+//
+// The run then decomposed, planned and executed carrying "provisional at intake;
+// conductor_classify has not run yet" for the rest of its life.
+test("[smoke-F22] INTAKE advances only once the CLASSIFIER has spoken, not on the intake placeholder", () => {
+  const unclassified = legalRunTransition("INTAKE", "DECOMPOSED", { classification: "work" });
+  assert.equal(unclassified.ok, false, `an unclassified INTAKE does not decompose; why=${unclassified.why}`);
+  assert.match(
+    unclassified.why ?? "",
+    /classif/i,
+    "and the refusal names the unmet requirement: " + String(unclassified.why),
+  );
+
+  const classified = legalRunTransition("INTAKE", "DECOMPOSED", { classification: "work", classified: true });
+  assert.equal(classified.ok, true, `a classified INTAKE decomposes; why=${classified.why}`);
+
+  // The other two INTAKE exits are gated the same way — one rule, three routes.
+  for (const [cls, to] of [
+    ["trivial", "EXECUTING"],
+    ["question", "ANSWERED"],
+  ] as const) {
+    assert.equal(
+      legalRunTransition("INTAKE", to, { classification: cls }).ok,
+      false,
+      `INTAKE->${to} also needs the classifier's verdict`,
+    );
+    assert.equal(
+      legalRunTransition("INTAKE", to, { classification: cls, classified: true }).ok,
+      true,
+      `INTAKE->${to} is legal once it has one`,
+    );
+  }
+});

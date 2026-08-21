@@ -191,12 +191,22 @@ function openStore(root: string, journal: JournalSink, config: Config): StateSto
   return openWorkspace(opts);
 }
 
-function createIntakeRun(store: StateStore): string {
+// `classified` models which run this is: one the classifier has already spoken for
+// (every decompose bench below, since the INTAKE edge reads that receipt and would
+// otherwise refuse before the scope rules under test are reached), or a fresh one
+// whose classifier is still to run (the classify benches, which assert that a
+// refused trivialItem leaves the receipt unset so the classifier gets another roll).
+function createIntakeRun(store: StateStore, classified = false): string {
   const run = store.createRun({
     prompt: "make the beta parser keep the sign of negative offsets",
     sessionID: "ses_orchestrator",
     classification: { kind: "work", rationale: "a behavioural change", check: { agreed: true, note: "" } },
   });
+  if (classified) {
+    const recorded = store.loadRun(run.runId);
+    recorded.classified = true;
+    store.saveRun(recorded);
+  }
   return run.runId;
 }
 
@@ -310,7 +320,7 @@ function implJson(): string {
 async function decomposeRefusal(root: string, config: Config, queue: Queue): Promise<string | null> {
   const journal = makeJournal();
   const store = openStore(root, journal.sink, config);
-  const runId = createIntakeRun(store);
+  const runId = createIntakeRun(store, true);
   const wiring = makeWiring(runId, config, journal.sink, { planner: [JSON.stringify(queue)] });
   try {
     await handleDecompose({

@@ -869,3 +869,55 @@ test("[21.5-grant-spend-still-distinguishable] a bypassed deny and a plain allow
   assert.equal(plain[0].data.toolName, "edit");
   assert.equal(grants.size, 0, "the grant was consumed, not merely read");
 });
+
+// ===========================================================================
+// smoke-F13 — the deny record names the GATE that refused
+//
+// conductor/tools/observation.ts groups denies by `data.gate` and
+// docs/developer/observing-a-run.md reads that grouping as the finding ("edit
+// means the scopes are wrong, git means the model is reaching for commits it may
+// not make, session means something is calling from an unregistered session").
+// Nothing wrote the field: in the 13.2 live smoke every deny in every run
+// bucketed under `unnamed: N`, so the row could not be read at all.
+// ===========================================================================
+
+test("[smoke-F13] every deny names the gate that refused, so the observer can group them", () => {
+  const cases: Array<{ label: string; gate: string; build: (journal: GateJournal) => void }> = [
+    {
+      label: "git",
+      gate: "git",
+      build: (journal) => {
+        const cmd = "git commit -m snap";
+        gateBeforeToolCall(hookInput({ toolName: "bash", command: cmd, args: { command: cmd }, journal }));
+      },
+    },
+    {
+      label: "edit",
+      gate: "edit",
+      build: (journal) => {
+        const outPath = `${TREE}/lib/nope.ts`;
+        gateBeforeToolCall(
+          hookInput({ toolName: "edit", editPath: outPath, args: { filePath: outPath }, fileScope: ["src/**"], journal }),
+        );
+      },
+    },
+    {
+      label: "session registry",
+      gate: "session",
+      build: (journal) => {
+        const outPath = `${TREE}/src/a.ts`;
+        gateBeforeToolCall(
+          hookInput({ sessionID: UNREG_SESSION, toolName: "edit", editPath: outPath, args: { filePath: outPath }, journal }),
+        );
+      },
+    },
+  ];
+
+  for (const c of cases) {
+    const { journal, records } = makeJournal();
+    expectThrow(() => c.build(journal), `${c.label} deny`);
+    const deny = records.find((r) => r.component === "gates" && r.event === "deny");
+    assert.ok(deny, `${c.label}: a deny is journaled`);
+    assert.equal(deny.data["gate"], c.gate, `${c.label}: the deny names its gate`);
+  }
+});

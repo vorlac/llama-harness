@@ -91,9 +91,27 @@ ROUTER_MACHINE_KEYS = (
 # router/UPSTREAM_CONTRACT.md, Task 12.1 item 6: --ctx-size is llama-server's
 # TOTAL context, divided among slots. Measured on qwen3.6-27b / llama-server
 # 10298: `--ctx-size 8192 --parallel 6` served n_ctx_slot = 1536, and
-# `--ctx-size 49152 --parallel 6` served the intended 8192. The recorded
-# per-slot window is what the derivation multiplies back up.
-PER_SLOT_CONTEXT_TOKENS = 8192
+# `--ctx-size 49152 --parallel 6` served the intended 8192. The per-slot window
+# is what the derivation multiplies back up.
+#
+# The window itself is sized by the 13.2 smoke (2026-08-21, llama-server build
+# 10542): the orchestrator's FIRST request - the agent prompt, the injected
+# doctrine and state block, the user prompt and 31 tool schemas - measured
+# 11,441 tokens, and an 8192-token slot refused it outright. The slot has to hold
+# that request plus the conversation that follows it, so it is four times the
+# measurement; six slots of 32768 loaded as a 34.1 GB child on the 64 GB host.
+PER_SLOT_CONTEXT_TOKENS = 32768
+ORCHESTRATOR_FIRST_REQUEST_TOKENS = 11441
+
+# opencode 1.18.15 session/overflow.ts: a session is compacted once its token
+# count reaches usable = limit.context - min(COMPACTION_BUFFER,
+# min(limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX), and a limit.context
+# of 0 (or a model entry with no limit at all) disables compaction. The limit
+# opencode is told therefore has to be the window llama-server serves, or the
+# session only discovers the slot by being refused - and then loops through a
+# compaction that cannot make the system prompt smaller.
+OPENCODE_COMPACTION_BUFFER = 20000
+OPENCODE_OUTPUT_TOKEN_MAX = 32000
 
 # Supervisor restart policy. Named so a drift is a test failure rather than a
 # behaviour change nobody notices.
@@ -198,6 +216,21 @@ def parallel_server_args(slots: Any, ctx: Optional[int] = None) -> List[str]:
     elif ctx is not None:
         args += ["--ctx-size", str(per_slot)]
     return args
+
+
+def opencode_model_limit(per_slot_ctx: Any) -> Dict[str, int]:
+    """The `limit` block every served model's opencode entry carries.
+
+    context is the per-slot window exactly; output is a quarter of it, so
+    opencode's usable window (context minus the output reserve) stays three
+    quarters of the slot and a long reasoning turn still has room to finish.
+    """
+    if isinstance(per_slot_ctx, bool) or not isinstance(per_slot_ctx, int) or per_slot_ctx <= 0:
+        raise WiringError(
+            "per-slot context must be a positive integer, got %r (%s)"
+            % (per_slot_ctx, type(per_slot_ctx).__name__)
+        )
+    return {"context": per_slot_ctx, "output": per_slot_ctx // 4}
 
 
 def generate_router_config(
@@ -317,16 +350,22 @@ def apply_conductor_wiring(
     base_url: str,
     root: Optional[Path] = None,
     fragment: Optional[Dict[str, object]] = None,
+    per_slot_ctx: Optional[int] = None,
 ) -> Dict[str, object]:
-    """The whole opencode-side wiring: merge, substitute, point, pin, verify.
+    """The whole opencode-side wiring: merge, substitute, point, pin, limit, verify.
 
     Idempotent, so the session-time merge over an already fragment-aware base
     config is a no-op, and non-mutating, so the caller's dicts are reusable.
+    ``per_slot_ctx`` is the window llama-server serves each slot; every model
+    entry under the provider gets it as its opencode limit, replacing whatever
+    the catalog declared, because the catalog's context is what the weights
+    support and the slot is what the session actually gets.
     """
     where = REPO_ROOT if root is None else Path(root)
     raw = load_fragment(where) if fragment is None else fragment
     resolved = substitute_harness_root(raw, where)
     config = merge_opencode_fragment(base, resolved)
+    limit = opencode_model_limit(PER_SLOT_CONTEXT_TOKENS if per_slot_ctx is None else per_slot_ctx)
 
     provider = (config.get("provider") or {}).get(PROVIDER_ID)
     if isinstance(provider, dict):
@@ -335,6 +374,10 @@ def apply_conductor_wiring(
             options = {}
             provider["options"] = options
         options["baseURL"] = base_url
+        models = provider.get("models")
+        if isinstance(models, dict):
+            for name, entry in list(models.items()):
+                models[name] = dict(entry if isinstance(entry, dict) else {}, limit=dict(limit))
 
     # C-012: the wire contract was verified against opencode 1.18.15, so the
     # generated config pins auto-update off and cannot drift under a session.

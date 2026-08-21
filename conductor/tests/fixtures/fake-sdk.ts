@@ -195,12 +195,34 @@ function extractText(body: Record<string, unknown>): string {
   return out.join("\n");
 }
 
+// opencode 1.18.15's payload schema for the prompt body's `model`: an object naming
+// provider and model, or null, or absent. Anything else — a bare string, an empty
+// string — is refused with `kind=Payload reason="Expected object | null, got …"`
+// before a model is reached. The fixture rejects exactly what the API rejects: a
+// fixture more permissive than the contract it stands in for pins the wrong wire
+// shape, which is how a body carrying `model: ""` passed the suite and failed every
+// live dispatch (the 13.2 smoke, 2026-08-21).
+function modelPayloadRejection(body: Record<string, unknown>): string | undefined {
+  if (!Object.hasOwn(body, "model")) return undefined;
+  const model = body["model"];
+  if (model === null) return undefined;
+  if (model === undefined || typeof model !== "object") {
+    return `Expected object | null, got ${JSON.stringify(model)}\n  at ["model"]`;
+  }
+  const { providerID, modelID } = model as { providerID?: unknown; modelID?: unknown };
+  if (typeof providerID !== "string" || typeof modelID !== "string") {
+    return 'Expected { providerID, modelID }\n  at ["model"]';
+  }
+  return undefined;
+}
+
 function extractModel(body: Record<string, unknown>): string | undefined {
   const model = body["model"];
-  if (typeof model === "string") return model;
   if (model !== null && typeof model === "object") {
-    const modelID = (model as { modelID?: unknown }).modelID;
-    if (typeof modelID === "string") return modelID;
+    const { providerID, modelID } = model as { providerID?: unknown; modelID?: unknown };
+    if (typeof providerID === "string" && typeof modelID === "string") {
+      return `${providerID}/${modelID}`;
+    }
   }
   return undefined;
 }
@@ -284,6 +306,11 @@ export function makeFakeSdk(opts: { registry: RegistryLike; idPrefix?: string })
         };
         prompts.push(record);
         calls.push({ seq, method: "prompt", sessionID, body });
+
+        const rejection = modelPayloadRejection(body);
+        if (rejection !== undefined) {
+          return Promise.resolve({ error: { message: rejection, kind: "Payload" } });
+        }
 
         const reply = responder({ sessionID, attempt, text, model, entry: entryAtStart, body });
         if (reply.kind === "reply") {

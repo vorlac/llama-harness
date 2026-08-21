@@ -607,3 +607,86 @@ test("[5.4-nogit] run creation in a no-git workspace coerces startHead/startBran
     "the orchestrator session is registered even in no-git mode",
   );
 });
+
+// ---------------------------------------------------------------------------
+// smoke-F09 — the fan-out's registry entry survives the sub-session's own prompt
+//
+// opencode fires `chat.message` for EVERY session, including the ones the fan-out
+// engine creates. The hook registering `{role:"orchestrator"}` unconditionally
+// therefore overwrote the entry adapter/fanout.ts writes before its first prompt,
+// and with it the itemId and tree. Measured downstream in the 13.2 live smoke
+// (run r-20260821-b8de): a planner sub-session received the orchestrator's
+// doctrine pack (core.md, not decompose.md+plan.md), carried
+// `X-Conductor-Priority: interactive`, passed continuation.ts's orchestrator-only
+// idle guard, and was re-prompted with "call conductor_decompose now" until the
+// futility limit stopped the run.
+// ---------------------------------------------------------------------------
+
+test("[smoke-F09] a prompt arriving in a fan-out sub-session leaves its registry entry alone, journals no user.midrun-prompt and creates no run", () => {
+  const repo = initRepo();
+  commit(repo, "f.ts", "x\n", "seed");
+
+  const journal = makeJournal();
+  const registry = makeRegistry();
+  const store = openStore(repo, journal.sink, "ses_orchestrator");
+
+  const created = handleChatMessage({
+    store,
+    registry,
+    sessionID: "ses_orchestrator",
+    prompt: "the task",
+    journal: journal.sink,
+  });
+  assert.equal(created.action, "created");
+
+  // What adapter/fanout.ts writes BEFORE it prompts the sub-session (§3.5).
+  const SUB = "ses_planner";
+  registry.register(SUB, { role: "planner", itemId: "I1", tree: "/w/tree-a" as TreePath });
+
+  const BRIEF = "Decompose the following work request into a queue of independently implementable items.";
+  const res = handleChatMessage({
+    store,
+    registry,
+    sessionID: SUB,
+    prompt: BRIEF,
+    journal: journal.sink,
+  });
+
+  assert.equal(res.action, "subsession", "a registered sub-session's prompt is neither a run nor mid-run context");
+
+  const entry = registry.get(SUB);
+  assert.equal(entry?.role, "planner", "the fan-out's role survives the sub-session's own prompt");
+  assert.equal(entry?.itemId, "I1", "the fan-out's itemId survives it");
+  assert.equal(entry?.tree, "/w/tree-a", "the fan-out's tree binding survives it");
+
+  const mislabelled = journal.calls.filter(
+    (c) => c.event === "user.midrun-prompt" && c.corr.sessionID === SUB,
+  );
+  assert.deepEqual(mislabelled, [], "a fan-out brief is not operator context and is not journaled as one");
+
+  assert.equal(countRuns(repo), 1, "the sub-session's prompt creates no run");
+  assert.equal(store.currentRun()?.runId, created.runId, "current-run still points at the orchestrator's run");
+});
+
+test("[smoke-F09] the orchestrator's own entry is still (re-)asserted, and an unregistered session still routes mid-run", () => {
+  const repo = initRepo();
+  commit(repo, "f.ts", "x\n", "seed");
+
+  const journal = makeJournal();
+  const registry = makeRegistry();
+  const store = openStore(repo, journal.sink, "ses_orchestrator");
+
+  handleChatMessage({ store, registry, sessionID: "ses_orchestrator", prompt: "start", journal: journal.sink });
+  assert.equal(registry.get("ses_orchestrator")?.role, "orchestrator");
+
+  // A session the fan-out never registered is not a sub-session: it routes as before.
+  const other = handleChatMessage({
+    store,
+    registry,
+    sessionID: "ses_other",
+    prompt: "more context",
+    journal: journal.sink,
+  });
+  assert.equal(other.action, "routed-midrun", "an unregistered session's mid-run prompt still routes");
+  assert.equal(registry.get("ses_other")?.role, "orchestrator", "and it is registered as the orchestrator");
+});

@@ -821,6 +821,7 @@ function verdictOf(store: StateStore, runId: string, queue: Queue): LegalToolsRe
     state: run.state,
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
   const questions = readQuestions(runDirOf(store, runId)).map((q) => ({
     id: q.id,
@@ -4673,6 +4674,7 @@ function verdictOver(store: StateStore, runId: string, items: GateItem[]): Legal
     state: run.state,
     stop: run.stop === null ? null : { kind: run.stop.kind },
     classification: { kind: run.classification.kind },
+    classified: run.classified === true,
   };
   const questions = readQuestions(runDirOf(store, runId)).map((q) => ({
     id: q.id,
