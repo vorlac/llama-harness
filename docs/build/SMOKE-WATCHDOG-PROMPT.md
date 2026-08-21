@@ -119,14 +119,14 @@ measurement.
 You are looking for **the tier at which the harness stops helping**, so the interesting
 information is at the transition, not at the top.
 
-| Step | Task | What it is testing |
-|---|---|---|
-| 1 | `slugify-ts` (T0) | The cost floor. This classifies `trivial`, so INTAKE goes straight to EXECUTING and decompose/plan/plan-review/wave scheduler are all skipped. If this does not work, nothing above it will. |
-| 2 | `changelog-ts` (T1) | The first run that classifies `work`: one item with a real `fileScope`, so decompose → plan → plan-review → one TDD cycle → review fan-out → publish all execute. Non-behavioral and deliberately ambiguous. |
-| 3 | `euler-cli-py` (T1) | The same path on work with real internal structure and known-correct answers. |
-| 4 | `euler-solvers-py` (T2) | Multiple items with disjoint scopes — the wave scheduler dispatches in parallel and `scopesIntersect` is exercised for real. |
-| 5 | `snake-game-ts` (T3) | A dependency chain forcing ≥3 waves. Ordering, held jobs, freeze admission. Judge the artifact by playing it. |
-| 6 | `config-widen-ts` (T4) | Work that legitimately needs a file no plan would have put in scope — `conductor_queue_amend`, the scope gate, the surfaced-question path. |
+| Step | Task                    | What it is testing                                                                                                                                                                                           |
+| ---- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1    | `slugify-ts` (T0)       | The cost floor. This classifies `trivial`, so INTAKE goes straight to EXECUTING and decompose/plan/plan-review/wave scheduler are all skipped. If this does not work, nothing above it will.                 |
+| 2    | `changelog-ts` (T1)     | The first run that classifies `work`: one item with a real `fileScope`, so decompose → plan → plan-review → one TDD cycle → review fan-out → publish all execute. Non-behavioral and deliberately ambiguous. |
+| 3    | `euler-cli-py` (T1)     | The same path on work with real internal structure and known-correct answers.                                                                                                                                |
+| 4    | `euler-solvers-py` (T2) | Multiple items with disjoint scopes — the wave scheduler dispatches in parallel and `scopesIntersect` is exercised for real.                                                                                 |
+| 5    | `snake-game-ts` (T3)    | A dependency chain forcing ≥3 waves. Ordering, held jobs, freeze admission. Judge the artifact by playing it.                                                                                                |
+| 6    | `config-widen-ts` (T4)  | Work that legitimately needs a file no plan would have put in scope — `conductor_queue_amend`, the scope gate, the surfaced-question path.                                                                   |
 
 **Verify the classification rather than assuming it.** Step 1 must classify `trivial` and
 step 2 must classify `work`; step 5 must actually produce ≥3 waves. If a T3 task produces
@@ -138,12 +138,17 @@ the task passed.
 ## Running one step
 
 ```bash
-# Terminal 1 — the server. --router is the default when the binary is present;
-# run at least one step BOTH ways and compare, because "the router is transparent"
-# is a claim this campaign can check.
-/usr/bin/python3 scripts/serve.py qwen3.6-27b
+# Terminal 1 — the server. --router is the default when the binary is present.
+/usr/bin/python3 scripts/serve.py qwen3.6-27b          # with llama-router
+/usr/bin/python3 scripts/serve.py qwen3.6-27b --no-router   # direct to llama-server
 #   ... drops you into a shell with opencode already wired. `cd` to the scratch
 #   workspace and run `opencode`.
+#
+# RUN AT LEAST ONE STEP BOTH WAYS. "The router is transparent to the workflow" is
+# a claim, and it is one of the few this campaign can actually falsify cheaply. If
+# the two runs differ in outcome, in wave composition, or in strain signals, the
+# router is part of the process under test and every other measurement inherits
+# that. Compare the bundles, not your impression of them.
 
 # Terminal 2 — the observer. Read-only by construction: a separate process that
 # opens files, imports no handler, holds no store, takes no lock, registers no
@@ -285,17 +290,17 @@ signals, which are the difference between "the model is weak" and "the process i
 The thresholds in `conductor/tools/observation.ts` `BREAKDOWN_THRESHOLDS` were committed
 **before** this campaign, deliberately, so the analysis cannot be fitted to the result:
 
-| Signal | Threshold |
-|---|---|
-| deny rate | 0.33 |
-| overrides minted / spent | 2 / 1 |
-| review dispatches per item | 3 |
-| blocked items | 2 |
-| receipt retries | 3 |
-| sub-session aborts | 1 |
-| disengages / idle continuations | 2 / 5 |
-| gate crashes | 1 |
-| largest brief as a fraction of the effective 8,192-token per-slot window | 0.5 |
+| Signal                                                                   | Threshold |
+| ------------------------------------------------------------------------ | --------- |
+| deny rate                                                                | 0.33      |
+| overrides minted / spent                                                 | 2 / 1     |
+| review dispatches per item                                               | 3         |
+| blocked items                                                            | 2         |
+| receipt retries                                                          | 3         |
+| sub-session aborts                                                       | 1         |
+| disengages / idle continuations                                          | 2 / 5     |
+| gate crashes                                                             | 1         |
+| largest brief as a fraction of the effective 8,192-token per-slot window | 0.5       |
 
 **A crossed threshold is a finding to investigate, never a stop.** But investigate it — a
 crossing you noted and moved past is worse than one you never measured, because it looks
@@ -340,24 +345,184 @@ not check it and why. **A gap you name is worth more than a claim you cannot sup
 3. **A tier verdict** — for each tier you reached: did the process earn its cost, and what
    is the evidence. If you reached a tier where it clearly does not, that is the most
    valuable single output of this exercise.
-4. **An assessment of the approach itself** — the thing this prompt is really for. Having
-   watched this harness work: what is the design getting right, what is it getting wrong,
-   and what would you change about how it is built, tested, validated and documented. Be
-   specific and be willing to say the uncomfortable thing.
+4. **An assessment of the approach itself.** This is what the exercise is for, and it is
+   the deliverable most likely to come back as diplomatic mush. The rules for it are below
+   and they are not optional.
+5. **A 14.2 go/no-go recommendation.** 14.2 follows this, gated on it. You are the input to
+   that decision and you must actually make a call — see below.
 
 ---
 
-## Stopping conditions
+## Deliverable 4 in full: the assessment, and the rules it is written under
+
+Having watched this harness carry a real model at increasing scope, answer: **what is this
+design getting right, what is it getting wrong, and what would you change about how it is
+built, tested, validated and documented.**
+
+### Write it under these constraints
+
+**Lead with the strongest criticism you have, not with what works.** If your assessment
+opens with praise and buries the problem in paragraph six, you have written a document
+designed to be comfortable to receive. Rewrite it.
+
+**No hedged verdicts.** "Could potentially benefit from" and "may be worth considering" are
+refusals to judge wearing the costume of judgement. Say the thing: *this is wrong, here is
+why, here is what it should be.* If you genuinely do not know, say **"I don't know"** —
+that is a real answer and it is worth more than a soft one.
+
+**Name the cost of every recommendation.** A change you propose without saying what it
+costs, what it breaks, and who has to do the work is a wish, not advice.
+
+**Argue against yourself once, explicitly.** For your single most important conclusion,
+write the strongest counter-argument you can construct — not a strawman, the version an
+intelligent person who disagrees would actually make — and then say why you still hold your
+position, or that you no longer do. A conclusion that has not survived that has not been
+tested.
+
+**Distinguish these four, and never blur them:**
+- what you **measured** (a number, a log line, a diff),
+- what you **inferred** (a conclusion from measurements, with the inference stated),
+- what you **suspect** (a hypothesis you could not test, labelled as one),
+- what you are **repeating** from the repository's own documentation without independent
+  verification. That last category is the dangerous one, because this repository is
+  articulate and its docs are persuasive. Being persuaded by a document is not evidence.
+
+**Judge the process, including the parts that made you look good.** If the gates never fired
+during your runs, that is not proof the gates work — it may mean the model never tried
+anything they would have caught, which makes them untested rather than validated. Say which.
+
+### Calibration: be honest about what you are not competent to judge
+
+You are a language model scoring the output of a language model, and there are things in
+this exercise you are **not reliably able to assess**. Pretending otherwise is the single
+most likely way this whole campaign produces a confident, wrong report.
+
+**For every judgement in your assessment, attach a confidence and the reason for it.** Use
+three levels and use them strictly:
+
+- **Measured** — I ran a command, read a log, or diffed a tree, and I am reporting what it
+  said. State the command.
+- **Judged** — I formed an opinion from evidence I can point at, and a competent reviewer
+  looking at the same evidence could reasonably disagree.
+- **Low confidence / possibly outside my competence** — I am reporting an impression I
+  cannot ground, or the question requires a kind of judgement I do not trust myself to make
+  here.
+
+**Flag the third category loudly rather than quietly downgrading your language.** In
+particular, be sceptical of your own ability to judge:
+
+- **Whether produced code is *good*** as opposed to passing. Pass rates you can measure.
+  "Would a person keep this" is a rubric judgement, and you are grading work produced by a
+  system very like you, with the biases that implies.
+- **Whether a game "feels" right, or a CLI is pleasant to use.** The T3 family exists
+  precisely because a human can judge the artifact by using it in thirty seconds. If you
+  cannot run it interactively, say the scripted-play assertions are what you have and that
+  they are a proxy.
+- **Idiomatic quality in a language you are inferring conventions for** — the C++ tasks
+  especially, where "correct" and "what this repository would accept" are different bars.
+- **Whether a strain-signal crossing is the process failing or the task being hard.** This
+  is the central question of the campaign and it is also genuinely hard. Where you cannot
+  separate them, say the measurement does not separate them.
+- **Whether a threshold is well-chosen.** They were set before the campaign, by a model, on
+  reasoning rather than data. You are the first evidence they have ever met. Say whether
+  each one looks right, and say plainly when you lack the data to tell.
+- **Your own thoroughness.** If you skipped a step, ran fewer repetitions than the design
+  asks for, or accepted a result without probing it, put that in the report as a limitation
+  of the evaluation rather than leaving it implicit.
+
+**If, at the end, you do not believe this exercise produced a trustworthy assessment — say
+that as the headline.** A report that opens "I do not think I was able to evaluate this
+properly, and here is why" is a genuinely useful result. A confident report that papers over
+the same gap is worse than no report at all, because it will be believed.
+
+---
+
+## Budget, persistence and stopping conditions
+
+**This is a thorough pass, not a quick one.** The owner has explicitly accepted the added
+time and work on the grounds that every aspect of this project should be verified as
+working as intended. Do not optimise for finishing. Do not skip a step because the previous
+one went well. Do not declare a defect unfixable on the second try.
+
+**Up to 10 fix attempts on any single defect** before you record it as standing. Each
+attempt owes the full loop — a fresh prediction, a test-first fix, a clean restart, and an
+honest verdict on whether the prediction held. Attempt 7 is not permission to guess faster;
+if you find yourself trying variations rather than diagnosing, stop and re-read the
+evidence bundle instead.
+
+**Up to 10 standing (unfixed) defects** before you stop climbing. Past that the later runs
+are measuring a system you already know is broken, and the findings stop being about the
+tier you are on.
 
 Stop and report when any of these is true:
 
 - You have completed step 6, or reached a tier where the harness demonstrably breaks down.
-- You have three unfixed standing defects — more than that and the later runs are measuring
-  a system you already know is broken.
-- A fix has failed its prediction twice in a row. Your model of the system is wrong and
-  more runs will not correct it; write up what you know.
+- You have 10 standing defects.
+- A single defect has survived 10 fix attempts. Write up everything you learned about it,
+  including which of your hypotheses each attempt falsified — that record is worth more
+  than the fix would have been.
 - The gate cannot be brought back to `GATE PASS`. Do not leave it red and continue.
 
-**Do not start the 14.2 campaign.** That is a separate, owner-authorized decision, and the
-runbook recommends a reps=1 pilot first to calibrate the per-tier timeouts. Your findings
-are an input to that decision, not a substitute for it.
+---
+
+## 14.2 is the follow-up, and this exercise is its gate
+
+**14.2 is the three-arm benchmark campaign** — `baseline` (vanilla opencode), `doctrine`
+(the doctrine packs, no gates) and `conductor` (the full harness) — same weights, same
+server, same machine, same seeded repositories, hidden acceptance materialized only after
+each process exits. It produces `docs/build/artifacts/conductor-report.md`, and it is the
+measurement everything else exists to enable: 13.2 proves the harness *runs*, 14.2 measures
+whether it *helps*.
+
+It has never been run. At three reps across all five tiers it is 207 cells for one model,
+roughly 60 hours, and the runbook recommends a **69-cell reps=1 pilot first** to calibrate
+the per-tier timeouts from observed medians.
+
+**Do not start it in this session.** Your job is to determine whether it can start.
+
+### What "clean" has to mean, or the gate is worthless
+
+A 60-hour campaign launched onto a harness with a live defect produces 207 cells of
+evidence about a broken system, and the defect will be indistinguishable from a finding.
+So the bar is explicit, and **every row must hold** for you to recommend GO:
+
+1. `bash scripts/test-conductor.sh` prints `GATE PASS` and `bash scripts/conductor-gate.sh`
+   is clean **at the end of your session**, not just at the start.
+2. `bash scripts/verify-acceptance.sh` fails **only** rows 6, 8, 12 and detector E. Rows 6
+   and 12 should now be closer to passing than when you started, because 13.2's artifact
+   exists; rows 8 and detector E remain open until 14.2 runs.
+3. **Every tier you reached completed at least one run end to end** — INTAKE through report,
+   with the hidden acceptance actually executed after the process exited. A tier you could
+   not complete is a tier the campaign has no basis to include.
+4. **The classification and wave assertions held**: a T0 task classified `trivial`, a T1+
+   task classified `work`, and the T3 task produced ≥3 waves. If decomposition does not
+   behave as designed, the tier ladder is not measuring what it claims to.
+5. **The read-allow records exist at `debug`.** If they do not, the campaign cannot answer
+   its own central question and must not run until that is fixed.
+6. **No standing defect that changes what a cell measures.** A cosmetic defect can ship. A
+   defect in a gate, in the evidence path, in scoring, or in the seeding is disqualifying,
+   because it silently biases every cell.
+7. **The router comparison is either clean or declared.** If routed and direct runs differ,
+   the campaign must fix the arm definition or state the difference in the report header
+   before it runs — not discover it afterwards.
+
+### Say GO, NO-GO, or GO-WITH-CONDITIONS, and mean it
+
+Give one of three verdicts and defend it:
+
+- **GO** — every row above holds. State which model and which sweep shape, and say whether
+  you endorse the reps=1 pilot first or think it can go straight to reps=3.
+- **GO WITH CONDITIONS** — name each condition, what it costs, and how the owner verifies it
+  is met. Conditions must be checkable, not aspirational.
+- **NO-GO** — name the specific rows that fail and what it would take to clear them. Give a
+  rough size for that work.
+
+**Do not hedge this one.** "It could probably go ahead once a few things are tidied" is not
+a verdict, and it hands the decision back to the person who asked you for it. If your honest
+answer is that you cannot tell, then the answer is NO-GO with "I could not establish
+readiness" as the reason — and say what you would have needed.
+
+Also record, either way: **anything you learned that should change the campaign's design**
+— a timeout that is clearly wrong, a tier whose tasks do not test what they claim, an arm
+that is not comparable to the others, a strain signal that turned out to be noise. Better to
+change the design now than to discover it at cell 140.
