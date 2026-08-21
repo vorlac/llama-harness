@@ -90,6 +90,7 @@ import { concernNamesFinding } from "../core/reply-protocol.ts";
 import { MAIN_TREE, NO_TREE, SCHEMAS, treePath, treeSlug, validate } from "../core/types.ts";
 import type { SideEffectClass, ToolClass } from "../core/types.ts";
 import { builtinSideEffect, decideBuiltinSurface } from "../core/builtin-surface.ts";
+import { networkShapedCommands } from "../core/gates-edit.ts";
 import type {
   AnomalyRecord,
   AnswerChannel,
@@ -315,7 +316,7 @@ export interface GateHookInput {
   // ENABLED: a composition root that forgets to pass them gets the governance
   // floor rather than losing it, which is the only default a fail-closed gate can
   // have. config.toolSurface is what the plugin threads in.
-  toolSurface?: { classifyBuiltins: boolean };
+  toolSurface?: { classifyBuiltins: boolean; denyNetwork: boolean };
   journal: GateJournal;
   corr: Corr;
   deps?: GateDeps;
@@ -327,9 +328,21 @@ export interface GateHookInput {
 // and until they exist a read-shaped bash is R0 — which is the honest statement
 // that this layer cannot yet tell `ls` from `curl`, rather than a claim that it
 // can.
-function bashSideEffect(command: string, writeTargets: readonly string[]): SideEffectClass {
+function bashSideEffect(
+  command: string,
+  writeTargets: readonly string[],
+  networkPrograms: readonly string[],
+): SideEffectClass {
+  // Write wins over network when a command is both: the write gates bound a
+  // target, and losing that adjudication to a coarser refusal would be a
+  // downgrade even though the call is refused either way.
   if (writeTargets.length > 0) return "W";
-  return interpreterStateAreaScript(command) !== null ? "W" : "R0";
+  if (interpreterStateAreaScript(command) !== null) return "W";
+  if (networkPrograms.length > 0) return "R3";
+  // The R1/R2 discriminations belong to the typed handlers of a later phase.
+  // Until those exist, a read-shaped bash is R0 — the honest statement that this
+  // layer cannot tell a checker from an `ls`, not a claim that it can.
+  return "R0";
 }
 
 // True iff the command contains at least one git segment, computed with the SAME
@@ -452,9 +465,13 @@ export function gateBeforeToolCall(input: GateHookInput): void {
   // §2 side-effect class. A bash call has none by name — `ls` is R0 and `curl` is
   // R3 — so it is classified from its command by the extractors below; every
   // other name reads its class from the table.
+  // The network programs a bash command reaches, read from the command with the
+  // same tokenizer and wrapper unwrapping the write shapes use. Computed once:
+  // it feeds both the class below and the refusal's own text.
+  const networkPrograms = command !== undefined ? networkShapedCommands(command) : [];
   const sideEffect =
     input.toolName === "bash"
-      ? bashSideEffect(command ?? "", writeTargets)
+      ? bashSideEffect(command ?? "", writeTargets, networkPrograms)
       : builtinSideEffect(input.toolName);
 
   // The fail-closed guardedness flag (G5), computed ONCE from the real parse:
@@ -468,6 +485,7 @@ export function gateBeforeToolCall(input: GateHookInput): void {
     toolClass === "write" ||
     toolClass === "conductor" ||
     toolClass === "spawn" ||
+    sideEffect === "R3" ||
     sideEffect === undefined;
 
   // (a0) The patch tools, refused before every other gate and in every session
@@ -499,6 +517,8 @@ export function gateBeforeToolCall(input: GateHookInput): void {
         toolName: input.toolName,
         ...(sideEffect === undefined ? {} : { commandClass: sideEffect }),
         classifyBuiltins: input.toolSurface?.classifyBuiltins ?? true,
+        denyNetwork: input.toolSurface?.denyNetwork ?? true,
+        networkPrograms,
       }),
   );
   if (surfaceDecision.action === "deny" && !consumeOverrideGrant(input, "session")) {

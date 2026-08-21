@@ -98,6 +98,13 @@ export interface BuiltinSurfaceInput {
   // The lane's flag. False restores the prior posture — an unclassified tool runs
   // — without touching any other lane.
   classifyBuiltins: boolean;
+  // The network lane's flag, independent of the one above so either can be
+  // reverted alone. False restores the reachable network surface.
+  denyNetwork: boolean;
+  // What the command reached, for the refusal to quote. A refusal that says
+  // "denied" teaches nothing; one that says "denied: curl" names the spelling to
+  // stop using.
+  networkPrograms?: readonly string[];
 }
 
 const ALLOW: Decision = { action: "allow" };
@@ -120,5 +127,30 @@ export function decideBuiltinSurface(input: BuiltinSurfaceInput): Decision {
     return { action: "deny", reason: undeclaredBuiltinWhy(input.toolName) };
   }
 
+  if (cls === "R3" && input.denyNetwork) {
+    return { action: "deny", reason: networkDeniedWhy(input.toolName, input.networkPrograms ?? []) };
+  }
+
   return ALLOW;
+}
+
+/**
+ * The refusal for a network-class call, naming the sanctioned path rather than
+ * only the prohibition.
+ *
+ * Both lanes reach this: the `webfetch`/`websearch` NAMES and a bash command
+ * whose shape is a network program. Denying only the name would leave `curl` as
+ * the same capability under a different spelling, which is why the message
+ * describes the CLASS and not the tool.
+ */
+export function networkDeniedWhy(toolName: string, programs: readonly string[]): string {
+  const what = programs.length > 0 ? `${toolName} (${programs.join(", ")})` : toolName;
+  return (
+    what +
+    ": network reads are denied in a conductor session. A retrieved page is a claim the model " +
+    "composed the request for and the harness cannot attest to, so it is not evidence — and " +
+    "nothing records that the call happened. The sanctioned path is a typed conductor_fetch " +
+    "handler with a host allowlist, which does not exist yet; until it does, work from the " +
+    "repository and from what the brief carries."
+  );
 }

@@ -708,3 +708,52 @@ test("[5.3-patch-tools-denied] control: the ordinary edit/write tools are untouc
     );
   }
 });
+
+// ===========================================================================
+// Tasks 21.3 / 21.4 through the REAL gate hook, not the pure decision.
+//
+// The pure rows live in builtin-surface.test.ts. These exist because the thing
+// that has failed in this build before is not the decision — it is the wiring:
+// a module that decides correctly and adjudicates nothing. So these drive
+// gateBeforeToolCall itself, with a registered session and real scopes, and
+// assert on the throw it produces.
+// ===========================================================================
+
+function surfaceGate(over: Partial<GateHookInput>): void {
+  gateBeforeToolCall(hookInput({ toolName: "read", gitMode: "read-only", ...over }));
+}
+
+test("[21.3-gate-still-reads] a registered session still reads, greps, globs, writes todos and loads skills", () => {
+  for (const toolName of ["read", "grep", "glob", "todowrite", "skill"]) {
+    assert.doesNotThrow(
+      () => surfaceGate({ toolName }),
+      `${toolName} was denied by the tool-surface gate — the tightening took the tree away`,
+    );
+  }
+  // And a read-shaped bash, which is the shape most of a session's work takes.
+  assert.doesNotThrow(() => surfaceGate({ toolName: "bash", command: "ls -la src/" }));
+  assert.doesNotThrow(() => surfaceGate({ toolName: "bash", command: "grep -rn foo src/" }));
+});
+
+test("[21.3-gate-refuses-unclassified] an upstream tool with no declared class is refused by the hook", () => {
+  const err = expectThrow(() => surfaceGate({ toolName: "some_upstream_tool" }), "unclassified tool");
+  assert.match(err.message, /some_upstream_tool/);
+  assert.match(err.message, /side-effect class/i);
+});
+
+test("[21.4-gate-refuses-webfetch] the webfetch name is refused by the hook", () => {
+  const err = expectThrow(() => surfaceGate({ toolName: "webfetch" }), "webfetch");
+  assert.match(err.message, /conductor_fetch/);
+});
+
+test("[21.4-gate-refuses-curl] a network-shaped bash command is refused by the hook, wrappers included", () => {
+  for (const command of [
+    "curl https://example.com",
+    `env sh -c "curl https://example.com"`,
+    "ls && wget https://example.com",
+    `node -e "fetch('https://example.com')"`,
+  ]) {
+    const err = expectThrow(() => surfaceGate({ toolName: "bash", command }), command);
+    assert.match(err.message, /conductor_fetch/, `not refused: ${command}`);
+  }
+});

@@ -607,6 +607,125 @@ function collectStateAreaScripts(command: string, out: string[], depth: number):
   }
 }
 
+// ---------------------------------------------------------------------------
+// Network shapes (Task 21.4).
+//
+// Denying the `webfetch` NAME leaves `curl https://…` reaching the same network
+// through the bash tool. A config flag cannot close that: the bash lane is not
+// reached by it. So the shape is read from the command, through the SAME
+// tokenizer, the SAME operator segmentation and the SAME wrapper unwrapping the
+// write-shape extractor uses — a deny that could be spelled around by choosing
+// `env sh -c` would be no deny at all.
+//
+// This is an ENUMERATION, deliberately, on the same terms as the write-shaped
+// command set: a name on this list reaches the network, and a reader can check
+// that claim. Its limit is that a program NOT on the list is not detected, which
+// is recorded in HONEST-LIMITS rather than papered over.
+// ---------------------------------------------------------------------------
+
+// Programs whose purpose is to move bytes over a network.
+//
+// `git` is absent on purpose: it has its own gate, which adjudicates the whole
+// command including its remote-touching subcommands, and a second opinion here
+// would deny `git log` for being spelled `git`.
+//
+// Package managers are absent too. `npm`, `pip` and `bun` fetch, but they are
+// also how a repo's own toolchain runs, and denying them would remove far more
+// than a network lane. That is a real gap and it is recorded as one.
+const NETWORK_PROGRAMS: readonly string[] = [
+  "curl",
+  "wget",
+  "nc",
+  "ncat",
+  "netcat",
+  "ssh",
+  "scp",
+  "sftp",
+  "rsync",
+  "ftp",
+  "telnet",
+];
+
+// The network calls an interpreter one-liner makes. Same rule and same reason as
+// the interpreter WRITE shapes above: a one-liner passed to `node -e` is not a
+// shell network program, so without this it classifies as an ordinary read the
+// way an interpreter write once did.
+//
+// Two shapes. A bare call, where the function name stands alone; and a dotted
+// one, where the module path may be several segments deep, as in the Python
+// `urllib.request` and `http.client` forms.
+const SCRIPT_NETWORK = new RegExp(
+  [
+    "(?:^|[^A-Za-z0-9_$.])(?:fetch|XMLHttpRequest)\\s*\\(",
+    "\\b(?:requests|axios|httpx|urllib|http|https|net|tls|socket)\\b" +
+      "(?:\\s*\\.\\s*[A-Za-z_][A-Za-z0-9_]*)*" +
+      "\\s*\\.\\s*(?:get|post|put|head|delete|patch|request|urlopen|urlretrieve|" +
+      "createConnection|connect|HTTPConnection|HTTPSConnection)\\s*\\(",
+  ].join("|"),
+);
+
+/**
+ * The network programs a command invokes, de-duplicated in first-seen order.
+ *
+ * Empty for a command that reaches no enumerated network program. The names are
+ * returned rather than a boolean so a refusal can quote what it saw: "denied"
+ * teaches nothing, "denied: curl" tells the reader which spelling to stop using.
+ */
+export function networkShapedCommands(command: string): string[] {
+  const out: string[] = [];
+  collectNetworkPrograms(command, out, 0);
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const name of out) {
+    if (!seen.has(name)) {
+      seen.add(name);
+      unique.push(name);
+    }
+  }
+  return unique;
+}
+
+function collectNetworkPrograms(command: string, out: string[], depth: number): void {
+  if (depth > MAX_WRAPPER_DEPTH) return;
+  for (const seg of splitOnOperators(shellTokens(command))) {
+    const cmdIdx = unwrappedCommandIndex(seg);
+    if (cmdIdx >= seg.length) continue;
+    const cmd = resolvedCommandName(seg[cmdIdx]);
+    const operands = seg.slice(cmdIdx + 1);
+
+    if (SHELLS.includes(cmd)) {
+      const ci = operands.indexOf("-c");
+      if (ci !== -1 && ci + 1 < operands.length) {
+        collectNetworkPrograms(operands[ci + 1], out, depth + 1);
+      }
+      continue;
+    }
+
+    if (INTERPRETERS.includes(cmd)) {
+      for (const script of interpreterScripts(operands)) {
+        if (SCRIPT_NETWORK.test(script)) out.push(cmd);
+      }
+      continue;
+    }
+
+    if (NETWORK_PROGRAMS.includes(cmd)) {
+      out.push(cmd);
+      continue;
+    }
+
+    // `xargs curl` names its child as an OPERAND, not through `-c`, and
+    // unwrappedCommandIndex consumes the wrapper's operands along with it. The
+    // wrapper's own tail is therefore re-read for a network program name.
+    if (WRAPPERS.includes(cmd)) {
+      for (const op of operands) {
+        if (NETWORK_PROGRAMS.includes(resolvedCommandName(op))) {
+          out.push(resolvedCommandName(op));
+        }
+      }
+    }
+  }
+}
+
 export function writeShapedPaths(command: string): string[] {
   const out: string[] = [];
   collectWriteTargets(command, out, 0);

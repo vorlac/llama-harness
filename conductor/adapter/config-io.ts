@@ -118,7 +118,7 @@ export const DEFAULT_CONFIG: Config = deepFreeze<Config>({
     maxReaders: DEFAULT_MAX_READERS,
     subSessionTimeoutMs: SUB_SESSION_TIMEOUT_MS,
   },
-  toolSurface: { classifyBuiltins: true },
+  toolSurface: { classifyBuiltins: true, denyNetwork: true },
   models: { default: "", roles: {} },
   ponytail: "full",
   retention: { keepRuns: 20, maxRunDirBytes: 268435456, pruneOnRunCreate: true },

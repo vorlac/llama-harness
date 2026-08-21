@@ -532,6 +532,14 @@ function readJournalFile(runDirPath: string): JournalRecord[] {
 //                               "harmless" is the absence of a decision rather
 //                               than a decision. The flag exists so the lane can
 //                               be turned OFF for a rollback, never to opt in.
+//   toolSurface.denyNetwork true  the network class is refused, both the
+//                               webfetch/websearch names and a bash command whose
+//                               shape reaches an enumerated network program. The
+//                               measured posture is that the client offers
+//                               webfetch with NO permission narrowing in any agent
+//                               kind (wire-notes 20.2), so leaving this off would
+//                               be leaving the surface exactly as wide as it was
+//                               found.
 //
 // The whole object is unreachable in practice until conductor_setup runs —
 // legalTools(…, repoConfigured=false, …) (core/gates-phase.ts:299) leaves only
@@ -560,7 +568,7 @@ const DOCUMENTED_DEFAULT_CONFIG: Config = {
   },
   parallel: { writes: "off", maxImplementers: 2, maxReaders: 6, subSessionTimeoutMs: 900000 },
   models: { default: "", roles: {} },
-  toolSurface: { classifyBuiltins: true },
+  toolSurface: { classifyBuiltins: true, denyNetwork: true },
   ponytail: "full",
   retention: { keepRuns: 20, maxRunDirBytes: 268435456, pruneOnRunCreate: true },
   logging: { level: "info", components: {} },

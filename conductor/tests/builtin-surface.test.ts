@@ -42,7 +42,7 @@ const OFFERED = ["edit", "glob", "grep", "read", "skill", "task", "todowrite", "
 const REGISTRY_ONLY = ["question", "invalid", "websearch", "apply_patch", "patch"];
 
 const surface = (over: Partial<Parameters<typeof decideBuiltinSurface>[0]> = {}) =>
-  decideBuiltinSurface({ toolName: "read", classifyBuiltins: true, ...over });
+  decideBuiltinSurface({ toolName: "read", classifyBuiltins: true, denyNetwork: true, ...over });
 
 test("[21.3-table-covers-offered] every tool the pinned client offers carries a class", () => {
   const missing = OFFERED.filter((name) => builtinSideEffect(name) === undefined);
@@ -175,19 +175,64 @@ test("[21.3-flag-threaded] the plugin passes the repo's toolSurface config into 
   );
 });
 
-test("[21.3-default-is-on] DEFAULT_CONFIG ships the lane enabled", () => {
+test("[21.3-default-is-on] DEFAULT_CONFIG ships both lanes enabled", () => {
   assert.equal(
     DEFAULT_CONFIG.toolSurface?.classifyBuiltins,
     true,
     "the floor ships on; the flag exists to turn it OFF for a rollback, not to opt into it",
   );
+  assert.equal(
+    DEFAULT_CONFIG.toolSurface?.denyNetwork,
+    true,
+    "the measured posture is that the client offers webfetch with no narrowing in any agent kind, " +
+      "so shipping this off would leave the surface exactly as wide as it was found",
+  );
 });
 
 test("[21.3-config-validates] a config carrying the block passes its own registered schema", () => {
-  const withBlock = { ...DEFAULT_CONFIG, toolSurface: { classifyBuiltins: false } };
+  const withBlock = { ...DEFAULT_CONFIG, toolSurface: { classifyBuiltins: false, denyNetwork: false } };
   assert.equal(validate("Config", withBlock).ok, true, validate("Config", withBlock).errors?.join("; "));
   // And absent still validates, so a config written before the block existed is
   // not rejected — it reads as every lane enabled.
   const { toolSurface: _omitted, ...withoutBlock } = DEFAULT_CONFIG;
   assert.equal(validate("Config", withoutBlock).ok, true);
+});
+
+// ---------------------------------------------------------------------------
+// Task 21.4 — the network class, both lanes.
+//
+// The measured starting position (adapter/wire-notes.md 20.2): the client offers
+// `webfetch` with NO permission narrowing in ANY agent kind, raises no
+// permission.asked for it, and a live probe drove it end to end from a bare
+// subagent. So this lane closes something reachable, not something theoretical.
+// ---------------------------------------------------------------------------
+
+test("[21.4-name-lane] the webfetch and websearch NAMES are refused", () => {
+  for (const name of ["webfetch", "websearch"]) {
+    const decision = surface({ toolName: name });
+    assert.equal(decision.action, "deny", `${name} is still reachable`);
+    assert.match(decision.reason ?? "", /conductor_fetch/, "the refusal names the sanctioned path");
+  }
+});
+
+test("[21.4-bash-lane] a bash command whose shape reaches the network is refused, and the refusal quotes it", () => {
+  const decision = surface({ toolName: "bash", commandClass: "R3", networkPrograms: ["curl"] });
+  assert.equal(decision.action, "deny");
+  assert.match(decision.reason ?? "", /curl/, "the refusal names the program, not merely the tool");
+});
+
+test("[21.4-two-flags] the network lane reverts independently of the classification lane", () => {
+  // Network off, classification still on: curl runs, an unknown tool still does not.
+  assert.equal(surface({ toolName: "webfetch", denyNetwork: false }).action, "allow");
+  assert.equal(surface({ toolName: "some_upstream_tool", denyNetwork: false }).action, "deny");
+  // Classification off, network still on: an unknown tool runs, curl still does not.
+  assert.equal(surface({ toolName: "some_upstream_tool", classifyBuiltins: false }).action, "allow");
+  assert.equal(surface({ toolName: "webfetch", classifyBuiltins: false }).action, "deny");
+});
+
+test("[21.4-reads-survive] denying the network does not deny reading", () => {
+  for (const name of ["read", "grep", "glob", "todowrite", "skill"]) {
+    assert.equal(surface({ toolName: name }).action, "allow", `${name} was caught by the network lane`);
+  }
+  assert.equal(surface({ toolName: "bash", commandClass: "R0" }).action, "allow");
 });

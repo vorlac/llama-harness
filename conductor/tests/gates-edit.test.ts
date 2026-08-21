@@ -71,6 +71,7 @@ import {
 } from "../core/gates-edit.ts";
 // The matcher the gate itself uses — imported so [5.2-out-of-tree-escape] can assert
 // its PREMISE rather than assume it.
+import { networkShapedCommands } from "../core/gates-edit.ts";
 import { globMatch } from "../core/shell-parse.ts";
 import { treePath } from "../core/types.ts";
 import type { TreePath } from "../core/types.ts";
@@ -985,4 +986,129 @@ test("[5.2-command-casefold] folding the command name does not widen the tool se
     null,
     "PRINT folds to `print`, which is not an interpreter — its argument is not a program the gate runs",
   );
+});
+
+// ===========================================================================
+// Task 21.4 — the network-shape extractor.
+//
+// The point of this extractor is that a config flag alone cannot deliver the
+// "R3 off" posture. Denying the `webfetch` NAME leaves `curl https://…` running
+// through the bash tool, which is the same command with a different spelling.
+// So the shape is read from the command, with the SAME quote-aware tokenizer,
+// the SAME operator segmentation and the SAME wrapper unwrapping the write-shape
+// extractor uses — anything less and the deny is spellable-around by choosing a
+// wrapper, which is precisely the property the patch refusal was designed to
+// avoid needing.
+//
+// It is an ENUMERATION, not a heuristic, and its limit is stated where it is
+// felt: a program not on the list is not detected. That is recorded in
+// HONEST-LIMITS in the same voice as the git-detection limit it mirrors.
+// ===========================================================================
+
+test("[21.4-plain] the enumerated network programs are detected", () => {
+  for (const cmd of [
+    "curl https://example.com",
+    "wget https://example.com/x.tar.gz",
+    "nc example.com 443",
+    "ssh user@host",
+    "scp file user@host:/tmp/x",
+    "sftp user@host",
+    "ftp example.com",
+    "telnet example.com 80",
+    "rsync -a ./x user@host:/tmp/",
+  ]) {
+    assert.notDeepEqual(networkShapedCommands(cmd), [], `undetected network command: ${cmd}`);
+  }
+});
+
+test("[21.4-not-network] ordinary read commands are NOT network-shaped", () => {
+  for (const cmd of [
+    "ls -la",
+    "grep -rn foo src/",
+    "cat README.md",
+    "node --test tests/x.test.ts",
+    "git status",
+    "sed -i '' s/a/b/ src/x.ts",
+    // The substring trap: a path or flag that merely contains a program name.
+    "cat ./curl-notes.md",
+    "ls src/ssh_config",
+    "echo nc",
+  ]) {
+    assert.deepEqual(networkShapedCommands(cmd), [], `over-detected as network: ${cmd}`);
+  }
+});
+
+test("[21.4-wrappers] every wrapper the write extractor unwraps is unwrapped here too", () => {
+  for (const cmd of [
+    `env sh -c "curl https://example.com"`,
+    `env -i curl https://example.com`,
+    `env FOO=1 curl https://example.com`,
+    "sudo curl https://example.com",
+    "nice -n 10 curl https://example.com",
+    "timeout 5 curl https://example.com",
+    "nohup wget https://example.com",
+    "command curl https://example.com",
+    "xargs -n 1 curl",
+    `sh -c "wget https://example.com"`,
+    `bash -c "sh -c 'curl https://example.com'"`,
+  ]) {
+    assert.notDeepEqual(networkShapedCommands(cmd), [], `wrapper hid a network call: ${cmd}`);
+  }
+});
+
+test("[21.4-compound] a network call in any segment of a compound command is found", () => {
+  for (const cmd of [
+    "ls && curl https://example.com",
+    "ls ; curl https://example.com",
+    "ls | curl https://example.com",
+    "echo x\ncurl https://example.com",
+    "cd /tmp && wget https://example.com && ls",
+  ]) {
+    assert.notDeepEqual(networkShapedCommands(cmd), [], `segmentation hid a network call: ${cmd}`);
+  }
+});
+
+test("[21.4-case-and-path] the command name is resolved the way the filesystem resolves it", () => {
+  for (const cmd of ["/usr/bin/curl https://example.com", "./curl https://x", "CURL https://x"]) {
+    assert.notDeepEqual(networkShapedCommands(cmd), [], `name resolution missed: ${cmd}`);
+  }
+  // Folding must not WIDEN the set: a name that merely resembles one is not it.
+  assert.deepEqual(networkShapedCommands("curler https://x"), []);
+  assert.deepEqual(networkShapedCommands("myssh host"), []);
+});
+
+test("[21.4-interpreters] a network call inside an interpreter one-liner is found", () => {
+  for (const cmd of [
+    `node -e "fetch('https://example.com')"`,
+    `python3 -c "import urllib.request; urllib.request.urlopen('https://x')"`,
+    `python3 -c "import requests; requests.get('https://x')"`,
+    `bun -e "await fetch('https://x')"`,
+  ]) {
+    assert.notDeepEqual(networkShapedCommands(cmd), [], `interpreter one-liner hid a network call: ${cmd}`);
+  }
+  assert.deepEqual(
+    networkShapedCommands(`node -e "console.log('fetching nothing')"`),
+    [],
+    "prose mentioning a network verb is not a network call",
+  );
+});
+
+test("[21.4-proxy-defeating] the flags that defeat an egress proxy do not change the answer", () => {
+  // The egress proxy is a process-wide backstop; `--noproxy '*'` walks past it.
+  // This extractor is the layer that catches that shape, so the flags must not
+  // make the call LESS visible here.
+  for (const cmd of [
+    `curl --noproxy '*' https://example.com`,
+    "curl -x '' https://example.com",
+    "wget --no-proxy https://example.com",
+  ]) {
+    assert.notDeepEqual(networkShapedCommands(cmd), [], `proxy-defeating flag hid the call: ${cmd}`);
+  }
+});
+
+test("[21.4-reports-what-it-saw] the extractor names the program it found, so the refusal can quote it", () => {
+  assert.deepEqual(networkShapedCommands("ls && curl https://example.com"), ["curl"]);
+  assert.deepEqual(networkShapedCommands("curl https://a ; wget https://b"), ["curl", "wget"]);
+  // De-duplicated, first-seen order, like writeShapedPaths.
+  assert.deepEqual(networkShapedCommands("curl https://a ; curl https://b"), ["curl"]);
 });

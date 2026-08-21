@@ -299,6 +299,11 @@ export interface Config {
     // Refuse a built-in core/builtin-surface.ts declares no side-effect class
     // for, instead of letting it fall through to the read catch-all.
     classifyBuiltins: boolean;
+    // Refuse network-class calls: the webfetch/websearch names AND a bash
+    // command whose shape reaches an enumerated network program. A flag that
+    // covered only the names would leave `curl` as the same capability under a
+    // different spelling.
+    denyNetwork: boolean;
   };
   ponytail: PonytailLevel;
   retention: { keepRuns: number; maxRunDirBytes: number; pruneOnRunCreate: boolean };
@@ -855,8 +860,8 @@ const configSchema = {
     },
     toolSurface: {
       type: "object",
-      properties: { classifyBuiltins: booleanSchema },
-      required: ["classifyBuiltins"],
+      properties: { classifyBuiltins: booleanSchema, denyNetwork: booleanSchema },
+      required: ["classifyBuiltins", "denyNetwork"],
       additionalProperties: false,
     },
     ponytail: { enum: PONYTAIL_LEVELS },
