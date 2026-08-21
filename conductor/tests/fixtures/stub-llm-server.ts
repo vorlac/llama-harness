@@ -9,6 +9,10 @@
 // `stream: true` and consumes SSE `chat.completion.chunk` events.
 import { createServer, type Server } from "node:http";
 
+/** Loopback page the webfetch probe targets; served by this same server. */
+export const WEBFETCH_PAGE_PATH = "/probe-page";
+export const WEBFETCH_PAGE_BODY = "CONDUCTOR_WEBFETCH_PAGE_MARKER_44R plain probe page\n";
+
 export interface StubRequest {
   n: number;
   url: string;
@@ -79,6 +83,7 @@ function scenarioToolCalls(
   text: string,
   body: Record<string, unknown>,
   editTargetPath: string,
+  webfetchUrl: string,
 ): ToolCallSpec[] | undefined {
   const offered = offeredToolNames(body);
   const pick = (wanted: string): string => (offered.includes(wanted) ? wanted : wanted);
@@ -103,6 +108,26 @@ function scenarioToolCalls(
       },
     ];
   }
+  if (text.includes("SCENARIO_BANNER_RESULT")) {
+    return [
+      {
+        id: "call_stub_bash_banner_1",
+        name: pick("bash"),
+        // Deliberately NOT the string the recorder's deny rule matches, so this
+        // call runs and produces a result the after-hook can decorate.
+        args: { command: "echo conductor-banner-result-probe", description: "banner result probe" },
+      },
+    ];
+  }
+  if (text.includes("SCENARIO_CALL_WEBFETCH")) {
+    return [
+      {
+        id: "call_stub_webfetch_1",
+        name: pick("webfetch"),
+        args: { url: webfetchUrl, format: "text" },
+      },
+    ];
+  }
   if (text.includes("SCENARIO_CALL_EDIT")) {
     return [
       {
@@ -122,6 +147,9 @@ function chunkEnvelope(id: string, model: unknown): Record<string, unknown> {
 export function startStubLlmServer(options: { editTargetPath: string }): Promise<StubHandle> {
   const requests: StubRequest[] = [];
   let n = 0;
+  // Filled in by listen(); the scenario table needs the bound port to name the
+  // loopback page in the webfetch tool call it emits.
+  let boundPort = 0;
 
   const server: Server = createServer((req, res) => {
     let raw = "";
@@ -144,6 +172,15 @@ export function startStubLlmServer(options: { editTargetPath: string }): Promise
         body,
       });
 
+      // The loopback page the Phase 20.2 webfetch probe targets. Keeping the
+      // fetch target on this server is what makes that probe hermetic: opencode
+      // really performs the fetch, and it never leaves the machine.
+      if ((req.url ?? "").startsWith(WEBFETCH_PAGE_PATH)) {
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        res.end(WEBFETCH_PAGE_BODY);
+        return;
+      }
+
       if (!(req.url ?? "").includes("chat/completions")) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
@@ -153,7 +190,7 @@ export function startStubLlmServer(options: { editTargetPath: string }): Promise
       const text = lastUserText(body);
       const toolCalls = hasToolResult(body)
         ? undefined
-        : scenarioToolCalls(text, body, options.editTargetPath);
+        : scenarioToolCalls(text, body, options.editTargetPath, `http://127.0.0.1:${boundPort}${WEBFETCH_PAGE_PATH}`);
       const replyText = `STUB_REPLY_OK ${n}`;
       const id = `chatcmpl-stub-${n}`;
 
@@ -241,6 +278,7 @@ export function startStubLlmServer(options: { editTargetPath: string }): Promise
         rejectPromise(new Error("stub server was assigned reserved port 8080"));
         return;
       }
+      boundPort = address.port;
       resolvePromise({
         port: address.port,
         baseUrl: `http://127.0.0.1:${address.port}/v1`,

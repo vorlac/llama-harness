@@ -21,6 +21,16 @@ another one already holds also leaves no beacon, because the lock is claimed bef
 beacon is written; [Degraded modes](#10-degraded-modes) tells that case apart from a plugin
 that never loaded. See [HONEST-LIMITS.md](./HONEST-LIMITS.md), limit 11.
 
+**Second rule: the agent blocks in `opencode-fragment.json` bind the orchestrator only.**
+The fragment defines six subagent blocks — implementer, test-writer, reviewer, skeptic,
+planner, mechanical — and `conductor/adapter/fanout.ts` creates every fan-out sub-session
+without naming an agent, so nothing selects them. Their `"edit": "deny"` and
+`tools: {"task": false}` rows are not in force for the sessions that do the work.
+Enforcement is unaffected, because conductor's registry and edit gates bind on the session
+registry rather than on the agent; but tightening one of those blocks changes nothing an
+operator can observe, and an operator reading the fragment should not conclude otherwise.
+The measured detail is in `conductor/adapter/wire-notes.md` under "20.3".
+
 **Contents**
 
 1. [Serving with and without the router](#1-serving-with-and-without-the-router)

@@ -13,6 +13,12 @@ import { appendFileSync } from "node:fs";
 import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 import {
+  BANNER_PART_MARKER,
+  BANNER_RESULT_MARKER,
+  BANNER_RESULT_TRIGGER,
+  BANNER_PART_TRIGGER_TITLE,
+  BANNER_TOAST_MARKER,
+  BANNER_TOAST_TRIGGER_TITLE,
   DENY_MARKER,
   PARAMS_FALLBACK_FIELD,
   PARAMS_FALLBACK_VALUE,
@@ -84,15 +90,79 @@ export const WireRecorder: Plugin = async (input) => {
         callID: input.callID,
         title: output.title,
       });
+
+      // Phase 20.5 — the tool-result banner seam. A result string is the one
+      // channel already proven to render (0.2-custom-tool), so the question is
+      // whether a hook can DECORATE a result it did not produce.
+      const args = input.args as { command?: unknown } | undefined;
+      if (input.tool === "bash" && typeof args?.command === "string" && args.command.includes(BANNER_RESULT_TRIGGER)) {
+        output.output = `${BANNER_RESULT_MARKER}\n${output.output}`;
+        record("banner-result-decorated", { sessionID: input.sessionID, callID: input.callID });
+      }
     },
 
-    "chat.message": async (input, output) => {
+    // The hook parameter is named `hook` rather than `input` so the factory's
+    // `input.client` stays reachable for the 20.5 toast probe below.
+    "chat.message": async (hook, output) => {
       record("chat.message", {
-        sessionID: input.sessionID,
-        agent: input.agent,
+        sessionID: hook.sessionID,
+        agent: hook.agent,
         messageRole: output.message.role,
         partTypes: output.parts.map((p) => p.type),
       });
+
+      // Phase 20.5 — banner-seam probes. Each fires only when the arriving prompt
+      // carries its own trigger, so every other suite sees this hook unchanged.
+      const promptText = output.parts
+        .map((p) => (p.type === "text" ? ((p as { text?: unknown }).text ?? "") : ""))
+        .join("\n");
+
+      // Candidate A: append a text part to output.parts and see whether it
+      // survives into the persisted transcript a human reads.
+      if (promptText.includes(BANNER_PART_TRIGGER_TITLE)) {
+        const before = output.parts.length;
+        // `output.parts` is Part[], not TextPartInput[] — a Part carries id,
+        // sessionID and messageID, and a bare {type,text} makes the prompt fail
+        // 500. The append below is fully shaped, so what it measures is whether
+        // the seam works at all rather than whether a malformed part is rejected.
+        const template = output.parts.find((p) => p.type === "text");
+        output.parts.push({
+          ...(template ?? {}),
+          id: `prt_conductor_banner_${String(before)}`,
+          sessionID: hook.sessionID,
+          messageID: output.message.id,
+          type: "text",
+          text: BANNER_PART_MARKER,
+        } as (typeof output.parts)[number]);
+        record("banner-part-appended", {
+          sessionID: hook.sessionID,
+          before,
+          after: output.parts.length,
+        });
+      }
+
+      // Candidate B: the TUI toast route. Recorded with its whole envelope so the
+      // test can tell "the call succeeded" from "a human saw it".
+      if (promptText.includes(BANNER_TOAST_TRIGGER_TITLE)) {
+        try {
+          const res = await input.client.tui.showToast({
+            body: { title: "conductor", message: BANNER_TOAST_MARKER, variant: "info" },
+          });
+          record("banner-toast", {
+            sessionID: hook.sessionID,
+            data: res.data ?? null,
+            error: res.error === undefined ? null : String(res.error),
+            threw: false,
+          });
+        } catch (err) {
+          record("banner-toast", {
+            sessionID: hook.sessionID,
+            data: null,
+            error: err instanceof Error ? err.message : String(err),
+            threw: true,
+          });
+        }
+      }
     },
 
     "chat.params": async (input, output) => {

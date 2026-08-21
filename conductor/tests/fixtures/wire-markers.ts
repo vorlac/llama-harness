@@ -20,3 +20,22 @@ export const PARAMS_FALLBACK_VALUE = "params-fallback-probe";
 export const PLUGIN_SPAWN_TRIGGER_TITLE = "CONDUCTOR_PLUGIN_SPAWN_TRIGGER";
 /** Thrown by the crashing plugin's factory (discovery ii). */
 export const CRASH_MARKER = "CONDUCTOR_CRASHING_PLUGIN_MARKER";
+
+// ---------------------------------------------------------------------------
+// Phase 20 probe markers. Each drives one measurement in wire-contract.test.ts
+// and nothing else: a marker only reaches the recorder when the probe that owns
+// it is running, so the other suites see the plugin unchanged.
+// ---------------------------------------------------------------------------
+
+/** Session title that arms the chat.message appended-part banner probe (20.5). */
+export const BANNER_PART_TRIGGER_TITLE = "CONDUCTOR_BANNER_PART_PROBE";
+/** Text the recorder appends to output.parts inside chat.message (20.5). */
+export const BANNER_PART_MARKER = "CONDUCTOR_BANNER_PART_MARKER_51K";
+/** Session title that arms the client.tui.showToast banner probe (20.5). */
+export const BANNER_TOAST_TRIGGER_TITLE = "CONDUCTOR_BANNER_TOAST_PROBE";
+/** Message text handed to client.tui.showToast (20.5). */
+export const BANNER_TOAST_MARKER = "CONDUCTOR_BANNER_TOAST_MARKER_51K";
+/** Prefix the recorder prepends to a tool result inside tool.execute.after (20.5). */
+export const BANNER_RESULT_MARKER = "CONDUCTOR_BANNER_RESULT_MARKER_51K";
+/** bash command whose result the 20.5 tool-result banner probe decorates. */
+export const BANNER_RESULT_TRIGGER = "conductor-banner-result-probe";

@@ -115,3 +115,122 @@ The suite asserts these points loosely; tighten opportunistically if regressions
   asserted only for the task-tool-spawned child.
 - log lines matched by substring ("failed to load plugin", /reject/i), not exact
   level/text.
+
+---
+
+## Phase 20 additions — measured 2026-08-20 against the same binary (1.18.15)
+
+Same rule as above: every line is asserted by `conductor/tests/wire-contract.test.ts`
+unless tagged **[observed]**. These close the assertion-coverage gaps named at the end
+of the previous section and answer the questions Phases 21 and 22B are gated on.
+
+### 20.1 The complete offered tool set (was: membership only)
+
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 the FULL set of tool names offered to the model at
+  1.18.15, asserted by `deepEqual` rather than by membership, is exactly:
+  `bash, edit, glob, grep, read, skill, task, todowrite, webfetch, write` plus every
+  plugin-registered tool (the fixture's `conductor_probe`). `question`, `invalid`,
+  `websearch` and `apply_patch` remain registry-only and are NOT offered.
+  The pin lives at `OFFERED_BUILTIN_TOOLS` / `OFFERED_TOOL_SET` in the test; a tool
+  appearing or disappearing on an opencode bump is now a red test naming the tool,
+  not a silent hole.
+
+### 20.2 Default permission posture per built-in
+
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 every resolved agent — native and config-defined,
+  `mode: primary` and `mode: subagent` — begins its permission ruleset with
+  `{permission: "*", pattern: "*", action: "allow"}` and then narrows. Rules are
+  **last-match-wins**. The complete base narrowing set is:
+  `doom_loop * -> ask`, `external_directory * -> ask` (with allow carve-outs for the
+  tool-output dir and the opencode temp dir), `question * -> deny`,
+  `plan_enter * -> deny`, `plan_exit * -> deny`, `read * -> allow`,
+  `read *.env -> ask`, `read *.env.* -> ask`, `read *.env.example -> allow`.
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 **`webfetch` carries no narrowing in any agent kind**,
+  so it resolves to `allow` and raises no `permission.asked`. A live probe drove a
+  `webfetch` call from a bare `mode: subagent` agent (no `permission` key, no `prompt`
+  key) against a loopback URL: the tool completed, the page body reached the tool
+  result, and the `permission.asked` count did not move. **The network surface is open
+  by default in a sub-session and conductor's own auto-reject default never sees it,
+  because opencode never asks.** Task 21.4 is therefore load-bearing, not redundant.
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 a config agent carrying `tools: {"task": false}`
+  resolves with an additional `task * -> deny` permission rule **on top of** the tool
+  being omitted from the offered set — two layers, not one (DISCOVERY (iii) recorded
+  only the offered-set half).
+- **[observed]** the resolved-agent view is `GET /agent?directory=<dir>`, and the `Agent`
+  schema makes `permission` a required field, so the ruleset is always readable without
+  driving a prompt.
+
+### 20.3 Fan-out sub-sessions select no agent
+
+- Measured from code, not from the binary: `conductor/adapter/fanout.ts` creates every
+  sub-session with `client.session.create({ body: { title } })` and prompts with
+  `{ parts, model }`. Neither call names an `agent`. **The six subagent blocks in
+  `conductor/opencode-fragment.json` are therefore selected by nothing**, and their
+  `"edit": "deny"` and `tools: {"task": false}` rows bind the orchestrator session only.
+  Enforcement is unaffected — conductor's registry and edit gates bind on the session
+  registry regardless of agent — but nobody should "harden" a block no session reads.
+  The same fact is recorded in `conductor/docs/OPERATIONS.md`.
+
+### 20.4 Side-effect class per offered tool (§2 of the read-only capability plan)
+
+| Tool | Class | Note |
+|---|---|---|
+| `read` | R0 | pure repo-local read |
+| `grep` | R0 | pure repo-local read |
+| `glob` | R0 | pure repo-local read |
+| `todowrite` | R0 | writes session-local todo state, never the tree |
+| `skill` | R0 | loads instruction text; reaches no tree and no network |
+| `bash` | polymorphic | adjudicated per command by extractor, never by name: `ls` R0, a checker R1, `man` R2, `curl` R3, `sed -i` W |
+| `webfetch` | R3 | network read; allow-by-default per 20.2 |
+| `websearch` | R3 | registry-only at 1.18.15, so not reachable — classified so it cannot arrive unclassified |
+| `edit` | W | single `args.filePath`, adjudicated by the edit-scope gate |
+| `write` | W | single `args.filePath`, adjudicated by the edit-scope gate |
+| `patch` | X | structurally unboundable; refused ahead of every gate |
+| `apply_patch` | X | structurally unboundable; refused ahead of every gate |
+| `task` | S | session-spawning; denied in every session |
+| `question` | — | registry-only; opencode's own ask surface, not a conductor lane |
+| `invalid` | — | opencode's redirect target for an unavailable tool |
+
+### 20.5 Banner delivery seam
+
+Four candidates were probed. Only one puts plugin-authored text in front of an operator.
+
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 **appending a part to `output.parts` inside the
+  `chat.message` hook delivers nothing.** `output.parts` is `Part[]`, not
+  `TextPartInput[]`: a bare `{type, text}` fails the whole prompt with an HTTP 500
+  (`UnknownError`), and a fully-shaped `Part` (`id`, `sessionID`, `messageID`) is
+  accepted and then has no effect — the appended text reaches neither the persisted
+  transcript nor the provider request. opencode builds both from its own part records.
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 **`tool.execute.after` CAN decorate a result it did
+  not produce**, and the decoration reaches the persisted tool part. This is the one
+  measured channel for operator-visible plugin text. Its cost is that it fires only when
+  a tool runs, so a banner riding it is conditional on the session making at least one
+  tool call.
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 `client.tui.showToast` (`POST /tui/show-toast`,
+  body `{title?, message, variant: info|success|warning|error, duration?}`) is callable
+  from a plugin and answers success under headless `opencode serve` **with no TUI
+  attached**. A 200 therefore proves reachability, never visibility. **[observed]** the
+  bench drives `opencode run`, which has no TUI, so a toast is inert there.
+- A plugin tool's own return string is visible (pinned by `0.2-custom-tool`), but is
+  likewise tied to a call.
+
+**Conclusion for Task 21.7: there is no unconditional user-visible text channel at
+1.18.15.** The strongest available seam is `tool.execute.after` decoration of the
+session's first tool result, and it must be described as conditional.
+
+### 20.6 Agent-selected sub-sessions
+
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 **`POST /session` accepts `agent` and `parentID`
+  together at 1.18.15**, echoes `parentID` on the created session, and lists the child
+  under `GET /session/{id}/children`. The pinned 1.18.10 SDK types declare only
+  `{parentID?, title?}` and are stale; the runtime schema also carries `agent`, `model`,
+  `metadata`, `permission` and `workspaceID`. Task 21.1 can set both fields in one call.
+  **[observed]** `permission` being settable per session at create is a governance lever
+  no conductor code uses today.
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 a `mode: "subagent"` agent with **no `prompt` key**
+  resolves with `prompt: ""` and receives opencode's own composed system prompt at
+  request time — measured at 9,646 characters for the fixture's bare subagent.
+- WIRE_CONTRACT_VERIFIED: 2026-08-20 **the `experimental.chat.system.transform` injection
+  still lands on a session prompted with `agent:` set.** This is the load-bearing check
+  for Task 21.1: doctrine rides that hook, and ISSUE-001 is what a silently-dead
+  injection costs.

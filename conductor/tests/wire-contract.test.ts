@@ -23,8 +23,18 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { after, before, describe, it, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { startStubLlmServer, type StubHandle, type StubRequest } from "./fixtures/stub-llm-server.ts";
 import {
+  startStubLlmServer,
+  WEBFETCH_PAGE_BODY,
+  type StubHandle,
+  type StubRequest,
+} from "./fixtures/stub-llm-server.ts";
+import {
+  BANNER_PART_MARKER,
+  BANNER_PART_TRIGGER_TITLE,
+  BANNER_RESULT_MARKER,
+  BANNER_TOAST_MARKER,
+  BANNER_TOAST_TRIGGER_TITLE,
   CRASH_MARKER,
   DENY_MARKER,
   PARAMS_FALLBACK_FIELD,
@@ -335,6 +345,89 @@ function writeOpencodeConfig(options: {
 // ---------------------------------------------------------------------------
 
 let mainSuiteRan = false;
+
+// ---------------------------------------------------------------------------
+// Phase 20.1 — the committed offered-tool contract. This is an EQUALITY pin, not
+// a membership sample: the assertion-coverage note it closes says the suite
+// asserted "membership/absence of specific names, never the full list", which
+// leaves a tool arriving on an opencode bump invisible. Every name here carries
+// a §2 side-effect class in adapter/wire-notes.md, and Task 21.3 refuses a
+// built-in that carries none — so a name added here without a class is caught
+// twice.
+//
+// `conductor_probe` is the recorder fixture's own plugin tool and is part of the
+// set opencode offers, which is exactly why the pin includes it: a plugin tool
+// and a built-in are indistinguishable to the model.
+const OFFERED_BUILTIN_TOOLS: readonly string[] = [
+  "bash",
+  "edit",
+  "glob",
+  "grep",
+  "read",
+  "skill",
+  "task",
+  "todowrite",
+  "webfetch",
+  "write",
+];
+const OFFERED_TOOL_SET: readonly string[] = [...OFFERED_BUILTIN_TOOLS, "conductor_probe"].sort();
+
+// 20.5 recorded reality. A bare {type,text} pushed onto the chat.message hook's
+// `output.parts` fails the prompt with a 500 — the array is Part[] (id,
+// sessionID and messageID all required), not TextPartInput[]. A fully-shaped
+// Part is accepted without error and then has no effect at all: opencode builds
+// both the persisted message and the provider request from its own part records,
+// never from the array the hook mutated. So the seam delivers no banner.
+const BANNER_PART_REACHES_TRANSCRIPT = false;
+
+// 20.5, the other half: the appended part does not reach the provider request
+// either. Recorded separately because "invisible to the operator" and "invisible
+// to the model" are different failures, and a future opencode could change one
+// without the other.
+const BANNER_PART_REACHES_MODEL = false;
+
+interface PermissionRule {
+  permission: string;
+  pattern: string;
+  action: string;
+}
+
+interface ResolvedAgent {
+  name: string;
+  mode?: string;
+  permission: PermissionRule[];
+}
+
+interface ResolvedChild {
+  id: string;
+  parentID?: string;
+}
+
+// opencode resolves a permission by walking its agent's ruleset and taking the
+// LAST rule whose permission and pattern both match — the leading {*,*,allow}
+// row is therefore the default and every later row is a narrowing. Only the
+// wildcard and prefix/suffix forms the base ruleset actually uses are handled;
+// anything richer would be modelling opencode rather than measuring it.
+function patternMatches(pattern: string, value: string): boolean {
+  if (pattern === "*") return true;
+  if (pattern === value) return true;
+  if (pattern.startsWith("*") && pattern.endsWith("*") && pattern.length > 2) {
+    return value.includes(pattern.slice(1, -1));
+  }
+  if (pattern.startsWith("*")) return value.endsWith(pattern.slice(1));
+  if (pattern.endsWith("*")) return value.startsWith(pattern.slice(0, -1));
+  return false;
+}
+
+function effectivePermission(rules: PermissionRule[], permission: string, value: string): string {
+  let action = "allow";
+  for (const rule of rules) {
+    if (rule.permission !== "*" && rule.permission !== permission) continue;
+    if (!patternMatches(rule.pattern, value)) continue;
+    action = rule.action;
+  }
+  return action;
+}
 
 describe("opencode wire contract (Task 0.2)", { skip: SKIP }, () => {
   // realpathSync matters: macOS tmpdir() is /var/... which opencode
@@ -870,6 +963,273 @@ describe("opencode wire contract (Task 0.2)", { skip: SKIP }, () => {
     assert.ok(denyBefore !== undefined);
     assert.equal(denyBefore.data["callID"], "call_stub_bash_1");
     t.diagnostic("discovery(iv): parentID accepted on create (API and plugin client); id shape identical (ses_*): registry gate stays mandatory");
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 20 — measured client contract. Each test below closes one gap the
+  // assertion-coverage notes name, or answers one question a later phase is
+  // gated on. They add no behaviour; they only pin what the binary does.
+  // -------------------------------------------------------------------------
+
+  it("20.1-tool-inventory: the FULL offered tool set equals the committed list, not merely a membership sample", () => {
+    const request = stubRequestWithMarker("WIRE_PRIMER");
+    assert.ok(request !== undefined, "no primer request reached the stub");
+    const offered = (request.body["tools"] as { function?: { name?: string } }[])
+      .map((t) => t.function?.name)
+      .filter((n): n is string => typeof n === "string")
+      .sort();
+    assert.ok(offered.length > 0, "no tools offered at all — the pin would be vacuous");
+    // The whole point of this assertion is that it is an EQUALITY. A tool that
+    // appears or disappears on an opencode bump must become an explicit decision,
+    // which membership checks cannot force.
+    assert.deepEqual(
+      offered,
+      OFFERED_TOOL_SET,
+      "the offered tool set drifted from the committed contract; update OFFERED_TOOL_SET and " +
+        "wire-notes.md, and give every added name a §2 side-effect class before Task 21.3 refuses it",
+    );
+  });
+
+  it("20.2-permission-defaults: with no permission key in config, every offered built-in resolves to allow — webfetch included", async (t) => {
+    const res = await httpJson("GET", `${serverUrl()}/agent?directory=${encodeURIComponent(fixtureDir)}`);
+    assert.equal(res.status, 200);
+    const agents = res.json as ResolvedAgent[];
+
+    // `helper` is the fixture's bare subagent: mode subagent, no permission key,
+    // no prompt key. It is the closest analogue of a conductor sub-session.
+    const helper = agents.find((a) => a.name === "helper");
+    assert.ok(helper !== undefined, "fixture agent 'helper' missing from the resolved agent list");
+    // `wire-primary` is the primary-kind counterpart, and native agents cover the
+    // built-in kinds, so the posture is recorded for every kind opencode ships.
+    const primary = agents.find((a) => a.name === "wire-primary");
+    assert.ok(primary !== undefined);
+
+    for (const agent of [helper, primary]) {
+      for (const toolName of OFFERED_BUILTIN_TOOLS) {
+        assert.equal(
+          effectivePermission(agent.permission, toolName, "*"),
+          "allow",
+          `built-in '${toolName}' does not default to allow for agent '${agent.name}' — ` +
+            "the §1.1 premise and Task 21.4 both key off this",
+        );
+      }
+    }
+
+    // The narrowings that DO exist in the base ruleset, recorded so a later
+    // opencode release that adds one to a tool name is caught here.
+    assert.equal(effectivePermission(helper.permission, "external_directory", "*"), "ask");
+    assert.equal(effectivePermission(helper.permission, "question", "*"), "deny");
+    assert.equal(effectivePermission(helper.permission, "read", ".env"), "ask");
+    assert.equal(effectivePermission(helper.permission, "read", "src/main.ts"), "allow");
+
+    t.diagnostic(
+      "20.2: opencode 1.18.15 resolves every agent's ruleset from a leading {*,*,allow} rule; " +
+        "webfetch carries no narrowing in any agent kind, so it is reachable and unasked by default",
+    );
+  });
+
+  it("20.2-webfetch-live: a webfetch call from a bare subagent-kind agent executes with NO permission.asked", async (t) => {
+    const asksBefore = records().filter((r) => eventType(r) === "permission.asked").length;
+    const session = await createSession("webfetch-posture");
+    await promptSession(session.id, {
+      agent: "helper",
+      parts: [{ type: "text", text: "SCENARIO_CALL_WEBFETCH probe the loopback page" }],
+    });
+
+    const parts = toolParts(await transcript(session.id));
+    const fetchPart = parts.find((p) => p.tool === "webfetch");
+    assert.ok(fetchPart !== undefined, `webfetch was never called: ${JSON.stringify(parts.map((p) => p.tool))}`);
+    assert.equal(
+      fetchPart.state?.status,
+      "completed",
+      `webfetch did not complete: ${JSON.stringify(fetchPart.state)}`,
+    );
+    assert.ok(
+      JSON.stringify(fetchPart.state?.output ?? "").includes(WEBFETCH_PAGE_BODY.trim().split(" ")[0] ?? ""),
+      "the fetched page body did not reach the tool result",
+    );
+
+    const asksAfter = records().filter((r) => eventType(r) === "permission.asked").length;
+    assert.equal(
+      asksAfter,
+      asksBefore,
+      "a permission.asked fired for webfetch; the §1.1 premise would then be narrower than stated",
+    );
+    t.diagnostic("20.2: webfetch ran end-to-end against a loopback URL with zero permission asks");
+  });
+
+  it("20.5-banner-part: a part appended inside chat.message reaches neither the transcript nor the model, so it is not a banner seam", async (t) => {
+    const session = await createSession("banner-part-probe");
+    await promptSession(session.id, {
+      agent: "wire-primary",
+      parts: [{ type: "text", text: `${BANNER_PART_TRIGGER_TITLE} banner seam probe` }],
+    });
+
+    const appended = await pollUntil(
+      () => findRecord((r) => r.kind === "banner-part-appended"),
+      "banner-part-appended record",
+      15_000,
+    );
+    assert.equal(appended.data["after"], (appended.data["before"] as number) + 1);
+
+    // Two distinct questions, recorded separately: whether the marker is EVER
+    // readable during the message's life, and whether it is readable once the
+    // message has settled. A single read right after the prompt returns cannot
+    // tell a durable part from a transient one, so this polls to a deadline.
+    let everSeen = false;
+    let lastTexts: string[] = [];
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      const messages = await transcript(session.id);
+      lastTexts = messages.flatMap((m) => m.parts.filter((p) => p.type === "text").map((p) => p.text ?? ""));
+      if (lastTexts.some((tx) => tx.includes(BANNER_PART_MARKER))) everSeen = true;
+      await sleep(250);
+    }
+    const settledSeen = lastTexts.some((tx) => tx.includes(BANNER_PART_MARKER));
+    assert.equal(
+      everSeen,
+      false,
+      "the appended part became readable at some point in the message's life; the seam is then " +
+        "transient rather than inert, and Task 21.7 must re-measure before ruling it out",
+    );
+
+    assert.equal(
+      settledSeen,
+      BANNER_PART_REACHES_TRANSCRIPT,
+      settledSeen
+        ? "an appended chat.message part now reaches the transcript — chat.message became a usable banner seam and BANNER_PART_REACHES_TRANSCRIPT must be flipped"
+        : `an appended chat.message part never reaches the transcript, so chat.message cannot carry a user-visible banner. Settled transcript text parts: ${JSON.stringify(lastTexts)}`,
+    );
+
+    // Nor does it reach the model. The append is inert in both directions, which
+    // is what disqualifies it as a banner seam rather than merely costing tokens.
+    const request = stubRequestWithMarker(BANNER_PART_TRIGGER_TITLE);
+    assert.ok(request !== undefined, "no provider request carried the banner probe prompt");
+    const sentToModel = JSON.stringify(request.body["messages"] ?? []).includes(BANNER_PART_MARKER);
+    assert.equal(
+      sentToModel,
+      BANNER_PART_REACHES_MODEL,
+      "the model-visibility of an appended chat.message part changed; Task 21.7's seam choice depends on it",
+    );
+
+    t.diagnostic(
+      `20.5: appended chat.message part — ever readable in transcript = ${String(everSeen)}, ` +
+        `readable after the message settles = ${String(settledSeen)}, sent to the model = ${String(sentToModel)}`,
+    );
+  });
+
+  it("20.5-banner-toast: client.tui.showToast is callable from a plugin, and its success is not evidence a human saw it", async (t) => {
+    const session = await createSession("banner-toast-probe");
+    await promptSession(session.id, {
+      agent: "wire-primary",
+      parts: [{ type: "text", text: `${BANNER_TOAST_TRIGGER_TITLE} banner seam probe` }],
+    });
+
+    const toast = await pollUntil(
+      () => findRecord((r) => r.kind === "banner-toast"),
+      "banner-toast record",
+      15_000,
+    );
+    assert.equal(toast.data["threw"], false, `client.tui.showToast threw: ${String(toast.data["error"])}`);
+    assert.equal(toast.data["error"], null, "client.tui.showToast returned an error envelope");
+    assert.ok(BANNER_TOAST_MARKER.length > 0);
+    // The route answers 200 with no TUI attached — this suite runs `opencode
+    // serve` headless, and no client is subscribed. So a toast is DELIVERABLE
+    // but not OBSERVABLE, and Task 21.7 must not treat a 200 as a banner.
+    t.diagnostic(
+      "20.5: /tui/show-toast succeeds under headless serve with no TUI attached — " +
+        "success proves reachability, never visibility",
+    );
+  });
+
+  it("20.5-banner-result: tool.execute.after CAN decorate a result it did not produce, and the decoration reaches the transcript", async (t) => {
+    const session = await createSession("banner-result-probe");
+    await promptSession(session.id, {
+      agent: "wire-primary",
+      parts: [{ type: "text", text: "SCENARIO_BANNER_RESULT decorate this result" }],
+    });
+
+    await pollUntil(
+      () => findRecord((r) => r.kind === "banner-result-decorated"),
+      "banner-result-decorated record",
+      15_000,
+    );
+
+    const parts = toolParts(await transcript(session.id));
+    const bashPart = parts.find((p) => p.callID === "call_stub_bash_banner_1");
+    assert.ok(bashPart !== undefined, `the probe bash call is absent: ${JSON.stringify(parts.map((p) => p.callID))}`);
+    assert.equal(bashPart.state?.status, "completed", JSON.stringify(bashPart.state));
+    const output = JSON.stringify(bashPart.state?.output ?? "");
+    assert.ok(
+      output.includes(BANNER_RESULT_MARKER),
+      `the after-hook decoration did not reach the persisted tool result: ${output.slice(0, 300)}`,
+    );
+    t.diagnostic(
+      "20.5: tool.execute.after output mutation is the ONE measured channel that puts plugin text " +
+        "in front of an operator — but it fires only when a tool runs, so a banner riding it is " +
+        "conditional on the session making at least one tool call",
+    );
+  });
+
+  it("20.6-subagent-prompt: a mode:subagent agent with no prompt key gets opencode's own system prompt, and the system.transform injection still lands", async (t) => {
+    const marker = "WIRE_SUBAGENT_SYSPROMPT_PROBE";
+    const session = await createSession("subagent-sysprompt-probe");
+    await promptSession(session.id, {
+      agent: "helper",
+      parts: [{ type: "text", text: `${marker} plain` }],
+    });
+
+    const request = stubRequestWithMarker(marker);
+    assert.ok(request !== undefined, "no provider request carried the subagent probe marker");
+    const messages = request.body["messages"] as { role: string; content?: unknown }[];
+    const systemText = messages
+      .filter((m) => m.role === "system")
+      .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+      .join("\n");
+
+    assert.ok(
+      systemText.length > 0,
+      "a subagent with no prompt key received NO system message at all — the §6.4 injection would be the only system content",
+    );
+    // The load-bearing half: doctrine rides experimental.chat.system.transform,
+    // and ISSUE-001 is what a silently-dead injection costs. Task 21.1 selects an
+    // agent per sub-session, so the injection must be proven to survive that.
+    assert.ok(
+      systemText.includes(SYSTEM_MARKER),
+      "experimental.chat.system.transform content did NOT reach a session prompted with agent:'helper' — " +
+        "Task 21.1 must not proceed",
+    );
+    t.diagnostic(
+      `20.6: bare subagent system prompt is ${String(systemText.length)} chars of opencode's own text, ` +
+        "and the system.transform append still lands on it",
+    );
+  });
+
+  it("20.6-create-agent: session.create accepts `agent` and `parentID` together at 1.18.15, and /children lists the child", async (t) => {
+    const parent = await createSession("agent-parent-probe");
+    const res = await httpJson(
+      "POST",
+      `${serverUrl()}/session?directory=${encodeURIComponent(fixtureDir)}`,
+      { title: "reviewer:item-1", parentID: parent.id, agent: "helper" },
+    );
+    assert.equal(res.status, 200, `session.create with agent+parentID failed: ${JSON.stringify(res.json)}`);
+    const child = res.json as ResolvedChild;
+    assert.equal(child.parentID, parent.id, "parentID was not echoed on the created session");
+
+    const children = await httpJson(
+      "GET",
+      `${serverUrl()}/session/${parent.id}/children?directory=${encodeURIComponent(fixtureDir)}`,
+    );
+    assert.equal(children.status, 200);
+    const listed = (children.json as SessionInfo[]).map((c) => c.id);
+    assert.ok(
+      listed.includes(child.id),
+      `the API-created child is absent from /session/{id}/children: ${JSON.stringify(listed)}`,
+    );
+    t.diagnostic(
+      "20.6: POST /session accepts {parentID, agent} on 1.18.15 even though the pinned 1.18.10 SDK " +
+        "types declare only {parentID, title} — Task 21.1 can set both in one call",
+    );
   });
 
   it("§5.1 coverage: every named hook was observed firing during this suite", () => {
