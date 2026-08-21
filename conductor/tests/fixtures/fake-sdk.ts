@@ -17,7 +17,7 @@
 // leans on the non-existent field.
 //
 // It mirrors the @opencode-ai/sdk shape the engine drives:
-//   client.session.create({ body:{title?,parentID?} })  -> { data:{ id }, error? }
+//   client.session.create({ body:{title?,parentID?,agent?} }) -> { data:{ id }, error? }
 //   client.session.prompt({ path:{id}, body:{ parts, model? } }) -> { data:{ info, parts }, error? }
 //   client.session.abort({ path:{id} })                  -> { data:{ aborted }, error? }
 //   client.session.messages({ path:{id} })               -> { data: AssistantMessage[], error? }
@@ -53,7 +53,7 @@ export interface AssistantMessage {
 }
 
 export interface CreateOptions {
-  body?: { title?: string; parentID?: string };
+  body?: { title?: string; parentID?: string; agent?: string };
 }
 export interface PromptOptions {
   path: { id: string };
@@ -144,7 +144,7 @@ export interface CreateReqContext {
   sessionID: string;
   // 1-based ordinal of this create across the fake's lifetime.
   createCount: number;
-  body: { title?: string; parentID?: string } | undefined;
+  body: { title?: string; parentID?: string; agent?: string } | undefined;
 }
 
 export type CreateResponder = (req: CreateReqContext) => CreateReply;

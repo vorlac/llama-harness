@@ -110,6 +110,12 @@ export const VOCABULARIES: readonly Vocabulary[] = [
       { lang: "ts", kind: "record-keys", file: "conductor/adapter/inject.ts", symbol: "ROLE_PACKS" },
       { lang: "ts", kind: "record-keys", file: "conductor/adapter/inject.ts", symbol: "ROLE_TEMPERATURE" },
       { lang: "ts", kind: "record-keys", file: "conductor/adapter/inject.ts", symbol: "ROLE_PRIORITY" },
+      // The role -> opencode agent map the fan-out engine names on every
+      // session.create and session.prompt (Task 21.1). It is a fourth parallel
+      // role map with the same silent-drift shape as the three above: a role
+      // added to ROLE_PACKS and forgotten here dispatches with no agent, which
+      // opencode accepts without complaint.
+      { lang: "ts", kind: "record-keys", file: "conductor/adapter/fanout.ts", symbol: "ROLE_AGENT" },
     ],
   },
 ] as const;

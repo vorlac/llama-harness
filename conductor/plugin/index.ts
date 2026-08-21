@@ -1192,6 +1192,9 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       registry as unknown as FanoutRegistry,
       treeState,
       runId,
+      // The session making this stage call is the orchestrator, so it is the
+      // parent every sub-session this engine dispatches hangs under (Task 21.1).
+      sessionID,
     );
 
     return {

@@ -419,6 +419,12 @@ function patternMatches(pattern: string, value: string): boolean {
   return false;
 }
 
+function offeredNames(request: StubRequest): string[] {
+  return (request.body["tools"] as { function?: { name?: string } }[])
+    .map((t) => t.function?.name)
+    .filter((n): n is string => typeof n === "string");
+}
+
 function effectivePermission(rules: PermissionRule[], permission: string, value: string): string {
   let action = "allow";
   for (const rule of rules) {
@@ -974,10 +980,7 @@ describe("opencode wire contract (Task 0.2)", { skip: SKIP }, () => {
   it("20.1-tool-inventory: the FULL offered tool set equals the committed list, not merely a membership sample", () => {
     const request = stubRequestWithMarker("WIRE_PRIMER");
     assert.ok(request !== undefined, "no primer request reached the stub");
-    const offered = (request.body["tools"] as { function?: { name?: string } }[])
-      .map((t) => t.function?.name)
-      .filter((n): n is string => typeof n === "string")
-      .sort();
+    const offered = offeredNames(request).sort();
     assert.ok(offered.length > 0, "no tools offered at all — the pin would be vacuous");
     // The whole point of this assertion is that it is an EQUALITY. A tool that
     // appears or disappears on an opencode bump must become an explicit decision,
@@ -1229,6 +1232,80 @@ describe("opencode wire contract (Task 0.2)", { skip: SKIP }, () => {
     t.diagnostic(
       "20.6: POST /session accepts {parentID, agent} on 1.18.15 even though the pinned 1.18.10 SDK " +
         "types declare only {parentID, title} — Task 21.1 can set both in one call",
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 21.1 prerequisites. Setting `agent` on session.create is only worth
+  // doing if it GOVERNS the session, and only safe if a wrong name is loud.
+  // Both are measured here before fanout.ts is changed.
+  // -------------------------------------------------------------------------
+
+  it("21.1-create-agent-does-not-govern: an agent set at session.create does NOT shape the tools offered; the PROMPT's agent does", async (t) => {
+    // `restricted` carries tools:{task:false}. If create-time selection governed,
+    // `task` would be absent from the set offered to a prompt naming no agent.
+    const res = await httpJson(
+      "POST",
+      `${serverUrl()}/session?directory=${encodeURIComponent(fixtureDir)}`,
+      { title: "create-agent-governs", agent: "restricted" },
+    );
+    assert.equal(res.status, 200);
+    const session = res.json as SessionInfo;
+
+    const createMarker = "WIRE_CREATE_AGENT_ONLY";
+    await promptSession(session.id, { parts: [{ type: "text", text: `${createMarker} plain` }] });
+    const createRequest = stubRequestWithMarker(createMarker);
+    assert.ok(createRequest !== undefined, "no provider request carried the create-agent probe marker");
+    const offeredWithoutPromptAgent = offeredNames(createRequest);
+    assert.ok(offeredWithoutPromptAgent.length > 0, "no tools offered at all — the pin would be vacuous");
+    // RECORDED REALITY: create-time selection is metadata. The session record
+    // echoes the agent, and the tool set ignores it.
+    assert.ok(
+      offeredWithoutPromptAgent.includes("task"),
+      "create-time agent selection now GOVERNS the offered tool set; Task 21.1 may then drop the " +
+        "prompt-body agent and this pin must be re-taken",
+    );
+
+    // The prompt-body agent is the field that governs, on the SAME session.
+    const promptMarker = "WIRE_PROMPT_AGENT_GOVERNS";
+    await promptSession(session.id, {
+      agent: "restricted",
+      parts: [{ type: "text", text: `${promptMarker} plain` }],
+    });
+    const promptRequest = stubRequestWithMarker(promptMarker);
+    assert.ok(promptRequest !== undefined, "no provider request carried the prompt-agent probe marker");
+    const offeredWithPromptAgent = offeredNames(promptRequest);
+    assert.ok(
+      !offeredWithPromptAgent.includes("task"),
+      `the prompt-body agent did not govern either: ${offeredWithPromptAgent.join(",")}`,
+    );
+
+    t.diagnostic(
+      "21.1: session.create's `agent` is recorded but does not govern; the prompt body's `agent` " +
+        "is what shapes the offered tool set, so Task 21.1 must set BOTH — create for the child " +
+        "record, prompt for the posture",
+    );
+  });
+
+  it("21.1-create-agent-unknown: an unknown agent name is accepted and echoed, so a wrong name is a SILENT no-op", async (t) => {
+    const res = await httpJson(
+      "POST",
+      `${serverUrl()}/session?directory=${encodeURIComponent(fixtureDir)}`,
+      { title: "unknown-agent", agent: "conductor-does-not-exist" },
+    );
+    // Recorded reality: no validation, no 400, no warning. This is why the
+    // role -> agent map must be pinned against opencode-fragment.json by a test:
+    // a typo there would be exactly the built-but-never-wired failure the fragment
+    // blocks already are, with nothing to notice it.
+    assert.equal(
+      res.status,
+      200,
+      "an unknown agent name is now rejected; the fragment-parity pin can be relaxed to rely on it",
+    );
+    assert.equal((res.json as { agent?: string }).agent, "conductor-does-not-exist");
+    t.diagnostic(
+      "21.1: POST /session accepts an unknown agent name with 200 and echoes it — a typo in the " +
+        "role->agent map cannot be detected at runtime, so it must be detected by a test",
     );
   });
 

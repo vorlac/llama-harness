@@ -764,3 +764,143 @@ test("[7.1-cleanup] the registry is populated during flight then cleaned; journa
   }
   assertKnownFanoutEvents(records);
 });
+
+// ---------------------------------------------------------------------------
+// 21.1 — sub-sessions are children of the orchestrator and select their role
+// agent. Two fields on one call, plus the prompt-body agent that actually
+// governs the offered tool set.
+//
+// Measured against the binary first (wire-contract.test.ts, 21.1-*):
+//   - POST /session accepts `parentID` and `agent` together at 1.18.15 and
+//     echoes both; /session/{id}/children lists the child.
+//   - `agent` on session.create is METADATA — it does not shape the tool set.
+//   - `agent` on the PROMPT body is what governs, so both are set.
+//   - an unknown agent name is accepted with 200 and echoed, so a wrong name is
+//     a silent no-op. That is why ROLE_AGENT is pinned to the fragment by a test
+//     (fragment.test.ts) rather than trusted to fail loudly at runtime.
+// ---------------------------------------------------------------------------
+
+function createBodies(sdk: FakeSdk): Record<string, unknown>[] {
+  return sdk.calls
+    .filter((c) => c.method === "create")
+    .map((c) => (c.body ?? {}) as Record<string, unknown>);
+}
+
+test("[21.1-parent-id] every sub-session is created with parentID set to the orchestrator session", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const fanout = createFanout(
+    sdk.client,
+    makeConfig(),
+    journal,
+    registry,
+    makeFakeTreeState(),
+    "run-1",
+    "ses_orchestrator",
+  );
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatchWave([readJob({ itemId: "i1" }), readJob({ itemId: "i2", role: "skeptic" })]);
+
+  const bodies = createBodies(sdk);
+  assert.equal(bodies.length, 2, "one create per job");
+  for (const body of bodies) {
+    assert.equal(
+      body["parentID"],
+      "ses_orchestrator",
+      "a sub-session created without parentID is a top-level SIBLING of the orchestrator: it does " +
+        "not render in the orchestrator's view and does not appear under /session/{id}/children",
+    );
+  }
+});
+
+test("[21.1-parent-id] with no orchestrator session known, parentID is OMITTED rather than sent empty", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  // The default: createFanout called without the parent argument, as every
+  // pre-21.1 call site does.
+  const fanout = createFanout(sdk.client, makeConfig(), journal, registry, makeFakeTreeState());
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatch(readJob());
+
+  const body = createBodies(sdk)[0] ?? {};
+  assert.equal(
+    "parentID" in body,
+    false,
+    "an empty parentID is not the same as no parentID — the field's schema pattern is ^ses",
+  );
+});
+
+test("[21.1-agent] a sub-session names its role agent on BOTH the create and the prompt", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const fanout = createFanout(
+    sdk.client,
+    makeConfig(),
+    journal,
+    registry,
+    makeFakeTreeState(),
+    "run-1",
+    "ses_orchestrator",
+  );
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  await fanout.dispatch(readJob({ role: "testWriter" }));
+
+  const createBody = createBodies(sdk)[0] ?? {};
+  assert.equal(
+    createBody["agent"],
+    "conductor-test-writer",
+    "the create-time agent is what a client's sub-agent view labels the child by",
+  );
+
+  const promptBody = sdk.prompts[0]?.body as Record<string, unknown> | undefined;
+  assert.ok(promptBody !== undefined, "the job must have been prompted");
+  assert.equal(
+    promptBody["agent"],
+    "conductor-test-writer",
+    "the PROMPT-body agent is the field that governs the offered tool set and the permission " +
+      "ruleset; without it the fragment's tools:{task:false} and edit:deny rows bind nothing",
+  );
+});
+
+test("[21.1-agent] every dispatchable role maps to an agent, and an unmapped role sends no agent at all", async () => {
+  const registry = makeRegistry();
+  const sdk = makeFakeSdk({ registry });
+  const { journal } = makeRecordingJournal();
+  const fanout = createFanout(
+    sdk.client,
+    makeConfig(),
+    journal,
+    registry,
+    makeFakeTreeState(),
+    "run-1",
+    "ses_orchestrator",
+  );
+
+  sdk.setResponder(() => ({ kind: "reply", text: VALID }));
+  for (const role of ["planner", "implementer", "reviewer", "skeptic", "mechanical"]) {
+    await fanout.dispatch(readJob({ role }));
+  }
+  const mapped = createBodies(sdk).map((b) => b["agent"]);
+  assert.deepEqual(mapped, [
+    "conductor-planner",
+    "conductor-implementer",
+    "conductor-reviewer",
+    "conductor-skeptic",
+    "conductor-mechanical",
+  ]);
+
+  // A role with no entry must send NO agent rather than a guessed one: opencode
+  // accepts an unknown agent name with 200 and echoes it, so a guess would be a
+  // silent no-op that looks like a working selection.
+  await fanout.dispatch(readJob({ role: "not-a-conductor-role" }));
+  const last = createBodies(sdk).at(-1) ?? {};
+  assert.equal("agent" in last, false, "an unmapped role must omit the field, never guess a name");
+  const lastPrompt = sdk.prompts.at(-1)?.body as Record<string, unknown> | undefined;
+  assert.equal("agent" in (lastPrompt ?? {}), false, "the prompt body must omit it for the same reason");
+});

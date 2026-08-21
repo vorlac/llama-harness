@@ -10,6 +10,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { ROLE_AGENT } from "../adapter/fanout.ts";
+
 const FRAGMENT_URL = new URL("../opencode-fragment.json", import.meta.url);
 
 const ORCHESTRATOR = "conductor-orchestrator";
@@ -164,6 +166,39 @@ test("fragment: every agent denies the built-in task spawn tool (0.2 discovery i
       tools["task"],
       false,
       `fragment.agent["${name}"].tools.task must be false`,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Task 21.1 — the role -> agent map names agents this fragment actually defines.
+//
+// This pin exists because the runtime cannot provide one. opencode accepts an
+// unknown agent name on session.create with HTTP 200 and echoes it back
+// (wire-contract.test.ts, 21.1-create-agent-unknown), so a typo in ROLE_AGENT
+// would dispatch every sub-session under an agent that does not exist, with no
+// error anywhere — the built-but-never-wired shape these blocks were already an
+// instance of before anything selected them.
+// ---------------------------------------------------------------------------
+
+test("fragment: every ROLE_AGENT value is an agent this fragment defines", () => {
+  const table = agentTable(readFragment());
+  for (const [role, agent] of Object.entries(ROLE_AGENT)) {
+    assert.ok(
+      agent in table,
+      `ROLE_AGENT["${role}"] = "${agent}", which opencode would accept and silently ignore. ` +
+        `Defined agents: ${Object.keys(table).join(", ")}`,
+    );
+  }
+});
+
+test("fragment: every subagent this fragment defines is reachable through ROLE_AGENT", () => {
+  const mapped = new Set(Object.values(ROLE_AGENT));
+  for (const name of SUBAGENT_NAMES) {
+    assert.ok(
+      mapped.has(name),
+      `${name} is defined in the fragment but no role selects it, so its permission and tools ` +
+        "rows bind nothing — the exact dead-config state Task 21.1 exists to end",
     );
   }
 });

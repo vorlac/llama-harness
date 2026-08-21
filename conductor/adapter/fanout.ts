@@ -98,7 +98,7 @@ export interface FanoutEnvelope<T> {
 export interface FanoutClient {
   session: {
     create(opts?: {
-      body?: { title?: string; parentID?: string };
+      body?: { title?: string; parentID?: string; agent?: string };
     }): Promise<FanoutEnvelope<{ id: string }>>;
     prompt(opts: {
       path: { id: string };
@@ -164,6 +164,35 @@ function appendErrors(basePrompt: string, schemaName: string, errors: string[]):
   );
 }
 
+// §4.1 role -> opencode agent name. The six subagent blocks in
+// conductor/opencode-fragment.json are selected by NOTHING until a dispatch names
+// one, so their `"edit": "deny"` and `tools: {"task": false}` rows bind no session
+// that does the work. Naming the agent buys three things: the client's sub-agent
+// view labels each child by its role rather than showing an anonymous default; the
+// spawn tool is never OFFERED to a session that may not use it, instead of being
+// offered and then denied by the registry gate at the cost of a wasted turn; and
+// the opencode permission layer denies reader-role edits independently of
+// conductor's own edit gate, which the budgeted override hatch can route around.
+//
+// A wrong name here is SILENT — opencode accepts an unknown agent with 200 and
+// echoes it (wire-notes 21.1) — so the values are pinned to the fragment by
+// conductor/tests/fragment.test.ts, and the KEYS are a registered site of the
+// `roles` vocabulary (core/vocab-registry.ts) so a role added to ROLE_PACKS and
+// forgotten here goes red.
+//
+// `orchestrator` maps to the primary agent for completeness of the vocabulary; the
+// engine never dispatches that role, since the orchestrator is the session doing
+// the dispatching.
+export const ROLE_AGENT: Record<string, string> = {
+  orchestrator: "conductor-orchestrator",
+  planner: "conductor-planner",
+  testWriter: "conductor-test-writer",
+  implementer: "conductor-implementer",
+  reviewer: "conductor-reviewer",
+  skeptic: "conductor-skeptic",
+  mechanical: "conductor-mechanical",
+};
+
 export function createFanout(
   client: FanoutClient,
   config: Config,
@@ -171,6 +200,11 @@ export function createFanout(
   registry: SessionRegistry,
   treeState: TreeState,
   runId = "",
+  // The orchestrator session every dispatched sub-session is a child of. Empty
+  // when no orchestrator session is known, in which case parentID is OMITTED
+  // rather than sent empty: the field's schema pattern is `^ses`, so "" is not a
+  // weaker version of the same request, it is an invalid one.
+  parentSessionID = "",
 ): Fanout {
   const maxReaders = config.parallel.maxReaders;
   const timeoutMs = config.parallel.subSessionTimeoutMs;
@@ -259,8 +293,19 @@ export function createFanout(
 
       void (async () => {
         try {
+          // The title is what a human reads in the client's session list; the
+          // lens distinguishes the six reviewers of one item from each other.
+          const title =
+            job.lens === undefined || job.lens === ""
+              ? `${job.role}:${job.itemId}`
+              : `${job.role}[${job.lens}]:${job.itemId}`;
+          const agent = ROLE_AGENT[job.role];
           const created = await client.session.create({
-            body: { title: `${job.role}:${job.itemId}` },
+            body: {
+              title,
+              ...(parentSessionID === "" ? {} : { parentID: parentSessionID }),
+              ...(agent === undefined ? {} : { agent }),
+            },
           });
           if (done) {
             // The watchdog already timed this job out during the create phase. If create
@@ -306,8 +351,15 @@ export function createFanout(
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
             const reply = await client.session.prompt({
               path: { id: sessionID },
-              // Prompt-shaped only — NO `format` field (Task 0.2 DRIFT).
-              body: { parts: [{ type: "text", text: promptText }], model },
+              // Prompt-shaped only — NO `format` field (Task 0.2 DRIFT). The
+              // `agent` here is the field that governs the offered tool set and
+              // the permission ruleset; the one on create is only metadata
+              // (wire-notes 21.1), so both are set and neither is redundant.
+              body: {
+                parts: [{ type: "text", text: promptText }],
+                model,
+                ...(agent === undefined ? {} : { agent }),
+              },
             });
             if (done) return; // the watchdog already resolved this job
 
