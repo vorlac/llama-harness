@@ -80,8 +80,8 @@ show it.
    `conductor/docs/RUNNER-DISCOVERY.md` sets: the question under test, tool
    versions verbatim, every command echoed with its exit code, and the journal
    lines quoted rather than paraphrased.
-8. Commit with the message `conductor: 13.2 live smoke` — `verify-acceptance.sh`
-   row 12 looks for exactly that string, once.
+8. Commit with the message `conductor: 13.2 live smoke` — row 12 matches
+   `docs/build/STATE.json`'s `commitMessage` for the task exactly, and counts it once.
 
 ---
 
@@ -128,7 +128,8 @@ hand-off. A crossed threshold is a finding to investigate, never a stop.
    per-task spread, and the §23.4 transcript answer as its own section: *does the
    baseline arm use `webfetch` or read-shaped `bash` in ways the conductor arm
    does not, and does that use correlate with passing?*
-2. Commit with the message `conductor: 14.2 POC campaign`.
+2. Commit with the message `conductor: 14.2 POC run` — row 12 matches
+   `docs/build/STATE.json`'s `commitMessage` for the task exactly, and counts it once.
 3. `bash scripts/verify-acceptance.sh` should then reach 21/21.
 
 **It is a legitimate outcome of this campaign that Phases 24–27 are not built.**
