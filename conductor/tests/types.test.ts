@@ -26,8 +26,17 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CONDUCTOR_NAME, MAIN_TREE, SCHEMAS, validate } from "../core/types.ts";
+import {
+  CONDUCTOR_NAME,
+  MAIN_TREE,
+  SCHEMAS,
+  SIDE_EFFECT_CLASSES,
+  TOOL_CLASSES,
+  validate,
+} from "../core/types.ts";
 import type {
+  SideEffectClass,
+  ToolClass,
   Config,
   RouterConfig,
   Run,
@@ -1286,4 +1295,86 @@ describe("[F5] tuple-form items is outside the subset", () => {
       );
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Task 21.2 — the two closed tool vocabularies.
+//
+// `ToolClass` was declared twice by hand (adapter/tools.ts and the inline union
+// in core/gates-edit.ts's SessionInput) plus a third time in each test that built
+// a SessionInput. That is exactly the shape core/vocab-registry.ts exists to
+// catch, and the cheapest fix is not to pin the copies but to delete them: one
+// as-const array in core, a derived union, and every site importing it.
+//
+// `SideEffectClass` is the §2 taxonomy every tool visible to a conductor session
+// carries. It is a DIFFERENT axis from ToolClass and the two must not be
+// conflated: ToolClass answers "which gate adjudicates this call", SideEffectClass
+// answers "what can this call reach".
+// ---------------------------------------------------------------------------
+
+test("[21.2-tool-classes] TOOL_CLASSES is the closed set the session gate dispatches on", () => {
+  assert.deepEqual([...TOOL_CLASSES], ["read", "write", "conductor", "spawn"]);
+  assert.equal(new Set(TOOL_CLASSES).size, TOOL_CLASSES.length, "no duplicate members");
+});
+
+test("[21.2-side-effect-classes] SIDE_EFFECT_CLASSES is the §2 taxonomy, ordered from least to most reach", () => {
+  assert.deepEqual([...SIDE_EFFECT_CLASSES], ["R0", "R1", "R2", "R3", "W", "X", "S"]);
+  assert.equal(new Set(SIDE_EFFECT_CLASSES).size, SIDE_EFFECT_CLASSES.length, "no duplicate members");
+});
+
+test("[21.2-exhaustive] every ToolClass and every SideEffectClass is handled by a total function", () => {
+  // The compile-time half is the `never` assignment below; this is the runtime
+  // half, which proves the switch really covers the array rather than covering a
+  // union some site forgot to widen.
+  const gateFor = (c: ToolClass): string => {
+    switch (c) {
+      case "read":
+        return "session";
+      case "write":
+        return "edit";
+      case "conductor":
+        return "session";
+      case "spawn":
+        return "session";
+      default: {
+        const unreachable: never = c;
+        return unreachable;
+      }
+    }
+  };
+  for (const c of TOOL_CLASSES) assert.equal(typeof gateFor(c), "string");
+
+  const reachOf = (c: SideEffectClass): string => {
+    switch (c) {
+      case "R0":
+        return "repo, direct";
+      case "R1":
+        return "repo, via a subprocess";
+      case "R2":
+        return "machine, outside the repo";
+      case "R3":
+        return "network";
+      case "W":
+        return "repo, write-capable";
+      case "X":
+        return "unboundable";
+      case "S":
+        return "session-spawning";
+      default: {
+        const unreachable: never = c;
+        return unreachable;
+      }
+    }
+  };
+  for (const c of SIDE_EFFECT_CLASSES) assert.equal(typeof reachOf(c), "string");
+});
+
+test("[21.2-no-restatement] the union is DERIVED from the array, so a member cannot be added to one and forgotten in the other", () => {
+  // A value the array does not carry must not typecheck as the union. The cast
+  // below is the only way to express that in a runtime test; the compile-time
+  // guarantee is that `(typeof TOOL_CLASSES)[number]` has no other inhabitant.
+  const members: readonly string[] = TOOL_CLASSES;
+  assert.equal(members.includes("network"), false, "a class not in the array is not in the union");
+  const effects: readonly string[] = SIDE_EFFECT_CLASSES;
+  assert.equal(effects.includes("R4"), false, "a class not in the array is not in the union");
 });

@@ -42,7 +42,7 @@
 //     registered: boolean;
 //     role: string | null;                 // null when unregistered
 //     toolName: string;                     // e.g. "edit", "task", "conductor_publish"
-//     toolClass: "read" | "write" | "conductor" | "spawn";
+//     toolClass: ToolClass (core/types.ts TOOL_CLASSES);
 //   }) -> Decision
 //
 // -------------------------------------------------------------------------
@@ -60,6 +60,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+
+import { TOOL_CLASSES } from "../core/types.ts";
 
 import {
   decideEdit,
@@ -102,7 +104,7 @@ interface SessionInput {
   registered: boolean;
   role: string | null;
   toolName: string;
-  toolClass: "read" | "write" | "conductor" | "spawn";
+  toolClass: (typeof TOOL_CLASSES)[number];
 }
 
 // ---------------------------------------------------------------------------

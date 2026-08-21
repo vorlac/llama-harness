@@ -88,6 +88,7 @@ import type { CreatedFile } from "../core/review-witness.ts";
 import { findingSubjects, floorExclusions, receiptFloor } from "../core/receipt-floor.ts";
 import { concernNamesFinding } from "../core/reply-protocol.ts";
 import { MAIN_TREE, NO_TREE, SCHEMAS, treePath, treeSlug, validate } from "../core/types.ts";
+import type { ToolClass } from "../core/types.ts";
 import type {
   AnomalyRecord,
   AnswerChannel,
@@ -189,8 +190,6 @@ export const CONDUCTOR_TOOL_NAMES: readonly string[] = [
 // to "write" here — it is caught downstream by the git gate, which runs for
 // registered and unregistered sessions alike.
 // ---------------------------------------------------------------------------
-
-export type ToolClass = "read" | "write" | "conductor" | "spawn";
 
 // opencode's built-in sub-agent spawn tool (Task 0.2 discovery iii: its id is
 // `task`). Spawning is denied in EVERY session — the load-bearing registry rule.

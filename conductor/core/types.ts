@@ -31,6 +31,36 @@ export const CONDUCTOR_NAME = "conductor";
 export const LOG_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
+// The class the §3.5 session-registry gate dispatches on. It answers ONE
+// question — which gate adjudicates this call — and nothing about what the call
+// can reach; SIDE_EFFECT_CLASSES below is that other axis.
+//
+// It lives in core, as an array with a derived union, so that the gate layer and
+// the adapter layer share one declaration. A hand-written copy in each place is
+// the drift shape core/vocab-registry.ts exists to catch: a member added to one
+// spelling and missed in another is a gate that silently stops dispatching on
+// it. Deriving the union removes the copies rather than pinning them.
+export const TOOL_CLASSES = ["read", "write", "conductor", "spawn"] as const;
+export type ToolClass = (typeof TOOL_CLASSES)[number];
+
+// The §2 side-effect taxonomy: what a call can REACH, independent of which gate
+// adjudicates it. Ordered from least to most reach, which is the order the
+// posture table reads in.
+//
+//   R0  pure read, repo-local, direct              — read, grep, glob
+//   R1  derived read, repo-local                   — a subprocess analysing the tree
+//   R2  read, machine-local, outside the repo      — man pages, vendored docs
+//   R3  network read                               — webfetch, curl
+//   W   write-capable                              — edit, write, write-shaped bash
+//   X   structurally unboundable                   — patch, apply_patch
+//   S   session-spawning                           — task
+//
+// `bash` carries no single class: it is adjudicated per command by the
+// extractors, because `ls` is R0 and `curl` is R3 and the name cannot tell them
+// apart. A tool whose class cannot be decided is refused rather than defaulted.
+export const SIDE_EFFECT_CLASSES = ["R0", "R1", "R2", "R3", "W", "X", "S"] as const;
+export type SideEffectClass = (typeof SIDE_EFFECT_CLASSES)[number];
+
 // §3.1, plan lines 1032-1043.
 const RUN_STATES = [
   "INTAKE",

@@ -15,7 +15,7 @@
 // phaseGate1 binding).
 
 import { shellTokens, splitOnOperators, globMatch } from "./shell-parse.ts";
-import type { TreePath } from "./types.ts";
+import type { TreePath, ToolClass } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Return contract (signature pinned by conductor/tests/gates-edit.test.ts). A
@@ -45,7 +45,7 @@ export interface SessionInput {
   registered: boolean;
   role: string | null;
   toolName: string;
-  toolClass: "read" | "write" | "conductor" | "spawn";
+  toolClass: ToolClass;
 }
 
 export function decideSession(input: SessionInput): Decision {

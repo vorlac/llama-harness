@@ -118,4 +118,26 @@ export const VOCABULARIES: readonly Vocabulary[] = [
       { lang: "ts", kind: "record-keys", file: "conductor/adapter/fanout.ts", symbol: "ROLE_AGENT" },
     ],
   },
+  {
+    // §3.5 tool classes — the axis the session-registry gate dispatches on.
+    // There is ONE site because Task 21.2 deleted the copies rather than pinning
+    // them: adapter/tools.ts and core/gates-edit.ts both import the derived
+    // union. The entry still earns its place — the pin here is the plan-frozen
+    // spelling, so widening the class set is a deliberate two-file act rather
+    // than an edit to one array that every gate silently inherits.
+    name: "toolClasses",
+    members: ["read", "write", "conductor", "spawn"],
+    sites: [
+      { lang: "ts", kind: "ts-value", file: "conductor/core/types.ts", symbol: "TOOL_CLASSES" },
+    ],
+  },
+  {
+    // §2 side-effect classes — what a call can REACH, the axis the built-in
+    // classification table and the network deny point are written against.
+    name: "sideEffectClasses",
+    members: ["R0", "R1", "R2", "R3", "W", "X", "S"],
+    sites: [
+      { lang: "ts", kind: "ts-value", file: "conductor/core/types.ts", symbol: "SIDE_EFFECT_CLASSES" },
+    ],
+  },
 ] as const;

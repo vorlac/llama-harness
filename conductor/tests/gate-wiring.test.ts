@@ -40,7 +40,7 @@
 //   //     name; a `bash` tool classifies by its command (write-shaped ⇒ "write",
 //   //     else "read"; a git WRITE is caught downstream by the git gate, which runs
 //   //     for registered and unregistered sessions alike).
-//   export type ToolClass = "read" | "write" | "conductor" | "spawn";
+//   ToolClass is core/types.ts's TOOL_CLASSES-derived union.
 //   export function classifyTool(toolName: string, command?: string): ToolClass;
 //
 //   // (3) The gate-hookup function the plugin's tool.execute.before body calls.
@@ -115,7 +115,7 @@ import {
   CONDUCTOR_TOOL_NAMES,
 } from "../adapter/tools.ts";
 import { ConductorPlugin } from "../plugin/index.ts";
-import { treePath } from "../core/types.ts";
+import { treePath, TOOL_CLASSES } from "../core/types.ts";
 import type { TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ import type { TreePath } from "../core/types.ts";
 // ---------------------------------------------------------------------------
 
 type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
-type ToolClass = "read" | "write" | "conductor" | "spawn";
+type ToolClass = (typeof TOOL_CLASSES)[number];
 
 interface Corr {
   runId: string;

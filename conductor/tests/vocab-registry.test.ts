@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { STOP_KINDS } from "../core/stops.ts";
 import { RUN_STATES } from "../core/fsm-run.ts";
 import { ITEM_STATES } from "../core/fsm-item.ts";
-import { SCHEMAS } from "../core/types.ts";
+import { SCHEMAS, SIDE_EFFECT_CLASSES, TOOL_CLASSES } from "../core/types.ts";
 import { VOCABULARIES } from "../core/vocab-registry.ts";
 import type { VocabSite } from "../core/vocab-registry.ts";
 
@@ -43,6 +43,8 @@ const TS_VALUES: Record<string, readonly string[]> = {
   "conductor/core/stops.ts#STOP_KINDS": STOP_KINDS,
   "conductor/core/fsm-run.ts#RUN_STATES": RUN_STATES,
   "conductor/core/fsm-item.ts#ITEM_STATES": ITEM_STATES,
+  "conductor/core/types.ts#TOOL_CLASSES": TOOL_CLASSES,
+  "conductor/core/types.ts#SIDE_EFFECT_CLASSES": SIDE_EFFECT_CLASSES,
 };
 
 function readSource(file: string): string {
