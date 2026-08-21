@@ -67,6 +67,8 @@ import {
   undeclaredToolWhy,
   unknownOverrideGateWhy,
   verdictAllowed,
+  readerMayOverrideGate,
+  readerEditOverrideWhy,
 } from "../core/tool-legality.ts";
 import type { CallerIdentity } from "../core/tool-legality.ts";
 import { packSection } from "../core/mechanics.ts";
@@ -9462,6 +9464,10 @@ export interface OverrideInput {
   journal: HandlerJournal;
   now?: () => number;
   sessionID: string;
+  // The §3.5 registry role of the calling session. The composition root reads it
+  // from the registry entry; the handler never asks the model for it, on the same
+  // rule that makes itemId a registry fact rather than an argument.
+  sessionRole: string;
   itemId: string;
   gate: string;
   reason: string;
@@ -9512,6 +9518,14 @@ export async function handleOverride(input: OverrideInput): Promise<OverrideResu
   // is the DOCUMENTED use.
   if (!isOverrideGate(input.gate)) {
     throw new Error(unknownOverrideGateWhy(OVERRIDE_TOOL, input.gate));
+  }
+
+  // (0b) Task 21.6, and free for exactly ISSUE-007's reason: a reader role's edit
+  // grant can never convert, because the opencode agent it is dispatched under
+  // denies edit before this gate is reached. Refusing it here costs nothing —
+  // no meter, no taint, no anomaly, no stop.
+  if (!readerMayOverrideGate(input.sessionRole, input.gate)) {
+    throw new Error(readerEditOverrideWhy(OVERRIDE_TOOL, input.sessionRole));
   }
 
   // (1) legality: the item must exist...

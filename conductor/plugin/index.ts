@@ -1395,6 +1395,9 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       return handleOverride({
         ...deps,
         itemId,
+        // §3.5's registry role, read by the root exactly as itemId is: the model
+        // is never asked who it is (Task 21.6).
+        sessionRole: entry?.role ?? "",
         gate: stringArg("conductor_override", args, "gate"),
         reason: stringArg("conductor_override", args, "reason"),
         grantedAction: stringArg("conductor_override", args, "grantedAction"),

@@ -107,7 +107,7 @@ export interface EditInput {
 }
 
 // Roles that may never write: they read the tree and report (§3.5:1394).
-const READER_ROLES: readonly string[] = ["reviewer", "skeptic", "planner", "mechanical"];
+export const READER_ROLES: readonly string[] = ["reviewer", "skeptic", "planner", "mechanical"];
 
 function stripTrailingSlashes(s: string): string {
   let end = s.length;

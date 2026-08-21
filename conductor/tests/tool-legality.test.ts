@@ -56,6 +56,7 @@ import {
   callerKindOf,
 } from "../core/tool-legality.ts";
 import { advanceRun } from "../core/fsm-run.ts";
+import { READER_ROLES } from "../core/gates-edit.ts";
 
 // ---- committed machinery these rows compose over --------------------------
 import { openWorkspace } from "../adapter/state.ts";
@@ -727,6 +728,7 @@ test("[gap-006-unknown-override-gate-refused-with-budget-intact] the §3.6 overr
     journal: { log: () => undefined },
     now: () => 1_800_000_000_000,
     sessionID: "ses_impl_gap006",
+    sessionRole: "implementer",
     itemId: "I1",
     reason: "the gate is wrong about this one",
     grantedAction: "write src/beta.ts once",
@@ -866,4 +868,136 @@ test("[gap-006-choke-point-is-wired] the composition root routes EVERY conductor
   assert.equal(callerKindOf("orchestrator"), "orchestrator", "the orchestrator entry is the orchestrator");
   assert.equal(callerKindOf("implementer"), "sub-session", "every dispatched role is a sub-session");
   assert.equal(callerKindOf(undefined), "orchestrator", "an absent entry is the orchestrator's own call (the registry gate already refuses an unregistered conductor call)");
+});
+
+// ===========================================================================
+// Task 21.6 — closing the override chain.
+//
+// I1 says reviewers and planners write nothing. That is not absolute at HEAD:
+// conductor_override carries `callers: EITHER`, handleOverride checks gate-name
+// validity, item existence and budget with NO role predicate, and
+// consumeOverrideGrant keys on {sessionID, gate, itemId} with no role predicate
+// either. So a reviewer could mint an edit grant and spend it.
+//
+// After Task 21.1 a dispatched reviewer names conductor-reviewer on its prompt,
+// and that agent's ruleset carries `edit * -> deny` at the opencode layer. The
+// grant therefore cannot convert into anything: opencode refuses the edit before
+// conductor's gate is consulted. Spending budget and recording a permanent taint
+// for a bypass that provably cannot happen is exactly ISSUE-007's shape, and the
+// answer is the same one — refuse for free.
+// ===========================================================================
+
+test("[21.6-reader-edit-override-refused-free] a READER role's edit override is refused with NOTHING spent", async () => {
+  const root = gitRoot("conductor-216-override-");
+  const config = makeConfig();
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  const runDir = runDirOf(root, runId);
+  seedQueue(store, runId, "EXECUTING", { I1: "PENDING" });
+
+  const base: Omit<OverrideInput, "sessionRole"> = {
+    store,
+    runId,
+    config,
+    journal: { log: () => undefined },
+    now: () => 1_800_000_000_000,
+    sessionID: "ses_reviewer_216",
+    itemId: "I1",
+    gate: "edit",
+    reason: "the scope is wrong about this one",
+    grantedAction: "write src/beta.ts once",
+    overrideGrants: new Map(),
+    stateHome: realpathSync(scratchDir("conductor-216-statehome-")),
+    workspaceKey: "wkey-216",
+    metrics: async () => null,
+  };
+
+  for (const role of READER_ROLES) {
+    const refused = await attempt(async () => handleOverride({ ...base, sessionRole: role }));
+    assert.equal(
+      refused.threw,
+      true,
+      `a ${role} must not mint an edit grant: the opencode layer denies that edit regardless, so ` +
+        `the grant can never convert. It returned: ${JSON.stringify(refused.value)}`,
+    );
+    const message = messageOf(refused.error);
+    assert.match(message, /conductor_override/, `the refusal names the tool: ${message}`);
+    assert.match(message, new RegExp(role), `and the role it applies to: ${message}`);
+
+    assert.equal(store.loadItem(runId, "I1").attempts.overridesUsed, 0, `item meter untouched for ${role}`);
+    assert.equal(store.loadRun(runId).counters.overridesUsed, 0, `run meter untouched for ${role}`);
+    assert.deepEqual(store.loadItem(runId, "I1").taint, [], `no taint entry for ${role}`);
+    assert.equal(store.loadRun(runId).stop, null, `no stop recorded for ${role}`);
+    assert.equal(
+      existsSync(path.join(runDir, "anomalies.jsonl")),
+      false,
+      `and no §2.8 anomaly for ${role} — a refused override is not an override that happened`,
+    );
+  }
+});
+
+test("[21.6-reader-other-gates-unaffected] a READER role may still override the gates its edit-deny does not cover", async () => {
+  const root = gitRoot("conductor-216-other-");
+  const config = makeConfig();
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  seedQueue(store, runId, "EXECUTING", { I1: "PENDING" });
+
+  // The rule is narrow on purpose: it closes the one chain whose end is provably
+  // blocked. A `session` or `git` override is not blocked at the opencode layer,
+  // so refusing it here would be inventing a policy rather than declining a
+  // pointless spend.
+  const granted = await attempt(async () =>
+    handleOverride({
+      store,
+      runId,
+      config,
+      journal: { log: () => undefined },
+      now: () => 1_800_000_000_000,
+      sessionID: "ses_reviewer_216b",
+      sessionRole: "reviewer",
+      itemId: "I1",
+      gate: "git",
+      reason: "the git gate is wrong about this one",
+      grantedAction: "run git status once",
+      overrideGrants: new Map(),
+      stateHome: realpathSync(scratchDir("conductor-216b-statehome-")),
+      workspaceKey: "wkey-216b",
+      metrics: async () => null,
+    }),
+  );
+  assert.equal(granted.threw, false, `a reviewer's git override must still work: ${messageOf(granted.error)}`);
+  assert.equal(store.loadItem(runId, "I1").attempts.overridesUsed, 1, "and it spends the meter");
+});
+
+test("[21.6-writer-roles-unaffected] an implementer's edit override is untouched by the rule", async () => {
+  const root = gitRoot("conductor-216-writer-");
+  const config = makeConfig();
+  writeRepoConfig(root, config);
+  const store = openTestStore(root, config);
+  const runId = createRunFor(store, SESSION);
+  seedQueue(store, runId, "EXECUTING", { I1: "PENDING" });
+
+  const granted = await attempt(async () =>
+    handleOverride({
+      store,
+      runId,
+      config,
+      journal: { log: () => undefined },
+      now: () => 1_800_000_000_000,
+      sessionID: "ses_impl_216",
+      sessionRole: "implementer",
+      itemId: "I1",
+      gate: "edit",
+      reason: "the scope is wrong about this one",
+      grantedAction: "write src/beta.ts once",
+      overrideGrants: new Map(),
+      stateHome: realpathSync(scratchDir("conductor-216c-statehome-")),
+      workspaceKey: "wkey-216c",
+      metrics: async () => null,
+    }),
+  );
+  assert.equal(granted.threw, false, `the hatch still works for a writing role: ${messageOf(granted.error)}`);
 });

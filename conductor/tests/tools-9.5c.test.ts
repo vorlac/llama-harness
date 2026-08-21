@@ -275,6 +275,7 @@ interface OverrideInput {
   journal: JournalSink;
   now?: () => number;
   sessionID: string;
+  sessionRole: string;
   itemId: string;
   gate: string;
   reason: string;
@@ -1238,6 +1239,7 @@ test("[9.5c-override-records] conductor_override records a §2.8 AnomalyRecord k
     journal: bench.journal.sink,
     now: () => START_MS,
     sessionID: "ses_impl",
+    sessionRole: "implementer",
     itemId: "I1",
     gate: "edit",
     reason: OVERRIDE_MARKER,
@@ -1315,6 +1317,7 @@ test("[9.5c-override-one-shot] the grant is ONE-SHOT: the FIRST gate decision in
       journal: bench.journal.sink,
       now: () => START_MS,
       sessionID: "ses_impl",
+      sessionRole: "implementer",
       itemId: "I1",
       gate: "edit",
       reason: OVERRIDE_MARKER,
@@ -1436,6 +1439,7 @@ test("[9.5c-override-item-budget] exceeding config.workflow.maxOverridesPerItem 
     journal: bench.journal.sink,
     now: () => START_MS,
     sessionID: "ses_impl",
+    sessionRole: "implementer",
     itemId: "I1",
     gate: "edit",
     reason: OVERRIDE_MARKER,
@@ -1514,6 +1518,7 @@ test("[9.5c-override-run-budget] exceeding config.workflow.maxOverridesPerRun do
     journal: bench.journal.sink,
     now: () => START_MS,
     sessionID: "ses_impl",
+    sessionRole: "implementer",
     itemId: "I1",
     gate: "edit",
     reason: OVERRIDE_MARKER,

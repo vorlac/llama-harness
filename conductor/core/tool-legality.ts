@@ -27,6 +27,7 @@
 // is where every stateful legality question in this codebase already lives.
 
 import { isTerminalRunState } from "./fsm-run.ts";
+import { READER_ROLES } from "./gates-edit.ts";
 
 // ---------------------------------------------------------------------------
 // Caller identity (§3.5)
@@ -226,6 +227,39 @@ export const TOOL_LEGALITY: Readonly<Record<string, ToolLegalityRow>> = {
 /** The declared row for a tool, or undefined when the tool declares none. */
 export function legalityRowOf(tool: string): ToolLegalityRow | undefined {
   return TOOL_LEGALITY[tool];
+}
+
+/**
+ * Whether a session in `role` may mint an override for `gate`.
+ *
+ * One rule, and it is narrow on purpose. A dispatched reader names its role agent
+ * on every prompt (Task 21.1), and conductor-reviewer, conductor-skeptic,
+ * conductor-planner and conductor-mechanical each carry `edit: "deny"` in
+ * opencode-fragment.json. opencode refuses that edit before conductor's gate is
+ * consulted, so an edit grant minted by one of those sessions can never convert
+ * into anything. Spending both budget meters and recording a permanent taint for
+ * a bypass that provably cannot happen is ISSUE-007's shape, and this is
+ * ISSUE-007's answer: refuse for free.
+ *
+ * The other gates are NOT covered. A `session` or `git` override from a reader is
+ * not blocked at the opencode layer, so refusing it here would be inventing a
+ * policy rather than declining a pointless spend.
+ */
+export function readerMayOverrideGate(role: string, gate: string): boolean {
+  return !(READER_ROLES.includes(role) && gate === "edit");
+}
+
+/** The refusal for a reader-role edit override, naming why it costs nothing. */
+export function readerEditOverrideWhy(tool: string, role: string): string {
+  return (
+    tool +
+    ': the "edit" gate cannot be overridden from a ' +
+    role +
+    " session. That role is dispatched under an opencode agent whose own permission ruleset denies " +
+    "edit, so the grant would be refused before this gate ever saw it — and a grant that cannot " +
+    "convert is not worth an item taint or a budget meter. Nothing was spent. An edit this item " +
+    "needs belongs to the implementer, through the receive-review loop."
+  );
 }
 
 /** The refusal for a tool that reached the choke point with no declared row. */

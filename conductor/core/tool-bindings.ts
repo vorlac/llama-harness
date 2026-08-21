@@ -231,9 +231,12 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       "runId",
       "config",
       "journal",
-      // The overriding session's identity and its assigned item come from the
-      // root's session registry (§3.5) — context, not model-supplied arguments.
+      // The overriding session's identity, its ROLE and its assigned item all
+      // come from the root's session registry (§3.5) — context, not
+      // model-supplied arguments. The role is what Task 21.6's rule reads, and a
+      // role the model could state would be a role the model could choose.
       "sessionID",
+      "sessionRole",
       "itemId",
       // The §3.6 one-shot grant map is root-owned state, the sibling of the
       // session registry: handleOverride writes into it and gateBeforeToolCall
