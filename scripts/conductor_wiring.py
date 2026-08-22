@@ -233,6 +233,21 @@ def opencode_model_limit(per_slot_ctx: Any) -> Dict[str, int]:
     return {"context": per_slot_ctx, "output": per_slot_ctx // 4}
 
 
+def opencode_usable_window(per_slot_ctx: Any) -> int:
+    """Tokens a session may reach before opencode compacts it.
+
+    The rule above as a number rather than a comment, because the room an arm
+    has to work in is the difference between the served slot and the reserve —
+    not the slot — and an arm carrying a large static prompt spends that
+    difference before it reads the task. A prompt approaching this value does
+    not fail; it compacts, resumes, re-derives the step it was about to take,
+    and compacts again, which reads as a slow arm rather than as a full one.
+    """
+    limit = opencode_model_limit(per_slot_ctx)
+    reserve = min(limit["output"], OPENCODE_OUTPUT_TOKEN_MAX) or OPENCODE_OUTPUT_TOKEN_MAX
+    return limit["context"] - min(OPENCODE_COMPACTION_BUFFER, reserve)
+
+
 def generate_router_config(
     listen_host: str,
     listen_port: int,

@@ -210,8 +210,17 @@ RESULT_KEYS = (
     "subSessions",
     "waves",
     "pluginAbsent",
+    "timedOut",
+    "gauge",
 )
 TOKEN_KEYS = ("prompt", "completion", "total", "partial")
+
+# The hidden suite's verdict on the tree the cell left behind, recorded on its
+# own axis. `outcome` answers "did this arm deliver inside its wall clock";
+# `gauge` answers "was the work correct", and a cell that ran out of clock while
+# holding a correct solution is the case that needs both. Scoring only the cells
+# that finished makes "could not do it" and "would not stop" the same number.
+GAUGE_KEYS = ("ran", "passed", "exitCode")
 
 SWEEP_REQUIRED_KEYS = (
     "rationale",
@@ -1997,7 +2006,15 @@ def run_cell(
     run_outcome = (default_cell_invocation_runner if runner is None else runner)(invocation)
     wall_clock_ms = run_outcome.wall_clock_ms
 
-    if run_outcome.timed_out or run_outcome.spawn_error:
+    # The tree is measured however the cell ended, a timeout included. An arm
+    # that ran out of wall clock can be holding a correct solution, and one that
+    # wrecked the repository cannot; recording only "timeout" for both makes
+    # "could not do it" and "would not stop" the same number. The two questions
+    # stay separate: `score` is delivery inside the wall clock, `gauge` is
+    # correctness of the tree left behind.
+    gauge = {"ran": False, "passed": None, "exitCode": None}
+    if run_outcome.spawn_error:
+        # Nothing ran, so there is no work to measure - only the seed.
         score = score_cell(
             run_outcome.exit_code, run_outcome.timed_out, run_outcome.spawn_error
         )
@@ -2005,10 +2022,24 @@ def run_cell(
         materialize_files(work, task.hidden_files)
         tester = default_test_runner if test_runner is None else test_runner
         test_outcome = tester(list(task.hidden_test_command), work, timeout_sec)
-        wall_clock_ms += test_outcome.wall_clock_ms
-        score = score_cell(
-            test_outcome.exit_code, test_outcome.timed_out, test_outcome.spawn_error
-        )
+        gauge = {
+            "ran": True,
+            "passed": (
+                test_outcome.exit_code == 0
+                and not test_outcome.timed_out
+                and test_outcome.spawn_error is None
+            ),
+            "exitCode": test_outcome.exit_code,
+        }
+        if run_outcome.timed_out:
+            # The wall clock is already spent; the gauge is measurement taken
+            # after the fact and does not belong in the cell's recorded cost.
+            score = score_cell(None, True, None)
+        else:
+            wall_clock_ms += test_outcome.wall_clock_ms
+            score = score_cell(
+                test_outcome.exit_code, test_outcome.timed_out, test_outcome.spawn_error
+            )
 
     window = summarize_ledger_window(ledger, ledger_before)
     metrics = collect_metrics(cell.arm, work)
@@ -2040,6 +2071,8 @@ def run_cell(
         "subSessions": metrics["subSessions"],
         "waves": metrics["waves"],
         "pluginAbsent": metrics["pluginAbsent"],
+        "timedOut": bool(run_outcome.timed_out),
+        "gauge": gauge,
     }
     validate_result(result)
     return result
@@ -2090,6 +2123,20 @@ def validate_result(result: Any) -> None:
         )
     if not isinstance(result["passed"], bool):
         raise BenchError("cell result field 'passed' must be a boolean")
+    if not isinstance(result["timedOut"], bool):
+        raise BenchError("cell result field 'timedOut' must be a boolean")
+    gauge = result["gauge"]
+    if not isinstance(gauge, dict):
+        raise BenchError("cell result field 'gauge' must be an object")
+    for key in GAUGE_KEYS:
+        if key not in gauge:
+            raise BenchError("cell result is missing the field 'gauge.%s'" % key)
+    if not isinstance(gauge["ran"], bool):
+        raise BenchError("cell result field 'gauge.ran' must be a boolean")
+    if gauge["ran"] and not isinstance(gauge["passed"], bool):
+        raise BenchError("a gauge that ran must record 'gauge.passed' as a boolean")
+    if not gauge["ran"] and gauge["passed"] is not None:
+        raise BenchError("a gauge that did not run must record 'gauge.passed' as null")
 
 
 def write_result(results_dir: Any, result: Dict[str, Any]) -> Path:
@@ -2914,7 +2961,7 @@ def render_report(
     lines.extend(_cost_lines(aggs, strata, task_ids, arms))
     lines.extend(_tier_lines(aggs, strata, arms))
     lines.extend(_process_lines(aggs, strata, arms))
-    lines.extend(_timeout_lines(aggs, strata, arms))
+    lines.extend(_timeout_lines(aggs, strata, arms, results))
     lines.extend(_trajectory_lines(results, tasks, arms))
     lines.extend(_rubric_lines(rubrics, results, arms))
     lines.extend(_router_error_lines(aggs, strata, arms))
@@ -3297,6 +3344,7 @@ def _timeout_lines(
     aggs: Dict[Tuple[str, str], Dict[str, Any]],
     strata: Sequence[Tuple[str, str]],
     arms: Sequence[str],
+    results: Sequence[Dict[str, Any]] = (),
 ) -> List[str]:
     lines = [SECTION_TIMEOUTS, ""]
     lines.append(TIMEOUT_NOTE)
@@ -3307,8 +3355,18 @@ def _timeout_lines(
             for cell_id in aggs[(model, capability)]["armTotals"][arm]["timeoutCells"]:
                 cells.append((arm, cell_id))
     lines.append("%d cell(s) ran out of their tier's wall clock." % len(cells))
+    # The tree each of them left is still measured, so the two ways a cell can
+    # run long stay apart: one was finished and slow, the other was neither.
+    gauges = {row["cellId"]: row.get("gauge") or {} for row in results}
     for arm, cell_id in cells:
-        lines.append("- %s" % cell_id)
+        gauge = gauges.get(cell_id) or {}
+        if not gauge.get("ran"):
+            verdict = "tree not measured"
+        elif gauge.get("passed"):
+            verdict = "tree PASSES the hidden suite - overran with a correct solution in hand"
+        else:
+            verdict = "tree fails the hidden suite"
+        lines.append("- %s (%s)" % (cell_id, verdict))
     lines.append("")
     return lines
 

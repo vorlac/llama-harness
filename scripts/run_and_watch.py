@@ -179,6 +179,32 @@ AUTO_SERVE = True
 # cold page cache is minutes, not seconds, and the wait is mostly disk.
 SERVE_READY_TIMEOUT_SECONDS = 600
 
+# The served window, as slots x tokens-per-slot.
+#
+# THESE TWO NUMBERS DECIDE HOW MUCH ROOM AN ARM HAS TO THINK IN, and they are
+# not interchangeable with each other. llama-server divides --ctx-size among its
+# slots, so the total KV cache is SERVE_SLOTS x SERVE_PER_SLOT_CONTEXT and the
+# window any one sub-session actually gets is SERVE_PER_SLOT_CONTEXT alone.
+#
+# The per-slot window is not free space. opencode compacts a session once it
+# reaches `context - output reserve`, and the arms do not start from the same
+# place: the doctrine arm's static prompt is ~13.8k tokens on EVERY request, and
+# the conductor's tool schemas are on the same order. At 32,768 per slot that
+# left the doctrine arm about 10k of working room, and it spent a whole T0 cell
+# compacting, re-deriving the same next step, and compacting again — three times
+# — while holding a correct answer. That is context pressure being measured
+# instead of doctrine.
+#
+# Slots are what the conductor's fan-out consumes: it dispatches its reviewers
+# concurrently, so a slot count below that fan-out serializes them and shows up
+# as wall clock rather than as a refusal. Three is the observed reviewer wave.
+#
+# The product is the memory. 3 x 65536 is the same 196,608 total as the 6 x
+# 32768 it replaces, so the window doubles at no cost in KV cache. Raise the
+# product only if the machine has the memory to hold it.
+SERVE_SLOTS = 3
+SERVE_PER_SLOT_CONTEXT = 65536
+
 # ── WHAT YOU SEE ─────────────────────────────────────────────────────────────
 
 # Seconds between dashboard repaints. The bench feed is relayed as it arrives
@@ -381,10 +407,16 @@ def start_services(served: str, ends: Dict[str, int]) -> Optional[dict]:
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     handle = open(log_path, "w")
 
-    print("  starting      %s (log: %s)" % (served, log_path))
+    argv = [PYTHON, os.path.join(REPO_ROOT, "scripts", "serve.py"), served, "--no-shell"]
+    argv += ["--max-readers", str(SERVE_SLOTS), "--ctx", str(SERVE_PER_SLOT_CONTEXT)]
+
+    print(
+        "  starting      %s (%d slots x %d tokens = %d total; log: %s)"
+        % (served, SERVE_SLOTS, SERVE_PER_SLOT_CONTEXT,
+           SERVE_SLOTS * SERVE_PER_SLOT_CONTEXT, log_path)
+    )
     server = subprocess.Popen(
-        [PYTHON, os.path.join(REPO_ROOT, "scripts", "serve.py"), served, "--no-shell"],
-        cwd=REPO_ROOT, stdout=handle, stderr=subprocess.STDOUT,
+        argv, cwd=REPO_ROOT, stdout=handle, stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL, start_new_session=True,
     )
 

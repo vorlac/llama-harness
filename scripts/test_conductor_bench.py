@@ -41,6 +41,26 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import conductor_bench as cb  # noqa: E402
+import conductor_wiring as cw  # noqa: E402
+
+
+def served_constant(name: str) -> int:
+    """A launch constant read out of run_and_watch.py without importing it.
+
+    The window an arm is measured in is decided by that file, so an invariant
+    about the window has to be pinned against that file. Asserting against a
+    constant defined here instead would let the two drift apart silently, which
+    is the exact failure the invariant exists to prevent. Read rather than
+    imported because importing a launcher to look at one integer runs its
+    module body.
+    """
+    source = (Path(__file__).resolve().parent / "run_and_watch.py").read_text()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == name for target in node.targets
+        ):
+            return int(ast.literal_eval(node.value))
+    raise AssertionError("run_and_watch.py defines no %s" % name)
 
 
 # Shell-free argv that always fail / always succeed. Cheaper and more portable
@@ -457,6 +477,8 @@ def make_result(
         "subSessions": 4 if conductor else None,
         "waves": 2 if conductor else None,
         "pluginAbsent": (False if plugin_absent is None else plugin_absent) if conductor else None,
+        "timedOut": outcome == "timeout",
+        "gauge": {"ran": True, "passed": passed, "exitCode": exit_code},
     }
     result.update(over)
     return result
@@ -2481,6 +2503,189 @@ class PlanAndCellTests(unittest.TestCase):
         self.assertIs(result["passed"], False)
         self.assertGreaterEqual(result["wallClockMs"], 2000)
 
+    def test_timeout_still_measures_the_tree(self):
+        """[D01-score-on-timeout] a cell that ran out of wall clock is still
+        scored against the hidden suite, so an arm that overran holding a
+        correct solution is distinguishable from one that wrecked the tree.
+
+        The delivery verdict is unchanged - a timeout is still a timeout and
+        still not a pass. What the timeout no longer does is destroy the
+        evidence.
+        """
+        task = self.tasks[0]
+        hung = cb.CommandOutcome(
+            exit_code=None, timed_out=True, spawn_error=None, wall_clock_ms=2100
+        )
+
+        seen: List[Sequence[str]] = []
+
+        def gauge_runner(exit_code: int):
+            def runner(argv, cwd, timeout_sec):
+                seen.append(list(argv))
+                # The hidden files must be on disk before the gauge is invoked;
+                # a gauge run against a tree that never received them measures
+                # nothing.
+                for relpath in task.hidden_files:
+                    if not (Path(cwd) / relpath).is_file():
+                        raise AssertionError("hidden file %r was never materialized" % relpath)
+                return cb.CommandOutcome(exit_code, False, None, 7)
+
+            return runner
+
+        for exit_code, expected in ((0, True), (1, False)):
+            cell = make_cell("doctrine", task.id, 1)
+            result = cb.run_cell(
+                cell,
+                task,
+                cell_dir=cb.cell_dir_for(self.tmp / ("timeout-%d" % exit_code), cell),
+                model=SENTINEL_MODEL,
+                router_config=ROUTER_CONFIG,
+                base_config=BASE_OPENCODE_CONFIG,
+                per_slot_ctx=SERVED_CTX,
+                timeout_sec=2,
+                runner=lambda invocation: hung,
+                test_runner=gauge_runner(exit_code),
+                git_runner=lambda argv, cwd: None,
+            )
+            cb.validate_result(result)
+            self.assertEqual(result["outcome"], "timeout", "delivery verdict is unchanged")
+            self.assertIs(result["passed"], False, "a timeout is still not a pass")
+            self.assertIs(result["timedOut"], True)
+            self.assertIs(result["gauge"]["ran"], True, "the tree must be measured anyway")
+            self.assertIs(result["gauge"]["passed"], expected)
+            self.assertEqual(result["gauge"]["exitCode"], exit_code)
+            self.assertEqual(
+                result["wallClockMs"],
+                2100,
+                "the gauge is measurement after the fact and is not the cell's cost",
+            )
+
+        self.assertEqual(
+            seen,
+            [list(task.hidden_test_command)] * 2,
+            "the gauge must be the task's own hidden command",
+        )
+
+    def test_spawn_error_measures_nothing(self):
+        """[D01-score-on-timeout] a cell whose process never started has no work
+        to measure, and says so rather than reporting a verdict on the seed."""
+        task = self.tasks[0]
+        cell = make_cell("baseline", task.id, 1)
+        result = cb.run_cell(
+            cell,
+            task,
+            cell_dir=cb.cell_dir_for(self.tmp / "spawn", cell),
+            model=SENTINEL_MODEL,
+            router_config=ROUTER_CONFIG,
+            base_config=BASE_OPENCODE_CONFIG,
+            per_slot_ctx=SERVED_CTX,
+            timeout_sec=2,
+            runner=lambda invocation: cb.CommandOutcome(None, False, "no such binary", 3),
+            test_runner=lambda argv, cwd, timeout_sec: self.fail(
+                "the gauge must not run when the cell never started"
+            ),
+            git_runner=lambda argv, cwd: None,
+        )
+        cb.validate_result(result)
+        self.assertEqual(result["outcome"], "harness-error")
+        self.assertIs(result["timedOut"], False)
+        self.assertIs(result["gauge"]["ran"], False)
+        self.assertIsNone(result["gauge"]["passed"])
+
+    def test_report_separates_overran_from_wrong(self):
+        """[D01-score-on-timeout] the timeouts section says which of the
+        timed-out cells was holding a correct tree, so cost and correctness are
+        not read off one number."""
+        results = fixture_results(self.tasks, ("conductor",))
+        by_id = {row["cellId"]: row for row in results}
+        correct = make_cell("conductor", TASK_IDS[1], 3).cell_id
+        wrecked = make_cell("conductor", TASK_IDS[1], 2).cell_id
+        for cell_id, gauge_passed in ((correct, True), (wrecked, False)):
+            by_id[cell_id].update(
+                {
+                    "outcome": "timeout",
+                    "passed": False,
+                    "exitCode": None,
+                    "timedOut": True,
+                    "gauge": {
+                        "ran": True,
+                        "passed": gauge_passed,
+                        "exitCode": 0 if gauge_passed else 1,
+                    },
+                }
+            )
+
+        report = cb.render_report(
+            results, self.tasks, models=[SENTINEL_MODEL], arms=("conductor",), reps=3
+        )
+        section = section_of(report, cb.SECTION_TIMEOUTS)
+        for line in section.splitlines():
+            if line.startswith("- %s" % correct):
+                self.assertIn("PASSES", line, "an overrun holding a correct tree must say so")
+                break
+        else:
+            self.fail("the timed-out cell holding a correct tree is not in the section")
+        for line in section.splitlines():
+            if line.startswith("- %s" % wrecked):
+                self.assertIn("fails", line)
+                break
+        else:
+            self.fail("the timed-out cell holding a failing tree is not in the section")
+
+    def test_doctrine_prompt_leaves_room_to_work(self):
+        """[D02-equal-context] the doctrine arm's static prompt is a bounded
+        fraction of the window it is served into, so what the arm is measured on
+        is its doctrine and not its context pressure.
+
+        This is the invariant behind a real loss. Served 32,768 per slot, the
+        packs took ~13.8k of a 24,576-token usable window and left about 10k to
+        work in; the arm compacted three times on a four-line function, resumed
+        onto the same instruction twice, and ran out its wall clock holding a
+        correct solution. The failure mode is silent - a full window looks
+        exactly like a slow arm - so the ceiling is pinned here rather than
+        discovered again.
+        """
+        prompt = cb.build_doctrine_prompt(cb.DOCTRINE_DIR)
+        # Four characters to the token: coarse, and deliberately so. This is a
+        # headroom check, and a tokenizer dependency would make it a test about
+        # the tokenizer.
+        prompt_tokens = len(prompt) // 4
+        usable = cw.opencode_usable_window(served_constant("SERVE_PER_SLOT_CONTEXT"))
+        share = prompt_tokens / float(usable)
+
+        self.assertLess(
+            share,
+            0.34,
+            "the doctrine packs are %d tokens of a %d-token usable window (%.0f%%); "
+            "either the window is too small or the packs have outgrown it"
+            % (prompt_tokens, usable, share * 100),
+        )
+        self.assertGreater(
+            usable - prompt_tokens,
+            2 * prompt_tokens,
+            "an arm needs more room to work in than its own prompt occupies",
+        )
+
+    def test_usable_window_follows_the_served_slot(self):
+        """[D02-equal-context] the window opencode compacts at is derived from
+        the slot llama-server actually serves, so the two cannot drift."""
+        # The observed pairing that lost a cell, and the one that replaces it.
+        self.assertEqual(cw.opencode_usable_window(32768), 24576)
+        self.assertEqual(cw.opencode_usable_window(65536), 49152)
+        self.assertEqual(
+            cw.opencode_usable_window(served_constant("SERVE_PER_SLOT_CONTEXT")),
+            49152,
+            "the launcher serves a slot whose usable window is not what this pins",
+        )
+        for per_slot in (32768, 65536, 98304, 131072):
+            limit = cw.opencode_model_limit(per_slot)
+            self.assertEqual(limit["context"], per_slot, "opencode is told the served slot")
+            self.assertLess(
+                cw.opencode_usable_window(per_slot),
+                per_slot,
+                "the output reserve is not usable window",
+            )
+
     def test_hidden_never_visible(self):
         """[14.1-hidden-never-visible] the hidden tests never reach the model:
         seed and hidden paths are disjoint, no arm's prompt/argv/env/config
@@ -3276,9 +3481,15 @@ class ResultTests(unittest.TestCase):
             "subSessions",
             "waves",
             "pluginAbsent",
+            # Delivery and correctness are two questions, so they are two
+            # fields: `timedOut`/`outcome` say whether the arm finished inside
+            # its wall clock, `gauge` says whether the tree it left is right.
+            "timedOut",
+            "gauge",
         }
         self.assertEqual(set(cb.RESULT_KEYS), expected_keys)
         self.assertEqual(set(cb.TOKEN_KEYS), {"prompt", "completion", "total", "partial"})
+        self.assertEqual(set(cb.GAUGE_KEYS), {"ran", "passed", "exitCode"})
         self.assertEqual(set(cb.OUTCOMES), {"pass", "fail", "timeout", "harness-error"})
         self.assertEqual(
             set(cb.STOP_KINDS), {"done", "noop", "blocked", "surfaced", "env", "interrupt"}
