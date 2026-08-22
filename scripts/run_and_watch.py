@@ -24,25 +24,42 @@ doctrine load no plugin, so they write no journal and there is nothing to read.
 While those two run you will see the bench feed and nothing else, which is the
 honest picture rather than an empty panel implying something is broken.
 
-READ-ONLY EXCEPT FOR THE RUN ITSELF. This script starts the benchmark; the three
-feeds only open files for reading. Ctrl-C stops the benchmark and prints a final
-scoreboard.
+THE MODEL SERVER
+
+It also brings the model up and takes it down. A run needs llama-server holding
+the weights and llama-router in front of it; with AUTO_SERVE on, both are started
+before the first cell and stopped after the last one, however the run ends —
+finished, failed, or ctrl-C. Switching models is then one edit to MODEL, because
+the old weights are released before the next run loads new ones.
+
+It will not touch a server it did not start. If one is already answering, that
+one is used and left running.
+
+Ctrl-C stops the benchmark, prints a final scoreboard, and releases the weights.
 """
 
 import glob
 import json
 import os
+import pathlib
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.request
 from collections import deque
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
+
+# scripts/ is not a package, and this file lives in it: the server and router
+# helpers below are serve.py's own, reused rather than reimplemented.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import conductor_wiring as cw  # noqa: E402
 
 # ═════════════════════════════════════════════════════════════════════════════
 # CONFIG — everything you might want to change lives here.
@@ -85,8 +102,18 @@ TIERS: List[str] = []
 # against one throwaway git repo, so this number multiplies the whole run.
 REPS = 1
 
-# The model. None means the manifest's own `defaults.model`, which for every
-# set in this repository is llamacpp/qwen3.8-27b. Set a string to override.
+# The model. None means the manifest's own `defaults.model`, which for every set
+# in this repository is llamacpp/qwen3.8-27b. Set a string to run a different
+# one; the provider prefix is optional, so "qwen3.6-27b" and
+# "llamacpp/qwen3.6-27b" both work.
+#
+# Whatever you name has to be on disk under .data/models. Today that is:
+#   qwen3.8-27b   qwen3.6-27b   qwen3.6-35b-a3b
+#   qwen3-coder-30b   qwen3-coder-next   ornith-9b   embeddinggemma-300m
+#
+# With AUTO_SERVE on, changing this line is the whole of switching models: the
+# old server is stopped when the run ends and the new one is started for the
+# next, so comparing two models is two runs and one edit.
 MODEL: Optional[str] = None
 
 # The capability dimension. None means "none", the only one wired today.
@@ -129,6 +156,28 @@ RESULTS_DIR: Optional[str] = None
 # Keep it OUT of this repository: a work tree inside the repo would put a git
 # checkout inside a git checkout.
 WORK_ROOT: Optional[str] = None
+
+# ── THE MODEL SERVER ─────────────────────────────────────────────────────────
+
+# Start the model server for the run, and stop it again when the run ends.
+#
+# A run needs two processes up: llama-server holding the weights, and
+# llama-router in front of it, which is the address every arm's requests go
+# through so token accounting is identical across arms. With this on, both are
+# started before the first cell and torn down after the last one.
+#
+# IT WILL NOT TOUCH A SERVER IT DID NOT START. If something is already answering
+# on the upstream port, that server is used as it stands and left running when
+# the run ends — a session you started by hand for something else does not get
+# reaped because a benchmark happened to finish.
+#
+# Turn this off to manage the server yourself, in which case the preflight still
+# checks it is up and refuses to start a run that cannot reach it.
+AUTO_SERVE = True
+
+# How long to wait for the weights to load before giving up. A 27B model off a
+# cold page cache is minutes, not seconds, and the wait is mostly disk.
+SERVE_READY_TIMEOUT_SECONDS = 600
 
 # ── WHAT YOU SEE ─────────────────────────────────────────────────────────────
 
@@ -272,67 +321,195 @@ def tier_budget_hours(cells: Sequence[str]) -> float:
 # ── the three feeds ──────────────────────────────────────────────────────────
 
 
-def preflight() -> bool:
-    """Is the model actually being served? Answer in one line, not a traceback.
-
-    The driver probes llama-server's /props through the upstream address in the
-    router config, and a refused connection there surfaces as forty lines of
-    urllib stack before the one sentence that matters. Ask the same question
-    first, and if the answer is no, say what to start.
-    """
-    config_path = os.path.join(REPO_ROOT, ".data", "configs", "conductor-router.json")
-    try:
-        config = json.load(open(config_path))
-    except (OSError, ValueError) as exc:
-        print("  router config unreadable at %s: %s" % (config_path, exc))
-        return False
-
-    upstream = config.get("upstream", {})
-    listen = config.get("listen", {})
-    host = upstream.get("host", "127.0.0.1")
-    port = int(upstream.get("port", 8080))
-
-    # The model name the server answers to is the manifest's model without its
-    # provider prefix, which is what the driver asks /props about.
+def served_model_name() -> str:
+    """The bare model id the server answers to, without the provider prefix."""
     model = MODEL
     if not model:
         try:
             model = json.load(open(os.path.join(REPO_ROOT, MANIFEST)))["defaults"]["model"]
         except (OSError, ValueError, KeyError):
             model = "llamacpp/qwen3.8-27b"
-    served = model.split("/", 1)[-1]
+    return model.split("/", 1)[-1]
 
+
+def router_endpoints() -> Dict[str, int]:
+    """Where llama-server and llama-router live, per the router config."""
+    config_path = os.path.join(REPO_ROOT, cw.ROUTER_CONFIG_RELPATH)
+    config = json.load(open(config_path))
+    up, listen = config.get("upstream", {}), config.get("listen", {})
+    return {
+        "host": up.get("host", "127.0.0.1"),
+        "upstream": int(up.get("port", 8080)),
+        "router": int(listen.get("port", 8088)),
+    }
+
+
+def props_ok(host: str, port: int, served: str, timeout: float = 5.0) -> bool:
+    """The same question the driver asks: is this model actually being served?"""
     url = "http://%s:%d/props?model=%s" % (host, port, served)
     try:
-        import urllib.request
-
-        with urllib.request.urlopen(url, timeout=10) as response:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
             response.read(1)
-        ok_upstream = True
-    except Exception as exc:  # any transport failure means the same thing
-        ok_upstream = False
-        reason = exc
-
-    if ok_upstream:
-        print("  model server  responding at %s" % url)
-    else:
-        print("  model server  NOT REACHABLE at %s" % url)
-        print("                %s" % reason)
-        print("")
-        print("  Nothing is serving %s. Start it in another terminal:" % served)
-        print("")
-        print("      python3 scripts/serve.py %s --no-shell" % served)
-        print("")
-        print("  That loads the model on port %d and brings up llama-router on %d," % (
-            port, int(listen.get("port", 8088))))
-        print("  which is the address every arm's requests go through. Leave it running,")
-        print("  then start this script again.")
+        return True
+    except Exception:
         return False
 
-    if shutil.which("node") is None:
-        print("  node          MISSING — the conductor console (feed 3) will be blank.")
-        print("                The benchmark itself does not need it.")
-    return True
+
+def port_open(host: str, port: int, timeout: float = 2.0) -> bool:
+    sock = socket.socket()
+    sock.settimeout(timeout)
+    try:
+        sock.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def start_services(served: str, ends: Dict[str, int]) -> Optional[dict]:
+    """Bring up llama-server and llama-router, and hand back what to stop later.
+
+    Neither half is reimplemented here. `serve.py --no-shell` os.execv's itself
+    into llama-server, so the pid this returns IS the server and killing it
+    stops the model. That exec happens before serve.py would have started the
+    router, so the router is started through the same supervisor serve.py uses,
+    handed THIS process's pid — the supervisor's whole contract is to outlive a
+    caller that cannot supervise and to exit with the pid it was given.
+    """
+    log_path = os.path.join(REPO_ROOT, ".data", "configs", "server.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    handle = open(log_path, "w")
+
+    print("  starting      %s (log: %s)" % (served, log_path))
+    server = subprocess.Popen(
+        [PYTHON, os.path.join(REPO_ROOT, "scripts", "serve.py"), served, "--no-shell"],
+        cwd=REPO_ROOT, stdout=handle, stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+
+    deadline = time.time() + SERVE_READY_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if server.poll() is not None:
+            print("  the server exited before it was ready. Last lines of %s:" % log_path)
+            try:
+                for line in open(log_path).read().splitlines()[-15:]:
+                    print("      %s" % line)
+            except OSError:
+                pass
+            return None
+        if props_ok(ends["host"], ends["upstream"], served, timeout=3.0):
+            break
+        time.sleep(2.0)
+    else:
+        print("  the model did not come up within %ds; see %s" % (SERVE_READY_TIMEOUT_SECONDS, log_path))
+        _terminate(server)
+        return None
+
+    print("  model server  up on %s:%d" % (ends["host"], ends["upstream"]))
+
+    binary = cw.find_router_binary(pathlib.Path(REPO_ROOT), dict(os.environ))
+    if binary is None:
+        print("  llama-router binary not found. Build it first:")
+        print("      cmake --build .out/build/clang-relwdebinfo --target llama-router")
+        _terminate(server)
+        return None
+
+    supervisor = cw.start_router_supervisor(
+        binary,
+        pathlib.Path(REPO_ROOT) / cw.ROUTER_CONFIG_RELPATH,
+        pathlib.Path(REPO_ROOT) / cw.ROUTER_SCHEMA_RELPATH,
+        os.getpid(),
+        pathlib.Path(REPO_ROOT),
+    )
+
+    deadline = time.time() + 60
+    while time.time() < deadline and not port_open(ends["host"], ends["router"]):
+        time.sleep(1.0)
+    if not port_open(ends["host"], ends["router"]):
+        print("  llama-router did not open %d within 60s" % ends["router"])
+        cw.stop_router_supervisor(supervisor)
+        _terminate(server)
+        return None
+
+    print("  llama-router  up on %s:%d" % (ends["host"], ends["router"]))
+    return {"server": server, "supervisor": supervisor}
+
+
+def _terminate(proc: subprocess.Popen) -> None:
+    """Stop a detached child and the group it leads, without waiting forever."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except OSError:
+        try:
+            proc.terminate()
+        except OSError:
+            return
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def stop_services(handles: Optional[dict]) -> None:
+    """Only ever called with handles this process created."""
+    if not handles:
+        return
+    print(rule("STOPPING THE MODEL SERVER "))
+    if handles.get("supervisor") is not None:
+        try:
+            cw.stop_router_supervisor(handles["supervisor"])
+            print("  llama-router  stopped")
+        except Exception as exc:
+            print("  llama-router  did not stop cleanly: %s" % exc)
+    if handles.get("server") is not None:
+        _terminate(handles["server"])
+        print("  model server  stopped, weights released")
+
+
+def preflight() -> Dict[str, Any]:
+    """Make sure a model is being served, starting one if asked to.
+
+    Returns {"ok": bool, "handles": dict or None}. `handles` is non-empty only
+    when this process started the services, which is the only case in which it
+    is entitled to stop them.
+    """
+    served = served_model_name()
+    try:
+        ends = router_endpoints()
+    except (OSError, ValueError) as exc:
+        print("  router config unreadable: %s" % exc)
+        return {"ok": False, "handles": None}
+
+    if props_ok(ends["host"], ends["upstream"], served):
+        print("  model server  already up on %s:%d serving %s" % (ends["host"], ends["upstream"], served))
+        if port_open(ends["host"], ends["router"]):
+            print("  llama-router  already up on %s:%d" % (ends["host"], ends["router"]))
+            print("  ownership     not ours; both are left running when this finishes")
+            return {"ok": True, "handles": None}
+        print("  llama-router  NOT up on %d, but llama-server is." % ends["router"])
+        print("                Every arm sends its requests through the router, so the run")
+        print("                cannot proceed. Stop the bare server and let this script")
+        print("                start both, or start the router yourself.")
+        return {"ok": False, "handles": None}
+
+    if not AUTO_SERVE:
+        print("  model server  NOT REACHABLE on %s:%d for %s" % (ends["host"], ends["upstream"], served))
+        print("")
+        print("  AUTO_SERVE is off, so start it yourself in another terminal:")
+        print("")
+        print("      python3 scripts/serve.py %s" % served)
+        print("")
+        return {"ok": False, "handles": None}
+
+    handles = start_services(served, ends)
+    if handles is None:
+        return {"ok": False, "handles": None}
+    print("  ownership     ours; both are stopped when this run ends")
+    return {"ok": True, "handles": handles}
 
 
 def read_results(results: str) -> List[dict]:
@@ -492,8 +669,10 @@ def main() -> int:
         return 1
 
     print(rule("PREFLIGHT "))
-    if not preflight():
+    ready = preflight()
+    if not ready["ok"]:
         return 1
+    handles = ready["handles"]
 
     os.makedirs(results, exist_ok=True)
     argv = bench_argv(results, plan_only=False)
@@ -522,6 +701,9 @@ def main() -> int:
             sys.stdout.flush()
     finally:
         pump.join(timeout=5)
+        # Whatever ended the run — the last cell, an error, ctrl-C — the weights
+        # are released here, and only if this process is what loaded them.
+        stop_services(handles)
 
     print(rule("FINAL "))
     print(dashboard(results, len(cells)))
