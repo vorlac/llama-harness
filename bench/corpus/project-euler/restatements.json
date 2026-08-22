@@ -1,7 +1,7 @@
 {
-  "_comment": "The question each generated bench task asks, written here in this repository's own words. scripts/generate_euler_tasks.py reads this file and expected-answers.json and nothing else: no Project Euler statement, image or data file is read at generation time and none is committed here. That is what lets bench/corpus-euler.json be a committed artifact while project-euler/problems/ stays fetched and gitignored in the source corpus.",
+  "_comment": "The question each generated bench task asks, written here in this repository's own words. scripts/generate_euler_tasks.py reads this file and expected-answers.json and nothing else: no Project Euler statement, image or data file is read at generation time and none is committed here. That is what lets bench/corpus-euler.json be a committed artifact: an operator who wants the statements fetches them into a directory of their own, which no mode but --audit-statements reads.",
   "_contract": "Every problem carrying a non-null answer in expected-answers.json must appear here exactly once, either with a 'question' (the generator emits a task) or with an 'omitted' reason (the generator emits none and says why). A problem present in neither is a refusal, so the answer key and this file cannot drift apart in silence.",
-  "_titles": "Titles are the short factual labels Project Euler gives its problems. The source corpus already commits sixty-nine of them in hard-subset.json; a label is not the statement.",
+  "_titles": "Titles are the short factual labels Project Euler gives its problems. hard-subset.json commits sixty-nine of them beside this file; a label is not the statement.",
   "problems": {
     "1": {
       "title": "Multiples of 3 or 5",
@@ -85,7 +85,7 @@
     },
     "8": {
       "title": "Largest Product in a Series",
-      "omitted": "The thousand-digit number this problem operates on is supplied by the statement and is the statement. A restatement that leaves it out gives the solver nothing to compute against, and one that includes it commits Project Euler material to this repository, which the source corpus gitignores for exactly that reason."
+      "omitted": "The thousand-digit number this problem operates on is supplied by the statement and is the statement. A restatement that leaves it out gives the solver nothing to compute against, and one that includes it commits Project Euler material to this repository, which is exactly the redistribution nothing here does."
     },
     "11": {
       "title": "Largest Product in a Grid",
@@ -97,15 +97,15 @@
     },
     "18": {
       "title": "Maximum Path Sum I",
-      "omitted": "The fifteen-row triangle this problem operates on is supplied by the statement and is the statement. Same reason as problem 8. The source corpus marks this problem as brute-force-proof, so it is a real loss to the set rather than a convenient one."
+      "omitted": "The fifteen-row triangle this problem operates on is supplied by the statement and is the statement. Same reason as problem 8. hard-subset.json marks this problem as brute-force-proof, so it is a real loss to the set rather than a convenient one."
     },
     "22": {
       "title": "Names Scores",
-      "omitted": "The problem reads a names file that the source corpus fetches and gitignores as Project Euler's. A seeded work tree would have to carry that file, and this repository does not carry it."
+      "omitted": "The problem reads a names file that is Project Euler's own and is committed nowhere here. A seeded work tree would have to carry that file, and this repository does not carry it."
     },
     "67": {
       "title": "Maximum Path Sum II",
-      "omitted": "The problem reads a triangle file that the source corpus fetches and gitignores as Project Euler's. Same reason as problem 22. The source corpus marks this problem as brute-force-proof."
+      "omitted": "The problem reads a triangle file that is Project Euler's own and is committed nowhere here. Same reason as problem 22. hard-subset.json marks this problem as brute-force-proof."
     }
   }
 }

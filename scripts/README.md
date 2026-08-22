@@ -596,7 +596,7 @@ nothing and is reported as its own outcome rather than as a failure; raise
 | `--reps N`             | `3`                                            |
 | `--verify-timeout SEC` | `600`; the clock one hidden test or suite gets |
 | `--results-dir PATH`   | `.data/benchmark/conductor/runs`               |
-| `--work-root PATH`     | `<tmp>/llama-harness-conductor-work`           |
+| `--work-root PATH`     | `<tmp>/llama-leash-conductor-work`           |
 | `--report PATH`        | `.data/benchmark/conductor-report.md`          |
 | `--router-config PATH` | `.data/configs/conductor-router.json`          |
 

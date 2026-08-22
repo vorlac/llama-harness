@@ -1,7 +1,7 @@
 # User guide
 
 How to install the model harness, serve an open-weight model locally, and run real work
-through conductor. These pages are written for people *using* llama-harness; the internals
+through conductor. These pages are written for people *using* llama-leash; the internals
 are in the [developer guide](../developer/README.md).
 
 The workspace has two halves, and the guide is ordered to match. The **model harness** is a

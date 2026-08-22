@@ -10,7 +10,7 @@
 // (the workspace root OR a worktree path — this is exactly what lets Task 9.6's
 // worktree mode reuse the interface without breaking it). This test never touches a
 // Bun API, never touches port 8080, and — critically — never runs git against the
-// llama-harness repo: every fixture is a throwaway repo built under os.tmpdir() with
+// llama-leash repo: every fixture is a throwaway repo built under os.tmpdir() with
 // `git init`, torn down in the global after() hook.
 //
 // Spec read for this test:
@@ -117,7 +117,7 @@ after(() => {
 });
 
 // Fixture builders. Every one runs git ONLY against its own temp dir — never the
-// llama-harness repo. `git init` inside a mkdtemp fixture is the required, allowed use.
+// llama-leash repo. `git init` inside a mkdtemp fixture is the required, allowed use.
 function git(dir: string, args: string[]): string {
   return execFileSync("git", args, {
     cwd: dir,
@@ -156,7 +156,7 @@ const EPOCH_MS_FLOOR = 1_000_000_000_000; // ~2001 in ms; a seconds-valued mtime
 // ---------------------------------------------------------------------------
 
 test("[4.2-api] full export surface; every function honors the explicit cwd rather than a process-global", () => {
-  // Two independent repos. `node --test` runs with cwd = the llama-harness repo (itself
+  // Two independent repos. `node --test` runs with cwd = the llama-leash repo (itself
   // a git repo), so a function that ignored its `cwd` argument and read a process-global
   // would return identical answers for both — these assertions catch exactly that.
   const repoA = initRepo();

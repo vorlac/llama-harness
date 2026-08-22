@@ -1,7 +1,7 @@
 # Verification Commands Reference
 
 Standard commands for building, testing and mechanically checking this repository
-(llama-harness: the `conductor` TypeScript harness, the `llama-router` C++ proxy, the
+(llama-leash: the `conductor` TypeScript harness, the `llama-router` C++ proxy, the
 Python model-serving scripts, and the standalone tools under `tools/`).
 
 Every command is written to be run from the repository root.
@@ -37,10 +37,10 @@ Three usable configure presets, all clang, all gated on `hostSystemName == macOS
 (`CMakePresets.json`). `default`, `verbose` and `clang` are hidden bases and cannot be
 selected directly.
 
-| Preset | Build type |
-|--------|------------|
-| `clang-debug` | `Debug` |
-| `clang-release` | `Release` |
+| Preset              | Build type       |
+| ------------------- | ---------------- |
+| `clang-debug`       | `Debug`          |
+| `clang-release`     | `Release`        |
 | `clang-relwdebinfo` | `RelWithDebInfo` |
 
 `clang-relwdebinfo` is the preset the acceptance script assumes
@@ -48,12 +48,12 @@ selected directly.
 
 ### Targets
 
-| Target | What it is | Built by default |
-|--------|------------|------------------|
-| `llama-router` | The proxy/scheduler binary in front of `llama-server` | yes |
-| `router-tests` | The doctest suite over `router/` and `dashboard/ledger_view.hpp` | yes |
-| `membench` | Dependency-free memory-bandwidth probe (`tools/membench`) | yes |
-| `conductor-dashboard` | Optional ftxui TUI over the router's metrics ledger | no — `-DCONDUCTOR_DASHBOARD=ON` |
+| Target                | What it is                                                       | Built by default                |
+| --------------------- | ---------------------------------------------------------------- | ------------------------------- |
+| `llama-router`        | The proxy/scheduler binary in front of `llama-server`            | yes                             |
+| `router-tests`        | The doctest suite over `router/` and `dashboard/ledger_view.hpp` | yes                             |
+| `membench`            | Dependency-free memory-bandwidth probe (`tools/membench`)        | yes                             |
+| `conductor-dashboard` | Optional ftxui TUI over the router's metrics ledger              | no — `-DCONDUCTOR_DASHBOARD=ON` |
 
 ```bash
 cmake --preset clang-relwdebinfo -DCONDUCTOR_DASHBOARD=ON
@@ -167,14 +167,14 @@ builds `router-tests` and runs `ctest`, so it needs a configured build tree at
 
 Knowing where code lives is a prerequisite for every grep below.
 
-| Tree | Language | Notes |
-|------|----------|-------|
-| `router/` | C++23, header-only plus `main.cpp` | `router/tests/` holds the doctest suite |
-| `dashboard/` | C++23 | `ledger_view.hpp` is pure and compiled into `router-tests` |
-| `tools/membench/` | C++23 | No project dependencies |
-| `conductor/` | TypeScript | `core/`, `adapter/`, `plugin/`, `tools/`, `tests/` are the TS trees `tsconfig.json` includes; `doctrine/` and `docs/` are Markdown |
-| `scripts/` | Python 3.9 + bash | Model fetch/serve/benchmark, gate scripts |
-| `extern/` | vendored | llama.cpp and vcpkg submodules — never scanned or edited |
+| Tree              | Language                           | Notes                                                                                                                              |
+| ----------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `router/`         | C++23, header-only plus `main.cpp` | `router/tests/` holds the doctest suite                                                                                            |
+| `dashboard/`      | C++23                              | `ledger_view.hpp` is pure and compiled into `router-tests`                                                                         |
+| `tools/membench/` | C++23                              | No project dependencies                                                                                                            |
+| `conductor/`      | TypeScript                         | `core/`, `adapter/`, `plugin/`, `tools/`, `tests/` are the TS trees `tsconfig.json` includes; `doctrine/` and `docs/` are Markdown |
+| `scripts/`        | Python 3.9 + bash                  | Model fetch/serve/benchmark, gate scripts                                                                                          |
+| `extern/`         | vendored                           | llama.cpp and vcpkg submodules — never scanned or edited                                                                           |
 
 There is no `include/` directory. The repository root is the only user-code include
 root, so every in-workspace header is included by its full path from the root
@@ -220,7 +220,7 @@ produce false positives, because "fixed", "new" and "now" are ordinary words:
 # Change narration
 grep -rnE '//.*\b(changed|updated|previously|formerly|refactored)\b' router/ dashboard/ tools/
 
-# Attribution. Any hit is a comment to reword. 
+# Attribution. Any hit is a comment to reword.
 grep -rniE '(claude|ai-generated|authored by)' router/ dashboard/ tools/ scripts/
 ```
 

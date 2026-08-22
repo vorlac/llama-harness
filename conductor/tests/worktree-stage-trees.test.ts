@@ -91,7 +91,7 @@ const PACKS: Record<string, string> = loadPacks(path.resolve(HERE, "..", "doctri
 
 // ---------------------------------------------------------------------------
 // Hermetic git + temp bookkeeping (the tests/tools-9.4b.test.ts idiom). Never the
-// llama-harness repo: every fixture is a throwaway under os.tmpdir().
+// llama-leash repo: every fixture is a throwaway under os.tmpdir().
 // ---------------------------------------------------------------------------
 
 const GIT_ENV: NodeJS.ProcessEnv = {

@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -195,8 +196,8 @@ class AbsentStatementTests(GeneratorHarness):
     def test_generation_never_reads_a_statement(self) -> None:
         """[23B.4-euler-absent-statement] the set is complete without problems/.
 
-        Project Euler statements are fetched and gitignored in the source
-        corpus, so a clone has none of them. If generation depended on one,
+        Project Euler statement text is committed nowhere here, so a clone
+        has none of it. If generation depended on one,
         the committed manifest could not be reproduced anywhere but the
         machine that fetched, and the prompts could not be complete on their
         own. The output must therefore be the same bytes whether the fetched
@@ -380,6 +381,57 @@ class AbsentStatementTests(GeneratorHarness):
             self.generate()
             code, _, err = self.generate("--audit-statements", str(statements))
             self.assertEqual(code, expected_code, err)
+
+
+class AuditInvocationTests(GeneratorHarness):
+    def test_the_documented_audit_invocation_names_no_path_this_repository_lacks(
+        self,
+    ) -> None:
+        """[23B.4-euler-absent-statement] --audit-statements is documented with a
+        placeholder, because no directory this repository ships can satisfy it.
+
+        The statements the audit reads are Project Euler's and are deliberately
+        not committed anywhere under `bench/corpus/project-euler/`, so any
+        concrete path in the documentation is a path the reader will not find.
+        A documented invocation that cannot run leaves a working flag looking
+        broken, so the two places that show the flag show a placeholder and say
+        what the operator has to assemble.
+        """
+        shown = [
+            (
+                "bench/corpus/project-euler/README.md",
+                (gen.REPO_ROOT / "bench" / "corpus" / "project-euler" / "README.md").read_text(),
+            ),
+            ("scripts/generate_euler_tasks.py", gen.__doc__ or ""),
+        ]
+        pattern = re.compile(r"--audit-statements[ \t]+(\S+)")
+        for relpath, text in shown:
+            arguments = pattern.findall(text)
+            self.assertTrue(
+                arguments, "%s must show how --audit-statements is invoked" % relpath
+            )
+            for argument in arguments:
+                self.assertTrue(
+                    argument.startswith("<") and argument.endswith(">"),
+                    "%s documents --audit-statements with the concrete path %r, "
+                    "which this repository does not carry" % (relpath, argument),
+                )
+            self.assertIn(
+                gen.STATEMENT_PATTERN.replace("%03d", "NNN"),
+                text,
+                "%s must name the file the audit looks for, or the operator "
+                "cannot assemble the directory it asks for" % relpath,
+            )
+
+    def test_the_flag_help_names_the_file_it_looks_for(self) -> None:
+        """[23B.4-euler-absent-statement] `--help` alone is enough to build the
+        directory the audit reads.
+
+        The documentation is not on the machine when an operator runs the
+        generator, so the parser carries the filename shape itself.
+        """
+        help_text = gen.build_parser().format_help()
+        self.assertIn(gen.STATEMENT_PATTERN.replace("%03d", "NNN"), help_text)
 
 
 class ManifestTests(GeneratorHarness):

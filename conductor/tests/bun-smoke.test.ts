@@ -13,7 +13,7 @@
 // subset confirmed to run under BOTH `node --test` and `bun test` — so it uses no
 // bun:test-only and no Node-only assertion surface. It drives the adapters through
 // throwaway temp dirs under os.tmpdir() (mkdtempSync), cleaned up in after(); it never
-// runs git against the llama-harness repo and never touches port 8080.
+// runs git against the llama-leash repo and never touches port 8080.
 //
 // The four runtime-observable behaviours asserted (plan 2189-2192):
 //   1. atomic write survives an injected mid-commit throw (old file intact, no leftover tmp);

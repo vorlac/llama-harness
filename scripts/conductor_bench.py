@@ -71,7 +71,7 @@ RUBRIC_DIR = BENCH_DIR / "conductor" / "rubrics"
 # exited so the measurement is never inside the tree the model reads; a
 # relative path around that ordering would defeat it. Outside the repository,
 # an arm that walks up out of its own tree finds other cells' work trees.
-WORK_ROOT = Path(tempfile.gettempdir()) / "llama-harness-conductor-work"
+WORK_ROOT = Path(tempfile.gettempdir()) / "llama-leash-conductor-work"
 RUN_MANIFEST_PATH = BENCH_DIR / "conductor-run-manifest.json"
 
 MANIFEST_PATH = REPO_ROOT / "bench" / "conductor-tasks.json"

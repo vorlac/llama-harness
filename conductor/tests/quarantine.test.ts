@@ -13,7 +13,7 @@
 //
 // ADAPTER module (G14): node:fs / node:path only — no Bun, no shell tag, no `bun:`
 // import; the purity guard (tests/purity.test.ts) scans it. This test never touches
-// a Bun API, never touches port 8080, and NEVER git-operates on the llama-harness
+// a Bun API, never touches port 8080, and NEVER git-operates on the llama-leash
 // repo: every fixture is a throwaway dir under os.tmpdir(), and the out-of-repo
 // quarantine root is a SEPARATE throwaway dir, both removed in after().
 //

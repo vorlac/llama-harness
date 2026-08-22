@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Interactive setup for llama-harness.
+# Interactive setup for llama-leash.
 #
 #   ./setup.sh                       guided install
 #   ./setup.sh --yes                 accept every step (unattended)
@@ -9,15 +9,15 @@
 #   ./setup.sh --dry-run             show the plan, change nothing
 #
 # Can also be run before the repo exists - it will offer to clone it:
-#   curl -fsSL https://raw.githubusercontent.com/vorlac/llama-harness/main/setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/vorlac/llama-leash/main/setup.sh | bash
 #
 # Deliberately bash-only. Everything it starts runs in bash regardless of your
 # login shell, so behaviour is identical from fish, zsh or bash.
 set -uo pipefail
 
-REPO_URL_SSH="git@github.com:vorlac/llama-harness.git"
-REPO_URL_HTTPS="https://github.com/vorlac/llama-harness.git"
-REPO_NAME="llama-harness"
+REPO_URL_SSH="git@github.com:vorlac/llama-leash.git"
+REPO_URL_HTTPS="https://github.com/vorlac/llama-leash.git"
+REPO_NAME="llama-leash"
 
 ASSUME_YES=0
 DRY_RUN=0
@@ -228,7 +228,7 @@ find_repo_root() {
 REPO_ROOT="$(find_repo_root || true)"
 
 if [[ -z "$REPO_ROOT" ]]; then
-  msg "llama-harness is not checked out here"
+  msg "llama-leash is not checked out here"
   command -v git >/dev/null 2>&1 || die "git is required to clone the repository"
   target="$PWD/$REPO_NAME"
   info "clone target: $target"
@@ -247,7 +247,7 @@ if [[ -z "$REPO_ROOT" ]]; then
 fi
 
 cd "$REPO_ROOT" || die "cannot cd into $REPO_ROOT"
-printf '%s%s%s\n' "$C_BOLD" "llama-harness setup" "$C_RESET"
+printf '%s%s%s\n' "$C_BOLD" "llama-leash setup" "$C_RESET"
 info "repository: $REPO_ROOT"
 printf '\n'
 

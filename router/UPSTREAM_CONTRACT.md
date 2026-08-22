@@ -3,7 +3,7 @@
 `WIRE_CONTRACT_VERIFIED: 2026-08-14 12.1 — all six Step 2 items observed; items 1-4 at 11.8 on ornith-9b, items 5-6 on qwen3.6-27b, llama-server 10298`
 
 Every command below is reproduced verbatim with its raw output. Nothing here is reconstructed,
-and nothing is inferred from a value that was not printed. Run from the repo root
+and nothing is inferred from a value that was not printed. Run from the repository root
 `/Users/sal/development/vorlac/llama-harness` on macOS arm64 (64 GB), 2026-08-14.
 
 Port 8080 was confirmed free before each server start and confirmed free after the last stop;

@@ -1,6 +1,6 @@
 # Patterns and Conventions Reference
 
-Standard patterns and conventions used throughout llama-harness, aligned with modern C++ best practices and the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines).
+Standard patterns and conventions used throughout llama-leash, aligned with modern C++ best practices and the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines).
 
 The repository holds two bodies of source under different rules: C++23 under `router/`, `dashboard/` and `tools/`, and TypeScript under `conductor/`. Where a rule applies to only one of them, this document says so. For the commands that check these rules mechanically, see [verification-commands.md](verification-commands.md).
 

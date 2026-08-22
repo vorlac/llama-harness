@@ -6,7 +6,7 @@
 // Built INSIDE Task 4.1 per the build's task-splitting. An ADAPTER (G14): node:fs /
 // node:path only, may read the clock; no Bun API, no shell tag. Every fixture is a
 // throwaway dir under os.tmpdir(), torn down in after(); nothing touches the
-// llama-harness repo or port 8080.
+// llama-leash repo or port 8080.
 //
 // Spec read: plan 979-998 §2.11 (questions.jsonl shape + "conductor_answer records the
 // answer, unblocks every item that named it"); plan 758-791 §2.5 (the item `blocked`

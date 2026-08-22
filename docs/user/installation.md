@@ -79,7 +79,7 @@ The script runs in phases. Each one asks before it spends time, bandwidth or dis
 
 **0. Locate the repository.** It walks up from its own path looking for a directory holding
 both `scripts/fetch_models.py` and `CMakeLists.txt`. If there is none — the case when you pipe
-it from `curl` before cloning — it offers to clone into `$PWD/llama-harness`, trying SSH first
+it from `curl` before cloning — it offers to clone into `$PWD/llama-leash`, trying SSH first
 and falling back to HTTPS, always with `--recurse-submodules`.
 
 **1. Check dependencies.** It probes the seven tools in the table above (`rich` by attempting

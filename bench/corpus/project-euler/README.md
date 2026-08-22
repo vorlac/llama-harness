@@ -1,6 +1,6 @@
 # Project Euler bench tasks
 
-Twenty bench tasks, one per Project Euler problem the source corpus holds a
+Twenty bench tasks, one per Project Euler problem the answer key here holds a
 verified answer for and this repository can ask for in its own words.
 
 Nothing here is edited by hand except the two files named as inputs below.
@@ -16,29 +16,40 @@ Nothing here is edited by hand except the two files named as inputs below.
 
 | File | Origin |
 |------|--------|
-| `expected-answers.json` | the source corpus's answer key, copied unchanged |
-| `hard-subset.json` | the source corpus's brute-force-proof list, copied unchanged |
-| `restatements.json` | authored here: the question each task asks, in this repository's words |
+| `expected-answers.json` | the answer key: one verified answer per problem, or null where none was verified |
+| `hard-subset.json` | the brute-force-proof list: the problems a direct loop cannot finish |
+| `restatements.json` | the question each task asks, in this repository's words |
 | `seed/` | generated: the work tree every task starts from |
 | `hidden/<task>/gauge/` | generated: the measurement, never seeded |
 
 No Project Euler statement, image or data file is committed here, and the
-generator reads none. Statement text is copyright Project Euler; the source
-corpus fetches it into a gitignored `problems/` directory for exactly that
-reason, and mirroring it into a committed manifest would redistribute it. Each
-prompt therefore states its question from `restatements.json` and is complete
-without the fetched statement, which is what makes this set reproducible on a
-clone that has fetched nothing.
+generator reads none. Statement text is copyright Project Euler, so mirroring
+it into a committed manifest would redistribute it. Each prompt therefore
+states its question from `restatements.json` and is complete without the
+statement it replaces, which is what makes this set reproducible on a clone
+that has fetched nothing.
 
-`--audit-statements` is the one mode that reads the fetched statements. It
-writes nothing, and it fails a restatement that shares a long run of words with
-the statement it replaces:
+`--audit-statements` is the one mode that reads statement text, and it is the
+check that keeps the committed prose ours: it writes nothing, and it fails a
+restatement that shares a long run of words with the statement it replaces.
+
+**It reads a directory this repository does not carry, and cannot.** The
+argument is a directory of fetched statements named `problem-NNN-challenge.md`,
+one per problem, three-digit zero-padded. Committing that directory is the
+redistribution the paragraph above refuses, and `restatements.json` cannot
+stand in for it — auditing this repository's prose against itself compares a
+string with a copy of itself and passes by construction. So the audit is an
+operator's tool for a machine that has fetched the statements itself, and a
+clone that has fetched none runs the generator without it:
 
 ```sh
 /usr/bin/python3 scripts/generate_euler_tasks.py \
-    --audit-statements ../llama-harness-test-results/project-euler/problems \
+    --audit-statements <statements-dir> \
     --require-statements
 ```
+
+Without `--require-statements` a missing statement file is reported by name and
+is not a failure, which is what makes the flag usable over a partial fetch.
 
 It composes with `--check`, which is the other reading mode: the pair audits
 the prose and reports any generated file that has drifted from what the inputs

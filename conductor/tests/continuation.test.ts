@@ -429,7 +429,7 @@ const CONTINUATION_SRC = path.resolve(HERE, "..", "adapter", "continuation.ts");
 // ---------------------------------------------------------------------------
 // Hermetic git + temp-dir bookkeeping (the tests/evidence.test.ts idiom). Every fixture
 // is a throwaway repo under os.tmpdir(); the out-of-repo state home is a SEPARATE
-// throwaway dir. This test never runs git against the llama-harness repo.
+// throwaway dir. This test never runs git against the llama-leash repo.
 // ---------------------------------------------------------------------------
 
 const GIT_ENV: NodeJS.ProcessEnv = {

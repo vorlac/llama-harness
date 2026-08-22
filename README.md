@@ -1,4 +1,4 @@
-# llama-harness
+# llama-leash
 
 A self-contained macOS/Apple-Silicon workspace for running open-weight LLMs locally on
 llama.cpp, and for driving them from [opencode](https://opencode.ai). On top of that sits

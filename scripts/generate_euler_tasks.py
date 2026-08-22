@@ -10,27 +10,32 @@ than of twenty near-identical JSON blocks.
 
 Three inputs, all of them beside the output under bench/corpus/project-euler:
 
-  expected-answers.json   copied from the source corpus. A null value there
-                          means the answer was never verified, and the corpus
-                          is explicit that guessing one silently corrupts every
-                          run compared against it. No task is emitted for one.
-  restatements.json       authored in this repository. It supplies the question
-                          each task asks, in this repository's own words, and a
-                          stated reason for every answerable problem that gets
-                          no task.
-  hard-subset.json        copied from the source corpus. It marks the problems
-                          a direct loop cannot finish, and a task that is on it
+  expected-answers.json   the answer key. A null value there means the answer
+                          was never verified, and a guessed reference answer
+                          silently corrupts every run compared against it, so
+                          no task is emitted for one.
+  restatements.json       the question each task asks, in this repository's own
+                          words, and a stated reason for every answerable
+                          problem that gets no task.
+  hard-subset.json        the brute-force-proof list. It marks the problems a
+                          direct loop cannot finish, and a task that is on it
                           says so in its own rationale.
 
-What is deliberately NOT an input is project-euler/problems/. Project Euler
-statement text, the images some problems embed and the data files a few of them
-ship are copyright Project Euler; the source corpus fetches them and gitignores
-them, and mirroring them into a committed bench manifest would redistribute
-them. So the generator never opens a statement, produces byte-identical output
-on a machine that has fetched none, and refuses any problem whose question this
-repository has not written for itself. `--audit-statements` is the one mode
-that reads them, it writes nothing, and it exists to catch a restatement that
-reproduces the prose it was supposed to replace.
+What is deliberately NOT an input is statement text. Project Euler statements,
+the images some problems embed and the data files a few of them ship are
+copyright Project Euler, and mirroring them into a committed bench manifest
+would redistribute them, so none is committed anywhere under this corpus. The
+generator never opens a statement, produces byte-identical output on a machine
+that has fetched none, and refuses any problem whose question this repository
+has not written for itself.
+
+`--audit-statements` is the one mode that reads statement text: it writes
+nothing, and it exists to catch a restatement that reproduces the prose it was
+supposed to replace. Its argument is a directory of fetched statements named
+problem-NNN-challenge.md, which this repository does not carry and cannot
+without performing the redistribution above. It is an operator's tool for a
+machine that has fetched them; every other mode runs on a clone that has
+fetched nothing.
 
 The output is deterministic: tasks in ascending problem order, file maps walked
 in sorted order, two-space JSON indent, no timestamp and no host detail
@@ -42,7 +47,7 @@ Usage::
     /usr/bin/python3 scripts/generate_euler_tasks.py
     /usr/bin/python3 scripts/generate_euler_tasks.py --check
     /usr/bin/python3 scripts/generate_euler_tasks.py \
-        --audit-statements ../llama-harness-test-results/project-euler/problems
+        --audit-statements <statements-dir>
 """
 
 from __future__ import annotations
@@ -82,7 +87,7 @@ TIER = "T1"
 # work tree contains any Euler answer, for any task, ever.
 EXAMPLE_ANSWERS = {"count_divisors": 24, "sum_of_squares": 385}
 
-# Matches the corpus's own per-run budget. Declared in every prompt, so a run
+# The per-run budget every euler prompt declares, so a run
 # that blows it fails a requirement it was told about.
 SOLVE_BUDGET_SEC = 60
 
@@ -799,8 +804,9 @@ def build_prompt(number: int, entry: Dict[str, str]) -> str:
 def build_rationale(number: int, entry: Dict[str, str], insight: Optional[str]) -> str:
     """Why this problem is in the set, and what it is expected to cost."""
     base = (
-        "Project Euler problem %d (%s), scored against the answer the source "
-        "corpus verified. One new module plus one import line is the smallest "
+        "Project Euler problem %d (%s), scored against the verified answer the "
+        "committed key holds for it. One new module plus one import line is the "
+        "smallest "
         "shape that still crosses two files, and the answer is a single int, "
         "so the tier scores objectively with no rubric in the path."
         % (number, entry["title"])
@@ -809,7 +815,7 @@ def build_rationale(number: int, entry: Dict[str, str], insight: Optional[str]) 
         return base
     return (
         base
-        + " The source corpus marks this problem brute-force-proof: %s" % insight
+        + " hard-subset.json marks this problem brute-force-proof: %s" % insight
     )
 
 
@@ -850,18 +856,17 @@ def build_selection_criteria(
         "provenance": (
             "Generated by scripts/generate_euler_tasks.py from "
             "bench/corpus/project-euler/expected-answers.json, which is the "
-            "source corpus's answer key copied unchanged, and from "
+            "answer key holding one verified answer per problem, and from "
             "bench/corpus/project-euler/restatements.json, which this "
             "repository authored. Edit those and regenerate; editing this file "
             "by hand puts it out of step with the script that owns it."
         ),
         "whyTheseProblems": (
-            "Every Project Euler problem the corpus answer key verifies and "
+            "Every Project Euler problem the committed answer key verifies and "
             "this repository can ask for in its own words: %d of the %d "
             "verified answers. The key leaves the other 174 problems null, and "
-            "the corpus is explicit that a guessed reference answer silently "
-            "corrupts every run compared against it, so an unverified problem "
-            "gets no task." % (len(emitted), len(emitted) + len(omitted))
+            "a guessed reference answer silently corrupts every run compared "
+            "against it, so an unverified problem gets no task." % (len(emitted), len(emitted) + len(omitted))
         ),
         "whatIsOmitted": (
             "%s. Each is answerable and each is left out for a stated reason "
@@ -881,12 +886,12 @@ def build_selection_criteria(
             "%s alone. A tier here is a statement about how far a plan has to "
             "decompose, and one Euler problem is one solver module plus one "
             "import line however hard the mathematics is. Spreading the set "
-            "across tiers on problem number or on the corpus's hard subset "
+            "across tiers on problem number or on the hard subset "
             "would label difficulty as scope, so the ladder above and below "
             "%s is empty and the pin says so." % (TIER, TIER)
         ),
         "hardSubset": (
-            "The source corpus curates a brute-force-proof subset. %d of the "
+            "hard-subset.json curates a brute-force-proof subset. %d of the "
             "generated tasks %s in it (%s), and each says so in its own "
             "rationale. The rest are problems where a direct loop finishes, so "
             "this set is not a discriminator on algorithmic reasoning."
@@ -923,7 +928,7 @@ def build_selection_criteria(
         ),
         "languageMix": (
             "python only. The registry contract, the command line and the "
-            "visible runner are the corpus's existing euler bench shape, which "
+            "visible runner are the euler bench shape under bench/corpus, which "
             "is python and needs no build step."
         ),
     }
@@ -1115,9 +1120,9 @@ def audit_statements(
     through, and this is the check that says so before it is committed.
 
     An absent statement file is reported by name and is not by itself a
-    failure: project-euler/problems/ is gitignored in the source corpus and a
-    clone that has fetched nothing has none of them. ``require`` is for the
-    machine that has fetched them and wants the audit to cover the whole set.
+    failure: statement text is not committed anywhere here, so a clone that has
+    fetched nothing has none of them. ``require`` is for the machine that has
+    fetched them and wants the audit to cover the whole set.
     """
     absent: List[str] = []
     copied: List[str] = []
@@ -1176,8 +1181,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--audit-statements",
         metavar="DIR",
-        help="compare each restatement against the fetched statement it replaces; "
-        "reads that directory and writes nothing",
+        help="compare each restatement against the fetched statement it replaces. "
+        "DIR holds one problem-NNN-challenge.md per problem and is not carried "
+        "by this repository; the audit reads it and writes nothing",
     )
     parser.add_argument(
         "--require-statements",

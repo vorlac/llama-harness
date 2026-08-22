@@ -1,16 +1,16 @@
-# tui-games and docs-generation: what was declined, and why
+# tui-games and docs-generation: what is not built yet, and why
 
-This file covers two categories of the corpus at llama-harness-test-results:
-`tui-games` and `docs-generation`. Other categories under `bench/corpus/` are
-not its subject.
+This file covers two categories of material under `bench/corpus/`:
+`tui-games` and `docs-generation`. The other categories there are not its
+subject.
 
-It is the record of what was read, what was declined, and why. Everything named
-below sits in `bench/corpus/` as source material, and none of it is a task in
-`bench/corpus-games.json`. A task that cannot be scored without the model
-supplying part of its own answer key does not belong in an A/B comparison: both
-arms pass it, the cell cannot fail, and it dilutes every real task it is
-averaged with. That failure mode looks exactly like completed work, which is why
-it is written down rather than left implicit.
+It is the record of what that material is, what has not been built from it, and
+why. Everything named below sits in `bench/corpus/` as source material, and
+none of it is a task in `bench/corpus-games.json`. A task that cannot be scored
+without the model supplying part of its own answer key does not belong in an
+A/B comparison: both arms pass it, the cell cannot fail, and it dilutes every
+real task it is averaged with. That failure mode looks exactly like completed
+work, which is why it is written down rather than left implicit.
 
 Two tasks were authored and are in the manifest: `snake-headless-py` and
 `grid2048-headless-py`. Six tui-games tasks and all five docs-generation tasks

@@ -10,7 +10,7 @@ answer links to the page that covers the topic properly.
 
 **General**
 
-## What is llama-harness?
+## What is llama-leash?
 
 A self-contained macOS/Apple-Silicon workspace with two intertwined halves. The first is a
 model harness: Python 3.9 stdlib-only scripts plus a pinned `llama.cpp` submodule that

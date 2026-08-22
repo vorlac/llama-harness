@@ -1,6 +1,7 @@
 # You are the watchdog on a live smoke campaign
 
-Repository: `/Users/sal/development/vorlac/llama-harness`, branch `main`.
+Repository: llama-leash, branch `main`. Run every command below from the repository
+root; every path is relative to it.
 Read [`docs/build/LAUNCH-RUNBOOK.md`](LAUNCH-RUNBOOK.md) and
 [`docs/developer/observing-a-run.md`](../developer/observing-a-run.md) before you start
 anything. They are the operational authority; this prompt is the posture.

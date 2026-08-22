@@ -425,7 +425,7 @@ to run. Name the manifest.
 | `--verify-tasks`       | off                                    | run each hidden test against its unmodified seed and report; exits non-zero if any passed, because a hidden test that passes unmodified measures nothing, and equally if any was killed on the clock, because a killed gate answered neither way |
 | `--report-only`        | off                                    | render the report from cells already on disk, execute nothing      |
 | `--verify-timeout SEC` | `600`                                  | the wall clock one hidden test or visible suite gets under the two floors |
-| `--work-root PATH`     | `<tmp>/llama-harness-conductor-work`   | where each cell's throwaway repository is built; a path inside this repository is refused |
+| `--work-root PATH`     | `<tmp>/llama-leash-conductor-work`   | where each cell's throwaway repository is built; a path inside this repository is refused |
 | `--results-dir PATH`   | `.data/benchmark/conductor/runs`       | one JSON file per cell, named `<arm>__<task>__r<rep>.json`         |
 | `--report PATH`        | `.data/benchmark/conductor-report.md`  | the rendered report                                                |
 | `--model ID`           | the manifest's `defaults.model`        | the model every arm runs                                           |

@@ -313,7 +313,7 @@ const DEBUG_PACK = PACKS["debug.md"].trim();
 // ---------------------------------------------------------------------------
 // Hermetic git + temp-dir bookkeeping (the tests/evidence.test.ts idiom). Every fixture
 // is a throwaway repo under os.tmpdir(); the out-of-repo state home is a SEPARATE
-// throwaway dir. Never the llama-harness repo.
+// throwaway dir. Never the llama-leash repo.
 // ---------------------------------------------------------------------------
 
 const GIT_ENV: NodeJS.ProcessEnv = {

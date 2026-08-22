@@ -607,7 +607,7 @@ files being outside the walked tree entirely.
 ## Repository layout
 
 ```text
-llama-harness/
+llama-leash/
 ├── conductor/                     # layer 1 — the opencode plugin
 │   ├── plugin/index.ts            # the plugin factory: hook wiring only
 │   ├── core/                      # pure decision + state-machine modules

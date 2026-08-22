@@ -258,7 +258,7 @@ generated config file is present:
 
 ```text
 $ scripts/fetch_models.py status
-Installed models  ->  /Users/you/llama-harness/.data/models
+Installed models  ->  /Users/you/llama-leash/.data/models
   ornith-9b            Q4_K_M        5.63 GB  fits   hash-checked
   qwen3-coder-next     MXFP4_MOE    48.03 GB  tight  hash-checked
   qwen3-coder-30b      Q6_K         25.09 GB  fits   hash-checked

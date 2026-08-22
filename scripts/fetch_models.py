@@ -110,7 +110,7 @@ CMAKE_FLAGS = [
 HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
 HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
-USER_AGENT = "llama-harness-fetch-models/1.0"
+USER_AGENT = "llama-leash-fetch-models/1.0"
 MANIFEST_NAME = ".manifest.json"
 MANIFEST_VERSION = 1
 

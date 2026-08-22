@@ -19,7 +19,7 @@
 // definition). It does node:fs I/O only THROUGH the store; no Bun API, no shell tag, no
 // port 8080. Every fixture here is a throwaway dir under os.tmpdir(), git-init'd with a
 // hermetic env for the git-backed cases, and torn down in after(). This test never runs
-// git against the llama-harness repo.
+// git against the llama-leash repo.
 //
 // Spec read for this test (docs/plans/2026-08-07-conductor-harness-plan.md):
 //   1064-1075 §3.2 INTAKE: the chat.message hook, on a prompt arriving while no run is

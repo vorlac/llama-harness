@@ -69,7 +69,7 @@ Five flags change how much it asks:
 The script can also run before the repo exists — it offers to clone it for you:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vorlac/llama-harness/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vorlac/llama-leash/main/setup.sh | bash
 ```
 
 ## Choose a model

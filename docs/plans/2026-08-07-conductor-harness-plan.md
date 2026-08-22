@@ -12,7 +12,7 @@
 >
 > **THIS DOCUMENT IS FULLY SELF-CONTAINED.** It assumes zero knowledge of any prior
 > conversation. Every schema, rule, state machine, decision function, and test it references
-> is defined inside this document. The repository it lands in is `llama-harness` — a
+> is defined inside this document. The repository it lands in is `llama-leash` — a
 > workspace that installs curated GGUF models, serves them through a llama.cpp
 > `llama-server` in router mode, and wires [opencode](https://opencode.ai) at whichever
 > model the user picked (`scripts/serve.py`). You are building ON TOP of that plumbing; do
@@ -309,7 +309,7 @@ model — decides what runs concurrently.
 ### 1.1 This repository (the harness's home)
 
 ```
-llama-harness/
+llama-leash/
 ├── conductor/
 │   ├── plugin/
 │   │   └── index.ts                # THE opencode plugin entry: hook wiring ONLY —
@@ -1710,7 +1710,7 @@ installed binary (`/opt/homebrew/bin/opencode`, 1.18.10).
   `"plugin": [...]` array in an opencode config file (npm names or file paths).
   Conductor travels via the **session config** serve.py already generates
   (`OPENCODE_CONFIG` env var), adding `"plugin": ["<abs path to
-  llama-harness/conductor/plugin/index.ts>"]` — nothing is written into target repos.
+  llama-leash/conductor/plugin/index.ts>"]` — nothing is written into target repos.
   Task 0.2 verifies a config-listed absolute file path loads on 1.18.10; fallback if
   not: serve.py symlinks into the global plugins dir for the session's lifetime and
   removes it on exit (both paths behind one function; the test pins whichever works).

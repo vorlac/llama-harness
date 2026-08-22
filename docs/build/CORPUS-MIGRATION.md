@@ -1,10 +1,11 @@
-# Corpus migration
+# The bench task corpus
 
 The conductor bench measures three arms against the same seeded repository and
 scores each by the exit status of a test the model never sees. This page
 describes the task corpus that measurement runs on: how a task states its files,
-how a run is narrowed, what every manifest holds, what was declined and why, how
-to run a comparison, and what is proven about the set as it stands.
+how a run is narrowed, what every manifest holds, what is not built and why, how
+to run a comparison, and what is proven about the set as it stands. It is the
+reference for `bench/corpus/` and the five manifests over it.
 
 Everything here targets one model. `llamacpp/qwen3.8-27b` is the only id any
 manifest names, in all three of the places a manifest names one — `defaults.model`,
@@ -13,7 +14,7 @@ own, so a run with neither `--sweep` nor `--model` plans `defaults.model`.
 
 ---
 
-## 1. What the corpus migration delivers
+## 1. What the corpus delivers
 
 ### 1.1 A task states its files once: inline, or by directory
 
@@ -60,10 +61,16 @@ so a byte-exact binary cannot survive it, and decoding with replacement would se
 a file that silently differs from the committed one. The two tasks with binary
 material carry it base64-encoded beside a seeded decoder: `knn-search-cpp`'s
 `sample/base.bin` and `queries.bin`, and `json-parser-py`'s `session-02.request`.
-Round-trip byte-identity against the source corpus is verified in each case.
+Round-trip byte-identity against the material each was encoded from — the
+binaries of the upstream corpora each manifest's `selectionCriteria.provenance`
+names, which this repository does not carry — is verified in each case. That is
+a stronger property than "the encoding decodes into the bytes the task grades
+against": those bytes ARE the decode output, so that weaker check passes for
+any encoding, correct or not. The check with teeth was run at authoring time
+and is not re-runnable from a clone.
 
 **Execute bits do not survive seeding.** `materialize_files` writes 0644. Every
-ported task invokes its scripts through an interpreter (`bash run.sh`,
+task invokes its scripts through an interpreter (`bash run.sh`,
 `/usr/bin/python3 gauge/run.py`), and every seeded `SPEC.md` and `README.md` says
 so. Two tasks whose runners must spawn an executable — `resp-server-py` and
 `bytecode-vm-py` — carry a `gauge/graded.sh` that chmods the workspace script
@@ -142,7 +149,7 @@ globs, so it adds nothing to the mechanical scan.
 
 ---
 
-## 2. Every ported task
+## 2. Every task
 
 34 tasks across five manifests. `timeout` is `runTimeoutSec` where the task states
 one, otherwise the tier default from `defaults.tierTimeoutSec`
@@ -157,7 +164,7 @@ one, otherwise the tier default from `defaults.tierTimeoutSec`
 | `resp-server-py` | T3 | python | An 869-case RESP2 server conformance suite, driven over a loopback socket on a gate-chosen ephemeral port. The seed scores 752/869 and every one of the 117 failures runs a transaction or a pub/sub command — the two families that stand on connection state the seed does not carry. | 7200 |
 | `bytecode-vm-py` | T2 | python | A 1077-case suite across 1045 hidden files. The seed scores 1039/1077: 16 failures want the §13 per-instruction module validation, 22 want a string inside an array rendered quoted and escaped. | 5400 |
 
-### 2.2 debugging and migration — `bench/corpus-repair.json`
+### 2.2 repair and migration — `bench/corpus-repair.json`
 
 | id | tier | lang | What the hidden test proves | timeout |
 |---|---|---|---|---|
@@ -219,10 +226,10 @@ a stated computation list. **Tier T1, language python, timeout 2700 for every ro
 | `euler-024-py` | 24 — Lexicographic Permutations |
 | `euler-025-py` | 25 — 1000-digit Fibonacci Number |
 
-The generator never reads `project-euler/problems/`. Statement text is copyright
-Project Euler and gitignored in the source corpus, so the prompt's question comes
-from `bench/corpus/project-euler/restatements.json`, written in this repository's
-own words. Generation is byte-identical on a machine that has fetched nothing.
+The generator never reads statement text. It is copyright Project Euler and is
+committed nowhere here, so the prompt's question comes from
+`bench/corpus/project-euler/restatements.json`, written in this repository's own
+words. Generation is byte-identical on a machine that has fetched nothing.
 `--audit-statements DIR` is the one mode that reads real statements: it writes
 nothing when paired with `--check`, names every absent statement and succeeds
 anyway, and refuses a restatement sharing a run of ten or more consecutive words
@@ -237,7 +244,7 @@ with the statement it replaces.
 
 ---
 
-## 3. What was declined, and why
+## 3. What is not built, and why
 
 A task that cannot be scored without the model supplying part of its own answer
 key does not belong in an A/B comparison: both arms pass, the cell cannot fail,
@@ -245,23 +252,26 @@ and it dilutes every real task it is averaged with. That failure mode looks
 exactly like completed work, which is why the declines are written down.
 
 `bench/corpus/DEFERRED.md` is the long-form record for the tui-games and
-docs-generation categories. The declines below cover every category.
+docs-generation categories. The entries below cover every category.
 
 ### 3.1 Advent of Code — blocked on per-account inputs and an earned answer key
 
 **No Advent of Code task exists in any manifest, and none can be built from
-committed material.** The source corpus carries 262 problems across 2015–2025 and
-ships the category almost empty by design.
+committed material.** The assessment was made against an advent-of-code corpus this
+repository does not carry and has not built: 262
+problems across 2015–2025, shipping the category almost empty by design. Every
+one of the four things a scoreable task needs is unavailable.
 
-- **Puzzle statements are not committed.** `*/problems/` is gitignored. The text
-  is copyright Eric Wastl, who asks that it not be republished.
-- **Puzzle inputs are per-account.** `*/inputs/` is gitignored. An input is
-  generated per logged-in account and is not the same for any two users, so the
-  correct answer depends on *whose* input file it is.
-- **The answer key is empty, and must be.** `expected-answers.json` holds all 262
-  entries with `part1` and `part2` both `null` — verified: zero non-null entries.
-  Its own comment states why: "the correct answer depends on YOUR input file, so
-  no answer key can be shipped."
+- **Puzzle statements are not committed.** `*/problems/` is gitignored there.
+  The text is copyright Eric Wastl, who asks that it not be republished.
+- **Puzzle inputs are per-account.** `*/inputs/` is gitignored there. An input
+  is generated per logged-in account and is not the same for any two users, so
+  the correct answer depends on *whose* input file it is.
+- **The answer key is empty, and must be.** That corpus's
+  `expected-answers.json` holds all 262 entries with `part1` and `part2` both
+  `null` — counted at the time this was assessed: zero non-null entries. Its
+  own comment states why: "the correct answer depends on YOUR input file, so no
+  answer key can be shipped."
 - **Part Two is gated behind having solved Part One.** adventofcode.com serves
   Part Two only to an account that has solved Part One, and serves inputs only to
   a logged-in account, so an anonymous fetch gets Part One of all 262 puzzles and
@@ -273,12 +283,12 @@ adventofcode.com session cookie, fetch their own inputs, solve each puzzle
 themselves, and fill the key in by hand — an *earned* key, one problem at a time,
 valid only for that account's inputs. A campaign run against such a key is not
 reproducible by anyone else, because nobody else's inputs match it. Fabricating
-entries is worse than leaving them null: the corpus scores `null` as
-**unverified** and excludes it from every head-to-head, so an unfilled key
-degrades coverage but can never manufacture a false regression, while a guessed
-key silently corrupts every comparison made against it.
+entries is worse than leaving them unknown: an unverified answer is excluded
+from every head-to-head, so an unfilled key degrades coverage but can never
+manufacture a false regression, while a guessed key silently corrupts every
+comparison made against it.
 
-Nothing from `advent-of-code/` is copied into `bench/corpus/`.
+No Advent of Code material sits under `bench/corpus/`.
 
 ### 3.2 Declined for language — the vocabulary is ts, python and cpp
 
@@ -475,7 +485,7 @@ default) times its cell count:**
 | `bench/corpus-games.json` | 18 | 27.0 h |
 | **Total** | **393** | **418.5 h — 17.4 days** |
 
-The five ported manifests alone are 186 cells and 238.5 h (9.9 days). Running
+The five corpus manifests alone are 186 cells and 238.5 h (9.9 days). Running
 `bench/corpus-euler.json` at `--reps 3` instead of its declared 1 makes it 180
 cells and 135.0 h, taking the total to 513 cells and 508.5 h.
 
@@ -680,7 +690,7 @@ $ python3 scripts/conductor_bench.py --seed-green   --manifest <set> --work-root
 | `bench/corpus-systems.json` | 4 | 4/4 | 4/4 |
 | **Total** | **57** | **57/57**, every manifest printing `every hidden test failed on its unmodified seed`, exit 0 | **57/57**, every manifest printing `every seeded repository starts green`, exit 0 |
 
-**Reachability, proved per task rather than argued.** For every ported task, an
+**Reachability, proved per task rather than argued.** For every task, an
 implementation of exactly the named unimplemented blocks — and nothing else — was
 written in a throwaway copy and run through the real gate:
 
@@ -798,7 +808,7 @@ All three trace to one root cause and **predate this work**: `docs/build/STATE.j
 records task 14.2 as `NOT_STARTED`, so the 14.2 POC report has never been produced
 and its commit is not in the log. `git log --all -- docs/build/artifacts/conductor-report.md`
 is empty, proving the file was never committed and nothing deleted it. No
-acceptance row went red because of the corpus migration.
+acceptance row went red because of the corpus.
 
 ### 7.6 Working tree
 
@@ -855,7 +865,7 @@ to whoever lands this.
   `check_spec.py`, `spec.cpp`, `spec.test.ts`, `gate.py`, `cases/**` — appear in no
   seed. **The load-bearing proof is §7.3: a seed holding answer material could not
   produce a hidden test that exits 1.**
-- **Cell isolation.** The default work root is `<tmpdir>/llama-harness-conductor-work`,
+- **Cell isolation.** The default work root is `<tmpdir>/llama-leash-conductor-work`,
   outside the repository, and any work root resolving inside `REPO_ROOT` is refused
   in every mode. Without that, a cell's cwd sits a constant number of `..` segments
   from every graded gauge under `bench/corpus/**/hidden/**`.
@@ -883,9 +893,13 @@ to whoever lands this.
 - **`knn-search-cpp`'s calibration is half-reproduced.** The reference wall clock
   (36–38 s here against a published 37.43 s) and the threaded upper end (x221 here
   against a published x206) were measured. The ~22x single-threaded datum — the one
-  that makes 40x discriminating rather than merely passable — is the source
-  corpus's own README figure and was **not** re-measured. `bench/corpus-perf.json`'s
-  `selectionCriteria.whereTheThresholdsComeFrom` currently reads as if it were.
+  that makes 40x discriminating rather than merely passable — is the README
+  figure of the upstream knn-search task material, which this repository
+  does not carry, and was **not** re-measured here.
+  `bench/corpus-perf.json`'s `selectionCriteria.whereTheThresholdsComeFrom`
+  reads as if it were. Naming where the number came from is what keeps it
+  cheap to adjudicate; this repository does not carry that README, so
+  re-checking it means measuring.
   **Next:** measure it, or reword that field.
 - **The euler set has a recall ceiling the gauge cannot close.** All 20 problems sit
   in 1–25, the most reproduced set in existence. The constant folder catches every
@@ -925,13 +939,13 @@ to whoever lands this.
   nothing the graded suite measures. That is the intended shape, but it means the
   conductor arm's own green signal is materially weaker on these three than on a
   task whose two suites agree.
-- **Three ported tasks are narrowings of their corpus originals.** `json-parser-py`
-  is difficulty 8 / XL / build-from-spec in the corpus; here it is "implement R-11
-  and R-16 without regressing anything". Same shape for `regex-engine-py`,
-  `bytecode-vm-py` and `grid2048-headless-py`. This is forced, not chosen:
-  `--seed-green` requires the seed to pass its own visible suite, the only visible
-  suite each corpus task ships is its reference-io exchanges, and a seed passing
-  those is necessarily most of the way to conforming. The alternatives were a
+- **Three tasks are narrowings of the specification they are built on.**
+  `json-parser-py`'s SPEC.md is a whole-parser build-from-spec; the task here is
+  "implement R-11 and R-16 without regressing anything". Same shape for
+  `regex-engine-py`, `bytecode-vm-py` and `grid2048-headless-py`. This is
+  forced, not chosen: `--seed-green` requires the seed to pass its own visible
+  suite, the only visible suite each task ships is its reference-io exchanges,
+  and a seed passing those is necessarily most of the way to conforming. The alternatives were a
   weaker seed-green signal or authored sabotage. Each manifest's `rationale` states
   the scope.
 - **Roughly 3% of `snake-headless-py`'s gate and 12% of `grid2048-headless-py`'s is
@@ -969,7 +983,7 @@ to whoever lands this.
   were fixed; any bug neither the visible check nor the hidden suite catches is
   still in there.
 - **The corpus tier ladder is narrow and the language mix skews hard to python.**
-  Of the 34 ported tasks, 30 are python, 2 ts and 2 cpp; by tier they are T1×21, T2×7, T3×5, T4×1, and T0 is empty.
+  Of the 34 corpus tasks, 30 are python, 2 ts and 2 cpp; by tier they are T1×21, T2×7, T3×5, T4×1, and T0 is empty.
   `bench/conductor-tasks.json`'s `languageMix` claim is about that manifest;
   combining the sets skews the mix.
 

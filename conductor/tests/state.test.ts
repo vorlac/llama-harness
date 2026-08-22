@@ -14,7 +14,7 @@
 // injected sink. Every fixture here is a throwaway dir under os.tmpdir(); the
 // git-dependent fixtures are `git init`-ed with a hermetic env (GIT_CONFIG_GLOBAL=
 // /dev/null) and torn down in after(). This test never runs git against the
-// llama-harness repo and never touches port 8080.
+// llama-leash repo and never touches port 8080.
 //
 // Spec read for this test (docs/plans/2026-08-07-conductor-harness-plan.md):
 //   2276-2304 §4.1 task + its full enumerated step list (pinned below, un-thinned).

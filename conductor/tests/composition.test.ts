@@ -166,7 +166,7 @@
 //   5.4a-tools-still-throw-scope-fence       -> "[5.4a-tools-still-throw-scope-fence] …"
 //
 // Every fixture is a throwaway dir under os.tmpdir(), built at runtime and torn
-// down in after(). No test here runs git against the llama-harness repo.
+// down in after(). No test here runs git against the llama-leash repo.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

@@ -9,7 +9,7 @@ resolves the decision gates in §3 and the file is committed. Implementation of 
 phases (24–27) must not begin before that sign-off **and** before Phase 23 produces its campaign
 report. Phases 20–23 are the pre-measurement floor and are separately signable.
 
-**Audience.** An implementing agent (Opus) working inside the llama-harness repository under its
+**Audience.** An implementing agent (Opus) working inside the llama-leash repository under its
 standing rules: test-first, `scripts/test-conductor.sh` green and `scripts/conductor-gate.sh` clean
 before any hand-off, every standing choice recorded in `conductor/DECISIONS.md`, every new limit
 recorded in `conductor/docs/HONEST-LIMITS.md`, build state tracked in `docs/build/STATE.json` /

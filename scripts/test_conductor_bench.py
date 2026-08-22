@@ -2766,6 +2766,35 @@ class PlanAndCellTests(unittest.TestCase):
             self.assertEqual(code, 2, "%s: %s" % (mode, output))
             self.assertIn(str(cb.REPO_ROOT), output, "the refusal must name the boundary")
 
+    def test_the_documented_work_root_is_the_one_the_driver_defaults_to(self):
+        """[23C.6-work-root-outside-the-repository] the default work root's name
+        is quoted in three documents, and all four agree.
+
+        The name is operator-facing: it is what `ls $TMPDIR` shows and what an
+        operator deletes to reclaim the disk a campaign spent. A document that
+        quotes a name the driver does not use sends them to an empty path, and
+        nothing else in the suite reads these files, so this is the only place
+        the four can be held together.
+        """
+        self.assertEqual(cb.WORK_ROOT.name, "llama-leash-conductor-work")
+        self.assertEqual(cb.WORK_ROOT.parent, Path(tempfile.gettempdir()))
+        for relpath in (
+            "scripts/README.md",
+            "docs/user/benchmarking.md",
+            "docs/build/CORPUS-MIGRATION.md",
+        ):
+            text = (cb.REPO_ROOT / relpath).read_text()
+            self.assertIn(
+                cb.WORK_ROOT.name,
+                text,
+                "%s must quote the work root the driver actually defaults to" % relpath,
+            )
+            self.assertNotIn(
+                "llama-harness-conductor-work",
+                text,
+                "%s quotes a work root no run creates" % relpath,
+            )
+
     def test_default_model_is_the_manifests_own(self):
         """[23B.6-default-model-from-manifest] with neither --sweep nor --model,
         every cell is planned against the model the manifest declares, and one

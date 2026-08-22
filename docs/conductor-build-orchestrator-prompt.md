@@ -1,8 +1,8 @@
 # Conductor build — orchestrator launch prompt
 
-> Paste everything below the line into a fresh agent session at
-> `/Users/sal/development/vorlac/llama-harness`. It is self-contained: it assumes the
-> agent has no memory of any prior conversation.
+> Paste everything below the line into a fresh agent session whose working directory
+> is the repository root. It is self-contained: it assumes the agent has no memory of
+> any prior conversation. Every path below is relative to that root.
 
 ---
 
@@ -27,7 +27,7 @@ Your discipline comes from this document. Nothing you build is running yet.
 
 Build the system specified in:
 
-**`/Users/sal/development/vorlac/llama-harness/docs/plans/2026-08-07-conductor-harness-plan.md`**
+**`docs/plans/2026-08-07-conductor-harness-plan.md`**
 (3,399 lines, "Revision 5")
 
 That file is the **specification and it is immutable**. You never edit it — not its prose,
@@ -365,7 +365,8 @@ Before the **first edit** of any task, write `docs/build/IN_PROGRESS.json`
 
 ### 4.3 Boot sequence — run this verbatim, in order, on every start
 
-1. `cd /Users/sal/development/vorlac/llama-harness`
+1. `cd` to the repository root, the directory holding `CMakeLists.txt` and
+   `scripts/fetch_models.py`. Every path below is relative to it.
 2. Read `docs/build/HANDOFF.md`.
 3. Read `docs/build/STATE.json`.
 4. `git status --porcelain` and `git log --oneline --grep='^conductor: '`.

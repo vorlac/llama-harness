@@ -17,7 +17,7 @@
 //
 // HERMETIC: every fixture is a throwaway `git init` repo under os.tmpdir() (built with
 // a hermetic GIT_ENV), the out-of-repo stateHome is a SEPARATE throwaway dir, and every
-// runner command is a real `node -e` / `node --test` subprocess. Never the llama-harness
+// runner command is a real `node -e` / `node --test` subprocess. Never the llama-leash
 // repo; never port 8080. All temp dirs (repos AND out-of-repo quarantine roots) are
 // removed in after().
 //
