@@ -215,6 +215,19 @@ RESULT_KEYS = (
 )
 TOKEN_KEYS = ("prompt", "completion", "total", "partial")
 
+# What opencode prints when it refuses a tool call because the path is outside
+# what it believes the project to be. A cell that hits this did not fail the
+# task; it was denied a file inside its own work tree, which makes the cell the
+# harness's failure and not the arm's.
+#
+# Seen once against a work tree under macOS's $TMPDIR: opencode built the
+# permission pattern from a path with eight characters missing out of the middle
+# of the temp directory's random component, and then correctly decided that the
+# resulting nonexistent path was external. The arm read three files, was refused
+# the fourth, and stopped at 2.8 minutes with an empty diff, which the scoreboard
+# recorded as an ordinary gauge failure.
+PERMISSION_REJECTION_MARKERS = ("auto-rejecting", "rejected permission to use")
+
 # The hidden suite's verdict on the tree the cell left behind, recorded on its
 # own axis. `outcome` answers "did this arm deliver inside its wall clock";
 # `gauge` answers "was the work correct", and a cell that ran out of clock while
@@ -1914,14 +1927,39 @@ def default_cell_invocation_runner(invocation: CellInvocation) -> CommandOutcome
     )
 
 
+def denied_own_tree(log_path: Any) -> bool:
+    """Whether the cell was refused a tool call on a path inside its own tree.
+
+    Read from the transcript rather than from an exit code, because opencode
+    does not fail on a denial: it prints the refusal, hands the model an error
+    string, and carries on. The model then stops, having been told it may not
+    read its own repository, and the run exits cleanly with an empty diff. The
+    only signal that anything went wrong is the line in the transcript.
+    """
+    try:
+        text = Path(log_path).read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(marker in text for marker in PERMISSION_REJECTION_MARKERS)
+
+
 def score_cell(
-    exit_code: Optional[int], timed_out: bool, spawn_error: Optional[str]
+    exit_code: Optional[int],
+    timed_out: bool,
+    spawn_error: Optional[str],
+    denied: bool = False,
 ) -> Dict[str, Any]:
     """The hidden test's exit status, passed through and nothing else.
 
     A spawn failure is the harness failing, never the model failing, so it is
     kept out of the fail bucket even when an exit code happens to be present.
+    A denied read is the same kind of thing one layer up: the arm was stopped by
+    the environment rather than by the task, and scoring it as a failure would
+    charge the arm for the harness's mistake. Both land on `harness-error`,
+    which `exclusion_reason` already drops symmetrically across the arms.
     """
+    if denied:
+        return {"passed": False, "outcome": "harness-error", "exitCode": exit_code}
     if spawn_error:
         return {"passed": False, "outcome": "harness-error", "exitCode": exit_code}
     if timed_out:
@@ -2023,10 +2061,11 @@ def run_cell(
     # stay separate: `score` is delivery inside the wall clock, `gauge` is
     # correctness of the tree left behind.
     gauge = {"ran": False, "passed": None, "exitCode": None}
+    denied = denied_own_tree(directory / "opencode.log")
     if run_outcome.spawn_error:
         # Nothing ran, so there is no work to measure - only the seed.
         score = score_cell(
-            run_outcome.exit_code, run_outcome.timed_out, run_outcome.spawn_error
+            run_outcome.exit_code, run_outcome.timed_out, run_outcome.spawn_error, denied
         )
     else:
         materialize_files(work, task.hidden_files)
@@ -2044,11 +2083,14 @@ def run_cell(
         if run_outcome.timed_out:
             # The wall clock is already spent; the gauge is measurement taken
             # after the fact and does not belong in the cell's recorded cost.
-            score = score_cell(None, True, None)
+            score = score_cell(None, True, None, denied)
         else:
             wall_clock_ms += test_outcome.wall_clock_ms
             score = score_cell(
-                test_outcome.exit_code, test_outcome.timed_out, test_outcome.spawn_error
+                test_outcome.exit_code,
+                test_outcome.timed_out,
+                test_outcome.spawn_error,
+                denied,
             )
 
     window = summarize_ledger_window(ledger, ledger_before)

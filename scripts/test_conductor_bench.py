@@ -2747,6 +2747,62 @@ class PlanAndCellTests(unittest.TestCase):
             "the hermetic home carried the previous run's session store",
         )
 
+    def test_a_denied_read_is_the_harness_failing(self):
+        """[D12-denied-read] a cell refused a tool call on a path inside its own
+        work tree is scored `harness-error`, not `fail`.
+
+        opencode does not error when it denies a call: it prints the refusal,
+        hands the model an error string, and exits cleanly. The model stops,
+        having been told it may not read its own repository, and the cell lands
+        as an ordinary gauge failure with an empty diff — a harness fault
+        charged to the arm, and indistinguishable in the results from the arm
+        having simply not done the work.
+        """
+        task = self.tasks[0]
+
+        def runner_writing(line: str):
+            def runner(invocation: cb.CellInvocation) -> cb.CommandOutcome:
+                log = Path(invocation.cell_dir) / "opencode.log"
+                with open(str(log), "ab") as handle:
+                    handle.write(line.encode())
+                return cb.CommandOutcome(0, False, None, 1)
+
+            return runner
+
+        denial = (
+            "! permission requested: external_directory "
+            "(/private/var/folders/6h/xxx/T/w/repo/src/solvers/*); auto-rejecting\n"
+        )
+        for label, line, expected in (
+            ("denied", denial, "harness-error"),
+            ("ordinary", "→ Read src/cli.py\n", "fail"),
+        ):
+            cell = make_cell("doctrine", task.id, 1)
+            result = cb.run_cell(
+                cell,
+                task,
+                cell_dir=cb.cell_dir_for(self.tmp / ("denied-%s" % label), cell),
+                model=SENTINEL_MODEL,
+                router_config=ROUTER_CONFIG,
+                base_config=BASE_OPENCODE_CONFIG,
+                per_slot_ctx=SERVED_CTX,
+                timeout_sec=5,
+                runner=runner_writing(line),
+                # The gauge fails either way: the point is that only one of the
+                # two is the arm's doing.
+                test_runner=lambda argv, cwd, timeout_sec: cb.CommandOutcome(1, False, None, 1),
+                git_runner=lambda argv, cwd: None,
+            )
+            cb.validate_result(result)
+            self.assertEqual(result["outcome"], expected, label)
+            self.assertIs(result["passed"], False, label)
+
+        self.assertIn(
+            "harness-error",
+            cb.EXCLUSION_REASONS,
+            "a denied cell must leave the pass rate, symmetrically across arms",
+        )
+
     def test_hidden_never_visible(self):
         """[14.1-hidden-never-visible] the hidden tests never reach the model:
         seed and hidden paths are disjoint, no arm's prompt/argv/env/config

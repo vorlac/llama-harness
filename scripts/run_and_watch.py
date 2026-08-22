@@ -155,7 +155,19 @@ RESULTS_DIR: Optional[str] = None
 #
 # Keep it OUT of this repository: a work tree inside the repo would put a git
 # checkout inside a git checkout.
-WORK_ROOT: Optional[str] = None
+#
+# It is ALSO kept out of $TMPDIR, which is the default and is where a cell was
+# lost. macOS hands each user a $TMPDIR like
+# /var/folders/6h/1x7gzts90yqfbtlkjn24_qkh0000gn/T/ — long, randomly named, and
+# reached through a symlink. Building a work tree under it, opencode composed
+# the permission pattern for `src/solvers/*` from a copy of that path with eight
+# characters missing out of the random component, found the result outside the
+# project, and refused the arm a file in its own repository. The arm read three
+# files, was denied the fourth, and stopped with an empty diff.
+#
+# A short, stable, real directory avoids the whole class. `~` is not a symlink
+# and its path is a fifth the length.
+WORK_ROOT: Optional[str] = os.path.join(os.path.expanduser("~"), ".llama-leash-work")
 
 # ── THE MODEL SERVER ─────────────────────────────────────────────────────────
 
