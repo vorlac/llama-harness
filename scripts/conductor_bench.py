@@ -1949,7 +1949,17 @@ def run_cell(
     The hidden files are materialized only after opencode has exited, so no
     ordering accident can put the measurement inside the tree the model reads.
     """
+    # The WHOLE cell directory is re-created, not just the repository inside it.
+    # A cell directory holds three things a rerun must not inherit: the hermetic
+    # HOME (opencode's session store, snapshots and caches), the arm's config,
+    # and `opencode.log`, which is opened for APPEND. Re-creating only `repo/`
+    # leaves all three, so a second run of the same cell reads a transcript that
+    # is the previous run's followed by its own, and starts against a home that
+    # already knows things. Both are silent: nothing errors, the numbers look
+    # ordinary, and the evidence is a splice of two runs.
     directory = Path(cell_dir)
+    if directory.exists():
+        shutil.rmtree(str(directory))
     directory.mkdir(parents=True, exist_ok=True)
 
     # Every arm is seeded with the SAME file set, conductor's config included.

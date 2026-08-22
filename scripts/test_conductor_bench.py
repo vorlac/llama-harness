@@ -2686,6 +2686,67 @@ class PlanAndCellTests(unittest.TestCase):
                 "the output reserve is not usable window",
             )
 
+    def test_a_rerun_inherits_nothing_from_the_last(self):
+        """[D09-fresh-cell] running the same cell twice leaves no trace of the
+        first run: not in the transcript, not in the hermetic home, not in the
+        arm's config.
+
+        The transcript is opened for append and the home is created with
+        exist_ok, so a cell directory that survives is a cell that starts with
+        the previous run's session store and whose log is two runs spliced
+        together. Nothing errors and the numbers look ordinary, which is what
+        makes it worth a test: a doctrine cell's compaction count was read off
+        such a splice and the fix that produced it was very nearly recorded as
+        having failed.
+        """
+        task = self.tasks[0]
+        cell = make_cell("doctrine", task.id, 1)
+        directory = cb.cell_dir_for(self.tmp / "rerun", cell)
+
+        def run(marker: str):
+            def runner(invocation: cb.CellInvocation) -> cb.CommandOutcome:
+                # Stand in for what opencode leaves behind: a line in the
+                # transcript, and state under the hermetic home.
+                log = Path(invocation.cell_dir) / "opencode.log"
+                with open(str(log), "ab") as handle:
+                    handle.write(("transcript from %s\n" % marker).encode())
+                home = Path(invocation.cell_dir) / "home" / "data" / "opencode"
+                home.mkdir(parents=True, exist_ok=True)
+                (home / "session.json").write_text(marker)
+                return cb.CommandOutcome(0, False, None, 1)
+
+            return cb.run_cell(
+                cell,
+                task,
+                cell_dir=directory,
+                model=SENTINEL_MODEL,
+                router_config=ROUTER_CONFIG,
+                base_config=BASE_OPENCODE_CONFIG,
+                per_slot_ctx=SERVED_CTX,
+                timeout_sec=5,
+                runner=runner,
+                test_runner=lambda argv, cwd, timeout_sec: cb.CommandOutcome(0, False, None, 1),
+                git_runner=lambda argv, cwd: None,
+            )
+
+        run("first")
+        first_log = (directory / "opencode.log").read_text()
+        self.assertIn("first", first_log)
+
+        run("second")
+        second_log = (directory / "opencode.log").read_text()
+        self.assertIn("second", second_log)
+        self.assertNotIn(
+            "first",
+            second_log,
+            "the transcript is the previous run's spliced onto this one",
+        )
+        self.assertEqual(
+            (directory / "home" / "data" / "opencode" / "session.json").read_text(),
+            "second",
+            "the hermetic home carried the previous run's session store",
+        )
+
     def test_hidden_never_visible(self):
         """[14.1-hidden-never-visible] the hidden tests never reach the model:
         seed and hidden paths are disjoint, no arm's prompt/argv/env/config

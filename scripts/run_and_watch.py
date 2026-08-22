@@ -86,7 +86,7 @@ MANIFEST = "bench/conductor-tasks.json"
 #
 #   TASKS = []                    every task
 #   TASKS = ["euler-001-py"]      one task (also set MANIFEST to its set)
-TASKS: List[str] = []
+TASKS: List[str] = ["slugify-ts", "euler-cli-py", "logfmt-lenses-ts", "clock-inject-py",]
 
 # Which tiers to run. Empty means every tier present in the manifest. Tiers are
 # a wall-clock budget per cell, not a difficulty rating: T0 1800s, T1 2700s,
@@ -289,6 +289,28 @@ def rule(title: str = "") -> str:
 
 def work_root() -> str:
     return WORK_ROOT or os.path.join(tempfile.gettempdir(), "llama-leash-conductor-work")
+
+
+def clear_work_root(resuming: bool) -> Optional[str]:
+    """Delete the previous run's work trees, and say what was deleted.
+
+    A fresh run is meant to start from nothing, and the driver already
+    re-creates each cell directory as it reaches it. This is the other half:
+    until a cell is reached, its directory still holds the PREVIOUS run's tree,
+    and anything that scans the work root for "the newest run" finds that one.
+    The live conductor console does exactly that, and on a fresh launch it spent
+    the first two cells reporting a 28-minute stall, with an alarm, belonging to
+    a process that had already exited.
+
+    A resuming run keeps its trees: the cells it is skipping are the cells whose
+    trees are the only record of what they did.
+    """
+    root = work_root()
+    if resuming or not os.path.isdir(root):
+        return None
+    cells = glob.glob(os.path.join(root, "*", "*", "*", "*", "*"))
+    shutil.rmtree(root, ignore_errors=True)
+    return "%d cell tree(s) from a previous run" % len(cells)
 
 
 def results_dir() -> str:
@@ -685,7 +707,8 @@ def main() -> int:
     print("  results       %s" % results)
     print("  work root     %s" % work_root())
     print("  worst case    %.1f hours if every cell burns its whole tier timeout" % hours)
-    if os.path.isdir(results) and glob.glob(os.path.join(results, "*.json")):
+    resuming = bool(os.path.isdir(results) and glob.glob(os.path.join(results, "*.json")))
+    if resuming:
         print("  NOTE          this results directory already holds scored cells;")
         print("                those cells will be REUSED and not re-run.")
 
@@ -701,6 +724,9 @@ def main() -> int:
         return 1
 
     print(rule("PREFLIGHT "))
+    cleared = clear_work_root(resuming)
+    if cleared is not None:
+        print("  work root     cleared (%s)" % cleared)
     ready = preflight()
     if not ready["ok"]:
         return 1
