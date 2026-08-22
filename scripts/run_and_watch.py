@@ -272,6 +272,69 @@ def tier_budget_hours(cells: Sequence[str]) -> float:
 # ── the three feeds ──────────────────────────────────────────────────────────
 
 
+def preflight() -> bool:
+    """Is the model actually being served? Answer in one line, not a traceback.
+
+    The driver probes llama-server's /props through the upstream address in the
+    router config, and a refused connection there surfaces as forty lines of
+    urllib stack before the one sentence that matters. Ask the same question
+    first, and if the answer is no, say what to start.
+    """
+    config_path = os.path.join(REPO_ROOT, ".data", "configs", "conductor-router.json")
+    try:
+        config = json.load(open(config_path))
+    except (OSError, ValueError) as exc:
+        print("  router config unreadable at %s: %s" % (config_path, exc))
+        return False
+
+    upstream = config.get("upstream", {})
+    listen = config.get("listen", {})
+    host = upstream.get("host", "127.0.0.1")
+    port = int(upstream.get("port", 8080))
+
+    # The model name the server answers to is the manifest's model without its
+    # provider prefix, which is what the driver asks /props about.
+    model = MODEL
+    if not model:
+        try:
+            model = json.load(open(os.path.join(REPO_ROOT, MANIFEST)))["defaults"]["model"]
+        except (OSError, ValueError, KeyError):
+            model = "llamacpp/qwen3.8-27b"
+    served = model.split("/", 1)[-1]
+
+    url = "http://%s:%d/props?model=%s" % (host, port, served)
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=10) as response:
+            response.read(1)
+        ok_upstream = True
+    except Exception as exc:  # any transport failure means the same thing
+        ok_upstream = False
+        reason = exc
+
+    if ok_upstream:
+        print("  model server  responding at %s" % url)
+    else:
+        print("  model server  NOT REACHABLE at %s" % url)
+        print("                %s" % reason)
+        print("")
+        print("  Nothing is serving %s. Start it in another terminal:" % served)
+        print("")
+        print("      python3 scripts/serve.py %s --no-shell" % served)
+        print("")
+        print("  That loads the model on port %d and brings up llama-router on %d," % (
+            port, int(listen.get("port", 8088))))
+        print("  which is the address every arm's requests go through. Leave it running,")
+        print("  then start this script again.")
+        return False
+
+    if shutil.which("node") is None:
+        print("  node          MISSING — the conductor console (feed 3) will be blank.")
+        print("                The benchmark itself does not need it.")
+    return True
+
+
 def read_results(results: str) -> List[dict]:
     rows = []
     for path in sorted(glob.glob(os.path.join(results, "*.json"))):
@@ -426,6 +489,10 @@ def main() -> int:
     if MAX_ESTIMATED_HOURS and hours > MAX_ESTIMATED_HOURS:
         print("\nrun_and_watch: worst case %.1fh exceeds MAX_ESTIMATED_HOURS (%.1fh)." % (hours, MAX_ESTIMATED_HOURS))
         print("Narrow it with TASKS or TIERS, lower REPS, or raise the ceiling.")
+        return 1
+
+    print(rule("PREFLIGHT "))
+    if not preflight():
         return 1
 
     os.makedirs(results, exist_ok=True)
