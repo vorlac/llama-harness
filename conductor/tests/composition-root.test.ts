@@ -2142,7 +2142,13 @@ test("[13.1-cr-override-needs-registered-item] conductor_override REFUSES when t
   // Settle the workspace open first, so the comparison below is about the
   // refusal alone.
   await attempt(() => callTool(hooks, "conductor_status", {}, root));
-  const before = snapshotTree(path.join(root, ".conductor"));
+  // journal.jsonl is dropped from both sides of the comparison: the §7.4 journal
+  // is an append-only observability sink — a refused call is REQUIRED to leave its
+  // `gates: refused` record there — and what this row asserts is that no run
+  // STATE moved: no item, no queue, no grant, no taint.
+  const withoutJournal = (entries: string[]): string[] =>
+    entries.filter((entry) => !entry.includes("journal.jsonl"));
+  const before = withoutJournal(snapshotTree(path.join(root, ".conductor")));
   assert.ok(before.length > 0, "premise: the run has state on disk to compare");
 
   const outcome = await attempt(() =>
@@ -2184,7 +2190,7 @@ test("[13.1-cr-override-needs-registered-item] conductor_override REFUSES when t
     "premise: and not a missing declared argument — every declared arg was given",
   );
   assert.deepEqual(
-    snapshotTree(path.join(root, ".conductor")),
+    withoutJournal(snapshotTree(path.join(root, ".conductor"))),
     before,
     "and the run's state is byte-identical afterwards: a refused override is not an override that half-happened",
   );

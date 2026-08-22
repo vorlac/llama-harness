@@ -62,8 +62,20 @@ export const EVENTS: Record<Component, readonly string[]> = {
   // §3.1 / §7.4: FSM transitions and refusals.
   fsm: [FSM_TRANSITION, "refusal", FSM_GUARD_REJECT, "invalid-transition"],
   // §3.6 / §7.2 / §7.4: gate decisions (with their input snapshot at debug),
-  // the §2.8 gate-crash anomaly, and the budgeted override hatch.
-  gates: [GATES_DENY, "allow", "snapshot", GATES_GATE_CRASH, "override-granted"],
+  // the §2.8 gate-crash anomaly, the budgeted override hatch, and — under the
+  // widening rule at the foot of this file — the §3.4 tool call that every gate
+  // ALLOWED and that was then refused past them:
+  //   `refused` — the composition root's tool choke point caught a throw out of a
+  //               §3.4 call: a run-FSM transition the tool would have made
+  //               illegally, a queue amendment validateQueue rejected, a handler's
+  //               own legality step, a missing argument the root will not invent.
+  //               `deny` states that the GATE STACK refused, and a record filed
+  //               under it would lie about which rule spoke; `allow` is already
+  //               written for these calls, since the gates did allow them. Without
+  //               its own name a refusal past the gates leaves the journal saying
+  //               only that the call was permitted — which is how two of a live
+  //               run's three tool failures survived nowhere a replay could read.
+  gates: [GATES_DENY, "allow", "snapshot", GATES_GATE_CRASH, "override-granted", "refused"],
   // §7.2 gives fanout/subsession.dispatched as the record-shape example; the
   // rest are the sub-session lifecycle the fan-out engine drives.
   fanout: [

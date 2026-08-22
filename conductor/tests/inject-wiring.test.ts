@@ -653,6 +653,41 @@ test("[inject-wiring-receipt] every delivery journals inject/system-append namin
   );
 });
 
+test("[inject-wiring-receipt-recommendation] the receipt records the single next tool the state block NAMED, so a run's recommendation can be scored against the tool the model actually called — the state block renders it into a sentence and journals nothing, which leaves the recommended-vs-actual column dead on every run this repository can produce", async () => {
+  const root = makeWorkspace("conductor-inject-recommend-");
+  const hooks = await startPlugin(root);
+  const sessionID = "ses_inject_recommend";
+  await arrive(hooks, sessionID, "please do the work");
+
+  const transform = hookOf(hooks, "experimental.chat.system.transform");
+  const output: { system: string[] } = { system: [] };
+  await transform({ sessionID, model: {} }, output);
+
+  const receipt = runJournal(root)
+    .filter((rec) => rec.component === "inject" && rec.event === "system-append")
+    .pop() as Rec;
+  const data = receipt.data ?? {};
+  assert.equal(
+    data["recommended"],
+    "conductor_classify",
+    "an unclassified INTAKE run recommends conductor_classify, and the receipt must carry the NAME " +
+      "rather than leave an observer to parse English out of a system prompt it never saw",
+  );
+  assert.equal(
+    data["recommendedItem"],
+    null,
+    "a run-level recommendation targets no item, and null is that fact — not an absent key",
+  );
+
+  const block = output.system[output.system.length - 1];
+  assert.match(
+    block,
+    /Recommended next tool: conductor_classify/,
+    "and the recorded name is the one the model was actually told, from the same derivation — a " +
+      "receipt that disagreed with the block would be worse than none",
+  );
+});
+
 // ===========================================================================
 // (5a) THE SUB-SESSION LEG — the delivery a REGISTERED sub-session receives
 //

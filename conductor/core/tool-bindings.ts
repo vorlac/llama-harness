@@ -12,6 +12,11 @@
 //     not asked of a human, so the root fixes it (the path that carries a
 //     human's answer is conductor_answer).
 //
+// The table also declares `dispatches`: the §4.1 sub-session roles each tool hands
+// its work to. That is a fact about the CALL rather than about the handler, and
+// core/mechanics.ts renders it into every doctrine pack's stage order, so a caller
+// reading the pipeline reads who authors each artifact along with it.
+//
 // The composition root (Task 13.1) CONSUMES this table when it binds handlers to
 // the plugin's tool map, and conductor/tests/tool-binding.test.ts enforces, for
 // every bound tool, that the handler's REQUIRED input fields are exactly the
@@ -41,9 +46,22 @@ export interface ToolBinding {
   infrastructure: readonly string[];
   // Required input fields the root pins to a constant value.
   fixed: Readonly<Record<string, string>>;
+  // The §4.1 sub-session roles this tool's handler DISPATCHES on the caller's
+  // behalf, in the order the handler dispatches them; empty for a tool that does
+  // its whole job inside the harness. This is a fact about the call, not about
+  // the implementation: calling the tool IS how the artifact those roles produce
+  // gets authored. core/mechanics.ts renders it into every doctrine pack's stage
+  // order, so a stage tool whose dispatch shape went unstated would read as a
+  // verification step the caller must satisfy before calling — the reading that
+  // sent one orchestrator to write a test by hand against two gates that deny it.
+  // Required, so a tool cannot enter the vocabulary without answering the question.
+  dispatches: readonly string[];
 }
 
 const NO_FIXED: Readonly<Record<string, string>> = {};
+
+// A tool that reaches no fan-out engine: its work happens in the harness.
+const NO_DISPATCH: readonly string[] = [];
 
 export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
   conductor_classify: {
@@ -51,24 +69,28 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     input: "ClassifyInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal"],
     fixed: NO_FIXED,
+    dispatches: ["mechanical", "skeptic"],
   },
   conductor_decompose: {
     handler: "handleDecompose",
     input: "DecomposeInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal", "packs"],
     fixed: NO_FIXED,
+    dispatches: ["planner"],
   },
   conductor_plan: {
     handler: "handlePlan",
     input: "PlanInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal", "packs"],
     fixed: NO_FIXED,
+    dispatches: ["planner"],
   },
   conductor_plan_review: {
     handler: "handlePlanReview",
     input: "PlanReviewInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal", "packs"],
     fixed: NO_FIXED,
+    dispatches: ["reviewer", "skeptic", "planner"],
   },
   conductor_dispatch_wave: {
     handler: "handleDispatchWave",
@@ -85,24 +107,28 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       "packs",
     ],
     fixed: NO_FIXED,
+    dispatches: ["testWriter", "reviewer", "implementer", "skeptic"],
   },
   conductor_submit_test: {
     handler: "handleSubmitTest",
     input: "SubmitTestInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal"],
     fixed: NO_FIXED,
+    dispatches: ["testWriter"],
   },
   conductor_vet_test: {
     handler: "handleVetTest",
     input: "VetTestInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal"],
     fixed: NO_FIXED,
+    dispatches: ["reviewer", "testWriter"],
   },
   conductor_mark_green: {
     handler: "handleMarkGreen",
     input: "MarkGreenInput",
     infrastructure: ["store", "fanout", "runId", "config", "journal", "stateHome", "workspaceKey"],
     fixed: NO_FIXED,
+    dispatches: ["implementer"],
   },
   conductor_validate: {
     handler: "handleValidate",
@@ -118,6 +144,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       "packs",
     ],
     fixed: NO_FIXED,
+    dispatches: ["implementer"],
   },
   conductor_item_review: {
     handler: "handleItemReview",
@@ -133,6 +160,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       "packs",
     ],
     fixed: NO_FIXED,
+    dispatches: ["reviewer", "skeptic", "implementer", "testWriter"],
   },
   conductor_publish: {
     handler: "handlePublish",
@@ -154,6 +182,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       // would assert a requirement the input does not carry.
     ],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_report: {
     handler: "handleReport",
@@ -173,6 +202,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       // The root still passes its fanout here, as everywhere an input accepts it.
     ],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_surface: {
     handler: "handleSurface",
@@ -181,6 +211,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     // session registry — context, not a model-supplied argument.
     infrastructure: ["store", "runId", "journal", "askedBy"],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_answer: {
     handler: "handleAnswer",
@@ -193,12 +224,14 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     // that records "human-file" is the ingest of a file from the state area no
     // session may write.
     fixed: { via: "tool" },
+    dispatches: NO_DISPATCH,
   },
   conductor_defer: {
     handler: "handleDefer",
     input: "DeferInput",
     infrastructure: ["store", "runId", "journal"],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_decide: {
     handler: "handleDecide",
@@ -207,12 +240,14 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     // C-044 ruling: a decision recorded through a tool call was not asked of a
     // human (§2.7 "human ⇒ was asked"), so kind is always "derived" here.
     fixed: { kind: "derived" },
+    dispatches: NO_DISPATCH,
   },
   conductor_queue_amend: {
     handler: "handleQueueAmend",
     input: "QueueAmendInput",
     infrastructure: ["store", "runId", "config", "journal"],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_inline_claim: {
     handler: "handleInlineClaim",
@@ -222,6 +257,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     // does for conductor_decide — the root can fabricate neither.
     infrastructure: ["store", "runId", "journal"],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_override: {
     handler: "handleOverride",
@@ -247,12 +283,14 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
       // `metrics` and `now` are OPTIONAL seams, omitted as on conductor_report.
     ],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_status: {
     handler: "handleStatus",
     input: "StatusInput",
     infrastructure: ["store", "runId", "journal"],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   // The ONE handler that takes no store and no runId: §2.3's OpenOptions requires
   // the very Config setup is producing, so the first-run path cannot go through
@@ -264,6 +302,7 @@ export const TOOL_BINDINGS: Readonly<Record<string, ToolBinding | null>> = {
     input: "SetupInput",
     infrastructure: ["root", "journal", "router", "upstream", "failoverState"],
     fixed: NO_FIXED,
+    dispatches: NO_DISPATCH,
   },
   conductor_forget_stale: null,
 };

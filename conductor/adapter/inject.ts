@@ -168,6 +168,27 @@ function renderStateBlock(
   return lines.join("\n");
 }
 
+/**
+ * The single next tool the state block names, as DATA.
+ *
+ * The block renders it into a sentence a human reads; the §7.4 receipt records it
+ * as a field an observer can score. Both come from this one call into legalTools,
+ * so a receipt that disagreed with the block it accompanies is not constructible —
+ * and without the field, "recommended vs actual", the signal that names a model
+ * ignoring its own state block sixteen turns running, is unrecorded on every run.
+ */
+export function recommendedToolOf(
+  run: GateRun,
+  items: GateItem[],
+  questions: GateQuestion[],
+  ctx: InjectCtx,
+): { tool: string | null; itemId: string | null } {
+  const recommended = legalTools(run, items, questions, ctx.repoConfigured, ctx.publishEnabled).recommended;
+  if (recommended === null) return { tool: null, itemId: null };
+  const itemId = recommended.args.itemId;
+  return { tool: recommended.tool, itemId: typeof itemId === "string" ? itemId : null };
+}
+
 // The state block for a workspace that has no live run: the §3.2 fact that a run
 // is created when the orchestrator receives a prompt. It is a SEPARATE rendering
 // rather than renderStateBlock over a fabricated run, because every field that
@@ -313,6 +334,11 @@ export interface Delivery {
   // delivery whose doctrine arrives and whose block does not is the §6.4 half-miss
   // that leaves a 32k model with no runtime navigation at all.
   stateBlock: string;
+  // The tool the state block told this session to call next, and the item it
+  // named, as fields. Both null for a delivery that recommends nothing (a
+  // terminal run, a workspace with no run at all).
+  recommended: string | null;
+  recommendedItem: string | null;
   system: string[];
   params: { temperature: number; topP?: number };
   headers: Record<string, string>;
@@ -354,11 +380,17 @@ export function composeDelivery(input: {
     state === null
       ? [...packTextsFor(packFiles, packs), renderNoRunStateBlock()]
       : buildSystemAppend(registryEntry, state.run, state.items, state.questions, packs, state.ctx);
+  const recommendation =
+    state === null
+      ? { tool: null, itemId: null }
+      : recommendedToolOf(state.run, state.items, state.questions, state.ctx);
   return {
     role: registryEntry.role,
     packFiles,
     packDigest: packDigestOf(packFiles, packs),
     stateBlock: system[system.length - 1] ?? "",
+    recommended: recommendation.tool,
+    recommendedItem: recommendation.itemId,
     system,
     params: paramsForRole(registryEntry.role),
     headers: headersFor(registryEntry, input.job),

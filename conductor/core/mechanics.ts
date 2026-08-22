@@ -158,6 +158,17 @@ export function subSessionTools(): string[] {
     .sort();
 }
 
+// A stage tool written with the sub-session roles it DISPATCHES, read off the
+// binding table's `dispatches` column. The stage order alone told a reader WHEN to
+// call a tool and left WHO does the work unsaid, so an orchestrator read
+// conductor_submit_test as a step it had to satisfy before calling and spent its
+// budget authoring a test the tool's own sub-session writes. A bare name is a
+// stage that dispatches nobody — the harness does that work itself.
+function stageWithRoles(tool: string): string {
+  const roles = TOOL_BINDINGS[tool]?.dispatches ?? [];
+  return roles.length === 0 ? tool : tool + " (" + roles.join(", ") + ")";
+}
+
 // ---------------------------------------------------------------------------
 // The rendered section, per pack.
 // ---------------------------------------------------------------------------
@@ -241,15 +252,23 @@ export function renderMechanics(pack: string): string {
   }
   const lines: string[] = ["## Mechanics — generated from the tool vocabulary", ""];
   if (sections.includes("run")) {
-    lines.push("Run stages, in FSM order: " + runStageTools().join(" -> ") + ".");
+    lines.push("Run stages, in FSM order: " + runStageTools().map(stageWithRoles).join(" -> ") + ".");
   }
   if (sections.includes("item")) {
     lines.push(
       "Item stages, in FSM order: " +
-        itemStageTools().join(" -> ") +
+        itemStageTools().map(stageWithRoles).join(" -> ") +
         ". A non-behavioral item enters at " +
         nonBehavioralEntryTool() +
         ".",
+    );
+  }
+  // The legend the parenthetical is worthless without: role names beside a tool
+  // read as decoration until the reader is told the call IS the authoring.
+  if (sections.includes("run") || sections.includes("item")) {
+    lines.push(
+      "A stage's parenthesised roles are the sub-sessions it dispatches: making the call is how " +
+        "that work gets authored, so never write the artifact yourself. A bare stage dispatches none.",
     );
   }
   if (sections.includes("meta")) {

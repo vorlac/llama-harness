@@ -3298,8 +3298,51 @@ function stageDenyReason(
   return 'item "' + queueItem.id + '" is not offered ' + tool + " right now: " + verdict.why;
 }
 
+/**
+ * Whether the phase gate offers `tool` for this item as the run stands, and, when
+ * it does not, the reason in terms the caller can act on.
+ *
+ * The ONE place the question is asked. requireStageTool refuses through it, and
+ * conductor_inline_claim's futility refusal names its exit through it — so a
+ * message that prescribes a next step can never prescribe one the gate would then
+ * refuse. A second derivation of "is this tool open for this item" is the shape
+ * that has drifted repeatedly in this build: the gate offering what the handler
+ * rejects, or a refusal naming a door locked from the other side.
+ */
+function stageToolOffer(
+  tool: string,
+  store: StateStore,
+  runId: string,
+  runDir: string,
+  context: { run: Run; queue: Queue; queueItem: QueueItem; item: Item },
+): { offered: boolean; reason: string } {
+  const { run, queue, queueItem, item } = context;
+  const gateItems = gateItemsOf(store, runId, queue);
+  const gateRun: GateRun = {
+    state: run.state,
+    stop: run.stop === null ? null : { kind: run.stop.kind },
+    classification: { kind: run.classification.kind },
+    classified: run.classified === true,
+  };
+  // A crash-torn trailing line in questions.jsonl is HEALED at the reader
+  // (GAP-024): the line is skipped and the legality verdict is taken on the
+  // questions that are actually there. The alternative — refusing the stage until
+  // a human repairs the file by hand — wedged a run at exactly the moment §2.11
+  // forbids hand-editing state to resume.
+  const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
+  // §3.9 publish availability is DERIVED from the workspace, never assumed: the
+  // handlers compute the same predicate, so gate and handler cannot disagree
+  // about whether an item at REVIEWED still owes a publish (C-048/C-054).
+  const verdict = legalTools(gateRun, gateItems, questions, true, isRepo(store.root));
+  const offered = (verdict.legal.get(tool)?.itemIds ?? []).includes(queueItem.id);
+  return {
+    offered,
+    reason: offered ? "" : stageDenyReason(tool, verdict, { run, queueItem, item, gateItems }),
+  };
+}
+
 // The legality step both stage handlers share. Loads the run, queue and item,
-// asks legalTools whether `tool` is offered for `itemId`, and THROWS a named
+// asks stageToolOffer whether `tool` is offered for `itemId`, and THROWS a named
 // refusal if it is not — before any sub-session is dispatched and before any
 // state is written.
 function requireStageTool(
@@ -3322,13 +3365,6 @@ function requireStageTool(
     throw new Error(tool + ': item "' + itemId + '" has no runtime item file; refusing to run the stage');
   }
 
-  const gateItems = gateItemsOf(store, runId, queue);
-  const gateRun: GateRun = {
-    state: run.state,
-    stop: run.stop === null ? null : { kind: run.stop.kind },
-    classification: { kind: run.classification.kind },
-    classified: run.classified === true,
-  };
   // §2.4 paths are repo-relative and stay inside the run's tree. Asserted HERE, at
   // the legality step, because this is the last point before the two things that
   // dereference them: the child test runner takes testScope as argv, and the
@@ -3340,20 +3376,8 @@ function requireStageTool(
   assertContainedPaths(tool, store.root, itemId, "testScope", queueItem.testScope);
   assertContainedPaths(tool, store.root, itemId, "fileScope", queueItem.fileScope);
 
-  // A crash-torn trailing line in questions.jsonl is HEALED at the reader
-  // (GAP-024): the line is skipped and the legality verdict is taken on the
-  // questions that are actually there. The alternative — refusing the stage until
-  // a human repairs the file by hand — wedged a run at exactly the moment §2.11
-  // forbids hand-editing state to resume.
-  const questions = readQuestions(runDir).map((q) => ({ id: q.id, answeredIso: q.answeredIso }));
-  // §3.9 publish availability is DERIVED from the workspace, never assumed: the
-  // handlers compute the same predicate, so gate and handler cannot disagree
-  // about whether an item at REVIEWED still owes a publish (C-048/C-054).
-  const verdict = legalTools(gateRun, gateItems, questions, true, isRepo(store.root));
-  const offered = verdict.legal.get(tool)?.itemIds ?? [];
-  if (!offered.includes(itemId)) {
-    throw new Error(tool + ": " + stageDenyReason(tool, verdict, { run, queueItem, item, gateItems }));
-  }
+  const offer = stageToolOffer(tool, store, runId, runDir, { run, queue, queueItem, item });
+  if (!offer.offered) throw new Error(tool + ": " + offer.reason);
   return { run, queue, queueItem, item };
 }
 
@@ -9437,6 +9461,66 @@ export interface InlineClaimResult {
 }
 
 /**
+ * Why a claim over a behavioral item at PENDING is futile, and what the caller
+ * should do instead.
+ *
+ * The exit is DERIVED, never asserted. conductor_submit_test is the item's stage
+ * tool by the §3.3 table, but a blocked, deferred, dependency-unready or
+ * pre-EXECUTING item is offered no stage tool at all — so naming it
+ * unconditionally would answer a deadlock with a door locked from the other side,
+ * which is the one thing gates-edit.ts says a refusal must never do. stageToolOffer
+ * answers whether the gate opens that door, and stageDenyReason names the blocker
+ * when it does not.
+ */
+function futilityRefusal(
+  store: StateStore,
+  runId: string,
+  runDir: string,
+  queue: Queue,
+  claimEntry: QueueItem,
+  item: Item,
+): string {
+  const run = store.loadRun(runId);
+  const offer = stageToolOffer(SUBMIT_TEST_TOOL, store, runId, runDir, {
+    run,
+    queue,
+    queueItem: claimEntry,
+    item,
+  });
+  const exit = offer.offered
+    ? 'Call ' +
+      SUBMIT_TEST_TOOL +
+      ' on "' +
+      claimEntry.id +
+      '": it DISPATCHES the test-writer that authors the failing test in testScope.'
+    : SUBMIT_TEST_TOOL +
+      ' is not open for "' +
+      claimEntry.id +
+      '" either — ' +
+      offer.reason +
+      ". That is the blocker to clear; the claim stays futile until it is.";
+  return (
+    'item "' +
+    claimEntry.id +
+    '" is behavioral and sits at PENDING, where the red it owes is written into testScope' +
+    (claimEntry.testScope.length === 0
+      ? ", which this queue entry leaves empty"
+      : " (" + claimEntry.testScope.join(", ") + ")") +
+    ". A claim grants this item's fileScope (" +
+    claimEntry.fileScope.join(", ") +
+    ") and nothing else (§3.6), and §2.4 holds those two scopes disjoint — so the claim cannot " +
+    "license the write its own next step needs, and widening its scope to reach the test is " +
+    "refused for that same reason. " +
+    exit +
+    " A claim becomes useful over this item once its red exists: from TEST_VETTED the " +
+    "implementation lands inside the fileScope a claim grants. What it buys there is the " +
+    "ORCHESTRATOR's own edit permission inside that scope, not a saved sub-session — " +
+    "conductor_mark_green still dispatches its implementer for a claimed item and an unclaimed " +
+    "one alike."
+  );
+}
+
+/**
  * §3.6: grant the ORCHESTRATOR edit permission scoped to the claimed item's
  * fileScope, for work where dispatch is objectively more expensive than doing.
  * The claim is a §2.7 DERIVED decision (dispatching was the other option), so
@@ -9457,6 +9541,38 @@ export function handleInlineClaim(input: InlineClaimInput): InlineClaimResult {
     item = store.loadItem(runId, input.itemId);
   } catch {
     throw new Error(INLINE_CLAIM_TOOL + ': item "' + input.itemId + '" does not exist; refusing to claim');
+  }
+
+  // ...and the §2.4 queue entry the claim would grant must be readable. §3.6's
+  // grant IS that entry's fileScope: inlineClaimScopeFor fails closed without it
+  // and derives no scope at all, so a claim taken here would spend a §2.7 ledger
+  // line and a §2.5 annotation on a grant of nothing. Refuse one step earlier,
+  // with the same posture the derivation takes.
+  const read = readQueue(runDir);
+  const claimEntry = read.queue.items.find((candidate) => candidate.id === input.itemId);
+  if (claimEntry === undefined) {
+    throw new Error(
+      INLINE_CLAIM_TOOL +
+        ': item "' +
+        input.itemId +
+        '" has no entry in this run\'s queue.json' +
+        (read.error === null ? "" : " (" + read.error.message + ")") +
+        ", and §3.6 grants exactly that entry's fileScope — inlineClaimScopeFor would derive no scope " +
+        "at all, so the claim would record a decision that grants nothing; refusing before it is taken",
+    );
+  }
+
+  // ...and a claim that could never license its own next step is refused before it
+  // is taken. A behavioral item at PENDING owes a proven red, and that red is
+  // written into testScope; a claim grants the queue entry's fileScope and nothing
+  // else (inlineClaimScopeFor), and §2.4 holds fileScope disjoint from testScope.
+  // The scope the claim would grant therefore cannot cover the one write the item's
+  // next step needs — a futility provable right here, from the queue entry and the
+  // item's FSM position, before any of it is spent. The claim stays legal
+  // everywhere else: on a non-behavioral item, and on a behavioral item past its
+  // red, the work lands inside fileScope.
+  if (claimEntry.behavioral && item.state === "PENDING") {
+    throw new Error(INLINE_CLAIM_TOOL + ": " + futilityRefusal(store, runId, runDir, read.queue, claimEntry, item));
   }
 
   // ...and the claim's decision must be §2.7-legal BEFORE anything persists.

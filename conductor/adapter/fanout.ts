@@ -201,6 +201,31 @@ function fencedBlock(text: string): string | null {
 // that names what was wrong without naming what is right asks for another guess.
 export const SCHEMA_SHAPE_HEADING = "Your reply is validated against this shape.";
 
+// The ceiling on the prompt and the response text a fan-out record carries. Both
+// sides of a sub-session exchange are already in memory on this code path, so
+// recording them costs no call — but a journal record is not free, and an unbounded
+// one is worse than useless: adapter/journal.ts bounds a record to 32 KiB and, past
+// that, throws away the WHOLE data object in favour of a truncation preview, so an
+// oversized transcript would take `role`, `itemId`, `model` and `promptChars` down
+// with it. 8192 characters is chosen against both ends of that. Observed briefs run
+// 2,543 to 2,863 characters, so a whole brief and a sub-session receipt of several
+// thousand characters land intact with room to spare; and one record carries at most
+// one capped string — the prompt on dispatch, the response on completion — so even
+// text that is entirely three-byte UTF-8 serializes near 24 KiB and stays under the
+// ceiling. At six exchanges to a wave the worst case is about 96 KiB of transcript
+// per wave, against the 256 MiB retention.maxRunDirBytes at which the journal
+// rotates: thousands of waves of headroom.
+export const MAX_TRANSCRIPT_CHARS = 8192;
+
+// A transcript field pair for a record: the text as far as the cap, plus the
+// `truncated` marker WHEN the cap bit. The marker is omitted rather than written
+// false when the text fits, so a journal written before this record shape carried a
+// transcript reads as untruncated instead of as a record that lost its marker.
+function transcriptFields(key: string, text: string): Record<string, string | boolean> {
+  if (text.length <= MAX_TRANSCRIPT_CHARS) return { [key]: text };
+  return { [key]: text.slice(0, MAX_TRANSCRIPT_CHARS), truncated: true };
+}
+
 function briefWithShape(job: FanoutJob): string {
   const shape = describeSchema(job.schemaName);
   if (shape.length === 0) return job.prompt;
@@ -481,6 +506,7 @@ export function createFanout(
             ...(job.receivingReview === true ? { receivingReview: true } : {}),
             ...(job.schemaName.length > 0 ? { schema: true } : {}),
           });
+          const brief = briefWithShape(job);
           journal.log(
             "info",
             "fanout",
@@ -489,18 +515,21 @@ export function createFanout(
             // schema shape that rides with it. conductor/tools/observation.ts derives
             // the largest-brief window fraction from it, and a fraction computed from
             // a number smaller than the real prompt understates exactly the crowding
-            // it exists to detect.
+            // it exists to detect. It measures the WHOLE prompt even when `prompt`
+            // beside it is capped, so the count says what the sub-session read and
+            // the text says as much of it as a record may carry.
             {
               role: job.role,
               itemId: job.itemId,
               tree: job.tree,
               model,
-              promptChars: briefWithShape(job).length,
+              promptChars: brief.length,
+              ...transcriptFields("prompt", brief),
             },
             corr(),
           );
 
-          let promptText = briefWithShape(job);
+          let promptText = brief;
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
             const reply = await client.session.prompt({
               path: { id: sessionID },
@@ -516,6 +545,12 @@ export function createFanout(
             });
             if (done) return; // the watchdog already resolved this job
 
+            // The reply text as the engine already holds it. Every completion below
+            // this line has a reply to quote; the ones above it — a session that was
+            // never created, a watchdog abort, an engine error — have none, and say
+            // nothing about a response rather than reporting an empty one.
+            const replyText = extractReplyText(reply);
+
             // An error envelope is a call that did not happen: there is no receipt to
             // re-prompt, and reading its (absent) text as a malformed receipt would
             // blame the sub-session's output for a transport failure and spend the
@@ -526,7 +561,12 @@ export function createFanout(
                 "info",
                 "fanout",
                 "subsession.complete",
-                { ok: false, reason: "dispatch-failed", errors: [detail] },
+                {
+                  ok: false,
+                  reason: "dispatch-failed",
+                  errors: [detail],
+                  ...transcriptFields("response", replyText),
+                },
                 corr(),
               );
               finish({
@@ -536,9 +576,15 @@ export function createFanout(
               return;
             }
 
-            const receipt = parseAndValidate(extractReplyText(reply), job.schemaName);
+            const receipt = parseAndValidate(replyText, job.schemaName);
             if (receipt.ok) {
-              journal.log("info", "fanout", "subsession.complete", { ok: true, attempts: attempt }, corr());
+              journal.log(
+                "info",
+                "fanout",
+                "subsession.complete",
+                { ok: true, attempts: attempt, ...transcriptFields("response", replyText) },
+                corr(),
+              );
               finish({ sessionID, value: receipt.value });
               return;
             }
@@ -552,7 +598,15 @@ export function createFanout(
               "info",
               "fanout",
               "subsession.complete",
-              { ok: false, reason: "schema-invalid", errors: receipt.errors },
+              // The refused text rides with the errors it was refused for: a reader
+              // asking why the validator kept saying no needs the answer it kept
+              // saying no to.
+              {
+                ok: false,
+                reason: "schema-invalid",
+                errors: receipt.errors,
+                ...transcriptFields("response", replyText),
+              },
               corr(),
             );
             finish({

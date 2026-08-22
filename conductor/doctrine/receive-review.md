@@ -70,7 +70,8 @@ that covers it."
 <!-- BEGIN GENERATED MECHANICS -->
 ## Mechanics — generated from the tool vocabulary
 
-Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+Item stages, in FSM order: conductor_submit_test (testWriter) -> conductor_vet_test (reviewer, testWriter) -> conductor_mark_green (implementer) -> conductor_validate (implementer) -> conductor_item_review (reviewer, skeptic, implementer, testWriter) -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+A stage's parenthesised roles are the sub-sessions it dispatches: making the call is how that work gets authored, so never write the artifact yourself. A bare stage dispatches none.
 A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 
 The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.

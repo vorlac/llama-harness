@@ -39,6 +39,15 @@
 // and nothing else: every extra field is another way for a wedged run to look like
 // it moved.
 //
+// THE SIGNATURE IS SAMPLED AT TWO POINTS, NEVER DERIVED TWICE. handleSessionIdle
+// samples it when the bus reports the orchestrator idle, and handleOrchestratorTurn
+// samples it when the orchestrator finishes a message. The second exists because
+// the first cannot see the failure that matters most: a session that generates
+// continuously never goes idle, so a run that spins while making no progress was
+// invisible to every guard — it ran to the tier ceiling with futileRePrompts 0,
+// no stop record and no artifact. Both call the SAME signatureOf and both stop
+// through core/stops.ts, which owns both thresholds; this file owns neither.
+//
 // THE DEBOUNCE, THE ONE-IN-FLIGHT LATCH, THE LAST OBSERVED SIGNATURE AND THE
 // CONSECUTIVE-SEND-FAILURE COUNT ARE IN-MEMORY (SG-3), held in a caller-owned
 // ContinuationState — the same shape the
@@ -73,7 +82,7 @@ import { legalTools } from "../core/gates-phase.ts";
 import type { GateRun, LegalToolsResult } from "../core/gates-phase.ts";
 import { isHumanTerritory } from "../core/decide.ts";
 import { dispositionsOf, isResumableStop, runDispositionOf, stopKindOf } from "../core/disposition.ts";
-import { isTerminal, shouldTerminate } from "../core/stops.ts";
+import { isTerminal, shouldTerminate, shouldTerminateStalledTurns } from "../core/stops.ts";
 import type { Config, Item, Queue, QuestionRecord, Run, StopKind, TreePath } from "../core/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -159,6 +168,20 @@ export interface ContinuationState {
    * holds a different one. It is reset by any send that leaves.
    */
   consecutiveSendFailures: number;
+  /**
+   * THE TURN SAMPLER'S THREE FIELDS (see handleOrchestratorTurn). The futility
+   * signature as of the last COUNTED orchestrator turn, namespaced by run id;
+   * the consecutive turns observed at it; and the assistant message ids already
+   * counted, because the bus re-delivers one message many times as it streams.
+   *
+   * In-memory for SG-3's reason and one more: a restart loses the count, which
+   * is the safe direction. An over-count would stop a live run on a wedge it
+   * never had, while an under-count costs a wedged run only the turns it takes
+   * to re-reach the threshold.
+   */
+  lastTurnSignature: string | null;
+  turnsAtSignature: number;
+  countedTurns: Set<string>;
 }
 
 export function createContinuationState(): ContinuationState {
@@ -169,6 +192,9 @@ export function createContinuationState(): ContinuationState {
     adjudicated: new Set<string>(),
     pendingConversions: [],
     consecutiveSendFailures: 0,
+    lastTurnSignature: null,
+    turnsAtSignature: 0,
+    countedTurns: new Set<string>(),
   };
 }
 
@@ -218,18 +244,30 @@ export interface ContinuationDeps {
   ) => void;
 }
 
-export interface SessionIdleInput {
+/**
+ * What recording a §2.9 stop takes, and nothing more: the store the stop is
+ * written through, the in-memory half whose queues the cleanup drains, the sink
+ * the disengagement is journaled to, and the coordinates the ONE report writer
+ * needs. Both seams that can end a run — the idle engine and the turn sampler —
+ * satisfy it, so the stop paths are written once against this shape rather than
+ * once per seam. There is no client here on purpose: no stop path sends a model
+ * a message.
+ */
+export interface StopContext {
   store: StateStore;
   state: ContinuationState;
-  registry: Map<string, RegistryEntry>;
-  sessionID: string;
-  client: ContinuationClient;
   config: Config;
   journal: ContinuationJournal;
   stateHome: string;
   workspaceKey: string;
   now: () => number;
   deps?: ContinuationDeps;
+}
+
+export interface SessionIdleInput extends StopContext {
+  registry: Map<string, RegistryEntry>;
+  sessionID: string;
+  client: ContinuationClient;
 }
 
 export interface SessionIdleResult {
@@ -351,6 +389,34 @@ export function activeInlineClaimScope(store: StateStore, runId: string): string
   return scope.length === 0 ? null : scope;
 }
 
+/**
+ * The §2.4 testScopes of every item in the run, flattened and de-duplicated in
+ * queue order.
+ *
+ * The ONE derivation both orchestrator edit seams feed core/gates-edit.ts
+ * `testScope` from. The orchestrator seat is bound to no item, so without this it
+ * is judged against an empty testScope and G8 can only ever offer it the inline
+ * claim — the one exit §2.4 makes incapable of covering a test path. Handing the
+ * gate the run's testScopes is what lets a refusal over one of them name
+ * conductor_submit_test instead.
+ *
+ * Run-wide rather than claim-wide on purpose: the advice is true of a test path
+ * whether or not a claim is held, and which item owns the test does not change
+ * which tool dispatches its writer. Fail closed the same way its sibling does —
+ * no queue derives no scope, and no scope names no test.
+ */
+export function runTestScopes(store: StateStore, runId: string): string[] {
+  const queue = readQueue(handlerRunDir(store, runId));
+  if (queue === null) return [];
+  const scope: string[] = [];
+  for (const entry of queue.items) {
+    for (const glob of entry.testScope) {
+      if (!scope.includes(glob)) scope.push(glob);
+    }
+  }
+  return scope;
+}
+
 // ---------------------------------------------------------------------------
 // The futility signature (SG-1)
 // ---------------------------------------------------------------------------
@@ -397,7 +463,7 @@ function signatureOf(store: StateStore, run: Run, runDir: string, queue: Queue |
 // Terminal-run cleanup (§4.2 worktrees + SG-4 archival)
 // ---------------------------------------------------------------------------
 
-function cleanupAndArchive(input: SessionIdleInput, run: Run, runDir: string): void {
+function cleanupAndArchive(input: StopContext, run: Run, runDir: string): void {
   const { store, journal } = input;
   // SG-5's channel closes with the run: a conversion raised under it has no
   // orchestrator left to surface it to, and it must not be carried into a later
@@ -464,7 +530,7 @@ function cleanupAndArchive(input: SessionIdleInput, run: Run, runDir: string): v
 // The stop paths (§2.9). ONLY `noop` and `interrupt` are recorded here.
 // ---------------------------------------------------------------------------
 
-async function driveStopReport(input: SessionIdleInput, runId: string): Promise<void> {
+async function driveStopReport(input: StopContext, runId: string): Promise<void> {
   const writer =
     input.deps?.writeStopReport ??
     (async (i: {
@@ -1167,6 +1233,191 @@ export async function handleSessionIdle(input: SessionIdleInput): Promise<Sessio
 }
 
 // ---------------------------------------------------------------------------
+// handleOrchestratorTurn — the no-progress detector that does not need idleness
+// ---------------------------------------------------------------------------
+
+export interface OrchestratorTurnInput extends StopContext {
+  registry: Map<string, RegistryEntry>;
+  /** The session the finished message belongs to. */
+  sessionID: string;
+  /** The assistant message id, which is what makes a turn countable ONCE. */
+  messageID: string;
+}
+
+export interface OrchestratorTurnResult {
+  runId: string | null;
+  /** True exactly when this delivery was a turn this run had not yet counted. */
+  counted: boolean;
+  /** Consecutive turns observed at the current signature, after this one. */
+  turnsAtSignature: number;
+  stop: StopRecorded | null;
+}
+
+const NO_TURN: OrchestratorTurnResult = { runId: null, counted: false, turnsAtSignature: 0, stop: null };
+
+/** How many assistant message ids the dedup window remembers. */
+const COUNTED_TURN_MEMORY = 512;
+
+/**
+ * The unfinished items, each with the state it is sitting in, so a stop can name
+ * WHAT did not move rather than only that nothing did. The id list is the ONE
+ * derivation the re-prompt already uses; only the state is read alongside it.
+ */
+function unmovedPositionsOf(store: StateStore, runId: string, queue: Queue | null): string[] {
+  return unfinishedItemIds(store, runId, queue).map((id) => {
+    try {
+      return id + " (" + store.loadItem(runId, id).state + ")";
+    } catch {
+      return id;
+    }
+  });
+}
+
+/**
+ * The blocker, named: the state the run was stuck in, the items that never
+ * moved, and the action the phase gate was recommending the whole time. A stop
+ * that says only "no progress" tells an operator nothing a timeout would not
+ * have told them, which is the whole complaint against the ceiling this detector
+ * replaces.
+ */
+function stalledReasonOf(
+  run: Run,
+  turns: number,
+  positions: string[],
+  gate: LegalToolsResult,
+): string {
+  const recommended = gate.recommended;
+  const named =
+    recommended === null
+      ? "the phase gate offered no per-item stage tool at all (" +
+        gate.why +
+        "); the actions it did legalize were: " +
+        offeredMetaTools(gate).join(", ")
+      : "the phase gate's next action was " +
+        recommended.tool +
+        (recommended.args.itemId === undefined ? "" : " for item " + recommended.args.itemId) +
+        ", unheeded throughout";
+  return (
+    "the orchestrator completed " +
+    String(turns) +
+    " consecutive turns without this run moving: state " +
+    run.state +
+    ", still unfinished " +
+    (positions.length === 0 ? "(no item)" : positions.join(", ")) +
+    ", and " +
+    named +
+    " — disengaging rather than generating until the session ceiling ends the run with nothing on disk"
+  );
+}
+
+/**
+ * Sample the §3.7 futility signature on an orchestrator TURN and stop the run
+ * when it has not moved across the core threshold's worth of them.
+ *
+ * WHY A SECOND SAMPLING POINT. handleSessionIdle is driven by `session.idle`,
+ * which fires when the orchestrator's reply CHAIN ends. A model that answers
+ * every re-prompt with more generation never produces one, so the futile
+ * re-prompt limit — the design's only wedge detector — is never even consulted.
+ * The analyzed run sat at one signature for 36 minutes, made 16 turns, and died
+ * at the tier ceiling with both counters at zero. A turn, by contrast, is
+ * observable exactly when a run is at its most active.
+ *
+ * WHAT THIS PASS IS NOT. It sends nothing, dispatches nothing and re-prompts
+ * nothing: a run that is merely slow must not be spoken to twice, and the
+ * §3.7.4 debounce exists precisely because the idle engine already may. It reads
+ * persisted state, counts, and — at the threshold — records the ONE §2.9 stop
+ * every other terminal path in this file records, in the same order (anomaly
+ * write-ahead, stop, journal, report through the ONE writer, cleanup), so
+ * isTerminal makes the run terminal for every subsystem at once with no special
+ * case anywhere.
+ */
+export async function handleOrchestratorTurn(input: OrchestratorTurnInput): Promise<OrchestratorTurnResult> {
+  const { store, state, registry, sessionID, journal } = input;
+
+  // (a) ORCHESTRATOR-ONLY, exactly as the idle engine reads it. A sub-session's
+  //     turns are the fan-out engine's business and its own timeout's; counting
+  //     them here would charge the orchestrator for work it did not do.
+  const entry = registry.get(sessionID);
+  if (entry === undefined || entry.role !== "orchestrator") return NO_TURN;
+
+  const current = store.currentRun();
+  if (current === null) return NO_TURN;
+  const runId = current.runId;
+
+  // (b) ONCE PER MESSAGE. The bus re-delivers one message as it streams, so the
+  //     id — not the delivery — is the turn. Over-counting is the one error this
+  //     detector cannot afford: it would stop live runs.
+  if (state.countedTurns.has(input.messageID)) {
+    return { runId, counted: false, turnsAtSignature: state.turnsAtSignature, stop: null };
+  }
+
+  const run = store.loadRun(runId);
+  // (c) A terminal run is not sampled: its stop is recorded, and a second one
+  //     would double-record. Archival stays the idle engine's, which owns the
+  //     pointer and the ISSUE-066 exception to clearing it.
+  if (isTerminal(run)) return { runId, counted: false, turnsAtSignature: state.turnsAtSignature, stop: null };
+
+  state.countedTurns.add(input.messageID);
+  // The plugin process outlives every run in it, so the dedup set is bounded to
+  // a window far wider than any streaming re-delivery (a whole run is tens of
+  // turns) and the oldest ids are dropped in insertion order. A message id old
+  // enough to fall out of it cannot still be arriving.
+  while (state.countedTurns.size > COUNTED_TURN_MEMORY) {
+    const oldest = state.countedTurns.values().next();
+    if (oldest.done === true) break;
+    state.countedTurns.delete(oldest.value);
+  }
+
+  // (d) The SAME signature the idle engine compares, namespaced by run id: two
+  //     runs can present identical projections (a fresh run with no items looks
+  //     like any other), and a count carried across a run boundary would measure
+  //     nothing that happened.
+  const runDir = handlerRunDir(store, runId);
+  const queue = readQueue(runDir);
+  const key = runId + "\u0000" + signatureOf(store, run, runDir, queue);
+  state.turnsAtSignature = key === state.lastTurnSignature ? state.turnsAtSignature + 1 : 1;
+  state.lastTurnSignature = key;
+
+  // (e) The threshold is core's. A turn below it is journaled nowhere: the §7.4
+  //     continuation vocabulary names re-prompts, idleness and disengagement,
+  //     and a sampler that logged every model turn would bury all three.
+  const verdict = shouldTerminateStalledTurns(run, { stalledTurns: state.turnsAtSignature }, store.itemsSummary(runId));
+  const kind = verdict.kind;
+  if (!verdict.stop || kind === undefined) {
+    return { runId, counted: true, turnsAtSignature: state.turnsAtSignature, stop: null };
+  }
+
+  const gate = waveVerdict(store, runId, runDir, queue ?? { items: [] });
+  const tsMs = input.now();
+  const reasonDisplay = stalledReasonOf(run, state.turnsAtSignature, unmovedPositionsOf(store, runId, queue), gate);
+  // §2.8 WRITE-AHEAD, as on every other disengagement path here: the trace lands
+  // before the stop and the report, so a process killed mid-disengagement still
+  // leaves it.
+  appendAnomaly(runDir, { ts: tsMs, kind: "disengage", detail: reasonDisplay });
+  const stop: StopRecorded = { kind, reasonDisplay, tsMs };
+  const stopped = recordStop(store, run, stop);
+  journal.log(
+    "info",
+    "continuation",
+    "disengage",
+    { stop: stop.kind, stalledTurns: state.turnsAtSignature, reasonDisplay },
+    { runId, sessionID },
+  );
+  await driveStopReport(input, runId);
+  // ISSUE-066, applied to this seam: `noop` is a RESUMABLE kind, and archiving
+  // clears the current-run pointer, which is the one thing that makes
+  // conductor_answer unable to revive a run. A run still holding an unanswered
+  // question keeps its pointer; anything else is cleaned up and archived in this
+  // same pass, because nothing would find it again afterwards.
+  if (!waitingForAnAnswer(store, store.loadRun(runId), runId)) {
+    cleanupAndArchive(input, stopped, runDir);
+  }
+  state.turnsAtSignature = 0;
+  state.lastTurnSignature = null;
+  return { runId, counted: true, turnsAtSignature: 0, stop };
+}
+
+// ---------------------------------------------------------------------------
 // handlePermissionAsked — the §3.5(b)/§3.6 ask-gate
 // ---------------------------------------------------------------------------
 
@@ -1350,7 +1601,11 @@ export async function handlePermissionAsked(input: PermissionAskedInput): Promis
       sessionRole: "orchestrator",
       registered: true,
       fileScope: [],
-      testScope: [],
+      // The orchestrator holds no item, so its fileScope is empty and its edits
+      // are adjudicated by the claim alone. The run's testScopes are handed over
+      // anyway: they are what lets a refusal over a test path name the tool that
+      // dispatches its writer instead of the claim that cannot cover it.
+      testScope: runId === undefined ? [] : runTestScopes(store, runId),
       path: askedPath,
       verifyInFlightTree: null,
       sessionTree: resolveSessionTree(store, entry),
@@ -1436,6 +1691,34 @@ function stringProp(properties: Record<string, unknown> | undefined, key: string
 }
 
 /**
+ * THE TURN SIGNAL. `message.updated` carries the whole message record under
+ * `properties.info` (@opencode-ai/sdk EventMessageUpdated), and an assistant
+ * message whose `time.completed` is set is a turn that finished — the same unit
+ * a transcript is counted in. It fires while the session is at its busiest,
+ * which is exactly where `session.idle` is silent.
+ *
+ * Everything else reads as "not a turn": a user message, a message still
+ * streaming, a payload whose shape this build does not recognize. The bias is
+ * deliberate and one-sided — an unrecognized payload costs a wedged run some
+ * turns, while a miscounted one would stop a run that is working.
+ */
+function completedTurnOf(
+  properties: Record<string, unknown> | undefined,
+): { sessionID: string; messageID: string } | null {
+  const info = properties?.["info"];
+  if (info === null || typeof info !== "object" || Array.isArray(info)) return null;
+  const record = info as Record<string, unknown>;
+  if (record["role"] !== "assistant") return null;
+  const time = record["time"];
+  if (time === null || typeof time !== "object") return null;
+  if (typeof (time as Record<string, unknown>)["completed"] !== "number") return null;
+  const sessionID = stringProp(record, "sessionID");
+  const messageID = stringProp(record, "id");
+  if (sessionID === null || messageID === null) return null;
+  return { sessionID, messageID };
+}
+
+/**
  * Routes by event.type and NEVER throws (G5): a conductor bug must not kill the
  * opencode session that would otherwise still work. Every unrouted type — the
  * whole rest of the bus — is ignored silently.
@@ -1452,6 +1735,24 @@ export async function handlePluginEvent(input: PluginEventInput): Promise<void> 
         registry: input.registry,
         sessionID,
         client: input.client,
+        config: input.config,
+        journal: input.journal,
+        stateHome: input.stateHome,
+        workspaceKey: input.workspaceKey,
+        now: input.now,
+        deps: input.deps,
+      });
+      return;
+    }
+    if (event.type === "message.updated") {
+      const turn = completedTurnOf(event.properties);
+      if (turn === null) return;
+      await handleOrchestratorTurn({
+        store: input.store,
+        state: input.state,
+        registry: input.registry,
+        sessionID: turn.sessionID,
+        messageID: turn.messageID,
         config: input.config,
         journal: input.journal,
         stateHome: input.stateHome,

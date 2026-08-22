@@ -93,7 +93,8 @@ the failure handling, and the safe-by-default behavior as concrete steps.
 <!-- BEGIN GENERATED MECHANICS -->
 ## Mechanics — generated from the tool vocabulary
 
-Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
+Run stages, in FSM order: conductor_classify (mechanical, skeptic) -> conductor_decompose (planner) -> conductor_plan (planner) -> conductor_plan_review (reviewer, skeptic, planner) -> conductor_dispatch_wave (testWriter, reviewer, implementer, skeptic) -> conductor_report.
+A stage's parenthesised roles are the sub-sessions it dispatches: making the call is how that work gets authored, so never write the artifact yourself. A bare stage dispatches none.
 A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 
 The harness re-derives which of these is legal on every request and names the one it recommends. A call out of order is refused, not negotiated.

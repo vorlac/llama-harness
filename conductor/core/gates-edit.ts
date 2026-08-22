@@ -96,6 +96,11 @@ export interface EditInput {
   sessionRole: string;
   registered: boolean;
   fileScope: string[];
+  // The §2.4 testScope this path is judged against. For a session the registry
+  // binds to an item, that item's testScope. For the ORCHESTRATOR seat, which
+  // binds to no item, the run's testScopes — the gate is pure, so the only way it
+  // can tell a session that its denied path belongs to a test-writer is for the
+  // composition root to hand it the scopes that say so.
   testScope: string[];
   path: string;
   // Both are tree PATHS: the tree comparison below is string equality against an
@@ -238,6 +243,21 @@ export function decideEdit(input: EditInput): Decision {
     // A present-but-non-matching claim still denies — the claim must scope it.
     if (inlineClaimScope !== null && scopeMatches(inlineClaimScope, normalized)) {
       return ALLOW;
+    }
+    // A refusal that names an exit the denied path does not have costs the
+    // session its next turn and returns it to the same wall. A path inside an
+    // item's testScope has no inline-claim exit at all: §3.6 scopes a claim to
+    // the item's fileScope, §2.4 holds fileScope and testScope disjoint, so no
+    // claim that could ever be granted covers a testScope path. The exit that
+    // does exist there is conductor_submit_test, which dispatches the test-writer
+    // that owns the file — so the refusal names THAT. The covering globs are
+    // quoted the way the implementer branch quotes them: a reader can check the
+    // claim against the item's own §2.4 scope.
+    const coveringTest = testScope.filter((glob) => globMatch(glob, normalized));
+    if (coveringTest.length > 0) {
+      return deny(
+        `this path is inside an item's testScope [${coveringTest.join(", ")}], and no inline claim reaches it (G8): a claim scopes the item's fileScope (§3.6) and §2.4 holds fileScope and testScope disjoint, so taking one leaves this same edit denied. conductor_submit_test dispatches the test-writer that owns this file — that is the way through`,
+      );
     }
     return deny(
       "the orchestrator may not edit source without an active inline claim scoping this path (G8); use conductor_inline_claim if dispatch is genuinely more expensive than doing",

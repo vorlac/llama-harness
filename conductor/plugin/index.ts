@@ -63,6 +63,7 @@ import {
   createContinuationState,
   handlePluginEvent,
   resolveSessionTree,
+  runTestScopes,
 } from "../adapter/continuation.ts";
 import type { ContinuationClient } from "../adapter/continuation.ts";
 import { DEFAULT_CONFIG, loadConfig } from "../adapter/config-io.ts";
@@ -550,15 +551,21 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
 
   const specs: Record<string, ToolSpec> = {
     conductor_classify: {
-      description: "Classify the run's intake (classifier + skeptic check) and advance INTAKE.",
+      description:
+        "Dispatch the classifier and its skeptic over the run's intake, re-check their verdict against " +
+        "the objective bounds, and advance INTAKE.",
       args: {},
     },
     conductor_decompose: {
-      description: "Decompose classified work into the validated item queue (DAG, scopes, sizes).",
+      description:
+        "Dispatch a planner that proposes the item queue (DAG, scopes, sizes); this validates the " +
+        "proposal against §2.4 and persists queue.json and the items.",
       args: {},
     },
     conductor_plan: {
-      description: "Write plan.md and extract decision records; advance to PLANNED.",
+      description:
+        "Dispatch a planner that authors plan.md and its decision records; this writes them to the run " +
+        "directory and advances to PLANNED.",
       args: {},
     },
     conductor_plan_review: {
@@ -566,11 +573,16 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       args: {},
     },
     conductor_dispatch_wave: {
-      description: "Compute the next wave and drive each member's item pipeline concurrently.",
+      description:
+        "Compute the next wave and drive each member's item pipeline concurrently, dispatching the " +
+        "sub-sessions each stage calls for.",
       args: {},
     },
     conductor_submit_test: {
-      description: "Run the item's test and assert a legal red (behavioral); PENDING to RED.",
+      description:
+        "Dispatch a test-writer sub-session that WRITES the item's failing test into its testScope, then " +
+        "run that test and assert a legal red (behavioral); PENDING to RED. The orchestrator does not " +
+        "author the test — this call does.",
       args: { itemId: S.string().describe("the queue item id") },
     },
     conductor_vet_test: {
@@ -578,11 +590,15 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       args: { itemId: S.string().describe("the queue item id") },
     },
     conductor_mark_green: {
-      description: "Confirm the item's test passes; advance to GREEN.",
+      description:
+        "Dispatch an implementer sub-session that writes the item's change into its fileScope, then " +
+        "confirm the item's test passes; advance to GREEN.",
       args: { itemId: S.string().describe("the queue item id") },
     },
     conductor_validate: {
-      description: "Run the quarantined, start/HEAD-stamped full verify; GREEN to VALIDATED.",
+      description:
+        "Run the quarantined, start/HEAD-stamped full verify, dispatching a debug-fix implementer for as " +
+        "long as it stays red and the fix budget lasts; GREEN to VALIDATED.",
       args: { itemId: S.string().describe("the queue item id") },
     },
     conductor_item_review: {
@@ -641,7 +657,11 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
       },
     },
     conductor_inline_claim: {
-      description: "Record an inline claim scoping orchestrator edit permission to an item (§3.6).",
+      description:
+        "Record an inline claim scoping orchestrator edit permission to an item's fileScope (§3.6). " +
+        "Legal on a non-behavioral item, and on a behavioral item from RED onward. A behavioral item " +
+        "at PENDING is REFUSED: the red it owes is written into testScope, which a claim never grants " +
+        "— call conductor_submit_test there.",
       args: {
         itemId: S.string().describe("the item whose fileScope is claimed"),
         reason: S.string().describe("why inline work is cheaper than dispatch"),
@@ -893,10 +913,19 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
   function gateScopesFor(ws: Workspace | null, sessionID: string): GateScopes {
     if (ws === null) return NO_GATE_SCOPE;
     const itemId = registry.get(sessionID)?.itemId;
-    if (itemId === undefined || itemId.length === 0) return NO_GATE_SCOPE;
     try {
       const run = ws.store.currentRun();
       if (run === null) return NO_GATE_SCOPE;
+      // A session bound to NO item is the orchestrator seat. It gets no fileScope
+      // — §3.6 adjudicates its edits through the inline claim the hook derives
+      // beside this — and the run's §2.4 testScopes, which is what lets a G8
+      // refusal over a test path name conductor_submit_test instead of offering a
+      // claim §2.4 makes incapable of covering one. Fed from the ONE derivation
+      // the ask-gate reads, so the two orchestrator seams cannot disagree about
+      // which paths belong to a test-writer.
+      if (itemId === undefined || itemId.length === 0) {
+        return { fileScope: [], testScope: runTestScopes(ws.store, run.runId) };
+      }
       // queue.json is where §2.4 persists the two scopes — the runtime item file
       // carries the FSM position and the worktree, not the scope — and it is read
       // through the handlers' OWN committed reader, so the gate and every stage
@@ -1488,64 +1517,96 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
     return handleSetup(setupInput);
   }
 
+  // The §7.4 record for a §3.4 call that was REFUSED. The gate stack's own
+  // refusals are `gates: deny`; this names the refusals past it — the run FSM's
+  // illegal transition, the queue amendment validateQueue rejects, a handler's own
+  // legality step, an argument the root will not invent. Every one of those calls
+  // is already written to the journal as `gates: allow`, because the gates did
+  // allow them, so without this record the journal says a call succeeded that the
+  // caller was told it could not make, and the refusal survives only in opencode's
+  // session log where no replay, observer or post-mortem reaches it.
+  function journalRefusal(name: string, sessionID: string, err: unknown): void {
+    const entry = registry.get(sessionID);
+    const data: Record<string, unknown> = {
+      toolName: name,
+      // Verbatim: this is exactly the text the caller read, and a paraphrase would
+      // make the record a second, differently-worded story about the same refusal.
+      reason: err instanceof Error ? err.message : String(err),
+    };
+    if (entry?.role !== undefined) data.role = entry.role;
+    journal.log("warn", "gates", "refused", data, {
+      ...(liveRunId === null ? {} : { runId: liveRunId }),
+      ...(entry?.itemId === undefined ? {} : { itemId: entry.itemId }),
+      sessionID,
+    });
+  }
+
   // The ONE body every registered tool executes. Caller legality first, then
   // argument legality (a refusal, never a default), then the bundle, then the
-  // committed handler.
+  // committed handler — with ONE catch around all four, so a refusal from any of
+  // them is recorded in one place rather than by thirty handlers each remembering
+  // to report themselves. It records and RETHROWS: the refusal reaches the caller
+  // exactly as it was raised, because a refusal converted into data is a refusal
+  // the model reads as a call that succeeded and happened to say no.
   async function runTool(name: string, rawArgs: unknown, context: unknown): Promise<string> {
     const args = argsOf(rawArgs);
     const sessionID = sessionIdOf(context);
-
-    // GAP-006, the choke point's CALLER half. Identity comes from the §3.5
-    // registry — the same map the gate hook reads — and never from an argument,
-    // because an identity the model supplies is an identity the model can forge.
-    // Asked here, ahead of everything, so it holds for conductor_setup too (the
-    // one name that returns before the bundle is assembled).
-    const callerEntry = registry.get(sessionID);
-    const caller = {
-      ...(callerEntry?.role === undefined ? {} : { role: callerEntry.role }),
-      ...(callerEntry?.itemId === undefined ? {} : { itemId: callerEntry.itemId }),
-    };
-
-    // WHO before WHAT, through core's own predicate (the same one requireToolLegal
-    // asks below, so this is an ordering and not a second rule). Asking the argument
-    // question first answers a sub-session that may not call this tool at all with a
-    // shape complaint — "re-issue the call with the missing field set" — which invites
-    // exactly the retry §3.5 exists to refuse and never names the rule it broke.
-    const byCaller = callerAllowed(name, caller);
-    if (!byCaller.ok) throw refuse(byCaller.why);
-
-    requireDeclaredArgs(name, args);
-
-    if (name === "conductor_setup") {
-      // No store: setup is the one tool that runs before a workspace can be
-      // opened at all (§2.3's OpenOptions needs the Config setup produces).
-      requireToolLegal({ tool: name, runId: "", caller });
-      return JSON.stringify(await runSetup(args));
-    }
-
-    const run = bound[name];
-    if (run === undefined) {
-      throw refuse(
-        `${name} is registered in the §3.4 inventory but no handler binding is declared for it; ` +
-          "conductor refuses the call rather than pretending the stage ran.",
-      );
-    }
-    const assembled = assemble(name, sessionID, !RUNLESS_TOOLS.includes(name));
     try {
-      // The PHASE half, after the bundle because it reads the run the bundle
-      // resolved. Every §3.4 name passes through here: a tool guarded by its own
-      // handler declares that delegation in the table, and a tool that declares
-      // nothing is refused rather than run (which is the growth property — the
-      // next tool cannot be born unguarded).
-      requireToolLegal({
-        tool: name,
-        store: assembled.deps.store,
-        runId: assembled.deps.runId,
-        caller,
-      });
-      return JSON.stringify(await run(args, assembled));
-    } finally {
-      assembled.release();
+      // GAP-006, the choke point's CALLER half. Identity comes from the §3.5
+      // registry — the same map the gate hook reads — and never from an argument,
+      // because an identity the model supplies is an identity the model can forge.
+      // Asked here, ahead of everything, so it holds for conductor_setup too (the
+      // one name that returns before the bundle is assembled).
+      const callerEntry = registry.get(sessionID);
+      const caller = {
+        ...(callerEntry?.role === undefined ? {} : { role: callerEntry.role }),
+        ...(callerEntry?.itemId === undefined ? {} : { itemId: callerEntry.itemId }),
+      };
+
+      // WHO before WHAT, through core's own predicate (the same one requireToolLegal
+      // asks below, so this is an ordering and not a second rule). Asking the argument
+      // question first answers a sub-session that may not call this tool at all with a
+      // shape complaint — "re-issue the call with the missing field set" — which invites
+      // exactly the retry §3.5 exists to refuse and never names the rule it broke.
+      const byCaller = callerAllowed(name, caller);
+      if (!byCaller.ok) throw refuse(byCaller.why);
+
+      requireDeclaredArgs(name, args);
+
+      if (name === "conductor_setup") {
+        // No store: setup is the one tool that runs before a workspace can be
+        // opened at all (§2.3's OpenOptions needs the Config setup produces).
+        requireToolLegal({ tool: name, runId: "", caller });
+        return JSON.stringify(await runSetup(args));
+      }
+
+      const run = bound[name];
+      if (run === undefined) {
+        throw refuse(
+          `${name} is registered in the §3.4 inventory but no handler binding is declared for it; ` +
+            "conductor refuses the call rather than pretending the stage ran.",
+        );
+      }
+      const assembled = assemble(name, sessionID, !RUNLESS_TOOLS.includes(name));
+      try {
+        // The PHASE half, after the bundle because it reads the run the bundle
+        // resolved. Every §3.4 name passes through here: a tool guarded by its own
+        // handler declares that delegation in the table, and a tool that declares
+        // nothing is refused rather than run (which is the growth property — the
+        // next tool cannot be born unguarded).
+        requireToolLegal({
+          tool: name,
+          store: assembled.deps.store,
+          runId: assembled.deps.runId,
+          caller,
+        });
+        return JSON.stringify(await run(args, assembled));
+      } finally {
+        assembled.release();
+      }
+    } catch (err) {
+      journalRefusal(name, sessionID, err);
+      throw err;
     }
   }
 
@@ -1595,6 +1656,12 @@ export const ConductorPlugin: Plugin = async (input: PluginInput) => {
           // rather than as a record that merely does not mention it.
           stateBlock: delivery.stateBlock.length > 0,
           stateBlockLines: delivery.stateBlock.split("\n").length,
+          // The single next tool this request was told to call, and the item it
+          // named. Recorded as fields so "recommended vs actual" — the signal
+          // that names a model ignoring its state block turn after turn — is
+          // derivable from the journal alone.
+          recommended: delivery.recommended,
+          recommendedItem: delivery.recommendedItem,
           entries: delivery.system.length,
         },
         { sessionID },

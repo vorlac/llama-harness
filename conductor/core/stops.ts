@@ -60,6 +60,15 @@ export interface TerminateVerdict {
   kind?: StopKind;
 }
 
+/**
+ * Consecutive orchestrator turns observed at ONE unchanged futility signature.
+ * Counted by the continuation engine, which owns both the signature derivation
+ * and the turn events; this module owns only the threshold and the verdict.
+ */
+export interface TurnCounters {
+  stalledTurns: number;
+}
+
 // ---------------------------------------------------------------------------
 // isTerminal — §2.3, one definition referenced everywhere
 // ---------------------------------------------------------------------------
@@ -81,9 +90,39 @@ export function isTerminal(run: RunLike): boolean {
 // shouldTerminate — the computed stop kinds
 // ---------------------------------------------------------------------------
 
-// §3.7 (plan lines 1465-1472): futileRePrompts reaching 3 is the ONLY wedge
-// detector; §2.9's noop row and this constant encode the identical rule.
+// §3.7 (plan lines 1465-1472): futileRePrompts reaching 3 is the wedge detector
+// for a run that goes IDLE; §2.9's noop row and this constant encode the
+// identical rule.
 const FUTILE_RE_PROMPT_LIMIT = 3;
+
+/**
+ * The wedge detector for a run that never goes idle.
+ *
+ * FUTILE_RE_PROMPT_LIMIT counts RE-PROMPTS, and a re-prompt is only ever sent to
+ * a session the bus reported idle. A session that generates continuously is
+ * never sampled, so a run that spins productively-looking while making no
+ * progress passes every guard: in the analyzed three-arm run the futility
+ * signature held for 36 minutes while the model worked, run.json closed at
+ * futileRePrompts 0, and the tier ceiling — not the harness — ended it, leaving
+ * no stop record and no artifact. This threshold measures the SAME signature over
+ * orchestrator TURNS, which are observable whether or not anything goes idle.
+ *
+ * WHY TWELVE. The analyzed run took 16 turns at one unchanged signature, and its
+ * MEDIAN turn was about 80 seconds (its mean, 123 s, was dragged up by two
+ * context compactions). Twelve turns is therefore ~16 minutes of wall clock at
+ * the median and ~25 at the mean — inside the 45-minute tier ceiling either way,
+ * so the run ends with a named stop instead of being killed mid-generation, and
+ * four turns below the count actually observed, so that wedge dies here.
+ *
+ * The floor is set by what a HEALTHY run does at one signature. The signature
+ * moves on every item state change, every run state change, every question
+ * raised or answered; between two of those an orchestrator legitimately reads
+ * files, greps and runs commands. Twelve consecutive model turns of that with
+ * nothing to show is already far past a session gathering context, and the count
+ * is CONSECUTIVE — any movement returns the whole budget — so the cost of the
+ * threshold to a run that is working is zero.
+ */
+const STALLED_TURN_LIMIT = 12;
 
 /**
  * The §2.9 counts, read as GAP-022 dispositions. `itemsSummary` carries counts
@@ -101,6 +140,27 @@ function summaryDisposition(itemsSummary: ItemsSummary): Disposition {
   if (itemsSummary.open > 0) dispositions.push("actionable");
   if (itemsSummary.blocked > 0) dispositions.push("waiting-human");
   return runDispositionOf(dispositions, { openQuestions: itemsSummary.surfacedQuestions });
+}
+
+/**
+ * The run's position as GAP-021's closer reads it. The kinds are never spelled
+ * by the callers below: the closer owns the cause-to-kind mapping, so a rule
+ * added to §2.9 lands in one place instead of in each recorder's own literal.
+ */
+function closureOf(itemsSummary: ItemsSummary): {
+  disposition: Disposition;
+  blockedItems: number;
+  openQuestions: number;
+  advancedItems: number;
+} {
+  return {
+    disposition: summaryDisposition(itemsSummary),
+    blockedItems: itemsSummary.blocked,
+    openQuestions: itemsSummary.surfacedQuestions,
+    // This engine never closes a run on completion — `done` is conductor_report's
+    // to record — so no advancement count is in play here.
+    advancedItems: 0,
+  };
 }
 
 /**
@@ -130,17 +190,7 @@ export function shouldTerminate(
   // isTerminal). Computing a second stop for it would double-record.
   if (isTerminal(run)) return { stop: false };
 
-  // The kinds are never spelled here: GAP-021's closer owns the cause-to-kind
-  // mapping, so a rule added to §2.9 lands in one place instead of in each
-  // recorder's own literal.
-  const closure = {
-    disposition: summaryDisposition(itemsSummary),
-    blockedItems: itemsSummary.blocked,
-    openQuestions: itemsSummary.surfacedQuestions,
-    // This engine never closes a run on completion — `done` is conductor_report's
-    // to record — so no advancement count is in play here.
-    advancedItems: 0,
-  };
+  const closure = closureOf(itemsSummary);
 
   if (counters.futileRePrompts >= FUTILE_RE_PROMPT_LIMIT) {
     return { stop: true, kind: stopKindOf({ cause: "futility", run: closure }).kind };
@@ -163,4 +213,29 @@ export function shouldTerminate(
   if (itemsSummary.blocked === 0 && itemsSummary.surfacedQuestions === 0) return { stop: false };
 
   return { stop: true, kind: stopKindOf({ cause: "settle", run: closure }).kind };
+}
+
+/**
+ * Decide whether the run must stop because the orchestrator has taken
+ * STALLED_TURN_LIMIT consecutive turns without the futility signature moving.
+ *
+ * A second THRESHOLD over the one existing wedge rule, never a second rule: the
+ * signature derivation and the progress comparison stay where they are, in the
+ * continuation engine, and this function reads only the count they produce. The
+ * kind is `noop` for the same reason the re-prompt limit's is — the run made no
+ * observable progress — and it is reached through the same closer, so a run
+ * stopped by turn count and one stopped by re-prompt count are one §2.9 stop
+ * with one recorder, not a special case advanceRun has to know about.
+ *
+ * A terminal run is never stopped again: its stop or terminal state is already
+ * recorded, and computing a second one would double-record.
+ */
+export function shouldTerminateStalledTurns(
+  run: RunLike,
+  turns: TurnCounters,
+  itemsSummary: ItemsSummary,
+): TerminateVerdict {
+  if (isTerminal(run)) return { stop: false };
+  if (turns.stalledTurns < STALLED_TURN_LIMIT) return { stop: false };
+  return { stop: true, kind: stopKindOf({ cause: "futility", run: closureOf(itemsSummary) }).kind };
 }

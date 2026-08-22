@@ -103,8 +103,9 @@ route around a spent budget — surface it and stop.
 <!-- BEGIN GENERATED MECHANICS -->
 ## Mechanics — generated from the tool vocabulary
 
-Run stages, in FSM order: conductor_classify -> conductor_decompose -> conductor_plan -> conductor_plan_review -> conductor_dispatch_wave -> conductor_report.
-Item stages, in FSM order: conductor_submit_test -> conductor_vet_test -> conductor_mark_green -> conductor_validate -> conductor_item_review -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+Run stages, in FSM order: conductor_classify (mechanical, skeptic) -> conductor_decompose (planner) -> conductor_plan (planner) -> conductor_plan_review (reviewer, skeptic, planner) -> conductor_dispatch_wave (testWriter, reviewer, implementer, skeptic) -> conductor_report.
+Item stages, in FSM order: conductor_submit_test (testWriter) -> conductor_vet_test (reviewer, testWriter) -> conductor_mark_green (implementer) -> conductor_validate (implementer) -> conductor_item_review (reviewer, skeptic, implementer, testWriter) -> conductor_publish. A non-behavioral item enters at conductor_mark_green.
+A stage's parenthesised roles are the sub-sessions it dispatches: making the call is how that work gets authored, so never write the artifact yourself. A bare stage dispatches none.
 Meta tools, outside the stage order: conductor_answer, conductor_decide, conductor_defer, conductor_inline_claim, conductor_override, conductor_queue_amend, conductor_setup, conductor_status, conductor_surface.
 A dispatched sub-session may call only: conductor_override, conductor_status, conductor_surface. Every other conductor tool belongs to the orchestrator, and a call from a dispatched session is refused by name — a session cannot answer its own question, defer its own item, close its own run or widen its own scope.
 

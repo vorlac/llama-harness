@@ -224,7 +224,7 @@ const HOOK_NODES: readonly AtlasNode[] = [
         level: "info",
         means:
           "The delivery receipt. `data` carries {role, packs, packDigest, stateBlock, stateBlockLines, " +
-          "entries}. This is the ONE record proving doctrine actually reached a request — the defect " +
+          "recommended, recommendedItem, entries}. This is the ONE record proving doctrine actually reached a request — the defect " +
           "ISSUE-001 was exactly this layer built, tested and never registered.",
       },
     ],
@@ -902,6 +902,47 @@ const GATE_NODES: readonly AtlasNode[] = [
         effect:
           "stageDenyReason picks the most specific cause in order and names it — the questionId that " +
           "blocks it, the deferral, or the unpublished dependencies.",
+      },
+    ],
+  },
+  {
+    id: "gate.toolcall",
+    label: "runTool — the composition root's one tool choke point",
+    kind: "gate",
+    layer: "conductor",
+    what:
+      "The single body every registered conductor_* tool executes: caller legality read from the §3.5 " +
+      "registry, then the declared arguments, then the workspace bundle, then the committed handler. " +
+      "One catch wraps all four, so a refusal from any of them leaves a record before it reaches the model.",
+    enforces:
+      "§7.4 — a refusal past the gate stack is still a refusal. These calls are journaled `gates: allow`, " +
+      "because the gates did allow them, so a refusal thrown by the run FSM, by validateQueue or by a " +
+      "handler's own legality step would otherwise leave the journal saying only that the call was permitted.",
+    source: ["conductor/plugin/index.ts:1494", "conductor/plugin/index.ts:1560"],
+    logs: [
+      {
+        component: "gates",
+        event: "refused",
+        level: "warn",
+        means:
+          "A §3.4 tool call the gate stack ALLOWED was refused deeper in. `data` carries {toolName, reason} " +
+          "— the reason verbatim as the caller read it — over the session, run and item correlation. Read it " +
+          "beside `gates: deny` for every refusal a run met, whichever rule spoke.",
+      },
+    ],
+    forks: [
+      {
+        when: "Caller, arguments, bundle and handler all permit",
+        to: "gate.legality",
+        outcome: "allow",
+      },
+      {
+        when: "Any of them refuses",
+        to: "sink.journal",
+        outcome: "deny",
+        effect:
+          "The refusal is journaled `gates: refused` and rethrown exactly as it was raised — opencode reads " +
+          "the text back to the model.",
       },
     ],
   },

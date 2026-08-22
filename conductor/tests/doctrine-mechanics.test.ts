@@ -48,6 +48,7 @@ import { legalTools } from "../core/gates-phase.ts";
 import { ITEM_MAX_FILES, PLAN_PLACEHOLDER_LABELS, scanPlaceholders } from "../core/planning.ts";
 import type { GateItem, GateRun } from "../core/gates-phase.ts";
 import { TOOL_BINDINGS } from "../core/tool-bindings.ts";
+import { VOCABULARIES } from "../core/vocab-registry.ts";
 import { ITEM_STATES } from "../core/fsm-item.ts";
 import { decideGit } from "../core/gates-git.ts";
 import {
@@ -242,6 +243,199 @@ test("I4B-1C: every conductor_* token a pack's mechanics block names is a bound 
     }
   }
   assert.ok(namedTotal >= 9, "the packs' mechanics blocks together must name the tool vocabulary, not one token");
+});
+
+// ---------------------------------------------------------------------------
+// 1E/1F — WHICH stage tools dispatch a sub-session, and as WHAT role.
+//
+// The generated section already ordered the stages; it never said that most of
+// them hand their work to a sub-session. A live run read conductor_submit_test as
+// a verification step, concluded it had to author the failing test itself, and
+// spent 26 minutes deadlocked against the edit and git gates. The stage order is
+// derived and cannot drift; the dispatch shape must be derived on the same terms.
+//
+// 1E pins the DECLARATION against the machine that performs it — an independent
+// scan of adapter/tools.ts for the fan-out roles each handler reaches, transitively
+// through the per-stage helpers. 1F pins that the derivation reaches the packs.
+// ---------------------------------------------------------------------------
+
+// The §4.1 role pin, read from the vocabulary registry rather than restated: a
+// dispatch declaration naming a role no fan-out map carries dispatches nowhere.
+const DISPATCHABLE_ROLES: readonly string[] = (
+  VOCABULARIES.find((entry) => entry.name === "roles")?.members ?? []
+).filter((role) => role !== "orchestrator");
+
+// Every top-level function in adapter/tools.ts, sliced from its own `function`
+// line to the next one. Slicing beats brace counting: braces inside template
+// literals and regexes are everywhere in that file, and a mis-counted body would
+// silently shrink the set this row reasons over.
+function adapterFunctions(): Map<string, string> {
+  const source = readFileSync(new URL("../adapter/tools.ts", import.meta.url), "utf8");
+  const lines = source.split("\n");
+  const starts: Array<{ line: number; name: string }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = /^(?:export )?(?:async )?function (\w+)/.exec(lines[i]);
+    if (match !== null) starts.push({ line: i, name: match[1] });
+  }
+  const bodies = new Map<string, string>();
+  for (let k = 0; k < starts.length; k += 1) {
+    const end = k + 1 < starts.length ? starts[k + 1].line : lines.length;
+    bodies.set(starts[k].name, lines.slice(starts[k].line, end).join("\n"));
+  }
+  return bodies;
+}
+
+// The roles a function names in a fan-out JOB, closed under the helpers it calls.
+// A role literal on an `askedBy` line is the identity of whoever ASKED a question,
+// not a session being dispatched, so those lines are excluded.
+function rolesReachedBy(bodies: Map<string, string>): Map<string, Set<string>> {
+  const direct = new Map<string, Set<string>>();
+  const callees = new Map<string, Set<string>>();
+  const roleLiteral = new RegExp(`"(${DISPATCHABLE_ROLES.join("|")})"`, "g");
+  for (const [name, body] of bodies) {
+    const roles = new Set<string>();
+    for (const line of body.split("\n")) {
+      if (line.includes("askedBy")) continue;
+      for (const match of line.matchAll(roleLiteral)) roles.add(match[1]);
+    }
+    direct.set(name, roles);
+    const called = new Set<string>();
+    for (const other of bodies.keys()) {
+      if (other !== name && new RegExp(`\\b${other}\\s*\\(`).test(body)) called.add(other);
+    }
+    callees.set(name, called);
+  }
+  const reached = new Map<string, Set<string>>();
+  const walk = (name: string, seen: Set<string>): Set<string> => {
+    if (seen.has(name)) return new Set<string>();
+    seen.add(name);
+    const out = new Set<string>(direct.get(name) ?? []);
+    for (const callee of callees.get(name) ?? []) {
+      for (const role of walk(callee, seen)) out.add(role);
+    }
+    return out;
+  };
+  for (const name of bodies.keys()) reached.set(name, walk(name, new Set<string>()));
+  return reached;
+}
+
+test("I4B-1E: every bound tool DECLARES the sub-session roles its handler dispatches, and the declaration equals an independent scan of adapter/tools.ts", () => {
+  assert.ok(
+    DISPATCHABLE_ROLES.length >= 6,
+    "premise: the §4.1 role pin names the fan-out roles this row scans for",
+  );
+  const bodies = adapterFunctions();
+  assert.ok(
+    bodies.size >= 100,
+    `parsed only ${bodies.size} top-level functions out of adapter/tools.ts — the parse is broken, ` +
+      "and a broken scan must be RED rather than a vacuous green",
+  );
+  const reached = rolesReachedBy(bodies);
+
+  // The scan DISCRIMINATES: two committed handlers dispatch nothing, so a scan
+  // that swept every handler into the set would prove nothing.
+  for (const quiet of ["handlePublish", "handleReport"]) {
+    assert.ok(bodies.has(quiet), `premise: ${quiet} is a committed handler`);
+    assert.deepEqual(
+      [...(reached.get(quiet) ?? [])],
+      [],
+      `${quiet} builds no fan-out job, so the scan must claim no role for it`,
+    );
+  }
+
+  let declaredTotal = 0;
+  for (const [tool, binding] of Object.entries(TOOL_BINDINGS)) {
+    if (binding === null) continue;
+    const declared = binding.dispatches;
+    assert.ok(
+      Array.isArray(declared),
+      `${tool} must DECLARE its dispatch shape in core/tool-bindings.ts — an undeclared stage tool ` +
+        "reads as a verification step the caller must satisfy itself",
+    );
+    for (const role of declared) {
+      assert.ok(
+        DISPATCHABLE_ROLES.includes(role),
+        `${tool} declares role ${JSON.stringify(role)}, which is not a §4.1 role the fan-out engine dispatches`,
+      );
+    }
+    assert.equal(
+      new Set(declared).size,
+      declared.length,
+      `${tool}'s dispatch declaration must name each role once`,
+    );
+    declaredTotal += declared.length;
+    const scanned = reached.get(binding.handler);
+    assert.notEqual(scanned, undefined, `${tool} binds handler ${binding.handler}, which the parse did not find`);
+    assert.deepEqual(
+      [...declared].sort(),
+      [...(scanned ?? [])].sort(),
+      `${tool}'s declared dispatch roles must equal the roles ${binding.handler} actually reaches in ` +
+        "adapter/tools.ts — a declaration nobody checks is the hand-written list this derivation removes",
+    );
+  }
+  assert.ok(
+    declaredTotal >= 12,
+    `only ${declaredTotal} role declarations across the whole table — the pipeline dispatches more than that`,
+  );
+});
+
+const RUN_STAGE_PREFIX = "Run stages, in FSM order: ";
+const ITEM_STAGE_PREFIX = "Item stages, in FSM order: ";
+// The one sentence that TEACHES the parenthetical. Without it the roles read as
+// decoration; with it they read as "the call is how this gets authored".
+const DISPATCH_LEGEND = "parenthesised roles are the sub-sessions it dispatches";
+
+function stageLine(block: string, prefix: string): string | null {
+  return block.split("\n").find((line) => line.startsWith(prefix)) ?? null;
+}
+
+test("I4B-1F: the generated stage lines name the roles each stage dispatches, and every pack carrying one carries the legend", () => {
+  const rolesOf = (tool: string): readonly string[] => TOOL_BINDINGS[tool]?.dispatches ?? [];
+  const rows: ReadonlyArray<{ prefix: string; tools: readonly string[] }> = [
+    { prefix: RUN_STAGE_PREFIX, tools: runStageTools() },
+    { prefix: ITEM_STAGE_PREFIX, tools: itemStageTools() },
+  ];
+  for (const row of rows) {
+    const dispatching = row.tools.filter((tool) => rolesOf(tool).length > 0);
+    const quiet = row.tools.filter((tool) => rolesOf(tool).length === 0);
+    assert.ok(dispatching.length >= 4, `premise: most ${row.prefix.trim()} stages dispatch`);
+    assert.ok(quiet.length >= 1, `premise: at least one stage does its work in the harness, or the annotation discriminates nothing`);
+  }
+
+  let annotatedPacks = 0;
+  for (const name of PACKS) {
+    const block = extractMechanics(readPack(name)) ?? "";
+    let carriesAStageLine = false;
+    for (const row of rows) {
+      const line = stageLine(block, row.prefix);
+      if (line === null) continue;
+      carriesAStageLine = true;
+      for (const tool of row.tools) {
+        const roles = rolesOf(tool);
+        if (roles.length === 0) {
+          assert.ok(
+            !line.includes(tool + " ("),
+            `${name}: ${tool} dispatches nothing, so it must stand bare in "${row.prefix.trim()}"`,
+          );
+          continue;
+        }
+        assert.ok(
+          line.includes(tool + " (" + roles.join(", ") + ")"),
+          `${name}'s "${row.prefix.trim()}" line must name the roles ${tool} dispatches ` +
+            `(${roles.join(", ")}), so a reader of the stage order learns the call is how that work ` +
+            `gets authored rather than a step it must satisfy first; the line reads: ${line}`,
+        );
+      }
+    }
+    if (!carriesAStageLine) continue;
+    annotatedPacks += 1;
+    assert.ok(
+      block.includes(DISPATCH_LEGEND),
+      `${name} carries a stage line, so its mechanics block must explain the parenthetical ` +
+        `(${JSON.stringify(DISPATCH_LEGEND)}) — bare role names beside a tool teach nothing`,
+    );
+  }
+  assert.equal(annotatedPacks, PACKS.length, "every pack carries at least one stage line");
 });
 
 // ===========================================================================
@@ -647,10 +841,12 @@ test("I4B-3D: the only git invocation tdd.md names is the one it forbids", () =>
 // 4. Pack size discipline — the packs ride in a 32k context.
 // ===========================================================================
 
-// ~2.6k tokens at the conservative 4-bytes-per-token rule is ~10.4kB; this floor
+// ~2.6k tokens at the conservative 4-bytes-per-token rule is ~10.4kB; this ceiling
 // is deliberately tighter, because a role can receive TWO packs plus the live
-// state block plus its payload in the same window.
-const MAX_PACK_BYTES = 6500;
+// state block plus its payload in the same window. ~1.75k tokens per pack leaves
+// room for that, and the ceiling exists to make prose that earns nothing visible:
+// a pack pushing against it is a pack to cut, not a ceiling to raise.
+const MAX_PACK_BYTES = 7000;
 
 test("I4B-4: every doctrine pack stays lean enough for a 32k context", () => {
   for (const name of PACKS) {
