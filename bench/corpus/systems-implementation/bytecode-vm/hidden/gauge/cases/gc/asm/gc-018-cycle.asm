@@ -1,0 +1,23 @@
+; case gc-018-cycle
+; expect exit=0 stdout="2\n0\n"
+.func main arity=0 locals=2
+  NEW_ARRAY 0
+  STORE_LOCAL 0
+  NEW_ARRAY 0
+  STORE_LOCAL 1
+  LOAD_LOCAL 0
+  LOAD_LOCAL 1
+  ARR_PUSH
+  LOAD_LOCAL 1
+  LOAD_LOCAL 0
+  ARR_PUSH
+  GCLIVE
+  PRINT
+  PUSH_NIL
+  STORE_LOCAL 0
+  PUSH_NIL
+  STORE_LOCAL 1
+  GCLIVE
+  PRINT
+  RET
+.end

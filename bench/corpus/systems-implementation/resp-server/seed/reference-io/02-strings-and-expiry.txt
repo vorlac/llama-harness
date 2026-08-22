@@ -1,0 +1,80 @@
+# 02 - strings and expiry (SPEC.md sections 7.3, 7.4, 6)
+#
+# Every exchange below is on one connection, in order, starting from an empty
+# database 0.
+
+# A plain SET, then GET.
+C: *3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n
+S: +OK\r\n
+C: *2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n
+S: $3\r\nbar\r\n
+
+# A missing key is the null bulk string, not an empty bulk string.
+C: *2\r\n$3\r\nGET\r\n$4\r\nnope\r\n
+S: $-1\r\n
+
+# An empty value is an empty bulk string, and the key exists.
+C: *3\r\n$3\r\nSET\r\n$1\r\ne\r\n$0\r\n\r\n
+S: +OK\r\n
+C: *2\r\n$3\r\nGET\r\n$1\r\ne\r\n
+S: $0\r\n\r\n
+C: *2\r\n$6\r\nSTRLEN\r\n$1\r\ne\r\n
+S: :0\r\n
+
+# NX on an existing key: no store, null bulk string reply.
+C: *4\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nzzz\r\n$2\r\nNX\r\n
+S: $-1\r\n
+C: *2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n
+S: $3\r\nbar\r\n
+
+# GET returns the OLD value and still stores the new one.
+C: *4\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbaz\r\n$3\r\nGET\r\n
+S: $3\r\nbar\r\n
+C: *2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n
+S: $3\r\nbaz\r\n
+
+# EX sets a TTL. TTL rounds to nearest: (remaining_ms + 500) / 1000.
+C: *5\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n$2\r\nEX\r\n$3\r\n100\r\n
+S: +OK\r\n
+C: *2\r\n$3\r\nTTL\r\n$1\r\nk\r\n
+S: :100\r\n
+
+# A plain SET clears the TTL. There is no KEEPTTL in this spec.
+C: *3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nw\r\n
+S: +OK\r\n
+C: *2\r\n$3\r\nTTL\r\n$1\r\nk\r\n
+S: :-1\r\n
+
+# TTL on a key that does not exist is -2, not -1.
+C: *2\r\n$3\r\nTTL\r\n$4\r\nnope\r\n
+S: :-2\r\n
+
+# STRICT_INT64 rejects a leading zero, so this is a value error, not 2.
+C: *3\r\n$3\r\nSET\r\n$1\r\nn\r\n$2\r\n01\r\n
+S: +OK\r\n
+C: *2\r\n$4\r\nINCR\r\n$1\r\nn\r\n
+S: -ERR value is not an integer or out of range\r\n
+
+# INCR on a missing key starts from 0 and stores the canonical rendering.
+C: *2\r\n$4\r\nINCR\r\n$1\r\nc\r\n
+S: :1\r\n
+C: *2\r\n$3\r\nGET\r\n$1\r\nc\r\n
+S: $1\r\n1\r\n
+
+# MGET returns nil for a wrong-type key rather than an error.
+C: *3\r\n$5\r\nRPUSH\r\n$1\r\nL\r\n$1\r\na\r\n
+S: :1\r\n
+C: *3\r\n$4\r\nMGET\r\n$1\r\nL\r\n$1\r\nc\r\n
+S: *2\r\n$-1\r\n$1\r\n1\r\n
+
+# But GET on that same key is a WRONGTYPE error.
+C: *2\r\n$3\r\nGET\r\n$1\r\nL\r\n
+S: -WRONGTYPE Operation against a key holding the wrong kind of value\r\n
+
+# An empty collection is an empty array, never a null array.
+C: *4\r\n$6\r\nLRANGE\r\n$4\r\nnope\r\n$1\r\n0\r\n$2\r\n-1\r\n
+S: *0\r\n
+
+# LPOP with a count on a missing key IS a null array. The two are different.
+C: *3\r\n$4\r\nLPOP\r\n$4\r\nnope\r\n$1\r\n2\r\n
+S: *-1\r\n

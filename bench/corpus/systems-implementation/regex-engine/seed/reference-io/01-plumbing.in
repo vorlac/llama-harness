@@ -1,0 +1,15 @@
+PING
+MATCH abc xxabcxx
+MATCH abc xyz
+MATCH - abc
+MATCH a -
+MATCH - -
+MATCH \x2d a\x2db
+MATCH \x20 a\x20b
+MATCH a\x0ab a\x0ab
+MATCH \\\\ a\\\\b
+MATCH \x41 xAy
+FOO bar
+match a a
+MATCH a
+MATCH a b c

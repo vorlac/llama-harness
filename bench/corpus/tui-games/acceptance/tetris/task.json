@@ -1,0 +1,35 @@
+{
+  "id": "tetris",
+  "title": "Vanilla Tetris with SRS, 7-bag, and a headless verification mode",
+  "category": "tui-games",
+  "size": "M",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-tetris-impl-prompt.md",
+  "difficulty": 4,
+  "timeouts": {
+    "build": 300,
+    "run": 120,
+    "test": 300
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "scripts/conformance-a.txt",
+    "scripts/conformance-b.txt",
+    "expected/conformance-a.seed12345.json",
+    "expected/conformance-b.seed777.json",
+    "README.md",
+    "NOTES.md",
+    "CONFORMANCE.md",
+    "run.json"
+  ]
+}

@@ -84,9 +84,10 @@ threshold is a finding to investigate, never a stop.
   with no `role` field (`conductor/adapter/tools.ts:7349`). Both the bench's sub-session count and the
   observation snapshot filter on `data.role`, so neither miscounts; anyone else counting that event
   should know.
-- **`qwen3.8-27b` weights are not downloaded.** The catalog entry is complete and every field was
-  verified against the real repository, but a second-model sweep needs `fetch_models.py` first
-  (~22 GB at the default `UD-Q6_K`).
+- **`qwen3.8-27b` is the campaign's model and its weights are on disk** —
+  `.data/models/qwen3.8-27b/Qwen3.8-27B-UD-Q6_K.gguf`, 20 GB. Every manifest names it in
+  `defaults.model`, `sweep.primaryModel` and `sweep.models[0]`, and the driver carries no
+  model id of its own. Adding any second model to the sweep needs `fetch_models.py` first.
 - **A judgement call worth a second opinion:** every arm now receives `.conductor/config.json` before
   the seed commit, which makes the trees byte-identical (what 22.2 asks for) but does put a
   conductor-shaped file in front of arms with no plugin. The alternative is a differing `startHead`.

@@ -1,0 +1,608 @@
+{
+  "group": "anchors",
+  "description": "`^` and `$` (start and end of the whole subject, never a line) and the ASCII word boundaries `\\b` and `\\B`.",
+  "default_time_limit_ms": 2000,
+  "cases": [
+    {
+      "id": "anchors-001",
+      "cmd": "match",
+      "pattern": "^",
+      "subject": "-",
+      "expect": {
+        "match": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-002",
+      "cmd": "match",
+      "pattern": "^",
+      "subject": "abc",
+      "expect": {
+        "match": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-003",
+      "cmd": "match",
+      "pattern": "$",
+      "subject": "-",
+      "expect": {
+        "match": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-004",
+      "cmd": "match",
+      "pattern": "$",
+      "subject": "abc",
+      "expect": {
+        "match": [
+          [
+            3,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-005",
+      "cmd": "match",
+      "pattern": "^$",
+      "subject": "-",
+      "expect": {
+        "match": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-006",
+      "cmd": "match",
+      "pattern": "^$",
+      "subject": "a",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-007",
+      "cmd": "match",
+      "pattern": "^$",
+      "subject": "\\x0a",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-008",
+      "cmd": "match",
+      "pattern": "^a",
+      "subject": "abc",
+      "expect": {
+        "match": [
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-009",
+      "cmd": "match",
+      "pattern": "^a",
+      "subject": "bac",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-010",
+      "cmd": "match",
+      "pattern": "a$",
+      "subject": "bca",
+      "expect": {
+        "match": [
+          [
+            2,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-011",
+      "cmd": "match",
+      "pattern": "a$",
+      "subject": "bac",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-012",
+      "cmd": "match",
+      "pattern": "a$",
+      "subject": "a\\x0a",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-013",
+      "cmd": "match",
+      "pattern": "^abc$",
+      "subject": "abc",
+      "expect": {
+        "match": [
+          [
+            0,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-014",
+      "cmd": "match",
+      "pattern": "^abc$",
+      "subject": "abcd",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-015",
+      "cmd": "match",
+      "pattern": "^abc$",
+      "subject": "xabc",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-016",
+      "cmd": "match",
+      "pattern": "^a*$",
+      "subject": "aaa",
+      "expect": {
+        "match": [
+          [
+            0,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-017",
+      "cmd": "match",
+      "pattern": "^a*$",
+      "subject": "aab",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-018",
+      "cmd": "match",
+      "pattern": "^.*$",
+      "subject": "abc",
+      "expect": {
+        "match": [
+          [
+            0,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-019",
+      "cmd": "match",
+      "pattern": "^.*$",
+      "subject": "ab\\x0acd",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-020",
+      "cmd": "match",
+      "pattern": "\\\\n$",
+      "subject": "ab\\x0a",
+      "expect": {
+        "match": [
+          [
+            2,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-021",
+      "cmd": "match",
+      "pattern": "^(?:a|b)+$",
+      "subject": "abab",
+      "expect": {
+        "match": [
+          [
+            0,
+            4
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-022",
+      "cmd": "match",
+      "pattern": "^(?:a|b)+$",
+      "subject": "abcab",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-023",
+      "cmd": "match",
+      "pattern": "\\\\ba",
+      "subject": "a\\x20b",
+      "expect": {
+        "match": [
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-024",
+      "cmd": "match",
+      "pattern": "\\\\ba",
+      "subject": "\\x20ab",
+      "expect": {
+        "match": [
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-025",
+      "cmd": "match",
+      "pattern": "\\\\ba",
+      "subject": "ba",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-026",
+      "cmd": "match",
+      "pattern": "a\\\\b",
+      "subject": "ba",
+      "expect": {
+        "match": [
+          [
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-027",
+      "cmd": "match",
+      "pattern": "a\\\\b",
+      "subject": "ab",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-028",
+      "cmd": "match",
+      "pattern": "\\\\bfoo\\\\b",
+      "subject": "a\\x20foo\\x20b",
+      "expect": {
+        "match": [
+          [
+            2,
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-029",
+      "cmd": "match",
+      "pattern": "\\\\bfoo\\\\b",
+      "subject": "foobar",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-030",
+      "cmd": "match",
+      "pattern": "\\\\bfoo\\\\b",
+      "subject": "foo",
+      "expect": {
+        "match": [
+          [
+            0,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-031",
+      "cmd": "match",
+      "pattern": "\\\\bfoo\\\\b",
+      "subject": "xfoo",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-032",
+      "cmd": "match",
+      "pattern": "\\\\b",
+      "subject": "-",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-033",
+      "cmd": "match",
+      "pattern": "\\\\b",
+      "subject": "a",
+      "expect": {
+        "match": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-034",
+      "cmd": "match",
+      "pattern": "\\\\b",
+      "subject": "\\x20a",
+      "expect": {
+        "match": [
+          [
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-035",
+      "cmd": "match",
+      "pattern": "\\\\B",
+      "subject": "a",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-036",
+      "cmd": "match",
+      "pattern": "\\\\B",
+      "subject": "ab",
+      "expect": {
+        "match": [
+          [
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-037",
+      "cmd": "match",
+      "pattern": "\\\\Bar",
+      "subject": "bar",
+      "expect": {
+        "match": [
+          [
+            1,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-038",
+      "cmd": "match",
+      "pattern": "\\\\Bar",
+      "subject": "ar",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-039",
+      "cmd": "match",
+      "pattern": "a\\\\Bb",
+      "subject": "ab",
+      "expect": {
+        "match": [
+          [
+            0,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-040",
+      "cmd": "match",
+      "pattern": "\\\\bhello\\\\b\\\\s\\\\bworld\\\\b",
+      "subject": "hello\\x20world",
+      "expect": {
+        "match": [
+          [
+            0,
+            11
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-041",
+      "cmd": "match",
+      "pattern": "\\\\b\\\\w+\\\\b",
+      "subject": "\\x20\\x20word\\x20\\x20",
+      "expect": {
+        "match": [
+          [
+            2,
+            6
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-042",
+      "cmd": "match",
+      "pattern": "\\\\b_\\\\b",
+      "subject": "a\\x20_\\x20b",
+      "expect": {
+        "match": [
+          [
+            2,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-043",
+      "cmd": "match",
+      "pattern": "\\\\b9\\\\b",
+      "subject": "x\\x209\\x20y",
+      "expect": {
+        "match": [
+          [
+            2,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-044",
+      "cmd": "match",
+      "pattern": "\\\\ba\\\\b",
+      "subject": "a\\x2db",
+      "expect": {
+        "match": [
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-045",
+      "cmd": "match",
+      "pattern": "\\\\B\\x2d\\\\B",
+      "subject": "a\\x2db",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-046",
+      "cmd": "match",
+      "pattern": "x\\\\bx",
+      "subject": "xx",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-047",
+      "cmd": "match",
+      "pattern": "^a$",
+      "subject": "a",
+      "expect": {
+        "match": [
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-048",
+      "cmd": "match",
+      "pattern": "^a$",
+      "subject": "aa",
+      "expect": {
+        "match": null
+      }
+    },
+    {
+      "id": "anchors-049",
+      "cmd": "match",
+      "pattern": "^\\\\bx",
+      "subject": "xy",
+      "expect": {
+        "match": [
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "anchors-050",
+      "cmd": "match",
+      "pattern": "\\\\B",
+      "subject": "-",
+      "expect": {
+        "match": [
+          [
+            0,
+            0
+          ]
+        ]
+      },
+      "note": "SPEC 5.5: neither side of position 0 in an empty subject is a word character, so no boundary exists there and \\B matches. Some backtracking engines disagree; this dialect does not."
+    }
+  ]
+}

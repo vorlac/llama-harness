@@ -1,0 +1,14 @@
+# Generated evaluation workload. Large, deterministic, regenerable from a seed:
+#   python3 tools/generate_workload.py --lines 1500000 --seed 20260320 \
+#       --minutes 240 --out data/access.log
+# Committing it would add hundreds of megabytes for no benefit. The small
+# committed check file lives in sample/ and is NOT ignored.
+data/
+
+# Benchmark and run output.
+bench-out/
+out/
+*.report.json
+
+__pycache__/
+*.pyc

@@ -1,0 +1,35 @@
+{
+  "id": "architecture-overview",
+  "title": "Architecture overview of an unfamiliar codebase",
+  "category": "docs-generation",
+  "description": "Read a target checkout cold and produce the architecture document a new engineer could trust as a mental model: system context, component map, data and control flow, invariants, build shape, and the decisions that formed the repository. Every non-obvious claim carries a file:line citation.",
+  "size": "large",
+  "languages": ["markdown"],
+  "prompt": "docs-generation/docs-architecture-overview-prompt.md",
+  "difficulty": 6,
+  "timeouts": {
+    "build": 60,
+    "run": 1800,
+    "test": 600
+  },
+  "verify": "check_docs.py",
+  "verify_target": "ARCHITECTURE.md",
+  "verify_args": [
+    "--min-words", "2000",
+    "--max-words", "4000",
+    "--min-mermaid", "2",
+    "--require-section", "Scope and method",
+    "--require-section", "System context",
+    "--require-section", "Component map",
+    "--require-section", "Data and control flow",
+    "--require-section", "Key invariants",
+    "--require-section", "Build, packaging, and deployment shape",
+    "--require-section", "Formative design decisions",
+    "--require-section", "Open questions"
+  ],
+  "starting_material": null,
+  "artifacts": ["ARCHITECTURE.md"],
+  "workspace_task_id": "{{TARGET}}-architecture-overview",
+  "variables": ["{{TARGET}}"],
+  "targets": ["*"]
+}

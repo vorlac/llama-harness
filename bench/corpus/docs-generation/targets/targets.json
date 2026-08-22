@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "description": "Pinned third-party codebases used as documentation targets by the docs-generation category. Source is never vendored into this repository; tools/fetch_docs_targets.sh clones each entry at the exact pinned sha so every run reads byte-identical source. See docs-generation/README.md and CONVENTIONS.md section 10 for the read-only rule.",
+  "checkout_root": "docs-generation/targets/checkouts",
+  "targets": [
+    {
+      "slug": "valkey",
+      "name": "Valkey",
+      "url": "https://github.com/valkey-io/valkey.git",
+      "ref": "unstable",
+      "sha": "7536bee63bb7e6cdd531b9832bbd2ede91878224",
+      "language": "c",
+      "license": "BSD-3-Clause",
+      "approx_loc": 180000,
+      "why": "A single-process C network daemon whose event loop, command table, keyspace, replication and cluster code are heavily interdependent through one global server struct, so any accurate description has to be reconstructed from the code rather than lifted from module boundaries.",
+      "subsystems": [
+        "networking",
+        "kvstore",
+        "replication",
+        "cluster",
+        "aof"
+      ],
+      "subsystem_paths": {
+        "networking": "src/networking.c",
+        "kvstore": "src/kvstore.c, src/dict.c, src/db.c",
+        "replication": "src/replication.c",
+        "cluster": "src/cluster.c, src/cluster_legacy.c",
+        "aof": "src/aof.c"
+      }
+    },
+    {
+      "slug": "ripgrep",
+      "name": "ripgrep",
+      "url": "https://github.com/BurntSushi/ripgrep.git",
+      "ref": "master",
+      "sha": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "language": "rust",
+      "license": "Unlicense OR MIT",
+      "approx_loc": 56000,
+      "why": "A Cargo workspace of small, sharply separated crates behind one CLI binary, which makes it the control case: the crate graph is easy to see but the interesting behaviour (ignore-rule precedence, literal extraction, multiline search) lives in details that a summary of the crate names will miss.",
+      "subsystems": [
+        "ignore",
+        "globset",
+        "searcher",
+        "printer",
+        "regex"
+      ],
+      "subsystem_paths": {
+        "ignore": "crates/ignore",
+        "globset": "crates/globset",
+        "searcher": "crates/searcher",
+        "printer": "crates/printer",
+        "regex": "crates/regex"
+      }
+    },
+    {
+      "slug": "fastapi",
+      "name": "FastAPI",
+      "url": "https://github.com/fastapi/fastapi.git",
+      "ref": "master",
+      "sha": "c3f316b7e814667e8ee81e03a7330d00ee61e45c",
+      "language": "python",
+      "license": "MIT",
+      "approx_loc": 60000,
+      "why": "Its core behaviour is produced by runtime introspection - type hints turned into validation, dependency graphs and an OpenAPI document - so the control flow that matters is never visible in a single call chain and has to be explained rather than traced.",
+      "subsystems": [
+        "routing",
+        "dependencies",
+        "openapi",
+        "params",
+        "security"
+      ],
+      "subsystem_paths": {
+        "routing": "fastapi/routing.py",
+        "dependencies": "fastapi/dependencies/",
+        "openapi": "fastapi/openapi/",
+        "params": "fastapi/params.py, fastapi/param_functions.py",
+        "security": "fastapi/security/"
+      }
+    },
+    {
+      "slug": "etcd",
+      "name": "etcd",
+      "url": "https://github.com/etcd-io/etcd.git",
+      "ref": "main",
+      "sha": "c34dc7ee0048fd2bcc44d50beff002e5e8069b69",
+      "language": "go",
+      "license": "Apache-2.0",
+      "approx_loc": 260000,
+      "why": "A distributed system in a multi-module Go workspace where correctness claims are about consensus, durability ordering and revision semantics, so documentation is only right if it gets the interaction between raft, the WAL and the MVCC backend right.",
+      "subsystems": [
+        "etcdserver",
+        "mvcc",
+        "wal",
+        "lease",
+        "auth"
+      ],
+      "subsystem_paths": {
+        "etcdserver": "server/etcdserver",
+        "mvcc": "server/storage/mvcc",
+        "wal": "server/storage/wal",
+        "lease": "server/lease",
+        "auth": "server/auth"
+      }
+    },
+    {
+      "slug": "vite",
+      "name": "Vite",
+      "url": "https://github.com/vitejs/vite.git",
+      "ref": "main",
+      "sha": "de1111ab0be00879b404e7ed3b2a80e264edddc1",
+      "language": "ts",
+      "license": "MIT",
+      "approx_loc": 70000,
+      "why": "A TypeScript build tool with two different code paths for the same user-facing job - a dev server that transforms on demand and a Rollup-based production build - joined by a shared plugin container, so the documentation risk is describing one path and implying it covers both.",
+      "subsystems": [
+        "server",
+        "plugins",
+        "optimizer",
+        "ssr",
+        "module-runner"
+      ],
+      "subsystem_paths": {
+        "server": "packages/vite/src/node/server",
+        "plugins": "packages/vite/src/node/plugins",
+        "optimizer": "packages/vite/src/node/optimizer",
+        "ssr": "packages/vite/src/node/ssr",
+        "module-runner": "packages/vite/src/module-runner"
+      }
+    },
+    {
+      "slug": "duckdb",
+      "name": "DuckDB",
+      "url": "https://github.com/duckdb/duckdb.git",
+      "ref": "main",
+      "sha": "044a04a7cd39e6e8235f756597ae42dde084e5e5",
+      "language": "cpp",
+      "license": "MIT",
+      "approx_loc": 600000,
+      "why": "The largest target: a full analytical database engine in C++ whose query path crosses parser, binder, optimizer, vectorized execution and storage layers, so it tests whether a model can stay accurate about a pipeline far larger than any context window.",
+      "subsystems": [
+        "parser",
+        "planner",
+        "optimizer",
+        "execution",
+        "storage"
+      ],
+      "subsystem_paths": {
+        "parser": "src/parser",
+        "planner": "src/planner",
+        "optimizer": "src/optimizer",
+        "execution": "src/execution",
+        "storage": "src/storage"
+      }
+    }
+  ],
+  "subsystem_note": "Each entry in a target's 'subsystems' array is a slug the project itself uses for that part of the code. It is substituted into the {{SUBSYSTEM}} variable of docs-generation/docs-subsystem-deepdive-prompt.md, so it is also part of a task id (<slug>-<subsystem>-deepdive) and of a deliverable filename: keep the values lowercase, file-safe, and stable. 'subsystem_paths' records where each one lives at the pinned sha, for task authors selecting a subsystem; establishing the exact boundary is part of the deep-dive task and is not given to the model."
+}

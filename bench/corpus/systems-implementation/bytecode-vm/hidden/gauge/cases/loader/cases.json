@@ -1,0 +1,419 @@
+{
+  "group": "loader",
+  "description": "Module validation: every field the loader must check before the first instruction runs, driven from hand-built byte images.",
+  "case_count": 52,
+  "cases": [
+    {
+      "id": "loader-001-valid",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 0,
+      "expect_stdout": ""
+    },
+    {
+      "id": "loader-002-valid",
+      "mode": "run",
+      "input_hex": "53564d3101000000040000000100000002040000006d61696e020a00000068656c6c6f2c2073766d01060000000000000001070000000000000000000000000000000d00000005010080040200040300228051",
+      "expect_exit": 0,
+      "expect_stdout": "hello, svm\n42\n"
+    },
+    {
+      "id": "loader-003-valid",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000080000000401000640000051",
+      "expect_exit": 0,
+      "expect_stdout": ""
+    },
+    {
+      "id": "loader-004-valid-halt",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000100000092",
+      "expect_exit": 0,
+      "expect_stdout": ""
+    },
+    {
+      "id": "loader-005-magic",
+      "mode": "run",
+      "input_hex": "53564d3001000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-006-magic",
+      "mode": "run",
+      "input_hex": "0000000001000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-007-magic-short",
+      "mode": "run",
+      "input_hex": "5356",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-008-empty",
+      "mode": "run",
+      "input_hex": "",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-009-version-high",
+      "mode": "run",
+      "input_hex": "53564d3102000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-010-version-zero",
+      "mode": "run",
+      "input_hex": "53564d3100000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-011-flags",
+      "mode": "run",
+      "input_hex": "53564d3101000100010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-012-header-truncated",
+      "mode": "run",
+      "input_hex": "53564d310100000001000000",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-013-constcount-high",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-014-constcount-zero",
+      "mode": "run",
+      "input_hex": "53564d3101000000000000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-015-conststring-overruns",
+      "mode": "run",
+      "input_hex": "53564d31010000000100000001000000020f2700006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-016-const-truncated",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-017-const-badtag",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000003040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-018-const-badtag",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000000040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-019-funccount-zero",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000000000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-020-funccount-high",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000200000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-021-entry-arity",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000010000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-022-reserved",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000010100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-023-nameconst-range",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e01000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-024-nameconst-notstring",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000100000000000000080000000401000640000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-025-codelen-zero",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000000000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-026-codelen-overruns",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000004000000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-027-trailing-bytes",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e0000000000000000010000005100",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-028-trailing-bytes",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e000000000000000001000000515151",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-029-terminator-nop",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000100000000",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-030-terminator-push",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000100000002",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-031-unknown-opcode",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e000000000000000001000000ff",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-032-unknown-opcode",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e0000000000000000010000009f",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-033-operand-truncated",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000020000000401",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-034-constindex-range",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000050000000409000651",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-035-pushint-notint",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000050000000400000651",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-036-pushstr-notstring",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000050000000501000651",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-037-global-notstring",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000050000001201000651",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-038-jump-past-end",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000080000000401000640050051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-039-jump-past-end",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000080000000401000640007d51",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-040-jump-before-start",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e01000000000000000000000000000000000800000004010006409cff51",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-041-jump-misaligned",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000080000000401000640faff51",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-042-jump-into-operand",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000100000002040000006d61696e0100000000000000000000000000000000080000000401000640fbff51",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-043-local-range",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e000000000000000003000000100051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-044-local-range",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e000000000001000003000000100151",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-045-upval-range",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e000000000000000003000000140051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-046-closure-range",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e0000000000000000050000005205000651",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-047-closure-upval-source",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000200000002040000006d61696e0201000000660000000000000000050000005201000651010000000000010000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-048-closure-upval-source",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000200000002040000006d61696e0201000000660000000000000000050000005201000651010000000000010001000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-049-upvaldesc-truncated",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000200000002040000006d61696e02010000006600000000000000000500000052010006510100000000000100",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-050-upvaldesc-kind",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000200000002040000006d61696e0201000000660000000000000000050000005201000651010000000001010002000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-051-arity-over-locals",
+      "mode": "run",
+      "input_hex": "53564d3101000000020000000200000002040000006d61696e020100000066000000000000000005000000520100065101000000030200000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "loader-052-call-operand-truncated",
+      "mode": "run",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e0000000000000000020000005150",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    }
+  ]
+}

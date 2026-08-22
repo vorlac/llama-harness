@@ -1,0 +1,22 @@
+CASE ex-01 17
+{"b":1,"a":[1,2]}
+CASE ex-02 21
+  [1.50, -0, 1e400]  
+CASE ex-03 17
+"caf\u00E9 \/ ok"
+CASE ex-04 4
+true
+CASE ex-05 4
+[1,]
+CASE ex-06 7
+{"a" 1}
+CASE ex-07 0
+
+CASE ex-08 12
+{
+ "n": 01
+}
+CASE ex-09 4
+[1e]
+CASE ex-10 2
+1e

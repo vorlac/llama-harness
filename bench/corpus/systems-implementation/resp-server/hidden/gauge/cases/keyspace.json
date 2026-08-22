@@ -1,0 +1,2178 @@
+{
+ "group": "keyspace",
+ "description": "DEL, EXISTS, TYPE, RENAME and KEYS including glob matching",
+ "cases": [
+  {
+   "name": "del-single-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "DEL",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-multiple-keys",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-partial-match",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "a",
+      "zzz",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-duplicate-arguments-counted-once",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "a",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-mixed-types",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "s",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "t",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "s",
+      "l",
+      "h",
+      "t"
+     ],
+     "expect": [
+      ":",
+      4
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-clears-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "del-expired-key-returns-zero",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "DEL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "EXISTS",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-single-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-counts-duplicates",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k",
+      "k"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k",
+      "k",
+      "k"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-mixed",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "a",
+      "zz",
+      "b",
+      "yy"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-duplicates-of-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "EXISTS",
+      "nope",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-on-every-type",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "s",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "t",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "s",
+      "l",
+      "h",
+      "t"
+     ],
+     "expect": [
+      ":",
+      4
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exists-empty-key-name",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "TYPE",
+      "nope"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "string"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "list"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "hash"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "set"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-after-list-emptied",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LPOP",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "a"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-after-hash-emptied",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "k",
+      "f"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-after-set-emptied",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-changes-with-overwrite",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "string"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-basic",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "a"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "b"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-missing-source",
+   "steps": [
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "-",
+      "ERR no such key"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-expired-source",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "-",
+      "ERR no such key"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-overwrites-destination",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "b"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-overwrites-different-type",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "b",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "string"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "b"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-same-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-same-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "a"
+     ],
+     "expect": [
+      "-",
+      "ERR no such key"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-carries-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "b"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-discards-destination-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "2",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "b"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-of-a-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "a",
+      "x",
+      "y"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "b",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "*",
+      [
+       "x",
+       "y"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "a"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-into-other-database-is-not-possible",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "-",
+      "ERR no such key"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-empty-database",
+   "steps": [
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-star-returns-all",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-includes-every-type",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "s",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "t",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "s",
+       "l",
+       "h",
+       "t"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-prefix-pattern",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "key:1",
+      "a",
+      "key:2",
+      "b",
+      "other",
+      "c"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "key:*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "key:1",
+       "key:2"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-prefix-matches-bare-prefix",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "key:",
+      "a",
+      "key:1",
+      "b",
+      "keys:1",
+      "c"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "key:*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "key:",
+       "key:1"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-question-mark",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "hello",
+      "1",
+      "hallo",
+      "2",
+      "hllo",
+      "3",
+      "heello",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "h?llo"
+     ],
+     "expect": [
+      "*u",
+      [
+       "hello",
+       "hallo"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-star-in-the-middle",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "hllo",
+      "1",
+      "heeeello",
+      "2",
+      "hllop",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "h*llo"
+     ],
+     "expect": [
+      "*u",
+      [
+       "hllo",
+       "heeeello"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-character-class",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "hello",
+      "1",
+      "hallo",
+      "2",
+      "hillo",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "h[ae]llo"
+     ],
+     "expect": [
+      "*u",
+      [
+       "hello",
+       "hallo"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-negated-character-class",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "hello",
+      "1",
+      "hallo",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "h[^e]llo"
+     ],
+     "expect": [
+      "*u",
+      [
+       "hallo"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-character-range",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "hallo",
+      "1",
+      "hbllo",
+      "2",
+      "hcllo",
+      "3",
+      "hdllo",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "h[a-c]llo"
+     ],
+     "expect": [
+      "*u",
+      [
+       "hallo",
+       "hbllo",
+       "hcllo"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-escaped-star",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "*",
+      "1",
+      "x",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "\\*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "*"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-escaped-question",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "?",
+      "1",
+      "x",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "\\?"
+     ],
+     "expect": [
+      "*u",
+      [
+       "?"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-literal-pattern",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "abc",
+      "1",
+      "abd",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "abc"
+     ],
+     "expect": [
+      "*u",
+      [
+       "abc"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-no-match",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "zzz*"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-empty-pattern-matches-empty-key",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "",
+      "1",
+      "a",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      ""
+     ],
+     "expect": [
+      "*u",
+      [
+       ""
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-unclosed-class-runs-to-end-of-pattern",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "[",
+      "1",
+      "a",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "["
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-class-with-escape",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a]c",
+      "1",
+      "abc",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "a[\\]]c"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a]c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-is-case-sensitive",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "Key",
+      "1",
+      "key",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "key"
+     ],
+     "expect": [
+      "*u",
+      [
+       "key"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-excludes-expired-keys",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "live",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "dead",
+      "1",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "live"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-is-per-database",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "b"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "keys-many-keys",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "k000",
+      "v",
+      "k001",
+      "v",
+      "k002",
+      "v",
+      "k003",
+      "v",
+      "k004",
+      "v",
+      "k005",
+      "v",
+      "k006",
+      "v",
+      "k007",
+      "v",
+      "k008",
+      "v",
+      "k009",
+      "v",
+      "k010",
+      "v",
+      "k011",
+      "v",
+      "k012",
+      "v",
+      "k013",
+      "v",
+      "k014",
+      "v",
+      "k015",
+      "v",
+      "k016",
+      "v",
+      "k017",
+      "v",
+      "k018",
+      "v",
+      "k019",
+      "v",
+      "k020",
+      "v",
+      "k021",
+      "v",
+      "k022",
+      "v",
+      "k023",
+      "v",
+      "k024",
+      "v",
+      "k025",
+      "v",
+      "k026",
+      "v",
+      "k027",
+      "v",
+      "k028",
+      "v",
+      "k029",
+      "v",
+      "k030",
+      "v",
+      "k031",
+      "v",
+      "k032",
+      "v",
+      "k033",
+      "v",
+      "k034",
+      "v",
+      "k035",
+      "v",
+      "k036",
+      "v",
+      "k037",
+      "v",
+      "k038",
+      "v",
+      "k039",
+      "v",
+      "k040",
+      "v",
+      "k041",
+      "v",
+      "k042",
+      "v",
+      "k043",
+      "v",
+      "k044",
+      "v",
+      "k045",
+      "v",
+      "k046",
+      "v",
+      "k047",
+      "v",
+      "k048",
+      "v",
+      "k049",
+      "v",
+      "k050",
+      "v",
+      "k051",
+      "v",
+      "k052",
+      "v",
+      "k053",
+      "v",
+      "k054",
+      "v",
+      "k055",
+      "v",
+      "k056",
+      "v",
+      "k057",
+      "v",
+      "k058",
+      "v",
+      "k059",
+      "v",
+      "k060",
+      "v",
+      "k061",
+      "v",
+      "k062",
+      "v",
+      "k063",
+      "v",
+      "k064",
+      "v",
+      "k065",
+      "v",
+      "k066",
+      "v",
+      "k067",
+      "v",
+      "k068",
+      "v",
+      "k069",
+      "v",
+      "k070",
+      "v",
+      "k071",
+      "v",
+      "k072",
+      "v",
+      "k073",
+      "v",
+      "k074",
+      "v",
+      "k075",
+      "v",
+      "k076",
+      "v",
+      "k077",
+      "v",
+      "k078",
+      "v",
+      "k079",
+      "v",
+      "k080",
+      "v",
+      "k081",
+      "v",
+      "k082",
+      "v",
+      "k083",
+      "v",
+      "k084",
+      "v",
+      "k085",
+      "v",
+      "k086",
+      "v",
+      "k087",
+      "v",
+      "k088",
+      "v",
+      "k089",
+      "v",
+      "k090",
+      "v",
+      "k091",
+      "v",
+      "k092",
+      "v",
+      "k093",
+      "v",
+      "k094",
+      "v",
+      "k095",
+      "v",
+      "k096",
+      "v",
+      "k097",
+      "v",
+      "k098",
+      "v",
+      "k099",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*n",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "k00*"
+     ],
+     "expect": [
+      "*n",
+      10
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "k0[0-1]?"
+     ],
+     "expect": [
+      "*n",
+      20
+     ]
+    }
+   ]
+  }
+ ]
+}

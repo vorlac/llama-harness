@@ -1,0 +1,1368 @@
+{
+  "group": "compare",
+  "description": "Equality, inequality and ordering over integers, strings and reference values, plus the type rules for mixed comparisons.",
+  "case_count": 191,
+  "cases": [
+    {
+      "id": "compare-001-eqint",
+      "mode": "exec",
+      "source": "asm/compare-001-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-002-eqint",
+      "mode": "exec",
+      "source": "asm/compare-002-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-003-eqint",
+      "mode": "exec",
+      "source": "asm/compare-003-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-004-eqint",
+      "mode": "exec",
+      "source": "asm/compare-004-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-005-eqint",
+      "mode": "exec",
+      "source": "asm/compare-005-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-006-eqint",
+      "mode": "exec",
+      "source": "asm/compare-006-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-007-eqint",
+      "mode": "exec",
+      "source": "asm/compare-007-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-008-eqint",
+      "mode": "exec",
+      "source": "asm/compare-008-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-009-eqint",
+      "mode": "exec",
+      "source": "asm/compare-009-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-010-eqint",
+      "mode": "exec",
+      "source": "asm/compare-010-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-011-eqint",
+      "mode": "exec",
+      "source": "asm/compare-011-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-012-eqint",
+      "mode": "exec",
+      "source": "asm/compare-012-eqint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-013-neint",
+      "mode": "exec",
+      "source": "asm/compare-013-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-014-neint",
+      "mode": "exec",
+      "source": "asm/compare-014-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-015-neint",
+      "mode": "exec",
+      "source": "asm/compare-015-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-016-neint",
+      "mode": "exec",
+      "source": "asm/compare-016-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-017-neint",
+      "mode": "exec",
+      "source": "asm/compare-017-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-018-neint",
+      "mode": "exec",
+      "source": "asm/compare-018-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-019-neint",
+      "mode": "exec",
+      "source": "asm/compare-019-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-020-neint",
+      "mode": "exec",
+      "source": "asm/compare-020-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-021-neint",
+      "mode": "exec",
+      "source": "asm/compare-021-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-022-neint",
+      "mode": "exec",
+      "source": "asm/compare-022-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-023-neint",
+      "mode": "exec",
+      "source": "asm/compare-023-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-024-neint",
+      "mode": "exec",
+      "source": "asm/compare-024-neint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-025-ltint",
+      "mode": "exec",
+      "source": "asm/compare-025-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-026-ltint",
+      "mode": "exec",
+      "source": "asm/compare-026-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-027-ltint",
+      "mode": "exec",
+      "source": "asm/compare-027-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-028-ltint",
+      "mode": "exec",
+      "source": "asm/compare-028-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-029-ltint",
+      "mode": "exec",
+      "source": "asm/compare-029-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-030-ltint",
+      "mode": "exec",
+      "source": "asm/compare-030-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-031-ltint",
+      "mode": "exec",
+      "source": "asm/compare-031-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-032-ltint",
+      "mode": "exec",
+      "source": "asm/compare-032-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-033-ltint",
+      "mode": "exec",
+      "source": "asm/compare-033-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-034-ltint",
+      "mode": "exec",
+      "source": "asm/compare-034-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-035-ltint",
+      "mode": "exec",
+      "source": "asm/compare-035-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-036-ltint",
+      "mode": "exec",
+      "source": "asm/compare-036-ltint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-037-leint",
+      "mode": "exec",
+      "source": "asm/compare-037-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-038-leint",
+      "mode": "exec",
+      "source": "asm/compare-038-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-039-leint",
+      "mode": "exec",
+      "source": "asm/compare-039-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-040-leint",
+      "mode": "exec",
+      "source": "asm/compare-040-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-041-leint",
+      "mode": "exec",
+      "source": "asm/compare-041-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-042-leint",
+      "mode": "exec",
+      "source": "asm/compare-042-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-043-leint",
+      "mode": "exec",
+      "source": "asm/compare-043-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-044-leint",
+      "mode": "exec",
+      "source": "asm/compare-044-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-045-leint",
+      "mode": "exec",
+      "source": "asm/compare-045-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-046-leint",
+      "mode": "exec",
+      "source": "asm/compare-046-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-047-leint",
+      "mode": "exec",
+      "source": "asm/compare-047-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-048-leint",
+      "mode": "exec",
+      "source": "asm/compare-048-leint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-049-gtint",
+      "mode": "exec",
+      "source": "asm/compare-049-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-050-gtint",
+      "mode": "exec",
+      "source": "asm/compare-050-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-051-gtint",
+      "mode": "exec",
+      "source": "asm/compare-051-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-052-gtint",
+      "mode": "exec",
+      "source": "asm/compare-052-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-053-gtint",
+      "mode": "exec",
+      "source": "asm/compare-053-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-054-gtint",
+      "mode": "exec",
+      "source": "asm/compare-054-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-055-gtint",
+      "mode": "exec",
+      "source": "asm/compare-055-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-056-gtint",
+      "mode": "exec",
+      "source": "asm/compare-056-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-057-gtint",
+      "mode": "exec",
+      "source": "asm/compare-057-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-058-gtint",
+      "mode": "exec",
+      "source": "asm/compare-058-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-059-gtint",
+      "mode": "exec",
+      "source": "asm/compare-059-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-060-gtint",
+      "mode": "exec",
+      "source": "asm/compare-060-gtint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-061-geint",
+      "mode": "exec",
+      "source": "asm/compare-061-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-062-geint",
+      "mode": "exec",
+      "source": "asm/compare-062-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-063-geint",
+      "mode": "exec",
+      "source": "asm/compare-063-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-064-geint",
+      "mode": "exec",
+      "source": "asm/compare-064-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-065-geint",
+      "mode": "exec",
+      "source": "asm/compare-065-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-066-geint",
+      "mode": "exec",
+      "source": "asm/compare-066-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-067-geint",
+      "mode": "exec",
+      "source": "asm/compare-067-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-068-geint",
+      "mode": "exec",
+      "source": "asm/compare-068-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-069-geint",
+      "mode": "exec",
+      "source": "asm/compare-069-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-070-geint",
+      "mode": "exec",
+      "source": "asm/compare-070-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-071-geint",
+      "mode": "exec",
+      "source": "asm/compare-071-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-072-geint",
+      "mode": "exec",
+      "source": "asm/compare-072-geint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-073-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-073-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-074-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-074-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-075-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-075-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-076-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-076-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-077-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-077-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-078-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-078-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-079-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-079-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-080-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-080-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-081-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-081-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-082-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-082-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-083-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-083-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-084-eqstr",
+      "mode": "exec",
+      "source": "asm/compare-084-eqstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-085-nestr",
+      "mode": "exec",
+      "source": "asm/compare-085-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-086-nestr",
+      "mode": "exec",
+      "source": "asm/compare-086-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-087-nestr",
+      "mode": "exec",
+      "source": "asm/compare-087-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-088-nestr",
+      "mode": "exec",
+      "source": "asm/compare-088-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-089-nestr",
+      "mode": "exec",
+      "source": "asm/compare-089-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-090-nestr",
+      "mode": "exec",
+      "source": "asm/compare-090-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-091-nestr",
+      "mode": "exec",
+      "source": "asm/compare-091-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-092-nestr",
+      "mode": "exec",
+      "source": "asm/compare-092-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-093-nestr",
+      "mode": "exec",
+      "source": "asm/compare-093-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-094-nestr",
+      "mode": "exec",
+      "source": "asm/compare-094-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-095-nestr",
+      "mode": "exec",
+      "source": "asm/compare-095-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-096-nestr",
+      "mode": "exec",
+      "source": "asm/compare-096-nestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-097-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-097-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-098-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-098-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-099-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-099-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-100-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-100-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-101-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-101-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-102-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-102-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-103-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-103-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-104-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-104-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-105-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-105-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-106-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-106-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-107-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-107-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-108-ltstr",
+      "mode": "exec",
+      "source": "asm/compare-108-ltstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-109-lestr",
+      "mode": "exec",
+      "source": "asm/compare-109-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-110-lestr",
+      "mode": "exec",
+      "source": "asm/compare-110-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-111-lestr",
+      "mode": "exec",
+      "source": "asm/compare-111-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-112-lestr",
+      "mode": "exec",
+      "source": "asm/compare-112-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-113-lestr",
+      "mode": "exec",
+      "source": "asm/compare-113-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-114-lestr",
+      "mode": "exec",
+      "source": "asm/compare-114-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-115-lestr",
+      "mode": "exec",
+      "source": "asm/compare-115-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-116-lestr",
+      "mode": "exec",
+      "source": "asm/compare-116-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-117-lestr",
+      "mode": "exec",
+      "source": "asm/compare-117-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-118-lestr",
+      "mode": "exec",
+      "source": "asm/compare-118-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-119-lestr",
+      "mode": "exec",
+      "source": "asm/compare-119-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-120-lestr",
+      "mode": "exec",
+      "source": "asm/compare-120-lestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-121-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-121-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-122-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-122-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-123-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-123-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-124-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-124-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-125-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-125-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-126-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-126-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-127-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-127-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-128-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-128-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-129-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-129-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-130-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-130-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-131-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-131-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-132-gtstr",
+      "mode": "exec",
+      "source": "asm/compare-132-gtstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-133-gestr",
+      "mode": "exec",
+      "source": "asm/compare-133-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-134-gestr",
+      "mode": "exec",
+      "source": "asm/compare-134-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-135-gestr",
+      "mode": "exec",
+      "source": "asm/compare-135-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-136-gestr",
+      "mode": "exec",
+      "source": "asm/compare-136-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-137-gestr",
+      "mode": "exec",
+      "source": "asm/compare-137-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-138-gestr",
+      "mode": "exec",
+      "source": "asm/compare-138-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-139-gestr",
+      "mode": "exec",
+      "source": "asm/compare-139-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-140-gestr",
+      "mode": "exec",
+      "source": "asm/compare-140-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-141-gestr",
+      "mode": "exec",
+      "source": "asm/compare-141-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-142-gestr",
+      "mode": "exec",
+      "source": "asm/compare-142-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-143-gestr",
+      "mode": "exec",
+      "source": "asm/compare-143-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-144-gestr",
+      "mode": "exec",
+      "source": "asm/compare-144-gestr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-145-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-145-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-146-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-146-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-147-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-147-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-148-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-148-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-149-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-149-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-150-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-150-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-151-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-151-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-152-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-152-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-153-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-153-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-154-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-154-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-155-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-155-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-156-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-156-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-157-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-157-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-158-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-158-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-159-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-159-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-160-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-160-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-161-eqmixed",
+      "mode": "exec",
+      "source": "asm/compare-161-eqmixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-162-nemixed",
+      "mode": "exec",
+      "source": "asm/compare-162-nemixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-163-lttype",
+      "mode": "exec",
+      "source": "asm/compare-163-lttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-164-lttype",
+      "mode": "exec",
+      "source": "asm/compare-164-lttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-165-lttype",
+      "mode": "exec",
+      "source": "asm/compare-165-lttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-166-lttype",
+      "mode": "exec",
+      "source": "asm/compare-166-lttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-167-lttype",
+      "mode": "exec",
+      "source": "asm/compare-167-lttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-168-lttype",
+      "mode": "exec",
+      "source": "asm/compare-168-lttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-169-letype",
+      "mode": "exec",
+      "source": "asm/compare-169-letype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-170-letype",
+      "mode": "exec",
+      "source": "asm/compare-170-letype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-171-letype",
+      "mode": "exec",
+      "source": "asm/compare-171-letype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-172-letype",
+      "mode": "exec",
+      "source": "asm/compare-172-letype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-173-letype",
+      "mode": "exec",
+      "source": "asm/compare-173-letype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-174-letype",
+      "mode": "exec",
+      "source": "asm/compare-174-letype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-175-gttype",
+      "mode": "exec",
+      "source": "asm/compare-175-gttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-176-gttype",
+      "mode": "exec",
+      "source": "asm/compare-176-gttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-177-gttype",
+      "mode": "exec",
+      "source": "asm/compare-177-gttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-178-gttype",
+      "mode": "exec",
+      "source": "asm/compare-178-gttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-179-gttype",
+      "mode": "exec",
+      "source": "asm/compare-179-gttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-180-gttype",
+      "mode": "exec",
+      "source": "asm/compare-180-gttype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-181-getype",
+      "mode": "exec",
+      "source": "asm/compare-181-getype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-182-getype",
+      "mode": "exec",
+      "source": "asm/compare-182-getype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-183-getype",
+      "mode": "exec",
+      "source": "asm/compare-183-getype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-184-getype",
+      "mode": "exec",
+      "source": "asm/compare-184-getype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-185-getype",
+      "mode": "exec",
+      "source": "asm/compare-185-getype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-186-getype",
+      "mode": "exec",
+      "source": "asm/compare-186-getype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "compare-187-arrayidentity",
+      "mode": "exec",
+      "source": "asm/compare-187-arrayidentity.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-188-arrayidentity",
+      "mode": "exec",
+      "source": "asm/compare-188-arrayidentity.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-189-arrayidentity",
+      "mode": "exec",
+      "source": "asm/compare-189-arrayidentity.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "compare-190-strvalue",
+      "mode": "exec",
+      "source": "asm/compare-190-strvalue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "compare-191-closureidentity",
+      "mode": "exec",
+      "source": "asm/compare-191-closureidentity.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\nfalse\n"
+    }
+  ]
+}

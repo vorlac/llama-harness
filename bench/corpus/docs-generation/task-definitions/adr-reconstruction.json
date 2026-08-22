@@ -1,0 +1,36 @@
+{
+  "id": "adr-reconstruction",
+  "title": "Reconstruct the architecture decision records",
+  "category": "docs-generation",
+  "description": "Recover the load-bearing design decisions the target embodies but never wrote down, as numbered ADRs in one file: what was decided, what the alternatives were, what it buys and costs, and the code and commit evidence behind the reconstruction. The hardest task in the category - it rewards evidence-backed inference and punishes confident invention, so anything unsupported belongs under Open questions.",
+  "size": "large",
+  "languages": ["markdown"],
+  "prompt": "docs-generation/docs-adr-reconstruction-prompt.md",
+  "difficulty": 9,
+  "timeouts": {
+    "build": 60,
+    "run": 2400,
+    "test": 600
+  },
+  "verify": "check_docs.py",
+  "verify_target": "ADRS.md",
+  "verify_args": [
+    "--min-words", "2500",
+    "--max-words", "4500",
+    "--min-mermaid", "1",
+    "--require-section", "Method",
+    "--require-section", "Decision map",
+    "--require-section", "ADR-0001",
+    "--require-section", "ADR-0002",
+    "--require-section", "ADR-0003",
+    "--require-section", "ADR-0004",
+    "--require-section", "ADR-0005",
+    "--require-section", "Rejected candidates",
+    "--require-section", "Open questions"
+  ],
+  "starting_material": null,
+  "artifacts": ["ADRS.md"],
+  "workspace_task_id": "{{TARGET}}-adr-reconstruction",
+  "variables": ["{{TARGET}}"],
+  "targets": ["*"]
+}

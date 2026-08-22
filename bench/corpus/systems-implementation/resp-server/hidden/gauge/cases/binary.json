@@ -1,0 +1,871 @@
+{
+ "group": "binary",
+ "description": "Binary safety of keys, values, fields, members, channels and patterns",
+ "cases": [
+  {
+   "name": "value-containing-nul",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a\u0000b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "a\u0000b"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "key-containing-nul",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a\u0000b",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a\u0000b"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "ab"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "a\u0000b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a\u0000b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "value-containing-crlf",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "line1\r\nline2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "line1\r\nline2"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      12
+     ]
+    }
+   ]
+  },
+  {
+   "name": "key-containing-crlf",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a\r\nb",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a\r\nb"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "a\r\nb"
+     ],
+     "expect": [
+      "+",
+      "string"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "value-with-every-high-byte",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      128
+     ]
+    }
+   ]
+  },
+  {
+   "name": "value-with-every-byte-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      256
+     ]
+    }
+   ]
+  },
+  {
+   "name": "key-with-every-byte-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "empty-key-and-empty-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "",
+      ""
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      ""
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      ""
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-preserves-binary-content",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a\u0000"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "\u0000b"
+     ],
+     "expect": [
+      ":",
+      4
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "a\u0000\u0000b"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "list-values-are-binary-safe",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "L",
+      "\u0000",
+      "a\r\nb",
+      "\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "L",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "*",
+      [
+       "\u0000",
+       "a\r\nb",
+       "\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "LINDEX",
+      "L",
+      "0"
+     ],
+     "expect": [
+      "$",
+      "\u0000"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "list-removal-is-byte-exact",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "L",
+      "a\u0000",
+      "a"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "LREM",
+      "L",
+      "0",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "L",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "*",
+      [
+       "a\u0000"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hash-fields-are-binary-safe",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f\u0000",
+      "v\r\n"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f\u0000"
+     ],
+     "expect": [
+      "$",
+      "v\r\n"
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "H",
+      "f\u0000"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "H"
+     ],
+     "expect": [
+      "*p",
+      [
+       "f\u0000",
+       "v\r\n"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-members-are-binary-safe",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "m\u0000",
+      "m"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "S",
+      "m\u0000"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*u",
+      [
+       "m\u0000",
+       "m"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "channel-names-are-binary-safe",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch\u0000"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch\u0000",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "pub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch\u0000",
+      "y"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch\u0000",
+       "y"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "keys-pattern-matches-binary-keys",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a\u00001",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "a\u00002",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b1",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "a\u0000*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a\u00001",
+       "a\u00002"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "KEYS",
+      "a*"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a\u00001",
+       "a\u00002"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-and-mget-are-binary-safe",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "\u0000",
+      "1",
+      "\r\n",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "\u0000",
+      "\r\n"
+     ],
+     "expect": [
+      "*",
+      [
+       "1",
+       "2"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "rename-with-binary-key-names",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a\u0000",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a\u0000",
+      "b\r\n"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "b\r\n"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "a\u0000"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-on-a-value-with-a-trailing-nul",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1\u0000"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "echo-round-trips-every-byte",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      "$",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "binary-value-survives-getset",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "\u0000"
+     ],
+     "expect": [
+      "$",
+      "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\u007f\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008a\u008b\u008c\u008d\u008e\u008f\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009a\u009b\u009c\u009d\u009e\u009f\u00a0\u00a1\u00a2\u00a3\u00a4\u00a5\u00a6\u00a7\u00a8\u00a9\u00aa\u00ab\u00ac\u00ad\u00ae\u00af\u00b0\u00b1\u00b2\u00b3\u00b4\u00b5\u00b6\u00b7\u00b8\u00b9\u00ba\u00bb\u00bc\u00bd\u00be\u00bf\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6\u00c7\u00c8\u00c9\u00ca\u00cb\u00cc\u00cd\u00ce\u00cf\u00d0\u00d1\u00d2\u00d3\u00d4\u00d5\u00d6\u00d7\u00d8\u00d9\u00da\u00db\u00dc\u00dd\u00de\u00df\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6\u00e7\u00e8\u00e9\u00ea\u00eb\u00ec\u00ed\u00ee\u00ef\u00f0\u00f1\u00f2\u00f3\u00f4\u00f5\u00f6\u00f7\u00f8\u00f9\u00fa\u00fb\u00fc\u00fd\u00fe\u00ff"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "\u0000"
+     ]
+    }
+   ]
+  }
+ ]
+}

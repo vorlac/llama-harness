@@ -1,0 +1,164 @@
+{
+  "group": "errors",
+  "description": "Every runtime trap, its error code and its process exit status, plus the rule that output already written survives.",
+  "case_count": 20,
+  "cases": [
+    {
+      "id": "errors-001-e_div_zero",
+      "mode": "exec",
+      "source": "asm/errors-001-e_div_zero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "errors-002-e_div_zero",
+      "mode": "exec",
+      "source": "asm/errors-002-e_div_zero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "errors-003-e_type",
+      "mode": "exec",
+      "source": "asm/errors-003-e_type.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "errors-004-e_range",
+      "mode": "exec",
+      "source": "asm/errors-004-e_range.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "errors-005-e_value",
+      "mode": "exec",
+      "source": "asm/errors-005-e_value.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "errors-006-e_undef_global",
+      "mode": "exec",
+      "source": "asm/errors-006-e_undef_global.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_UNDEF_GLOBAL"
+    },
+    {
+      "id": "errors-007-e_assert",
+      "mode": "exec",
+      "source": "asm/errors-007-e_assert.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_ASSERT"
+    },
+    {
+      "id": "errors-008-e_assert",
+      "mode": "exec",
+      "source": "asm/errors-008-e_assert.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_ASSERT"
+    },
+    {
+      "id": "errors-009-e_underflow",
+      "mode": "exec",
+      "source": "asm/errors-009-e_underflow.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_UNDERFLOW"
+    },
+    {
+      "id": "errors-010-e_underflow",
+      "mode": "exec",
+      "source": "asm/errors-010-e_underflow.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_UNDERFLOW"
+    },
+    {
+      "id": "errors-011-e_underflow",
+      "mode": "exec",
+      "source": "asm/errors-011-e_underflow.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_UNDERFLOW"
+    },
+    {
+      "id": "errors-012-e_underflow",
+      "mode": "exec",
+      "source": "asm/errors-012-e_underflow.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_UNDERFLOW"
+    },
+    {
+      "id": "errors-013-e_range",
+      "mode": "exec",
+      "source": "asm/errors-013-e_range.asm",
+      "expect_exit": 4,
+      "expect_stdout": "before\n",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "errors-014-assertpasses",
+      "mode": "exec",
+      "source": "asm/errors-014-assertpasses.asm",
+      "expect_exit": 0,
+      "expect_stdout": "ok\n"
+    },
+    {
+      "id": "errors-015-assertpops",
+      "mode": "exec",
+      "source": "asm/errors-015-assertpops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "errors-016-halt",
+      "mode": "exec",
+      "source": "asm/errors-016-halt.asm",
+      "expect_exit": 0,
+      "expect_stdout": "one\n"
+    },
+    {
+      "id": "errors-017-haltdiscards",
+      "mode": "exec",
+      "source": "asm/errors-017-haltdiscards.asm",
+      "expect_exit": 0,
+      "expect_stdout": ""
+    },
+    {
+      "id": "errors-018-retmain",
+      "mode": "exec",
+      "source": "asm/errors-018-retmain.asm",
+      "expect_exit": 0,
+      "expect_stdout": "",
+      "note": "the entry function's return value is discarded, not an exit code"
+    },
+    {
+      "id": "errors-019-errorinframe",
+      "mode": "exec",
+      "source": "asm/errors-019-errorinframe.asm",
+      "expect_exit": 4,
+      "expect_stdout": "a\nb\n",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "errors-020-writeflush",
+      "mode": "exec",
+      "source": "asm/errors-020-writeflush.asm",
+      "expect_exit": 4,
+      "expect_stdout": "partial",
+      "expect_error": "E_TYPE",
+      "note": "unterminated output written with WRITE must still reach stdout"
+    }
+  ]
+}

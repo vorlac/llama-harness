@@ -1,0 +1,75 @@
+; case integration-002-bubblesort
+; expect exit=0 stdout="[1, 2, 3, 5, 7, 8, 9]\n"
+.func main arity=0 locals=4
+  PUSH_INT 5
+  PUSH_INT 3
+  PUSH_INT 8
+  PUSH_INT 1
+  PUSH_INT 9
+  PUSH_INT 2
+  PUSH_INT 7
+  NEW_ARRAY 7
+  STORE_LOCAL 0
+  PUSH_INT 0
+  STORE_LOCAL 1
+i_top:
+  LOAD_LOCAL 1
+  LOAD_LOCAL 0
+  LEN
+  LT
+  JMP_IF_FALSE i_end
+  PUSH_INT 0
+  STORE_LOCAL 2
+j_top:
+  LOAD_LOCAL 2
+  LOAD_LOCAL 0
+  LEN
+  PUSH_INT 1
+  SUB
+  LT
+  JMP_IF_FALSE j_end
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  ARR_GET
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  PUSH_INT 1
+  ADD
+  ARR_GET
+  GT
+  JMP_IF_FALSE noswap
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  ARR_GET
+  STORE_LOCAL 3
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  PUSH_INT 1
+  ADD
+  ARR_GET
+  ARR_SET
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  PUSH_INT 1
+  ADD
+  LOAD_LOCAL 3
+  ARR_SET
+noswap:
+  LOAD_LOCAL 2
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 2
+  JMP j_top
+j_end:
+  LOAD_LOCAL 1
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 1
+  JMP i_top
+i_end:
+  LOAD_LOCAL 0
+  PRINT
+  RET
+.end

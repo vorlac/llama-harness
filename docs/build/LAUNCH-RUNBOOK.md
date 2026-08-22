@@ -20,12 +20,34 @@ Measured 2026-08-20 on this machine; re-check before each launch.
 | C++ side                | `cmake --build .out/build/clang-relwdebinfo --target router-tests && ctest --test-dir .out/build/clang-relwdebinfo` | 1/1 passed                                                                                                                                                                                                                                                                                                               |
 | Acceptance              | `bash scripts/verify-acceptance.sh`                                                                                 | 17 PASS, 4 FAIL — all four are 13.2/14.2                                                                                                                                                                                                                                                                                 |
 | opencode                | `opencode --version`                                                                                                | `1.18.15` (the version the wire contract is pinned against)                                                                                                                                                                                                                                                              |
-| Model on disk           | `ls .data/models`                                                                                                   | `qwen3.6-27b` present                                                                                                                                                                                                                                                                                                    |
+| Model on disk           | `ls .data/models`                                                                                                   | `qwen3.8-27b` present                                                                                                                                                                                                                                                                                                    |
 | llama.cpp tools current | `python3 -c 'import sys; sys.path.insert(0,"scripts"); import fetch_models as fm; print(fm.tools_state())'`         | `(True, 'up to date with submodule …')` — otherwise `serve.py` rebuilds nine binaries at launch and the llama-server under test is not the one the contract was measured on (the 13.2 smoke launched into exactly that: build 10298 on disk, submodule at 521a64cd0197, rebuilt to build 10542 before the model started) |
 | Disk                    | `df -h .`                                                                                                           | 376 GiB free                                                                                                                                                                                                                                                                                                             |
 | Port                    | `lsof -nP -iTCP:8080 -sTCP:LISTEN`                                                                                  | free — `llama-server` is not running                                                                                                                                                                                                                                                                                     |
-| Hidden-test floor       | `python3 scripts/conductor_bench.py --verify-tasks --work-root <scratch>`                                           | every hidden test exits non-zero on its unmodified seed                                                                                                                                                                                                                                                                  |
-| Seed-green floor        | `python3 scripts/conductor_bench.py --seed-green --work-root <scratch>`                                             | every seeded repo passes its own visible suite                                                                                                                                                                                                                                                                           |
+| Hidden-test floor       | `python3 scripts/conductor_bench.py --verify-tasks --manifest <set> --work-root <scratch outside the repo>`                            | every hidden test exits non-zero on its unmodified seed, and none was killed on the clock |
+| Seed-green floor        | `python3 scripts/conductor_bench.py --seed-green --manifest <set> --work-root <scratch outside the repo>`                            | every seeded repo passes its own visible suite |
+
+**Both floors cover one manifest — the one named.** `--manifest` defaults to
+`bench/conductor-tasks.json`, so a floor run without it checks the 23 POC tasks
+whichever set is about to run. Run each floor once per set that will run:
+
+```bash
+for set in bench/conductor-tasks.json bench/corpus-systems.json \
+           bench/corpus-repair.json bench/corpus-perf.json \
+           bench/corpus-euler.json bench/corpus-games.json; do
+  python3 scripts/conductor_bench.py --verify-tasks --manifest "$set" \
+      --work-root "$SCRATCH/verify" || break
+  python3 scripts/conductor_bench.py --seed-green  --manifest "$set" \
+      --work-root "$SCRATCH/green"  || break
+done
+```
+
+`$SCRATCH` must be outside this repository — a work root inside it is refused,
+because a cell's cwd would then sit a constant number of `..` segments from every
+graded gauge under `bench/corpus/**/hidden/**`. The corpus speed gates compile a
+reference and run timed workloads, so raise `--verify-timeout` (default 600s)
+rather than reading a killed gate as a failure; the floor reports a timeout as
+its own outcome and refuses either way.
 
 **Never run a bare `cmake --build` with no `--target`** — the default target
 reaches vendored llama.cpp, which `scripts/verify-acceptance.sh` records as
@@ -117,14 +139,20 @@ and calibrate `TIER_TIMEOUT_SEC` from the observed medians before committing to
 reps=3.** The plan asks for timeouts "calibrated from a pilot run", and 60 hours
 is not an overnight.
 
-### Second model
+### The model
 
-`qwen3.8-27b` is in the catalog with every field verified against the real
-repository, but **its weights are not on disk**. Adding it to the sweep means
-`python3 scripts/fetch_models.py` first — roughly 22 GB for the default
-`UD-Q6_K`. The manifest names the model in three places
-(`defaults.model`, `sweep.primaryModel`, `sweep.models[0]`) plus `DEFAULT_MODEL`
-in `scripts/conductor_bench.py`.
+`qwen3.8-27b` is the model this campaign runs, and the only one any manifest
+names. Each manifest declares it in three places — `defaults.model`,
+`sweep.primaryModel` and `sweep.models[0]` — and `defaults.model` must be one of
+`sweep.models`, so a manifest cannot declare one model and plan another. The
+driver holds no model id of its own: a run with neither `--sweep` nor `--model`
+plans `defaults.model`.
+
+Adding a second model means fetching its weights first — `python3
+scripts/fetch_models.py`, roughly 22 GB for the default `UD-Q6_K` — and then
+adding the id to `sweep.models` in every manifest the campaign runs. A model
+listed in one manifest and not another is a campaign whose lanes ran on
+different weights.
 
 ### Read it against the thresholds, not against itself
 

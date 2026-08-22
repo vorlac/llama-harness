@@ -1,0 +1,743 @@
+{
+  "group": "utf8",
+  "description": "UTF-8 well-formedness of the whole input, plus byte order marks.",
+  "cases": [
+    {
+      "id": "utf8-001",
+      "note": "string containing stray continuation byte 0x80",
+      "input_b64": "IoAi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-002",
+      "note": "string containing stray continuation byte 0x8f",
+      "input_b64": "Io8i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-003",
+      "note": "string containing stray continuation byte 0xa0",
+      "input_b64": "IqAi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-004",
+      "note": "string containing stray continuation byte 0xbf",
+      "input_b64": "Ir8i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-005",
+      "note": "string containing overlong two-byte encoding of U+0000",
+      "input_b64": "IsCAIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-006",
+      "note": "string containing overlong two-byte encoding of U+002F",
+      "input_b64": "IsCvIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-007",
+      "note": "string containing overlong two-byte encoding of U+007F",
+      "input_b64": "IsG/Ig==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-008",
+      "note": "string containing truncated two-byte sequence",
+      "input_b64": "IsIi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-009",
+      "note": "string containing two-byte lead followed by ASCII",
+      "input_b64": "IsJBIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-010",
+      "note": "string containing two-byte lead followed by another lead",
+      "input_b64": "IsLCIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-011",
+      "note": "string containing truncated two-byte sequence (0xdf)",
+      "input_b64": "It8i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-012",
+      "note": "string containing overlong three-byte encoding of U+0000",
+      "input_b64": "IuCAgCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-013",
+      "note": "string containing overlong three-byte encoding of U+07FF",
+      "input_b64": "IuCfvyI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-014",
+      "note": "string containing truncated three-byte sequence",
+      "input_b64": "IuCgIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-015",
+      "note": "string containing truncated three-byte sequence (U+20AC prefix)",
+      "input_b64": "IuKCIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-016",
+      "note": "string containing three-byte lead with invalid second byte",
+      "input_b64": "IuIooSI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-017",
+      "note": "string containing three-byte lead with invalid third byte",
+      "input_b64": "IuKCKCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-018",
+      "note": "string containing UTF-8 encoding of high surrogate U+D800",
+      "input_b64": "Iu2ggCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-019",
+      "note": "string containing UTF-8 encoding of high surrogate U+DB7F",
+      "input_b64": "Iu2tvyI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-020",
+      "note": "string containing UTF-8 encoding of low surrogate U+DC00",
+      "input_b64": "Iu2wgCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-021",
+      "note": "string containing UTF-8 encoding of low surrogate U+DFFF",
+      "input_b64": "Iu2/vyI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-022",
+      "note": "string containing CESU-8 surrogate pair for U+10000",
+      "input_b64": "Iu2ggO2wgCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-023",
+      "note": "string containing overlong four-byte encoding of U+0000",
+      "input_b64": "IvCAgIAi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-024",
+      "note": "string containing overlong four-byte encoding of U+FFFF",
+      "input_b64": "IvCPv78i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-025",
+      "note": "string containing truncated four-byte sequence",
+      "input_b64": "IvCfmCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-026",
+      "note": "string containing truncated four-byte sequence (2 of 4)",
+      "input_b64": "IvCfIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-027",
+      "note": "string containing truncated four-byte sequence (1 of 4)",
+      "input_b64": "IvAi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-028",
+      "note": "string containing four-byte encoding of U+110000",
+      "input_b64": "IvSQgIAi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-029",
+      "note": "string containing four-byte encoding beyond U+10FFFF",
+      "input_b64": "IvS/v78i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-030",
+      "note": "string containing lead byte 0xf5 (out of range)",
+      "input_b64": "IvWAgIAi",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-031",
+      "note": "string containing lead byte 0xf7 (out of range)",
+      "input_b64": "Ive/v78i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-032",
+      "note": "string containing five-byte sequence",
+      "input_b64": "IviIgICAIg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-033",
+      "note": "string containing six-byte sequence",
+      "input_b64": "IvyEgICAgCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-034",
+      "note": "string containing byte 0xfe is never valid UTF-8",
+      "input_b64": "Iv4i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-035",
+      "note": "string containing byte 0xff is never valid UTF-8",
+      "input_b64": "Iv8i",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-036",
+      "note": "string containing UTF-16BE byte order mark",
+      "input_b64": "Iv7/Ig==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-037",
+      "note": "string containing UTF-16LE byte order mark",
+      "input_b64": "Iv/+Ig==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-038",
+      "note": "bare stray continuation byte 0x80",
+      "input_b64": "gA==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-039",
+      "note": "bare stray continuation byte 0x8f",
+      "input_b64": "jw==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-040",
+      "note": "bare stray continuation byte 0xa0",
+      "input_b64": "oA==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-041",
+      "note": "bare stray continuation byte 0xbf",
+      "input_b64": "vw==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-042",
+      "note": "bare overlong two-byte encoding of U+0000",
+      "input_b64": "wIA=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-043",
+      "note": "bare overlong two-byte encoding of U+002F",
+      "input_b64": "wK8=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-044",
+      "note": "bare overlong two-byte encoding of U+007F",
+      "input_b64": "wb8=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-045",
+      "note": "bare truncated two-byte sequence",
+      "input_b64": "wg==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-046",
+      "note": "bare two-byte lead followed by ASCII",
+      "input_b64": "wkE=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-047",
+      "note": "bare two-byte lead followed by another lead",
+      "input_b64": "wsI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-048",
+      "note": "bare truncated two-byte sequence (0xdf)",
+      "input_b64": "3w==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-049",
+      "note": "bare overlong three-byte encoding of U+0000",
+      "input_b64": "4ICA",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-050",
+      "note": "array element: overlong three-byte encoding of U+07FF",
+      "input_b64": "WzEs4J+/XQ==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-051",
+      "note": "array element: truncated three-byte sequence",
+      "input_b64": "WzEs4KBd",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-052",
+      "note": "array element: truncated three-byte sequence (U+20AC prefix)",
+      "input_b64": "WzEs4oJd",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-053",
+      "note": "array element: three-byte lead with invalid second byte",
+      "input_b64": "WzEs4iihXQ==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-054",
+      "note": "array element: three-byte lead with invalid third byte",
+      "input_b64": "WzEs4oIoXQ==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-055",
+      "note": "array element: UTF-8 encoding of high surrogate U+D800",
+      "input_b64": "WzEs7aCAXQ==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-056",
+      "note": "array element: UTF-8 encoding of high surrogate U+DB7F",
+      "input_b64": "WzEs7a2/XQ==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-057",
+      "note": "array element: UTF-8 encoding of low surrogate U+DC00",
+      "input_b64": "WzEs7bCAXQ==",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-058",
+      "note": "trailing comma AND invalid UTF-8: the UTF-8 scan wins",
+      "input_b64": "WzEsXf8=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 4,
+      "line": 1,
+      "column": 5
+    },
+    {
+      "id": "utf8-059",
+      "note": "syntax error AND overlong encoding: the UTF-8 scan wins",
+      "input_b64": "eyJhIiAxfcCA",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 7,
+      "line": 1,
+      "column": 8
+    },
+    {
+      "id": "utf8-060",
+      "note": "NUL then 0xff",
+      "input_b64": "AP8=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-061",
+      "note": "string containing U+0080, shortest two-byte form",
+      "input": "\"\u0080\"",
+      "expect": "accept",
+      "canonical": "\"\\u0080\""
+    },
+    {
+      "id": "utf8-062",
+      "note": "string containing U+07FF, largest two-byte form",
+      "input": "\"\u07ff\"",
+      "expect": "accept",
+      "canonical": "\"\\u07ff\""
+    },
+    {
+      "id": "utf8-063",
+      "note": "string containing U+0800, shortest three-byte form",
+      "input": "\"\u0800\"",
+      "expect": "accept",
+      "canonical": "\"\\u0800\""
+    },
+    {
+      "id": "utf8-064",
+      "note": "string containing U+D7FF, just below the surrogate block",
+      "input": "\"\ud7ff\"",
+      "expect": "accept",
+      "canonical": "\"\\ud7ff\""
+    },
+    {
+      "id": "utf8-065",
+      "note": "string containing U+E000, just above the surrogate block",
+      "input": "\"\ue000\"",
+      "expect": "accept",
+      "canonical": "\"\\ue000\""
+    },
+    {
+      "id": "utf8-066",
+      "note": "string containing U+FFFD replacement character",
+      "input": "\"\ufffd\"",
+      "expect": "accept",
+      "canonical": "\"\\ufffd\""
+    },
+    {
+      "id": "utf8-067",
+      "note": "string containing U+FFFF noncharacter",
+      "input": "\"\uffff\"",
+      "expect": "accept",
+      "canonical": "\"\\uffff\""
+    },
+    {
+      "id": "utf8-068",
+      "note": "string containing U+10000, shortest four-byte form",
+      "input": "\"\ud800\udc00\"",
+      "expect": "accept",
+      "canonical": "\"\\ud800\\udc00\""
+    },
+    {
+      "id": "utf8-069",
+      "note": "string containing U+10FFFF, largest scalar value",
+      "input": "\"\udbff\udfff\"",
+      "expect": "accept",
+      "canonical": "\"\\udbff\\udfff\""
+    },
+    {
+      "id": "utf8-070",
+      "note": "UTF-8 BOM before an array",
+      "input": "\ufeff[]",
+      "expect": "reject",
+      "code": "E_BOM",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-071",
+      "note": "UTF-8 BOM alone",
+      "input": "\ufeff",
+      "expect": "reject",
+      "code": "E_BOM",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-072",
+      "note": "UTF-8 BOM before a number",
+      "input": "\ufeff1",
+      "expect": "reject",
+      "code": "E_BOM",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "utf8-073",
+      "note": "BOM after whitespace is not a leading BOM",
+      "input": " \ufeff1",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "utf8-074",
+      "note": "BOM inside an array is U+FEFF, which cannot start a value",
+      "input": "[1,\ufeff2]",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "utf8-075",
+      "note": "BOM bytes inside a string are just U+FEFF",
+      "input": "\"\ufeff\"",
+      "expect": "accept",
+      "canonical": "\"\\ufeff\""
+    },
+    {
+      "id": "utf8-076",
+      "note": "BOM inside a string inside an array",
+      "input": "[\"\ufeff\"]",
+      "expect": "accept",
+      "canonical": "[\"\\ufeff\"]"
+    },
+    {
+      "id": "utf8-077",
+      "note": "CESU-8: U+1F600 as two three-byte surrogate encodings; each half is an encoded surrogate (SPEC 5.1 Note)",
+      "input_b64": "Iu2gve24gCI=",
+      "expect": "reject",
+      "code": "E_INVALID_UTF8",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    }
+  ]
+}

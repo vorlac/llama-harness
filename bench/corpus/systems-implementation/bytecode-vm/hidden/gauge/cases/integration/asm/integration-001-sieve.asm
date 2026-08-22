@@ -1,0 +1,69 @@
+; case integration-001-sieve
+; expect exit=0 stdout="2\n3\n5\n7\n11\n13\n17\n19\n23\n29\n31\n37\n41\n43\n47\n"
+.func main arity=0 locals=3
+  NEW_ARRAY 0
+  STORE_LOCAL 0
+  PUSH_INT 0
+  STORE_LOCAL 1
+f_top:
+  LOAD_LOCAL 1
+  PUSH_INT 51
+  LT
+  JMP_IF_FALSE f_end
+  LOAD_LOCAL 0
+  PUSH_TRUE
+  ARR_PUSH
+  LOAD_LOCAL 1
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 1
+  JMP f_top
+f_end:
+  PUSH_INT 2
+  STORE_LOCAL 1
+o_top:
+  LOAD_LOCAL 1
+  PUSH_INT 51
+  LT
+  JMP_IF_FALSE o_end
+  LOAD_LOCAL 0
+  LOAD_LOCAL 1
+  ARR_GET
+  JMP_IF_FALSE skip_i
+  LOAD_LOCAL 1
+  PRINT
+  LOAD_LOCAL 1
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 2
+in_top:
+  LOAD_LOCAL 2
+  PUSH_INT 51
+  LT
+  JMP_IF_FALSE in_end
+  LOAD_LOCAL 2
+  LOAD_LOCAL 1
+  MOD
+  PUSH_INT 0
+  EQ
+  JMP_IF_FALSE skip_j
+  LOAD_LOCAL 0
+  LOAD_LOCAL 2
+  PUSH_FALSE
+  ARR_SET
+skip_j:
+  LOAD_LOCAL 2
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 2
+  JMP in_top
+in_end:
+skip_i:
+  LOAD_LOCAL 1
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 1
+  JMP o_top
+o_end:
+  RET
+.end

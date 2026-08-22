@@ -1,0 +1,15 @@
+PONG
+MATCH 1 2 5
+NOMATCH
+MATCH 1 0 0
+NOMATCH
+MATCH 1 0 0
+MATCH 1 1 2
+MATCH 1 1 2
+MATCH 1 0 3
+MATCH 1 1 2
+MATCH 1 1 2
+ERROR unknown-command -1
+ERROR unknown-command -1
+ERROR bad-request -1
+ERROR bad-request -1

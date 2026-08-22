@@ -1,0 +1,213 @@
+{
+  "group": "depth",
+  "description": "The call-depth limit and the operand-stack limit: the boundary cases either side of each, and the errors they raise.",
+  "case_count": 19,
+  "cases": [
+    {
+      "id": "depth-001-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "8"
+      ],
+      "source": "asm/depth-001-limit.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6\n"
+    },
+    {
+      "id": "depth-002-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "8"
+      ],
+      "source": "asm/depth-002-limit.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-003-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "2"
+      ],
+      "source": "asm/depth-003-limit.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "depth-004-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "2"
+      ],
+      "source": "asm/depth-004-limit.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-005-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "20"
+      ],
+      "source": "asm/depth-005-limit.asm",
+      "expect_exit": 0,
+      "expect_stdout": "18\n"
+    },
+    {
+      "id": "depth-006-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "20"
+      ],
+      "source": "asm/depth-006-limit.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-007-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "1000"
+      ],
+      "source": "asm/depth-007-limit.asm",
+      "expect_exit": 0,
+      "expect_stdout": "500\n"
+    },
+    {
+      "id": "depth-008-limit",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "1000"
+      ],
+      "source": "asm/depth-008-limit.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-009-default",
+      "mode": "exec",
+      "source": "asm/depth-009-default.asm",
+      "expect_exit": 0,
+      "expect_stdout": "254\n",
+      "note": "the default call-depth limit is 256"
+    },
+    {
+      "id": "depth-010-default",
+      "mode": "exec",
+      "source": "asm/depth-010-default.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-011-nocall",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "1"
+      ],
+      "source": "asm/depth-011-nocall.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "depth-012-nocall",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "1"
+      ],
+      "source": "asm/depth-012-nocall.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-013-infinite",
+      "mode": "exec",
+      "source": "asm/depth-013-infinite.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-014-infinite",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "32"
+      ],
+      "source": "asm/depth-014-infinite.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-015-recovered",
+      "mode": "exec",
+      "args": [
+        "--max-depth",
+        "40"
+      ],
+      "source": "asm/depth-015-recovered.asm",
+      "expect_exit": 0,
+      "expect_stdout": "60\n",
+      "note": "frames are released on return, so a second deep call still fits"
+    },
+    {
+      "id": "depth-016-opstack",
+      "mode": "exec",
+      "args": [
+        "--max-stack",
+        "16"
+      ],
+      "source": "asm/depth-016-opstack.asm",
+      "expect_exit": 5,
+      "expect_stdout": "",
+      "expect_error": "E_STACK_OVERFLOW"
+    },
+    {
+      "id": "depth-017-opstack",
+      "mode": "exec",
+      "args": [
+        "--max-stack",
+        "17"
+      ],
+      "source": "asm/depth-017-opstack.asm",
+      "expect_exit": 0,
+      "expect_stdout": "17\n"
+    },
+    {
+      "id": "depth-018-opstack",
+      "mode": "exec",
+      "source": "asm/depth-018-opstack.asm",
+      "expect_exit": 0,
+      "expect_stdout": "17\n",
+      "note": "the default operand-stack limit is 1024"
+    },
+    {
+      "id": "depth-019-opstackperframe",
+      "mode": "exec",
+      "args": [
+        "--max-stack",
+        "4"
+      ],
+      "source": "asm/depth-019-opstackperframe.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6\n1\n",
+      "note": "the limit applies per frame, not to all frames together"
+    }
+  ]
+}

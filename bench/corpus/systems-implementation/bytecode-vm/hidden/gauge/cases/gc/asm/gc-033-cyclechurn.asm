@@ -1,0 +1,34 @@
+; case gc-033-cyclechurn
+; expect exit=0 stdout="0\n"
+.func main arity=0 locals=3
+  PUSH_INT 0
+  STORE_LOCAL 2
+c_top:
+  LOAD_LOCAL 2
+  PUSH_INT 2000
+  LT
+  JMP_IF_FALSE c_end
+  NEW_ARRAY 0
+  STORE_LOCAL 0
+  NEW_ARRAY 0
+  STORE_LOCAL 1
+  LOAD_LOCAL 0
+  LOAD_LOCAL 1
+  ARR_PUSH
+  LOAD_LOCAL 1
+  LOAD_LOCAL 0
+  ARR_PUSH
+  LOAD_LOCAL 2
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 2
+  JMP c_top
+c_end:
+  PUSH_NIL
+  STORE_LOCAL 0
+  PUSH_NIL
+  STORE_LOCAL 1
+  GCLIVE
+  PRINT
+  RET
+.end

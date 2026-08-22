@@ -1,0 +1,1296 @@
+{
+ "group": "connection",
+ "description": "PING, ECHO, SELECT, QUIT and the harness admin commands",
+ "cases": [
+  {
+   "name": "ping-bare",
+   "steps": [
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ping-lowercase",
+   "steps": [
+    {
+     "cmd": [
+      "ping"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ping-with-message",
+   "steps": [
+    {
+     "cmd": [
+      "PING",
+      "hello"
+     ],
+     "expect": [
+      "$",
+      "hello"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ping-with-empty-message",
+   "steps": [
+    {
+     "cmd": [
+      "PING",
+      ""
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ping-with-binary-message",
+   "steps": [
+    {
+     "cmd": [
+      "PING",
+      "a\r\nb"
+     ],
+     "expect": [
+      "$",
+      "a\r\nb"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ping-twice",
+   "steps": [
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "echo-simple",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      "hello"
+     ],
+     "expect": [
+      "$",
+      "hello"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "echo-empty",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      ""
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "name": "echo-preserves-case",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      "HeLLo"
+     ],
+     "expect": [
+      "$",
+      "HeLLo"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "echo-256-bytes",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+     ],
+     "expect": [
+      "$",
+      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "echo-with-spaces",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      "a b c"
+     ],
+     "expect": [
+      "$",
+      "a b c"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-0",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-1",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-2",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-3",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-4",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-5",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-6",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "6"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-7",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "7"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-8",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "8"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-9",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-10",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-11",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "11"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-12",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "12"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-13",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "13"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-14",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "14"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-db-15",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "15"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-out-of-range-16",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "16"
+     ],
+     "expect": [
+      "-",
+      "ERR DB index is out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-out-of-range-negative",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "-1"
+     ],
+     "expect": [
+      "-",
+      "ERR DB index is out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-not-an-integer",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-leading-zero-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "01"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-empty-argument",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      ""
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-float-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "1.0"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-plus-sign-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "+1"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-space-padded-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      " 1"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-huge-value-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "9223372036854775808"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-keyspaces-are-independent",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "zero"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "one"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "one"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "zero"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-is-per-connection",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "five"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "five"
+     ],
+     "client": "c2"
+    }
+   ]
+  },
+  {
+   "name": "select-survives-across-commands",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "select-does-not-clear-keys",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "quit-returns-ok-then-closes",
+   "steps": [
+    {
+     "cmd": [
+      "QUIT"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "expect_closed": true
+    }
+   ]
+  },
+  {
+   "name": "quit-on-one-connection-leaves-others",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "QUIT"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "expect_closed": true,
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "c2"
+    }
+   ]
+  },
+  {
+   "name": "dbsize-empty-database",
+   "steps": [
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "dbsize-counts-keys",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "s",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      5
+     ]
+    }
+   ]
+  },
+  {
+   "name": "dbsize-is-per-database",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "dbsize-after-del",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "DEL",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "flushdb-clears-current-database",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "FLUSHDB"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "flushdb-does-not-touch-other-databases",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "FLUSHDB"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a"
+     ],
+     "expect": [
+      "$",
+      "0"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "flushdb-async-accepted",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "FLUSHDB",
+      "ASYNC"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "flushdb-sync-accepted",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "FLUSHDB",
+      "sync"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "flushdb-bad-option",
+   "steps": [
+    {
+     "cmd": [
+      "FLUSHDB",
+      "MAYBE"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "flushdb-on-empty-database",
+   "steps": [
+    {
+     "cmd": [
+      "FLUSHDB"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  }
+ ]
+}

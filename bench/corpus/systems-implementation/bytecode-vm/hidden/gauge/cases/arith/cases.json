@@ -1,0 +1,1492 @@
+{
+  "group": "arith",
+  "description": "Integer arithmetic: wrapping two's-complement add/sub/mul, truncating div, sign-of-dividend mod, negation, and the division and overflow edge cases the spec pins down.",
+  "case_count": 205,
+  "cases": [
+    {
+      "id": "arith-001-add",
+      "mode": "exec",
+      "source": "asm/arith-001-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-002-add",
+      "mode": "exec",
+      "source": "asm/arith-002-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-003-add",
+      "mode": "exec",
+      "source": "asm/arith-003-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-004-add",
+      "mode": "exec",
+      "source": "asm/arith-004-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arith-005-add",
+      "mode": "exec",
+      "source": "asm/arith-005-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "arith-006-add",
+      "mode": "exec",
+      "source": "asm/arith-006-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "arith-007-add",
+      "mode": "exec",
+      "source": "asm/arith-007-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-008-add",
+      "mode": "exec",
+      "source": "asm/arith-008-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-009-add",
+      "mode": "exec",
+      "source": "asm/arith-009-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-010-add",
+      "mode": "exec",
+      "source": "asm/arith-010-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4\n"
+    },
+    {
+      "id": "arith-011-add",
+      "mode": "exec",
+      "source": "asm/arith-011-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4\n"
+    },
+    {
+      "id": "arith-012-add",
+      "mode": "exec",
+      "source": "asm/arith-012-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-10\n"
+    },
+    {
+      "id": "arith-013-add",
+      "mode": "exec",
+      "source": "asm/arith-013-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "125\n"
+    },
+    {
+      "id": "arith-014-add",
+      "mode": "exec",
+      "source": "asm/arith-014-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "125\n"
+    },
+    {
+      "id": "arith-015-add",
+      "mode": "exec",
+      "source": "asm/arith-015-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1111111110\n"
+    },
+    {
+      "id": "arith-016-add",
+      "mode": "exec",
+      "source": "asm/arith-016-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "864197532\n"
+    },
+    {
+      "id": "arith-017-add",
+      "mode": "exec",
+      "source": "asm/arith-017-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "8589934592\n"
+    },
+    {
+      "id": "arith-018-add",
+      "mode": "exec",
+      "source": "asm/arith-018-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4294967293\n"
+    },
+    {
+      "id": "arith-019-add",
+      "mode": "exec",
+      "source": "asm/arith-019-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "arith-020-add",
+      "mode": "exec",
+      "source": "asm/arith-020-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-021-add",
+      "mode": "exec",
+      "source": "asm/arith-021-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "arith-022-add",
+      "mode": "exec",
+      "source": "asm/arith-022-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-023-add",
+      "mode": "exec",
+      "source": "asm/arith-023-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-024-add",
+      "mode": "exec",
+      "source": "asm/arith-024-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "arith-025-add",
+      "mode": "exec",
+      "source": "asm/arith-025-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "arith-026-add",
+      "mode": "exec",
+      "source": "asm/arith-026-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-027-add",
+      "mode": "exec",
+      "source": "asm/arith-027-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-028-add",
+      "mode": "exec",
+      "source": "asm/arith-028-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-029-add",
+      "mode": "exec",
+      "source": "asm/arith-029-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6148914691236517208\n"
+    },
+    {
+      "id": "arith-030-add",
+      "mode": "exec",
+      "source": "asm/arith-030-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-6148914691236517202\n"
+    },
+    {
+      "id": "arith-031-add",
+      "mode": "exec",
+      "source": "asm/arith-031-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2000000016\n"
+    },
+    {
+      "id": "arith-032-add",
+      "mode": "exec",
+      "source": "asm/arith-032-add.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4294967294\n"
+    },
+    {
+      "id": "arith-033-sub",
+      "mode": "exec",
+      "source": "asm/arith-033-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-034-sub",
+      "mode": "exec",
+      "source": "asm/arith-034-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-035-sub",
+      "mode": "exec",
+      "source": "asm/arith-035-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-036-sub",
+      "mode": "exec",
+      "source": "asm/arith-036-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-037-sub",
+      "mode": "exec",
+      "source": "asm/arith-037-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-038-sub",
+      "mode": "exec",
+      "source": "asm/arith-038-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-039-sub",
+      "mode": "exec",
+      "source": "asm/arith-039-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-040-sub",
+      "mode": "exec",
+      "source": "asm/arith-040-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arith-041-sub",
+      "mode": "exec",
+      "source": "asm/arith-041-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-042-sub",
+      "mode": "exec",
+      "source": "asm/arith-042-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "10\n"
+    },
+    {
+      "id": "arith-043-sub",
+      "mode": "exec",
+      "source": "asm/arith-043-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-10\n"
+    },
+    {
+      "id": "arith-044-sub",
+      "mode": "exec",
+      "source": "asm/arith-044-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4\n"
+    },
+    {
+      "id": "arith-045-sub",
+      "mode": "exec",
+      "source": "asm/arith-045-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "75\n"
+    },
+    {
+      "id": "arith-046-sub",
+      "mode": "exec",
+      "source": "asm/arith-046-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-75\n"
+    },
+    {
+      "id": "arith-047-sub",
+      "mode": "exec",
+      "source": "asm/arith-047-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-864197532\n"
+    },
+    {
+      "id": "arith-048-sub",
+      "mode": "exec",
+      "source": "asm/arith-048-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1111111110\n"
+    },
+    {
+      "id": "arith-049-sub",
+      "mode": "exec",
+      "source": "asm/arith-049-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-050-sub",
+      "mode": "exec",
+      "source": "asm/arith-050-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4294967299\n"
+    },
+    {
+      "id": "arith-051-sub",
+      "mode": "exec",
+      "source": "asm/arith-051-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "arith-052-sub",
+      "mode": "exec",
+      "source": "asm/arith-052-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775806\n"
+    },
+    {
+      "id": "arith-053-sub",
+      "mode": "exec",
+      "source": "asm/arith-053-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775805\n"
+    },
+    {
+      "id": "arith-054-sub",
+      "mode": "exec",
+      "source": "asm/arith-054-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-055-sub",
+      "mode": "exec",
+      "source": "asm/arith-055-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-056-sub",
+      "mode": "exec",
+      "source": "asm/arith-056-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "arith-057-sub",
+      "mode": "exec",
+      "source": "asm/arith-057-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "arith-058-sub",
+      "mode": "exec",
+      "source": "asm/arith-058-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-059-sub",
+      "mode": "exec",
+      "source": "asm/arith-059-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-060-sub",
+      "mode": "exec",
+      "source": "asm/arith-060-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-061-sub",
+      "mode": "exec",
+      "source": "asm/arith-061-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6148914691236517202\n"
+    },
+    {
+      "id": "arith-062-sub",
+      "mode": "exec",
+      "source": "asm/arith-062-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-6148914691236517208\n"
+    },
+    {
+      "id": "arith-063-sub",
+      "mode": "exec",
+      "source": "asm/arith-063-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-064-sub",
+      "mode": "exec",
+      "source": "asm/arith-064-sub.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-065-mul",
+      "mode": "exec",
+      "source": "asm/arith-065-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-066-mul",
+      "mode": "exec",
+      "source": "asm/arith-066-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-067-mul",
+      "mode": "exec",
+      "source": "asm/arith-067-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-068-mul",
+      "mode": "exec",
+      "source": "asm/arith-068-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-069-mul",
+      "mode": "exec",
+      "source": "asm/arith-069-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6\n"
+    },
+    {
+      "id": "arith-070-mul",
+      "mode": "exec",
+      "source": "asm/arith-070-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6\n"
+    },
+    {
+      "id": "arith-071-mul",
+      "mode": "exec",
+      "source": "asm/arith-071-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-072-mul",
+      "mode": "exec",
+      "source": "asm/arith-072-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-073-mul",
+      "mode": "exec",
+      "source": "asm/arith-073-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-074-mul",
+      "mode": "exec",
+      "source": "asm/arith-074-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-21\n"
+    },
+    {
+      "id": "arith-075-mul",
+      "mode": "exec",
+      "source": "asm/arith-075-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-21\n"
+    },
+    {
+      "id": "arith-076-mul",
+      "mode": "exec",
+      "source": "asm/arith-076-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "21\n"
+    },
+    {
+      "id": "arith-077-mul",
+      "mode": "exec",
+      "source": "asm/arith-077-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2500\n"
+    },
+    {
+      "id": "arith-078-mul",
+      "mode": "exec",
+      "source": "asm/arith-078-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2500\n"
+    },
+    {
+      "id": "arith-079-mul",
+      "mode": "exec",
+      "source": "asm/arith-079-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "121932631112635269\n"
+    },
+    {
+      "id": "arith-080-mul",
+      "mode": "exec",
+      "source": "asm/arith-080-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-121932631112635269\n"
+    },
+    {
+      "id": "arith-081-mul",
+      "mode": "exec",
+      "source": "asm/arith-081-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-082-mul",
+      "mode": "exec",
+      "source": "asm/arith-082-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-12884901888\n"
+    },
+    {
+      "id": "arith-083-mul",
+      "mode": "exec",
+      "source": "asm/arith-083-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-084-mul",
+      "mode": "exec",
+      "source": "asm/arith-084-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "arith-085-mul",
+      "mode": "exec",
+      "source": "asm/arith-085-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-086-mul",
+      "mode": "exec",
+      "source": "asm/arith-086-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-087-mul",
+      "mode": "exec",
+      "source": "asm/arith-087-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-088-mul",
+      "mode": "exec",
+      "source": "asm/arith-088-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-089-mul",
+      "mode": "exec",
+      "source": "asm/arith-089-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-090-mul",
+      "mode": "exec",
+      "source": "asm/arith-090-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-091-mul",
+      "mode": "exec",
+      "source": "asm/arith-091-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-092-mul",
+      "mode": "exec",
+      "source": "asm/arith-092-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-093-mul",
+      "mode": "exec",
+      "source": "asm/arith-093-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-094-mul",
+      "mode": "exec",
+      "source": "asm/arith-094-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-095-mul",
+      "mode": "exec",
+      "source": "asm/arith-095-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1000000016000000063\n"
+    },
+    {
+      "id": "arith-096-mul",
+      "mode": "exec",
+      "source": "asm/arith-096-mul.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4611686014132420609\n"
+    },
+    {
+      "id": "arith-097-div",
+      "mode": "exec",
+      "source": "asm/arith-097-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "arith-098-div",
+      "mode": "exec",
+      "source": "asm/arith-098-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-3\n"
+    },
+    {
+      "id": "arith-099-div",
+      "mode": "exec",
+      "source": "asm/arith-099-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-3\n"
+    },
+    {
+      "id": "arith-100-div",
+      "mode": "exec",
+      "source": "asm/arith-100-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "arith-101-div",
+      "mode": "exec",
+      "source": "asm/arith-101-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arith-102-div",
+      "mode": "exec",
+      "source": "asm/arith-102-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-103-div",
+      "mode": "exec",
+      "source": "asm/arith-103-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-104-div",
+      "mode": "exec",
+      "source": "asm/arith-104-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arith-105-div",
+      "mode": "exec",
+      "source": "asm/arith-105-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-106-div",
+      "mode": "exec",
+      "source": "asm/arith-106-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-107-div",
+      "mode": "exec",
+      "source": "asm/arith-107-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-108-div",
+      "mode": "exec",
+      "source": "asm/arith-108-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-109-div",
+      "mode": "exec",
+      "source": "asm/arith-109-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "arith-110-div",
+      "mode": "exec",
+      "source": "asm/arith-110-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "arith-111-div",
+      "mode": "exec",
+      "source": "asm/arith-111-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-112-div",
+      "mode": "exec",
+      "source": "asm/arith-112-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-113-div",
+      "mode": "exec",
+      "source": "asm/arith-113-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4611686018427387904\n"
+    },
+    {
+      "id": "arith-114-div",
+      "mode": "exec",
+      "source": "asm/arith-114-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3074457345618258602\n"
+    },
+    {
+      "id": "arith-115-div",
+      "mode": "exec",
+      "source": "asm/arith-115-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "14\n"
+    },
+    {
+      "id": "arith-116-div",
+      "mode": "exec",
+      "source": "asm/arith-116-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-14\n"
+    },
+    {
+      "id": "arith-117-div",
+      "mode": "exec",
+      "source": "asm/arith-117-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-14\n"
+    },
+    {
+      "id": "arith-118-div",
+      "mode": "exec",
+      "source": "asm/arith-118-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "14\n"
+    },
+    {
+      "id": "arith-119-div",
+      "mode": "exec",
+      "source": "asm/arith-119-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "65536\n"
+    },
+    {
+      "id": "arith-120-div",
+      "mode": "exec",
+      "source": "asm/arith-120-div.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-65536\n"
+    },
+    {
+      "id": "arith-121-mod",
+      "mode": "exec",
+      "source": "asm/arith-121-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-122-mod",
+      "mode": "exec",
+      "source": "asm/arith-122-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-123-mod",
+      "mode": "exec",
+      "source": "asm/arith-123-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-124-mod",
+      "mode": "exec",
+      "source": "asm/arith-124-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-125-mod",
+      "mode": "exec",
+      "source": "asm/arith-125-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-126-mod",
+      "mode": "exec",
+      "source": "asm/arith-126-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-127-mod",
+      "mode": "exec",
+      "source": "asm/arith-127-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-128-mod",
+      "mode": "exec",
+      "source": "asm/arith-128-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-129-mod",
+      "mode": "exec",
+      "source": "asm/arith-129-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-130-mod",
+      "mode": "exec",
+      "source": "asm/arith-130-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-131-mod",
+      "mode": "exec",
+      "source": "asm/arith-131-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-132-mod",
+      "mode": "exec",
+      "source": "asm/arith-132-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-133-mod",
+      "mode": "exec",
+      "source": "asm/arith-133-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-134-mod",
+      "mode": "exec",
+      "source": "asm/arith-134-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-135-mod",
+      "mode": "exec",
+      "source": "asm/arith-135-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-136-mod",
+      "mode": "exec",
+      "source": "asm/arith-136-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-137-mod",
+      "mode": "exec",
+      "source": "asm/arith-137-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-138-mod",
+      "mode": "exec",
+      "source": "asm/arith-138-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-139-mod",
+      "mode": "exec",
+      "source": "asm/arith-139-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arith-140-mod",
+      "mode": "exec",
+      "source": "asm/arith-140-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-141-mod",
+      "mode": "exec",
+      "source": "asm/arith-141-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arith-142-mod",
+      "mode": "exec",
+      "source": "asm/arith-142-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-143-mod",
+      "mode": "exec",
+      "source": "asm/arith-143-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-144-mod",
+      "mode": "exec",
+      "source": "asm/arith-144-mod.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-145-divzero",
+      "mode": "exec",
+      "source": "asm/arith-145-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-146-modzero",
+      "mode": "exec",
+      "source": "asm/arith-146-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-147-divzero",
+      "mode": "exec",
+      "source": "asm/arith-147-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-148-modzero",
+      "mode": "exec",
+      "source": "asm/arith-148-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-149-divzero",
+      "mode": "exec",
+      "source": "asm/arith-149-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-150-modzero",
+      "mode": "exec",
+      "source": "asm/arith-150-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-151-divzero",
+      "mode": "exec",
+      "source": "asm/arith-151-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-152-modzero",
+      "mode": "exec",
+      "source": "asm/arith-152-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-153-divzero",
+      "mode": "exec",
+      "source": "asm/arith-153-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-154-modzero",
+      "mode": "exec",
+      "source": "asm/arith-154-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-155-divzero",
+      "mode": "exec",
+      "source": "asm/arith-155-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-156-modzero",
+      "mode": "exec",
+      "source": "asm/arith-156-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-157-divzero",
+      "mode": "exec",
+      "source": "asm/arith-157-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-158-modzero",
+      "mode": "exec",
+      "source": "asm/arith-158-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-159-divzero",
+      "mode": "exec",
+      "source": "asm/arith-159-divzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-160-modzero",
+      "mode": "exec",
+      "source": "asm/arith-160-modzero.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO"
+    },
+    {
+      "id": "arith-161-neg",
+      "mode": "exec",
+      "source": "asm/arith-161-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arith-162-neg",
+      "mode": "exec",
+      "source": "asm/arith-162-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "arith-163-neg",
+      "mode": "exec",
+      "source": "asm/arith-163-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arith-164-neg",
+      "mode": "exec",
+      "source": "asm/arith-164-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-42\n"
+    },
+    {
+      "id": "arith-165-neg",
+      "mode": "exec",
+      "source": "asm/arith-165-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\n"
+    },
+    {
+      "id": "arith-166-neg",
+      "mode": "exec",
+      "source": "asm/arith-166-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "arith-167-neg",
+      "mode": "exec",
+      "source": "asm/arith-167-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "arith-168-neg",
+      "mode": "exec",
+      "source": "asm/arith-168-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4294967296\n"
+    },
+    {
+      "id": "arith-169-neg",
+      "mode": "exec",
+      "source": "asm/arith-169-neg.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4294967296\n"
+    },
+    {
+      "id": "arith-170-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-170-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-171-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-171-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-172-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-172-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-173-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-173-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-174-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-174-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-175-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-175-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-176-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-176-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-177-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-177-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-178-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-178-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-179-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-179-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-180-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-180-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-181-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-181-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-182-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-182-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-183-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-183-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-184-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-184-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-185-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-185-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-186-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-186-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-187-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-187-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-188-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-188-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-189-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-189-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-190-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-190-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-191-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-191-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-192-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-192-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-193-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-193-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-194-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-194-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-195-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-195-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-196-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-196-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-197-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-197-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-198-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-198-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-199-typeerr",
+      "mode": "exec",
+      "source": "asm/arith-199-typeerr.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-200-negtype",
+      "mode": "exec",
+      "source": "asm/arith-200-negtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-201-negtype",
+      "mode": "exec",
+      "source": "asm/arith-201-negtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-202-negtype",
+      "mode": "exec",
+      "source": "asm/arith-202-negtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-203-negtype",
+      "mode": "exec",
+      "source": "asm/arith-203-negtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arith-204-chain",
+      "mode": "exec",
+      "source": "asm/arith-204-chain.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "arith-205-chain",
+      "mode": "exec",
+      "source": "asm/arith-205-chain.asm",
+      "expect_exit": 0,
+      "expect_stdout": "7\n"
+    }
+  ]
+}

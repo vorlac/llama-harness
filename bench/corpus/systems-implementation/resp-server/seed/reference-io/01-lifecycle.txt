@@ -1,0 +1,55 @@
+# 01 - process lifecycle and the harness contract (SPEC.md section 2)
+#
+# The runner picks a free port, starts the server, probes for readiness, runs
+# cases, then terminates it. Everything below is what that looks like.
+
+# --- start -----------------------------------------------------------------
+# The runner executes, with the workspace language folder as cwd:
+#
+#     ./run.sh --port 41337
+#
+# The server binds 127.0.0.1:41337 with SO_REUSEADDR, calls listen(), and then
+# writes exactly one line to stdout and flushes it:
+
+stdout: READY 41337\n
+
+# Nothing else is ever written to stdout. Diagnostics go to stderr, where the
+# runner captures them and prints the tail if the run fails, for example:
+
+stderr: resp-server listening on 127.0.0.1:41337, 16 databases\n
+
+# --- readiness probe -------------------------------------------------------
+# The runner opens a TCP connection and sends an inline PING. It retries the
+# whole probe every 50 ms for up to 20 seconds.
+
+C: PING\r\n
+S: +PONG\r\n
+
+# The probe connection is then closed. Closing it must not disturb the server.
+
+# --- per-case reset --------------------------------------------------------
+# Before every case the runner pipelines 33 commands on one control connection
+# and reads 33 replies. Abbreviated here to the first and last:
+
+C: *2\r\n$6\r\nSELECT\r\n$1\r\n0\r\n
+C: *1\r\n$7\r\nFLUSHDB\r\n
+C: *2\r\n$6\r\nSELECT\r\n$1\r\n1\r\n
+C: *1\r\n$7\r\nFLUSHDB\r\n
+C: ... SELECT 2..15 and FLUSHDB for each ...
+C: *2\r\n$6\r\nSELECT\r\n$1\r\n0\r\n
+S: +OK\r\n
+S: +OK\r\n
+S: +OK\r\n
+S: +OK\r\n
+S: ... 28 more +OK ...
+S: +OK\r\n
+
+# All 33 replies must be exactly +OK. Anything else aborts the run with
+# "per-case reset failed".
+
+# --- shutdown --------------------------------------------------------------
+# The runner sends SIGTERM to the process group. The server closes its listener
+# and exits 0 within 5 seconds. If it is still alive after that, the runner
+# sends SIGKILL, which counts against nothing but is a bug in your server.
+#
+# exit status: 0

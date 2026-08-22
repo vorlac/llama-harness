@@ -1,0 +1,3687 @@
+{
+ "group": "strings",
+ "description": "GET, SET and its options, GETSET, APPEND, the INCR family, STRLEN, MGET and MSET",
+ "cases": [
+  {
+   "name": "get-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "GET",
+      "nope"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-then-get",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-overwrites",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "b"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-empty-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      ""
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-empty-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      ""
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-lowercase-command",
+   "steps": [
+    {
+     "cmd": [
+      "set",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "get",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-keys-are-case-sensitive",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "lower"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "K",
+      "upper"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "lower"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "K"
+     ],
+     "expect": [
+      "$",
+      "upper"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-overwrites-a-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "string"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "get-on-list-is-wrongtype",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-sets-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-px-sets-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "100000"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PTTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       95000,
+       100000
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-lowercase-option",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "ex",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-clears-existing-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-replaces-existing-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w",
+      "EX",
+      "1000"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       999,
+       1000
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-zero-is-invalid",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "0"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'set' command"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-negative-is-invalid",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "-1"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'set' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-px-zero-is-invalid",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "0"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'set' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-px-negative-is-invalid",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "-5"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'set' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-not-an-integer",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-leading-zero-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "010"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-float-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "1.5"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-overflowing-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "9223372036854775807"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'set' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-missing-argument",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-ex-and-px-together",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "10",
+      "PX",
+      "10000"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-duplicate-ex-option",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "10",
+      "EX",
+      "20"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-unknown-option",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "KEEPTTL"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-trailing-garbage",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "10",
+      "junk"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "NX"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-on-existing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "NX"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-xx-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "XX"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-xx-on-existing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "XX"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "new"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-and-xx-together",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "NX",
+      "XX"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-xx-and-nx-together",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "XX",
+      "NX"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-lowercase",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "nx"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-with-ex-sets-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "NX",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-blocked-does-not-set-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "NX",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-xx-on-expired-key-fails",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w",
+      "XX"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-on-expired-key-succeeds",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w",
+      "NX"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "w"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-get-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "GET"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-get-on-existing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "GET"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "new"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-nx-get-on-existing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "NX",
+      "GET"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-xx-get-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "XX",
+      "GET"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-get-on-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "list"
+     ]
+    },
+    {
+     "cmd": [
+      "LLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-get-option-order-varies",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "GET",
+      "XX",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "new"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-get-lowercase",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "new",
+      "get"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-get-duplicate-option",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "GET",
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR syntax error"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-invalid-expire-beats-wrongtype-get",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "0",
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'set' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "getset-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "getset-on-existing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "new"
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "new"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "getset-clears-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "getset-on-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "set"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "getset-empty-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "old"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      ""
+     ],
+     "expect": [
+      "$",
+      "old"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-to-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "abc"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-to-existing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "ab"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "cd"
+     ],
+     "expect": [
+      ":",
+      4
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "abcd"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-empty-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "ab"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      ""
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "ab"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-empty-to-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      ""
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-preserves-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-repeated",
+   "steps": [
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "abc"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-on-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-on-existing",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      11
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "11"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-negative-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "-5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -4
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-to-zero",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "-1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "0"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-preserves-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-non-numeric-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-empty-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      ""
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-leading-zero-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "01"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-negative-zero-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "-0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-space-padded-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      " 1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-trailing-space-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1 "
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-float-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1.0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-exponent-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "3e2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-hex-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "0x10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-plus-sign-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "+1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-trailing-newline-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1\n"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-value-above-int64",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "9223372036854775808"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-at-int64-max",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "9223372036854775807"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "9223372036854775807"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-int64-min-accepted",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "-9223372036854775808"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -9223372036854775807
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-on-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decr-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "DECR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "-1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decr-on-existing",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DECR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      9
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decr-at-int64-min",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "-9223372036854775808"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DECR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decr-on-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DECR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-positive",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "5"
+     ],
+     "expect": [
+      ":",
+      15
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-negative",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "-15"
+     ],
+     "expect": [
+      ":",
+      -5
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-zero",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "0"
+     ],
+     "expect": [
+      ":",
+      10
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "7"
+     ],
+     "expect": [
+      ":",
+      7
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-not-an-integer-argument",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-leading-zero-argument",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "05"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-argument-above-int64",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "9223372036854775808"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-to-int64-max",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "9223372036854775807"
+     ],
+     "expect": [
+      ":",
+      9223372036854775807
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-overflow",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "9223372036854775807"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incrby-argument-checked-before-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "notanumber"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decrby-positive",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DECRBY",
+      "k",
+      "3"
+     ],
+     "expect": [
+      ":",
+      7
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decrby-negative-argument",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DECRBY",
+      "k",
+      "-3"
+     ],
+     "expect": [
+      ":",
+      13
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decrby-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "DECRBY",
+      "k",
+      "4"
+     ],
+     "expect": [
+      ":",
+      -4
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decrby-int64-min-argument-overflows",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DECRBY",
+      "k",
+      "-9223372036854775808"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "decrby-underflow",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "-1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DECRBY",
+      "k",
+      "9223372036854775807"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-canonical-storage",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "100"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-canonical-negative-storage",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "-42"
+     ],
+     "expect": [
+      ":",
+      -42
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "-42"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "strlen-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "STRLEN",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "strlen-basic",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "hello"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      5
+     ]
+    }
+   ]
+  },
+  {
+   "name": "strlen-empty-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      ""
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "strlen-with-crlf",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a\r\nb"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      4
+     ]
+    }
+   ]
+  },
+  {
+   "name": "strlen-on-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-single-missing",
+   "steps": [
+    {
+     "cmd": [
+      "MGET",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      [
+       null
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-single-present",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "k"
+     ],
+     "expect": [
+      "*",
+      [
+       "v"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-mixed",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      "*",
+      [
+       "1",
+       null,
+       "3"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-preserves-argument-order",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "b",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "2",
+       "1"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-duplicate-keys",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "a",
+      "a",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "1",
+       "1",
+       "1"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-wrong-type-returns-nil",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "a",
+      "l"
+     ],
+     "expect": [
+      "*",
+      [
+       "1",
+       null
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-all-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "s",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "h",
+      "s"
+     ],
+     "expect": [
+      "*",
+      [
+       null,
+       null
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-expired-key-is-nil",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "MGET",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       null,
+       "2"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-single-pair",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-multiple-pairs",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      "*",
+      [
+       "1",
+       "2",
+       "3"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-overwrites-other-types",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "a",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "string"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-clears-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "a"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-duplicate-key-last-wins",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "a",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "a"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-empty-values",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "",
+      "b",
+      ""
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "",
+       ""
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-many-pairs",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "k0",
+      "0",
+      "k1",
+      "1",
+      "k2",
+      "2",
+      "k3",
+      "3",
+      "k4",
+      "4",
+      "k5",
+      "5",
+      "k6",
+      "6",
+      "k7",
+      "7",
+      "k8",
+      "8",
+      "k9",
+      "9",
+      "k10",
+      "10",
+      "k11",
+      "11",
+      "k12",
+      "12",
+      "k13",
+      "13",
+      "k14",
+      "14",
+      "k15",
+      "15",
+      "k16",
+      "16",
+      "k17",
+      "17",
+      "k18",
+      "18",
+      "k19",
+      "19",
+      "k20",
+      "20",
+      "k21",
+      "21",
+      "k22",
+      "22",
+      "k23",
+      "23",
+      "k24",
+      "24",
+      "k25",
+      "25",
+      "k26",
+      "26",
+      "k27",
+      "27",
+      "k28",
+      "28",
+      "k29",
+      "29",
+      "k30",
+      "30",
+      "k31",
+      "31",
+      "k32",
+      "32",
+      "k33",
+      "33",
+      "k34",
+      "34",
+      "k35",
+      "35",
+      "k36",
+      "36",
+      "k37",
+      "37",
+      "k38",
+      "38",
+      "k39",
+      "39",
+      "k40",
+      "40",
+      "k41",
+      "41",
+      "k42",
+      "42",
+      "k43",
+      "43",
+      "k44",
+      "44",
+      "k45",
+      "45",
+      "k46",
+      "46",
+      "k47",
+      "47",
+      "k48",
+      "48",
+      "k49",
+      "49"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      50
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k49"
+     ],
+     "expect": [
+      "$",
+      "49"
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,304 @@
+{
+  "group": "arrays",
+  "description": "Array construction, element access, mutation, growth, reference semantics and the index range rules.",
+  "case_count": 39,
+  "cases": [
+    {
+      "id": "arrays-001-empty",
+      "mode": "exec",
+      "source": "asm/arrays-001-empty.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[]\n"
+    },
+    {
+      "id": "arrays-002-order",
+      "mode": "exec",
+      "source": "asm/arrays-002-order.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1, 2, 3]\n"
+    },
+    {
+      "id": "arrays-003-order",
+      "mode": "exec",
+      "source": "asm/arrays-003-order.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "arrays-004-order",
+      "mode": "exec",
+      "source": "asm/arrays-004-order.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "arrays-005-partial",
+      "mode": "exec",
+      "source": "asm/arrays-005-partial.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1, 2]\n9\n",
+      "note": "NEW_ARRAY consumes exactly n values"
+    },
+    {
+      "id": "arrays-006-len",
+      "mode": "exec",
+      "source": "asm/arrays-006-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "arrays-007-len",
+      "mode": "exec",
+      "source": "asm/arrays-007-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "arrays-008-push",
+      "mode": "exec",
+      "source": "asm/arrays-008-push.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1, 2]\n2\n"
+    },
+    {
+      "id": "arrays-009-pop",
+      "mode": "exec",
+      "source": "asm/arrays-009-pop.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n[1, 2]\n2\n"
+    },
+    {
+      "id": "arrays-010-popempty",
+      "mode": "exec",
+      "source": "asm/arrays-010-popempty.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-011-set",
+      "mode": "exec",
+      "source": "asm/arrays-011-set.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"x\", 2]\n"
+    },
+    {
+      "id": "arrays-012-setpops",
+      "mode": "exec",
+      "source": "asm/arrays-012-setpops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "7\n",
+      "note": "ARR_SET consumes array, index and value and pushes nothing"
+    },
+    {
+      "id": "arrays-013-getrange",
+      "mode": "exec",
+      "source": "asm/arrays-013-getrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-014-setrange",
+      "mode": "exec",
+      "source": "asm/arrays-014-setrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-015-getrange",
+      "mode": "exec",
+      "source": "asm/arrays-015-getrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-016-setrange",
+      "mode": "exec",
+      "source": "asm/arrays-016-setrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-017-getrange",
+      "mode": "exec",
+      "source": "asm/arrays-017-getrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-018-setrange",
+      "mode": "exec",
+      "source": "asm/arrays-018-setrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-019-getrange",
+      "mode": "exec",
+      "source": "asm/arrays-019-getrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-020-setrange",
+      "mode": "exec",
+      "source": "asm/arrays-020-setrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-021-getrange",
+      "mode": "exec",
+      "source": "asm/arrays-021-getrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-022-setrange",
+      "mode": "exec",
+      "source": "asm/arrays-022-setrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-023-getempty",
+      "mode": "exec",
+      "source": "asm/arrays-023-getempty.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "arrays-024-gettype",
+      "mode": "exec",
+      "source": "asm/arrays-024-gettype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arrays-025-gettype",
+      "mode": "exec",
+      "source": "asm/arrays-025-gettype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arrays-026-gettype",
+      "mode": "exec",
+      "source": "asm/arrays-026-gettype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arrays-027-gettype",
+      "mode": "exec",
+      "source": "asm/arrays-027-gettype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arrays-028-indextype",
+      "mode": "exec",
+      "source": "asm/arrays-028-indextype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arrays-029-pushtype",
+      "mode": "exec",
+      "source": "asm/arrays-029-pushtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "arrays-030-underflow",
+      "mode": "exec",
+      "source": "asm/arrays-030-underflow.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_UNDERFLOW"
+    },
+    {
+      "id": "arrays-031-alias",
+      "mode": "exec",
+      "source": "asm/arrays-031-alias.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1]\n"
+    },
+    {
+      "id": "arrays-032-nested",
+      "mode": "exec",
+      "source": "asm/arrays-032-nested.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[[1, 2], [3, 4]]\n"
+    },
+    {
+      "id": "arrays-033-nestedget",
+      "mode": "exec",
+      "source": "asm/arrays-033-nestedget.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "arrays-034-cycle",
+      "mode": "exec",
+      "source": "asm/arrays-034-cycle.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[[...]]\n",
+      "note": "an array reachable from itself renders as [...] at the repeat"
+    },
+    {
+      "id": "arrays-035-cycle",
+      "mode": "exec",
+      "source": "asm/arrays-035-cycle.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[[[...]]]\n"
+    },
+    {
+      "id": "arrays-036-shared",
+      "mode": "exec",
+      "source": "asm/arrays-036-shared.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[[], []]\n",
+      "note": "the same array twice is not a cycle"
+    },
+    {
+      "id": "arrays-037-big",
+      "mode": "exec",
+      "source": "asm/arrays-037-big.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1000\n499500\n999\n"
+    },
+    {
+      "id": "arrays-038-mixed",
+      "mode": "exec",
+      "source": "asm/arrays-038-mixed.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1, \"a\", nil, true, false]\n"
+    },
+    {
+      "id": "arrays-039-lenoftype",
+      "mode": "exec",
+      "source": "asm/arrays-039-lenoftype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    }
+  ]
+}

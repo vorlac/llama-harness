@@ -1,0 +1,19 @@
+{
+  "_comment": "relay 0.2 shipped a flat config file. Deployments still have files that look like this, and the loader still accepts them, because flattening turns the dotted names into the same canonical keys.",
+  "server.host": "0.0.0.0",
+  "server.port": 8081,
+  "auth.required": true,
+  "auth.tokens": [
+    "legacy-token-a",
+    "legacy-token-b"
+  ],
+  "log.level": "warn",
+  "sink.kind": "file",
+  "sink.file.path": "./relay-out.ndjson",
+  "retry.maxAttempts": 4,
+  "transform.redactKeys": [
+    "password",
+    "token",
+    "authorization"
+  ]
+}

@@ -1,0 +1,936 @@
+{
+  "group": "strings-reject",
+  "description": "Bad escapes, lone surrogates, and raw control characters.",
+  "cases": [
+    {
+      "id": "strings-reject-001",
+      "note": "b'\"abc'",
+      "input": "\"abc",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 4,
+      "line": 1,
+      "column": 5
+    },
+    {
+      "id": "strings-reject-002",
+      "note": "b'\"'",
+      "input": "\"",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-003",
+      "note": "b'\"\\\\'",
+      "input": "\"\\",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-004",
+      "note": "b'\"\\\\u'",
+      "input": "\"\\u",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-005",
+      "note": "b'\"\\\\u00'",
+      "input": "\"\\u00",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 5,
+      "line": 1,
+      "column": 6
+    },
+    {
+      "id": "strings-reject-006",
+      "note": "b'\"\\\\u0041'",
+      "input": "\"\\u0041",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 7,
+      "line": 1,
+      "column": 8
+    },
+    {
+      "id": "strings-reject-007",
+      "note": "b'[\"abc'",
+      "input": "[\"abc",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 5,
+      "line": 1,
+      "column": 6
+    },
+    {
+      "id": "strings-reject-008",
+      "note": "b'{\"a'",
+      "input": "{\"a",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-009",
+      "note": "b'\"a\\\\x\"'",
+      "input": "\"a\\x\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-010",
+      "note": "b'\"\\\\v\"'",
+      "input": "\"\\v\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-011",
+      "note": "b'\"\\\\0\"'",
+      "input": "\"\\0\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-012",
+      "note": "b'\"\\\\a\"'",
+      "input": "\"\\a\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-013",
+      "note": "b'\"\\\\ \"'",
+      "input": "\"\\ \"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-014",
+      "note": "b'\"\\\\\\'\"'",
+      "input": "\"\\'\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-015",
+      "note": "b'\"\\\\U0041\"'",
+      "input": "\"\\U0041\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-016",
+      "note": "b'\"\\\\X41\"'",
+      "input": "\"\\X41\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-017",
+      "note": "b'\"\\\\u\"'",
+      "input": "\"\\u\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-018",
+      "note": "b'\"\\\\u0\"'",
+      "input": "\"\\u0\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 4,
+      "line": 1,
+      "column": 5
+    },
+    {
+      "id": "strings-reject-019",
+      "note": "b'\"\\\\u00\"'",
+      "input": "\"\\u00\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 5,
+      "line": 1,
+      "column": 6
+    },
+    {
+      "id": "strings-reject-020",
+      "note": "b'\"\\\\u004\"'",
+      "input": "\"\\u004\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 6,
+      "line": 1,
+      "column": 7
+    },
+    {
+      "id": "strings-reject-021",
+      "note": "b'\"\\\\u00g4\"'",
+      "input": "\"\\u00g4\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 5,
+      "line": 1,
+      "column": 6
+    },
+    {
+      "id": "strings-reject-022",
+      "note": "b'\"\\\\ug000\"'",
+      "input": "\"\\ug000\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-023",
+      "note": "b'\"\\\\u0x41\"'",
+      "input": "\"\\u0x41\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 4,
+      "line": 1,
+      "column": 5
+    },
+    {
+      "id": "strings-reject-024",
+      "note": "b'\"\\\\u00 1\"'",
+      "input": "\"\\u00 1\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 5,
+      "line": 1,
+      "column": 6
+    },
+    {
+      "id": "strings-reject-025",
+      "note": "b'\"\\\\u{1f600}\"'",
+      "input": "\"\\u{1f600}\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-026",
+      "note": "b'\"\\\\u00-1\"'",
+      "input": "\"\\u00-1\"",
+      "expect": "reject",
+      "code": "E_BAD_UNICODE_ESCAPE",
+      "offset": 5,
+      "line": 1,
+      "column": 6
+    },
+    {
+      "id": "strings-reject-027",
+      "note": "b'\\\\ud800\"'",
+      "input": "\\ud800\"",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "strings-reject-028",
+      "note": "b'\"\\\\ud800\"'",
+      "input": "\"\\ud800\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-029",
+      "note": "b'\"\\\\udc00\"'",
+      "input": "\"\\udc00\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-030",
+      "note": "b'\"\\\\udfff\"'",
+      "input": "\"\\udfff\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-031",
+      "note": "b'\"\\\\udbff\"'",
+      "input": "\"\\udbff\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-032",
+      "note": "b'\"\\\\ud800\\\\ud800\"'",
+      "input": "\"\\ud800\\ud800\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-033",
+      "note": "b'\"\\\\ud800x\"'",
+      "input": "\"\\ud800x\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-034",
+      "note": "b'\"\\\\ud800\\\\n\"'",
+      "input": "\"\\ud800\\n\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-035",
+      "note": "b'\"\\\\ud800\\\\u0041\"'",
+      "input": "\"\\ud800\\u0041\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-036",
+      "note": "b'\"\\\\udc00\\\\ud800\"'",
+      "input": "\"\\udc00\\ud800\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-037",
+      "note": "b'\"a\\\\ud83d\"'",
+      "input": "\"a\\ud83d\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-038",
+      "note": "b'\"\\\\ud83dx\\\\ude00\"'",
+      "input": "\"\\ud83dx\\ude00\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-039",
+      "note": "b'[\"\\\\ud800\"]'",
+      "input": "[\"\\ud800\"]",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-040",
+      "note": "b'{\"\\\\ud800\":1}'",
+      "input": "{\"\\ud800\":1}",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-041",
+      "note": "b'\"\\\\ud800\\\\\\\\\"'",
+      "input": "\"\\ud800\\\\\"",
+      "expect": "reject",
+      "code": "E_LONE_SURROGATE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-042",
+      "note": "b'\"a\\x00b\"'",
+      "input": "\"a\u0000b\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-043",
+      "note": "b'\"\\x01\"'",
+      "input": "\"\u0001\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-044",
+      "note": "b'\"\\x08\"'",
+      "input": "\"\b\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-045",
+      "note": "b'\"\\t\"'",
+      "input": "\"\t\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-046",
+      "note": "b'\"\\n\"'",
+      "input": "\"\n\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-047",
+      "note": "b'\"\\x0b\"'",
+      "input": "\"\u000b\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-048",
+      "note": "b'\"\\x0c\"'",
+      "input": "\"\f\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-049",
+      "note": "b'\"\\r\"'",
+      "input": "\"\r\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-050",
+      "note": "b'\"\\x1b\"'",
+      "input": "\"\u001b\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-051",
+      "note": "b'\"\\x1f\"'",
+      "input": "\"\u001f\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-052",
+      "note": "b'[\"a\\x00\"]'",
+      "input": "[\"a\u0000\"]",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-053",
+      "note": "b'{\"a\\t\":1}'",
+      "input": "{\"a\t\":1}",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-054",
+      "note": "b\"'a'\"",
+      "input": "'a'",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "strings-reject-055",
+      "note": "b\"['a']\"",
+      "input": "['a']",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 1,
+      "line": 1,
+      "column": 2
+    },
+    {
+      "id": "strings-reject-056",
+      "note": "b'\"a\"\"b\"'",
+      "input": "\"a\"\"b\"",
+      "expect": "reject",
+      "code": "E_TRAILING",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-057",
+      "note": "b'[\"a\"\"b\"]'",
+      "input": "[\"a\"\"b\"]",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 4,
+      "line": 1,
+      "column": 5
+    },
+    {
+      "id": "strings-reject-058",
+      "note": "b'`a`'",
+      "input": "`a`",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_BYTE",
+      "offset": 0,
+      "line": 1,
+      "column": 1
+    },
+    {
+      "id": "strings-reject-059",
+      "note": "b'\"\\\\u0041\"x'",
+      "input": "\"\\u0041\"x",
+      "expect": "reject",
+      "code": "E_TRAILING",
+      "offset": 8,
+      "line": 1,
+      "column": 9
+    },
+    {
+      "id": "strings-reject-060",
+      "note": "b'\"\\\\\"'",
+      "input": "\"\\\"",
+      "expect": "reject",
+      "code": "E_UNEXPECTED_EOF",
+      "offset": 3,
+      "line": 1,
+      "column": 4
+    },
+    {
+      "id": "strings-reject-061",
+      "note": "b'\"x\\x00y\"'",
+      "input": "\"x\u0000y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-062",
+      "note": "b'\"x\\x01y\"'",
+      "input": "\"x\u0001y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-063",
+      "note": "b'\"x\\x02y\"'",
+      "input": "\"x\u0002y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-064",
+      "note": "b'\"x\\x03y\"'",
+      "input": "\"x\u0003y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-065",
+      "note": "b'\"x\\x04y\"'",
+      "input": "\"x\u0004y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-066",
+      "note": "b'\"x\\x05y\"'",
+      "input": "\"x\u0005y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-067",
+      "note": "b'\"x\\x06y\"'",
+      "input": "\"x\u0006y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-068",
+      "note": "b'\"x\\x07y\"'",
+      "input": "\"x\u0007y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-069",
+      "note": "b'\"x\\x08y\"'",
+      "input": "\"x\by\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-070",
+      "note": "b'\"x\\ty\"'",
+      "input": "\"x\ty\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-071",
+      "note": "b'\"x\\ny\"'",
+      "input": "\"x\ny\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-072",
+      "note": "b'\"x\\x0by\"'",
+      "input": "\"x\u000by\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-073",
+      "note": "b'\"x\\x0cy\"'",
+      "input": "\"x\fy\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-074",
+      "note": "b'\"x\\ry\"'",
+      "input": "\"x\ry\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-075",
+      "note": "b'\"x\\x0ey\"'",
+      "input": "\"x\u000ey\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-076",
+      "note": "b'\"x\\x0fy\"'",
+      "input": "\"x\u000fy\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-077",
+      "note": "b'\"x\\x10y\"'",
+      "input": "\"x\u0010y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-078",
+      "note": "b'\"x\\x11y\"'",
+      "input": "\"x\u0011y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-079",
+      "note": "b'\"x\\x12y\"'",
+      "input": "\"x\u0012y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-080",
+      "note": "b'\"x\\x13y\"'",
+      "input": "\"x\u0013y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-081",
+      "note": "b'\"x\\x14y\"'",
+      "input": "\"x\u0014y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-082",
+      "note": "b'\"x\\x15y\"'",
+      "input": "\"x\u0015y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-083",
+      "note": "b'\"x\\x16y\"'",
+      "input": "\"x\u0016y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-084",
+      "note": "b'\"x\\x17y\"'",
+      "input": "\"x\u0017y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-085",
+      "note": "b'\"x\\x18y\"'",
+      "input": "\"x\u0018y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-086",
+      "note": "b'\"x\\x19y\"'",
+      "input": "\"x\u0019y\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-087",
+      "note": "b'\"x\\x1ay\"'",
+      "input": "\"x\u001ay\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-088",
+      "note": "b'\"x\\x1by\"'",
+      "input": "\"x\u001by\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-089",
+      "note": "b'\"x\\x1cy\"'",
+      "input": "\"x\u001cy\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-090",
+      "note": "b'\"x\\x1dy\"'",
+      "input": "\"x\u001dy\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-091",
+      "note": "b'\"x\\x1ey\"'",
+      "input": "\"x\u001ey\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-092",
+      "note": "b'\"x\\x1fy\"'",
+      "input": "\"x\u001fy\"",
+      "expect": "reject",
+      "code": "E_CONTROL_CHAR",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    },
+    {
+      "id": "strings-reject-093",
+      "note": "b'\"\\\\x41\"' -- a C-style hex escape is not a JSON escape (SPEC 7.1)",
+      "input": "\"\\x41\"",
+      "expect": "reject",
+      "code": "E_BAD_STRING_ESCAPE",
+      "offset": 2,
+      "line": 1,
+      "column": 3
+    }
+  ]
+}

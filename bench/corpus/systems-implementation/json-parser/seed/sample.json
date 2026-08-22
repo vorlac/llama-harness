@@ -1,0 +1,9 @@
+{
+  "name": "json-parser",
+  "limits": { "depth": 512, "codes": 14 },
+  "numbers": [0, -0, 1.50, 1e400, 1e-7],
+  "text": "café \/ ok\t!",
+  "unicode": "😀",
+  "ok": true,
+  "missing": null
+}

@@ -1,0 +1,12 @@
+ERROR trailing-backslash 1
+ERROR bad-escape 0
+ERROR unbalanced-paren 0
+ERROR unbalanced-paren 1
+ERROR unterminated-class 0
+ERROR bad-request -1
+ERROR class-range-out-of-order 2
+ERROR bad-repeat 1
+ERROR nothing-to-repeat 0
+ERROR unsupported-group 0
+ERROR bad-repeat 1
+MATCH 1 0 3

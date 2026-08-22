@@ -1,0 +1,51 @@
+# 05 - pub/sub (SPEC.md section 7.9)
+#
+# Two connections: [sub] subscribes, [pub] publishes.
+
+# Subscribing pushes one 3-element array per channel, in argument order.
+C: [sub] *2\r\n$9\r\nSUBSCRIBE\r\n$4\r\nnews\r\n
+S: [sub] *3\r\n$9\r\nsubscribe\r\n$4\r\nnews\r\n:1\r\n
+
+# A second channel in one command pushes two replies, counts 1 then 2.
+C: [sub] *3\r\n$9\r\nSUBSCRIBE\r\n$1\r\na\r\n$1\r\nb\r\n
+S: [sub] *3\r\n$9\r\nsubscribe\r\n$1\r\na\r\n:2\r\n
+S: [sub] *3\r\n$9\r\nsubscribe\r\n$1\r\nb\r\n:3\r\n
+
+# PUBLISH replies with the number of connections that received the message.
+C: [pub] *3\r\n$7\r\nPUBLISH\r\n$4\r\nnews\r\n$5\r\nhello\r\n
+S: [pub] :1\r\n
+S: [sub] *3\r\n$7\r\nmessage\r\n$4\r\nnews\r\n$5\r\nhello\r\n
+
+# Nobody is listening on this one.
+C: [pub] *3\r\n$7\r\nPUBLISH\r\n$4\r\nquiet\r\n$1\r\nx\r\n
+S: [pub] :0\r\n
+
+# In subscribed mode, PING replies with an ARRAY, not +PONG.
+C: [sub] *1\r\n$4\r\nPING\r\n
+S: [sub] *2\r\n$4\r\npong\r\n$0\r\n\r\n
+C: [sub] *2\r\n$4\r\nPING\r\n$5\r\nhello\r\n
+S: [sub] *2\r\n$4\r\npong\r\n$5\r\nhello\r\n
+
+# Everything outside the allow-list is refused, with the canonical lowercase
+# command name in the message. The connection stays open.
+C: [sub] *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+S: [sub] -ERR Can't execute 'get': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context\r\n
+
+# PUBLISH is not in the allow-list either.
+C: [sub] *3\r\n$7\r\nPUBLISH\r\n$1\r\na\r\n$1\r\nx\r\n
+S: [sub] -ERR Can't execute 'publish': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context\r\n
+
+# UNSUBSCRIBE with no arguments walks the subscriptions in subscribe order.
+C: [sub] *1\r\n$11\r\nUNSUBSCRIBE\r\n
+S: [sub] *3\r\n$11\r\nunsubscribe\r\n$4\r\nnews\r\n:2\r\n
+S: [sub] *3\r\n$11\r\nunsubscribe\r\n$1\r\na\r\n:1\r\n
+S: [sub] *3\r\n$11\r\nunsubscribe\r\n$1\r\nb\r\n:0\r\n
+
+# Out of subscribed mode, normal commands work again.
+C: [sub] *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+S: [sub] $-1\r\n
+
+# UNSUBSCRIBE with nothing subscribed emits exactly one reply, with a NULL
+# channel name and a count of zero.
+C: [sub] *1\r\n$11\r\nUNSUBSCRIBE\r\n
+S: [sub] *3\r\n$11\r\nunsubscribe\r\n$-1\r\n:0\r\n

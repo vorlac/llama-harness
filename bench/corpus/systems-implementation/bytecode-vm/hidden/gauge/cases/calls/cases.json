@@ -1,0 +1,182 @@
+{
+  "group": "calls",
+  "description": "Frames, argument binding, return values, recursion, mutual recursion, arity checking and the call-site type rules.",
+  "case_count": 23,
+  "cases": [
+    {
+      "id": "calls-001-simple",
+      "mode": "exec",
+      "source": "asm/calls-001-simple.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "calls-002-argorder",
+      "mode": "exec",
+      "source": "asm/calls-002-argorder.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6\n"
+    },
+    {
+      "id": "calls-003-noargs",
+      "mode": "exec",
+      "source": "asm/calls-003-noargs.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\n"
+    },
+    {
+      "id": "calls-004-emptyret",
+      "mode": "exec",
+      "source": "asm/calls-004-emptyret.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n"
+    },
+    {
+      "id": "calls-005-retdiscards",
+      "mode": "exec",
+      "source": "asm/calls-005-retdiscards.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n",
+      "note": "RET returns the top of the callee stack; the rest is discarded"
+    },
+    {
+      "id": "calls-006-nested",
+      "mode": "exec",
+      "source": "asm/calls-006-nested.asm",
+      "expect_exit": 0,
+      "expect_stdout": "120\n"
+    },
+    {
+      "id": "calls-007-factorial",
+      "mode": "exec",
+      "source": "asm/calls-007-factorial.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3628800\n"
+    },
+    {
+      "id": "calls-008-fib",
+      "mode": "exec",
+      "source": "asm/calls-008-fib.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6765\n"
+    },
+    {
+      "id": "calls-009-mutual",
+      "mode": "exec",
+      "source": "asm/calls-009-mutual.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\nfalse\n"
+    },
+    {
+      "id": "calls-010-arity",
+      "mode": "exec",
+      "source": "asm/calls-010-arity.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_ARITY"
+    },
+    {
+      "id": "calls-011-arity",
+      "mode": "exec",
+      "source": "asm/calls-011-arity.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_ARITY"
+    },
+    {
+      "id": "calls-012-arity",
+      "mode": "exec",
+      "source": "asm/calls-012-arity.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_ARITY"
+    },
+    {
+      "id": "calls-013-arity",
+      "mode": "exec",
+      "source": "asm/calls-013-arity.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_ARITY"
+    },
+    {
+      "id": "calls-014-calltype",
+      "mode": "exec",
+      "source": "asm/calls-014-calltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "calls-015-calltype",
+      "mode": "exec",
+      "source": "asm/calls-015-calltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "calls-016-calltype",
+      "mode": "exec",
+      "source": "asm/calls-016-calltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "calls-017-calltype",
+      "mode": "exec",
+      "source": "asm/calls-017-calltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "calls-018-calltype",
+      "mode": "exec",
+      "source": "asm/calls-018-calltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "calls-019-calltype",
+      "mode": "exec",
+      "source": "asm/calls-019-calltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE",
+      "note": "the callee sits below the arguments, so this calls the integer 1"
+    },
+    {
+      "id": "calls-020-stackisolation",
+      "mode": "exec",
+      "source": "asm/calls-020-stackisolation.asm",
+      "expect_exit": 0,
+      "expect_stdout": "77\n"
+    },
+    {
+      "id": "calls-021-underflow",
+      "mode": "exec",
+      "source": "asm/calls-021-underflow.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_UNDERFLOW",
+      "note": "a callee cannot reach into its caller's operand stack"
+    },
+    {
+      "id": "calls-022-halt",
+      "mode": "exec",
+      "source": "asm/calls-022-halt.asm",
+      "expect_exit": 0,
+      "expect_stdout": "a\nb\n"
+    },
+    {
+      "id": "calls-023-recursion50",
+      "mode": "exec",
+      "source": "asm/calls-023-recursion50.asm",
+      "expect_exit": 0,
+      "expect_stdout": "50\n"
+    }
+  ]
+}

@@ -1,0 +1,236 @@
+{
+  "group": "binary",
+  "description": "The on-disk module format: byte-exact assembler output, constant-pool interning order, the canonical disassembly, and assemble/disassemble round-tripping.",
+  "case_count": 33,
+  "cases": [
+    {
+      "id": "binary-001-golden",
+      "mode": "asm",
+      "source": "asm/binary-001-golden.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000100000051",
+      "note": "the smallest legal module, 38 bytes"
+    },
+    {
+      "id": "binary-002-golden",
+      "mode": "asm",
+      "source": "asm/binary-002-golden.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000040000000100000002040000006d61696e020a00000068656c6c6f2c2073766d01060000000000000001070000000000000000000000000000000d00000005010080040200040300228051",
+      "note": "the worked example from reference-io/"
+    },
+    {
+      "id": "binary-003-lowercase",
+      "mode": "asm",
+      "source": "asm/binary-003-lowercase.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000040000000100000002040000006d61696e020a00000068656c6c6f2c2073766d01060000000000000001070000000000000000000000000000000d00000005010080040200040300228051"
+    },
+    {
+      "id": "binary-004-whitespace",
+      "mode": "asm",
+      "source": "asm/binary-004-whitespace.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000040000000100000002040000006d61696e020a00000068656c6c6f2c2073766d01060000000000000001070000000000000000000000000000000d00000005010080040200040300228051",
+      "note": "comments, blank lines and indentation carry no bytes"
+    },
+    {
+      "id": "binary-005-intern",
+      "mode": "asm",
+      "source": "asm/binary-005-intern.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000030000000100000002040000006d61696e0105000000000000000201000000610000000000000000110000000401000401002005020005020070808051",
+      "note": "equal constants are interned to a single pool entry"
+    },
+    {
+      "id": "binary-006-intern",
+      "mode": "asm",
+      "source": "asm/binary-006-intern.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000030000000100000002040000006d61696e010100000000000000020100000031000000000000000009000000040100050200808051",
+      "note": "the integer 1 and the string \"1\" are different constants"
+    },
+    {
+      "id": "binary-007-poolorder",
+      "mode": "asm",
+      "source": "asm/binary-007-poolorder.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000040000000200000002040000006d61696e01070000000000000002060000007365636f6e6401080000000000000000000000000000000900000004010006520100065102000000000000000400000004030051",
+      "note": "each function's name is interned before the constants in its body"
+    },
+    {
+      "id": "binary-008-globalname",
+      "mode": "asm",
+      "source": "asm/binary-008-globalname.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000030000000100000002040000006d61696e01010000000000000002010000006700000000000000000b0000000401001302001202008051",
+      "note": "a global name is a string constant like any other"
+    },
+    {
+      "id": "binary-009-upvaldesc",
+      "mode": "asm",
+      "source": "asm/binary-009-upvaldesc.asm",
+      "expect_exit": 0,
+      "expect_bytes_hex": "53564d3101000000030000000200000002040000006d61696e010300000000000000020300000067657400000000000100000c0000000401001100520100500080510200000000000100000003000000140051",
+      "note": "upvalue descriptors sit between the function header and the code"
+    },
+    {
+      "id": "binary-010-dis",
+      "mode": "dis",
+      "source": "asm/binary-010-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  RET\n.end\n"
+    },
+    {
+      "id": "binary-011-dis",
+      "mode": "dis",
+      "source": "asm/binary-011-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  PUSH_STR \"hello, svm\"\n  PRINT\n  PUSH_INT 6\n  PUSH_INT 7\n  MUL\n  PRINT\n  RET\n.end\n"
+    },
+    {
+      "id": "binary-012-dis",
+      "mode": "dis",
+      "source": "asm/binary-012-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=1 upvals=0\n  PUSH_INT 3\n  STORE_LOCAL 0\nL0005:\n  LOAD_LOCAL 0\n  JMP_IF_FALSE L0018\n  LOAD_LOCAL 0\n  PRINT\n  LOAD_LOCAL 0\n  PUSH_INT 1\n  SUB\n  STORE_LOCAL 0\n  JMP L0005\nL0018:\n  RET\n.end\n",
+      "note": "labels are named after the byte offset they mark"
+    },
+    {
+      "id": "binary-013-dis",
+      "mode": "dis",
+      "source": "asm/binary-013-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  CLOSURE outer\n  PUSH_INT 7\n  CALL 1\n  CALL 0\n  PRINT\n  RET\n.end\n.func outer arity=1 locals=1 upvals=0\n  CLOSURE inner\n  RET\n.end\n.func inner arity=0 locals=0 upvals=1\n  .upval local 0\n  LOAD_UPVAL 0\n  RET\n.end\n"
+    },
+    {
+      "id": "binary-014-dis",
+      "mode": "dis",
+      "source": "asm/binary-014-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  PUSH_INT 1\n  STORE_GLOBAL \"odd name\"\n  LOAD_GLOBAL \"odd name\"\n  PRINT\n  RET\n.end\n",
+      "note": "a global name that is not an identifier is quoted"
+    },
+    {
+      "id": "binary-015-dis",
+      "mode": "dis",
+      "source": "asm/binary-015-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  PUSH_STR \"a\\nb\\t\\\"c\\\"\\\\d\"\n  PRINT\n  PUSH_INT 0\n  CHR\n  PRINT\n  RET\n.end\n",
+      "note": "string constants are re-emitted with the canonical escapes"
+    },
+    {
+      "id": "binary-016-dis",
+      "mode": "dis",
+      "source": "asm/binary-016-dis.asm",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  PUSH_INT -9223372036854775808\n  PRINT\n  PUSH_INT 9223372036854775807\n  PRINT\n  RET\n.end\n"
+    },
+    {
+      "id": "binary-017-disbin",
+      "mode": "dis",
+      "input_hex": "53564d3101000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 0,
+      "expect_stdout": "; svm disassembly\n.func main arity=0 locals=0 upvals=0\n  RET\n.end\n",
+      "note": "dis reads a module file, not assembly source"
+    },
+    {
+      "id": "binary-018-disbin",
+      "mode": "dis",
+      "input_hex": "53564d3001000000010000000100000002040000006d61696e00000000000000000100000051",
+      "expect_exit": 3,
+      "expect_stdout": "",
+      "expect_error": "E_BAD_CODE"
+    },
+    {
+      "id": "binary-019-roundtrip-min",
+      "mode": "roundtrip",
+      "source": "asm/binary-019-roundtrip-min.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-020-roundtrip-smoke",
+      "mode": "roundtrip",
+      "source": "asm/binary-020-roundtrip-smoke.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-021-roundtrip-loop",
+      "mode": "roundtrip",
+      "source": "asm/binary-021-roundtrip-loop.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-022-roundtrip-closures",
+      "mode": "roundtrip",
+      "source": "asm/binary-022-roundtrip-closures.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-023-roundtrip-globals",
+      "mode": "roundtrip",
+      "source": "asm/binary-023-roundtrip-globals.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-024-roundtrip-strings",
+      "mode": "roundtrip",
+      "source": "asm/binary-024-roundtrip-strings.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-025-roundtrip-extremes",
+      "mode": "roundtrip",
+      "source": "asm/binary-025-roundtrip-extremes.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-026-roundtrip-everyjump",
+      "mode": "roundtrip",
+      "source": "asm/binary-026-roundtrip-everyjump.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-027-roundtrip-arrays",
+      "mode": "roundtrip",
+      "source": "asm/binary-027-roundtrip-arrays.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-028-roundtrip-allstrops",
+      "mode": "roundtrip",
+      "source": "asm/binary-028-roundtrip-allstrops.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-029-roundtrip-allarith",
+      "mode": "roundtrip",
+      "source": "asm/binary-029-roundtrip-allarith.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-030-roundtrip-allcompare",
+      "mode": "roundtrip",
+      "source": "asm/binary-030-roundtrip-allcompare.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-031-roundtrip-stackops",
+      "mode": "roundtrip",
+      "source": "asm/binary-031-roundtrip-stackops.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-032-roundtrip-manyconstants",
+      "mode": "roundtrip",
+      "source": "asm/binary-032-roundtrip-manyconstants.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "binary-033-roundtrip-manyfunctions",
+      "mode": "roundtrip",
+      "source": "asm/binary-033-roundtrip-manyfunctions.asm",
+      "expect_exit": 0
+    }
+  ]
+}

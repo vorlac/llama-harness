@@ -1,0 +1,38 @@
+{
+  "id": "onboarding-guide",
+  "title": "Onboarding guide for a new contributor",
+  "category": "docs-generation",
+  "description": "Write the document a competent engineer needs on day one of working on the target: prerequisites, build, test, repository map, the daily edit-build-test loop, a worked trace, local conventions, landmines, and concrete first tasks. Every instruction must come from what is in the checkout, not from generic ecosystem habits.",
+  "size": "medium",
+  "languages": ["markdown"],
+  "prompt": "docs-generation/docs-onboarding-guide-prompt.md",
+  "difficulty": 5,
+  "timeouts": {
+    "build": 60,
+    "run": 1800,
+    "test": 600
+  },
+  "verify": "check_docs.py",
+  "verify_target": "ONBOARDING.md",
+  "verify_args": [
+    "--min-words", "2000",
+    "--max-words", "4000",
+    "--min-mermaid", "1",
+    "--require-section", "What this project is",
+    "--require-section", "Prerequisites",
+    "--require-section", "Build it",
+    "--require-section", "Test it",
+    "--require-section", "Repository map",
+    "--require-section", "The daily loop",
+    "--require-section", "Worked trace",
+    "--require-section", "Conventions",
+    "--require-section", "Landmines",
+    "--require-section", "First tasks",
+    "--require-section", "Open questions"
+  ],
+  "starting_material": null,
+  "artifacts": ["ONBOARDING.md"],
+  "workspace_task_id": "{{TARGET}}-onboarding-guide",
+  "variables": ["{{TARGET}}"],
+  "targets": ["*"]
+}

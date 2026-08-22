@@ -574,27 +574,104 @@ Scoring is the hidden test command's exit status, passed straight through. There
 partial credit and nothing model-graded anywhere in it.
 
 ```bash
-scripts/conductor_bench.py --verify-tasks   # every hidden test must FAIL on its seed
+# every hidden test must FAIL on its seed - name the set being checked
+scripts/conductor_bench.py --verify-tasks --manifest bench/corpus-systems.json
 scripts/conductor_bench.py                  # the full ninety-cell run
 scripts/conductor_bench.py --report-only    # rebuild the report from existing cells
 ```
 
 `--verify-tasks` is the honesty check: a task whose hidden test passes on the
-unmodified seed measures nothing, so it exits nonzero and names the offenders.
+unmodified seed measures nothing, so it exits nonzero and names the offenders. It
+checks the manifest it is given and no other, so a floor run without `--manifest`
+checks the POC set whichever set is about to run. A gate the clock killed answered
+nothing and is reported as its own outcome rather than as a failure; raise
+`--verify-timeout` and run it again.
 
-| flag                   | default                               |
-| ---------------------- | ------------------------------------- |
-| `--manifest PATH`      | `bench/conductor-tasks.json`          |
-| `--model ID`           | `llamacpp/qwen3.6-27b`                |
-| `--reps N`             | `3`                                   |
-| `--results-dir PATH`   | `.data/benchmark/conductor/runs`      |
-| `--work-root PATH`     | `.data/benchmark/conductor/work`      |
-| `--report PATH`        | `.data/benchmark/conductor-report.md` |
-| `--router-config PATH` | `.data/configs/conductor-router.json` |
+| flag                   | default                                        |
+| ---------------------- | ---------------------------------------------- |
+| `--manifest PATH`      | `bench/conductor-tasks.json`                   |
+| `--task ID`            | repeatable; every task in the set              |
+| `--tier T0..T4`        | repeatable; every tier                         |
+| `--model ID`           | the manifest's `defaults.model`                |
+| `--reps N`             | `3`                                            |
+| `--verify-timeout SEC` | `600`; the clock one hidden test or suite gets |
+| `--results-dir PATH`   | `.data/benchmark/conductor/runs`               |
+| `--work-root PATH`     | `<tmp>/llama-harness-conductor-work`           |
+| `--report PATH`        | `.data/benchmark/conductor-report.md`          |
+| `--router-config PATH` | `.data/configs/conductor-router.json`          |
 
-The task set lives in `bench/conductor-tasks.json`; each entry carries its seed files,
-its prompt, and the hidden files and test command the model never sees. The per-cell
-timeout defaults to 1800 seconds. Everything the driver does that is not a process spawn or a file write is a
+The work root sits outside this repository and a work root inside it is refused. A
+cell's cwd is `<work_root>/<model>/<capability>/<arm>/<task>/rN/repo`, so under the
+repository every graded gauge under `bench/corpus/**/hidden/**` is a constant number of
+`..` segments away from every cell - and the driver's rule that the hidden files enter
+the tree only after opencode exits is a rule a relative path walks around. What this
+closes is the walk itself: an arm that greps its way up out of its own tree, which is
+what a model debugging a failing run does, lands among other cells' work trees. It is
+not a sandbox. The cell's bash tool runs as the user, and the conductor arm's own
+opencode config names this repository by absolute path because that is where the plugin
+is loaded from, so an arm that goes looking for the corpus on purpose can still find it.
+Read a corpus lane's pass rate with that in mind.
+
+`--task` and `--tier` narrow what runs. Values union inside a dimension and the two
+dimensions intersect, so `--tier T0 --tier T1` is both tiers and `--tier T1 --task
+euler-cli-py` is that one task if it sits in T1. The narrowing happens after the whole
+manifest is validated, so the set keeps its guards either way; an unknown id and a
+selection matching nothing are both refusals rather than a zero-cell run. A narrowed run
+records the selection in the run manifest and prints it at the top of the report, so it
+cannot be read as the campaign. A `--report-only` rebuild covers the same selection: a
+cell belonging to a task outside it is not that report's to describe.
+
+`--sweep` runs the shape the manifest declares, and is refused alongside every flag it
+would otherwise overwrite - `--task`, `--tier`, `--model`, `--capability` and `--reps`.
+The sweep block states the models, the capabilities and the repetition count, so a
+composed plan would be neither what the manifest declares nor what the operator asked
+for, and the report's sweep section would describe a campaign that did not happen.
+
+A task set is a manifest, and there are six. `--manifest` takes one path, has no glob
+and discovers nothing, so each set is a separate invocation and a campaign that means to
+cover the corpus runs all six:
+
+| Manifest | Tasks | What it holds |
+|----------|-------|---------------|
+| `bench/conductor-tasks.json` | 23 | the POC set, and the default when `--manifest` is unset |
+| `bench/corpus-euler.json` | 20 | Project Euler solvers, generated rather than hand-written |
+| `bench/corpus-repair.json` | 5 | debugging and migration repairs drawn from the task corpus |
+| `bench/corpus-systems.json` | 4 | systems-implementation tasks with conformance suites for gauges |
+| `bench/corpus-perf.json` | 3 | speed gates, where the hidden test is a wall clock |
+| `bench/corpus-games.json` | 2 | headless TUI games driven through a scripted input tape |
+
+A report describes the manifest it was given and says so at the top, which is a claim
+about that set and not about the other five. Fifty-seven tasks is the whole corpus and
+twenty-three of them are the POC set, so a campaign that runs the default alone has run
+under half of it with nothing in its own report to say so.
+
+`bench/corpus-euler.json` is the one manifest a hand edit does not own:
+`scripts/generate_euler_tasks.py` writes it from the material under
+`bench/corpus/project-euler/`, and `--check` re-derives the file and refuses a drift.
+Edit that material and regenerate.
+
+```bash
+/usr/bin/python3 scripts/generate_euler_tasks.py           # rewrite the set
+/usr/bin/python3 scripts/generate_euler_tasks.py --check   # refuse a hand edit
+```
+
+Each entry in a set carries its prompt, the seed the model starts from, and the hidden
+files and test command it never sees. A task's seed and hidden file sets are each stated
+once, either way round. A small task spells them inline as `seedFiles` and
+`hiddenFiles`, path to body. A task whose material is too large for a JSON string names
+`seedDir` and `hiddenDir` instead: repo-relative directories, walked in sorted order
+and flattened into the identical map, so nothing downstream can tell the two spellings
+apart. A directory that is a symlink, holds one, escapes itself, sits inside the other
+side's directory, is empty, carries a `.git` tree, holds an entry that is not a regular
+file, or holds a file that is not UTF-8 text is a refusal naming the task and the file -
+the seeding path writes text and commits it, so a byte-exact binary could not survive
+it, and mangling one silently would seed a file that differs from the one the repository
+holds. One file may not exceed 1 MiB and one file set may not exceed 8 MiB, so a source
+directory that has grown a build tree is a refusal with a size in it.
+
+The optional top-level `expectedTaskCounts` pins the set's per-tier shape, so a lost T3
+task cannot hide behind a gained T2 one; a manifest that omits the field states no shape
+and is held to none. The per-cell timeout defaults to 1800 seconds. Everything the driver does that is not a process spawn or a file write is a
 pure function, which is why `test_conductor_bench.py` can exercise the manifest load,
 the arm construction, the run plan, the scoring and the report without starting
 opencode or a model.

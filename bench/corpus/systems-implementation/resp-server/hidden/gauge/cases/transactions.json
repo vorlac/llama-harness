@@ -1,0 +1,3568 @@
+{
+ "group": "transactions",
+ "description": "MULTI, EXEC, DISCARD, WATCH and UNWATCH, including optimistic locking and abort semantics",
+ "cases": [
+  {
+   "name": "multi-returns-ok",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "queued-commands-reply-queued",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-runs-queue-in-order",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ],
+       [
+        ":",
+        2
+       ],
+       [
+        "$",
+        "2"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-empty-queue",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-without-multi",
+   "steps": [
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "ERR EXEC without MULTI"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-twice",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "ERR EXEC without MULTI"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "discard-without-multi",
+   "steps": [
+    {
+     "cmd": [
+      "DISCARD"
+     ],
+     "expect": [
+      "-",
+      "ERR DISCARD without MULTI"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "discard-drops-queue",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "DISCARD"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "ERR EXEC without MULTI"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "discard-leaves-connection-usable",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "DISCARD"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "w"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "multi-cannot-nest",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "-",
+      "ERR MULTI calls can not be nested"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "commands-are-not-executed-before-exec",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "c2"
+    }
+   ]
+  },
+  {
+   "name": "multi-state-is-per-connection",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "j",
+      "w"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "exec-mixed-types",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "L",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "L",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "m"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        ":",
+        2
+       ],
+       [
+        "*",
+        [
+         "a",
+         "b"
+        ]
+       ],
+       [
+        ":",
+        1
+       ],
+       [
+        ":",
+        1
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-with-select-inside",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "three"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ],
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "three"
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-reply-nesting",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        ":",
+        1
+       ],
+       [
+        "*u",
+        [
+         "a"
+        ]
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-runtime-error-is-an-element",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "-",
+        "ERR value is not an integer or out of range"
+       ],
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-wrongtype-error-is-an-element",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "L",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "L"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "LLEN",
+      "L"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "-",
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+       ],
+       [
+        ":",
+        1
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-continues-after-error",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "x"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "done"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ],
+       [
+        ":",
+        2
+       ],
+       [
+        "+",
+        "OK"
+       ],
+       [
+        "-",
+        "ERR value is not an integer or out of range"
+       ],
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "b"
+     ],
+     "expect": [
+      "$",
+      "done"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-option-syntax-error-is-runtime",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "BOGUS"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "-",
+        "ERR syntax error"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "exec-expire-error-is-runtime",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "-",
+        "ERR value is not an integer or out of range"
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "queue-unknown-command-aborts-exec",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "NOSUCHCOMMAND"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'NOSUCHCOMMAND'"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "EXECABORT Transaction discarded because of previous errors."
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "queue-arity-error-aborts-exec",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "EXECABORT Transaction discarded because of previous errors."
+     ]
+    }
+   ]
+  },
+  {
+   "name": "queue-arity-error-on-second-command",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'set' command"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "EXECABORT Transaction discarded because of previous errors."
+     ]
+    }
+   ]
+  },
+  {
+   "name": "execabort-clears-transaction-state",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "BOGUS"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'BOGUS'"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "EXECABORT Transaction discarded because of previous errors."
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "ERR EXEC without MULTI"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "discard-clears-dirty-flag",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "BOGUS"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'BOGUS'"
+     ]
+    },
+    {
+     "cmd": [
+      "DISCARD"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "queue-time-errors-do-not-stop-queuing",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "-",
+      "EXECABORT Transaction discarded because of previous errors."
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-returns-ok",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-missing-key-returns-ok",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH",
+      "nope"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-multiple-keys",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unwatch-returns-ok",
+   "steps": [
+    {
+     "cmd": [
+      "UNWATCH"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-unmodified-key-executes",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        ":",
+        2
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-modified-by-other-client-aborts",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-modified-by-self-aborts",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-same-value-write-still-dirties",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-key-creation-dirties",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-delete-dirties",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "DEL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-delete-of-missing-key-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "DEL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-failed-set-nx-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w",
+      "NX"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-failed-command-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "LPUSH",
+      "k",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-lpop-on-missing-key-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "LPOP",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-srem-of-absent-member-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SREM",
+      "k",
+      "zzz"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-expire-on-missing-key-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-append-dirties",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-passive-expiry-does-not-dirty",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 300
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "other",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "other"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-flushdb-dirties",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "FLUSHDB"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-rename-dirties-destination",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-rename-dirties-source",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "a",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "a"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "RENAME",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-is-scoped-to-the-database",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "zero"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "one"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-multiple-keys-any-dirty-aborts",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "b",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "unwatch-clears-the-abort",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "UNWATCH"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "exec-clears-watches",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "discard-clears-watches",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "DISCARD"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "aborted-exec-clears-watches",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-is-per-connection",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "c2"
+    }
+   ]
+  },
+  {
+   "name": "watch-inside-multi-is-an-error",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR WATCH inside MULTI is not allowed"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "watch-after-abort-can-be-reestablished",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      null
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        ":",
+        3
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "watch-then-exec-sees-latest-value",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "WATCH",
+      "other"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "c1"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "$",
+        "9"
+       ]
+      ]
+     ],
+     "client": "c1"
+    }
+   ]
+  },
+  {
+   "name": "subscribe-inside-multi-is-an-error",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "-",
+      "ERR SUBSCRIBE is not allowed in transactions"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-inside-multi-is-an-error",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE"
+     ],
+     "expect": [
+      "-",
+      "ERR UNSUBSCRIBE is not allowed in transactions"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "publish-is-queueable",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "hi"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ]
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        ":",
+        0
+       ]
+      ]
+     ]
+    }
+   ]
+  }
+ ]
+}

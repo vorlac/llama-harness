@@ -1,0 +1,72 @@
+# 04 - MULTI, EXEC, DISCARD and WATCH (SPEC.md section 7.8)
+#
+# Two connections are used. Lines are tagged [c1] and [c2].
+
+# --- a plain transaction ---------------------------------------------------
+C: [c1] *1\r\n$5\r\nMULTI\r\n
+S: [c1] +OK\r\n
+C: [c1] *3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\n1\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *2\r\n$4\r\nINCR\r\n$1\r\nk\r\n
+S: [c1] +QUEUED\r\n
+
+# Nothing has happened yet, as another connection can see.
+C: [c2] *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+S: [c2] $-1\r\n
+
+C: [c1] *1\r\n$4\r\nEXEC\r\n
+S: [c1] *2\r\n+OK\r\n:2\r\n
+
+# --- a runtime error is an element, not an abort ---------------------------
+C: [c1] *1\r\n$5\r\nMULTI\r\n
+S: [c1] +OK\r\n
+C: [c1] *3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *2\r\n$4\r\nINCR\r\n$1\r\nk\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *1\r\n$4\r\nPING\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *1\r\n$4\r\nEXEC\r\n
+S: [c1] *3\r\n+OK\r\n-ERR value is not an integer or out of range\r\n+PONG\r\n
+
+# --- a queue-time error aborts the whole transaction -----------------------
+C: [c1] *1\r\n$5\r\nMULTI\r\n
+S: [c1] +OK\r\n
+C: [c1] *1\r\n$3\r\nGET\r\n
+S: [c1] -ERR wrong number of arguments for 'get' command\r\n
+C: [c1] *3\r\n$3\r\nSET\r\n$1\r\nz\r\n$1\r\n1\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *1\r\n$4\r\nEXEC\r\n
+S: [c1] -EXECABORT Transaction discarded because of previous errors.\r\n
+C: [c1] *2\r\n$6\r\nEXISTS\r\n$1\r\nz\r\n
+S: [c1] :0\r\n
+
+# --- WATCH aborts on a concurrent write ------------------------------------
+C: [c1] *3\r\n$3\r\nSET\r\n$1\r\nn\r\n$1\r\n1\r\n
+S: [c1] +OK\r\n
+C: [c1] *2\r\n$5\r\nWATCH\r\n$1\r\nn\r\n
+S: [c1] +OK\r\n
+C: [c2] *3\r\n$3\r\nSET\r\n$1\r\nn\r\n$1\r\n2\r\n
+S: [c2] +OK\r\n
+C: [c1] *1\r\n$5\r\nMULTI\r\n
+S: [c1] +OK\r\n
+C: [c1] *2\r\n$4\r\nINCR\r\n$1\r\nn\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *1\r\n$4\r\nEXEC\r\n
+S: [c1] *-1\r\n
+
+# The abort is a NULL array, not an empty one, and the write did not happen.
+C: [c1] *2\r\n$3\r\nGET\r\n$1\r\nn\r\n
+S: [c1] $1\r\n2\r\n
+
+# --- a no-op write does not dirty the watch --------------------------------
+C: [c1] *2\r\n$5\r\nWATCH\r\n$1\r\nq\r\n
+S: [c1] +OK\r\n
+C: [c2] *2\r\n$3\r\nDEL\r\n$1\r\nq\r\n
+S: [c2] :0\r\n
+C: [c1] *1\r\n$5\r\nMULTI\r\n
+S: [c1] +OK\r\n
+C: [c1] *1\r\n$4\r\nPING\r\n
+S: [c1] +QUEUED\r\n
+C: [c1] *1\r\n$4\r\nEXEC\r\n
+S: [c1] *1\r\n+PONG\r\n

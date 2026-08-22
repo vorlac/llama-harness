@@ -1,0 +1,138 @@
+{
+  "group": "closures",
+  "description": "Closure creation, by-value upvalue capture, upvalue mutation, capture chains through nested functions, and closures as first-class values.",
+  "case_count": 17,
+  "cases": [
+    {
+      "id": "closures-001-adder",
+      "mode": "exec",
+      "source": "asm/closures-001-adder.asm",
+      "expect_exit": 0,
+      "expect_stdout": "8\n"
+    },
+    {
+      "id": "closures-002-twoadders",
+      "mode": "exec",
+      "source": "asm/closures-002-twoadders.asm",
+      "expect_exit": 0,
+      "expect_stdout": "11\n101\n"
+    },
+    {
+      "id": "closures-003-byvalue",
+      "mode": "exec",
+      "source": "asm/closures-003-byvalue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "10\n",
+      "note": "upvalues are captured by value at CLOSURE time"
+    },
+    {
+      "id": "closures-004-counter",
+      "mode": "exec",
+      "source": "asm/closures-004-counter.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n2\n3\n",
+      "note": "STORE_UPVAL mutates the closure object, so the count persists"
+    },
+    {
+      "id": "closures-005-independent",
+      "mode": "exec",
+      "source": "asm/closures-005-independent.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n2\n1\n"
+    },
+    {
+      "id": "closures-006-chain",
+      "mode": "exec",
+      "source": "asm/closures-006-chain.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n",
+      "note": "leaf captures mk2's upvalue, which mk2 captured from mk1's local"
+    },
+    {
+      "id": "closures-007-twoupvals",
+      "mode": "exec",
+      "source": "asm/closures-007-twoupvals.asm",
+      "expect_exit": 0,
+      "expect_stdout": "12\n"
+    },
+    {
+      "id": "closures-008-upvalorder",
+      "mode": "exec",
+      "source": "asm/closures-008-upvalorder.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n",
+      "note": "upvalue 0 is the second local, upvalue 1 the first"
+    },
+    {
+      "id": "closures-009-holdsarray",
+      "mode": "exec",
+      "source": "asm/closures-009-holdsarray.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1, 2, 2]\n",
+      "note": "the captured array is shared: capture copies the reference"
+    },
+    {
+      "id": "closures-010-higherorder",
+      "mode": "exec",
+      "source": "asm/closures-010-higherorder.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\n"
+    },
+    {
+      "id": "closures-011-inarray",
+      "mode": "exec",
+      "source": "asm/closures-011-inarray.asm",
+      "expect_exit": 0,
+      "expect_stdout": "10\n6\n"
+    },
+    {
+      "id": "closures-012-map",
+      "mode": "exec",
+      "source": "asm/closures-012-map.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[2, 4, 6]\n"
+    },
+    {
+      "id": "closures-013-noupvals",
+      "mode": "exec",
+      "source": "asm/closures-013-noupvals.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "closures-014-upvalrange",
+      "mode": "exec",
+      "source": "asm/closures-014-upvalrange.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM",
+      "note": "the entry function has no upvalues"
+    },
+    {
+      "id": "closures-015-upvalrange",
+      "mode": "exec",
+      "source": "asm/closures-015-upvalrange.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "closures-016-upvalcount",
+      "mode": "exec",
+      "source": "asm/closures-016-upvalcount.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM",
+      "note": "upvals=2 but only one .upval descriptor"
+    },
+    {
+      "id": "closures-017-upvalsource",
+      "mode": "exec",
+      "source": "asm/closures-017-upvalsource.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM",
+      "note": "main has no local 0 to capture"
+    }
+  ]
+}

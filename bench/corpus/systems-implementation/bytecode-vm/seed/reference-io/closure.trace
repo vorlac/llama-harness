@@ -1,0 +1,9 @@
+trace: depth=1 fn=0 pc=0000 op=CLOSURE sp=0
+trace: depth=1 fn=0 pc=0003 op=PUSH_INT sp=1
+trace: depth=1 fn=0 pc=0006 op=CALL sp=2
+trace: depth=2 fn=1 pc=0000 op=LOAD_LOCAL sp=0
+trace: depth=2 fn=1 pc=0002 op=PUSH_INT sp=1
+trace: depth=2 fn=1 pc=0005 op=ADD sp=2
+trace: depth=2 fn=1 pc=0006 op=RET sp=1
+trace: depth=1 fn=0 pc=0008 op=PRINT sp=1
+trace: depth=1 fn=0 pc=0009 op=RET sp=0

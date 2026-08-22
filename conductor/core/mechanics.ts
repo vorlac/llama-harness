@@ -180,7 +180,10 @@ export function renderLimits(): string {
       " tokens (matched-file bytes / " +
       String(BYTES_PER_TOKEN) +
       "); `workflow.readSetTokenBudget` overrides it, 0 disables it. A scope too big to read is refused.",
-    "- acceptance must resolve to one cluster; more than one is a rejection, not a warning.",
+    "- acceptance must resolve to one cluster; more than one is a rejection, not a warning. The " +
+      "gate counts the distinct SUBJECTS the criteria name against the item's files, so open each " +
+      "criterion with what it is about (`parse rejects empty input`, not `rejects empty input`). A " +
+      "criterion NAMING a file, test or symbol it does not change is a guard and costs nothing.",
   ].join("\n");
 }
 

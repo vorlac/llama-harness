@@ -1,0 +1,4 @@
+; svm disassembly
+.func main arity=0 locals=0 upvals=0
+  RET
+.end

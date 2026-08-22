@@ -1,0 +1,123 @@
+{
+  "suite": "bytecode-vm-conformance",
+  "format_version": 1,
+  "case_count": 1077,
+  "groups": [
+    "asmerr",
+    "binary",
+    "loader",
+    "arith",
+    "bitwise",
+    "compare",
+    "strops",
+    "control",
+    "locals",
+    "globals",
+    "calls",
+    "closures",
+    "arrays",
+    "display",
+    "errors",
+    "depth",
+    "gc",
+    "trace",
+    "integration"
+  ],
+  "group_info": [
+    {
+      "name": "asmerr",
+      "case_count": 62,
+      "description": "Source the assembler must reject, each with exit status 2 and the E_ASM error code."
+    },
+    {
+      "name": "binary",
+      "case_count": 33,
+      "description": "The on-disk module format: byte-exact assembler output, constant-pool interning order, the canonical disassembly, and assemble/disassemble round-tripping."
+    },
+    {
+      "name": "loader",
+      "case_count": 52,
+      "description": "Module validation: every field the loader must check before the first instruction runs, driven from hand-built byte images."
+    },
+    {
+      "name": "arith",
+      "case_count": 205,
+      "description": "Integer arithmetic: wrapping two's-complement add/sub/mul, truncating div, sign-of-dividend mod, negation, and the division and overflow edge cases the spec pins down."
+    },
+    {
+      "name": "bitwise",
+      "case_count": 100,
+      "description": "Bitwise AND/OR/XOR/NOT and the two shifts, including the arithmetic right shift on negative values and the shift-count range rule."
+    },
+    {
+      "name": "compare",
+      "case_count": 191,
+      "description": "Equality, inequality and ordering over integers, strings and reference values, plus the type rules for mixed comparisons."
+    },
+    {
+      "name": "strops",
+      "case_count": 110,
+      "description": "String operations: concatenation, byte-indexed substring, search, length, chr/ord and the string/integer conversions."
+    },
+    {
+      "name": "control",
+      "case_count": 55,
+      "description": "Conditional and unconditional jumps, truthiness, loop shapes, and the stack discipline of the conditional branches."
+    },
+    {
+      "name": "locals",
+      "case_count": 15,
+      "description": "Local slots: default initialisation, store and load, parameter binding, per-frame isolation, and the stack shuffling opcodes."
+    },
+    {
+      "name": "globals",
+      "case_count": 12,
+      "description": "The global name table: definition on first store, lookup failure, visibility across frames, and quoted global names."
+    },
+    {
+      "name": "calls",
+      "case_count": 23,
+      "description": "Frames, argument binding, return values, recursion, mutual recursion, arity checking and the call-site type rules."
+    },
+    {
+      "name": "closures",
+      "case_count": 17,
+      "description": "Closure creation, by-value upvalue capture, upvalue mutation, capture chains through nested functions, and closures as first-class values."
+    },
+    {
+      "name": "arrays",
+      "case_count": 39,
+      "description": "Array construction, element access, mutation, growth, reference semantics and the index range rules."
+    },
+    {
+      "name": "display",
+      "case_count": 75,
+      "description": "The display form used by PRINT, WRITE and TOSTR, including quoting inside arrays and the type names reported by TYPEOF."
+    },
+    {
+      "name": "errors",
+      "case_count": 20,
+      "description": "Every runtime trap, its error code and its process exit status, plus the rule that output already written survives."
+    },
+    {
+      "name": "depth",
+      "case_count": 19,
+      "description": "The call-depth limit and the operand-stack limit: the boundary cases either side of each, and the errors they raise."
+    },
+    {
+      "name": "gc",
+      "case_count": 34,
+      "description": "The observable heap: which operations allocate, what the root set contains, that cycles are reclaimed, and that a bounded heap is enough for an unbounded amount of garbage."
+    },
+    {
+      "name": "trace",
+      "case_count": 4,
+      "description": "The instruction trace: one line per executed instruction with the frame depth, function index, byte offset and stack size."
+    },
+    {
+      "name": "integration",
+      "case_count": 11,
+      "description": "Whole programs that exercise many subsystems at once: real algorithms written in the assembly language."
+    }
+  ]
+}

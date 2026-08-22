@@ -1,0 +1,38 @@
+; case arrays-037-big
+; expect exit=0 stdout="1000\n499500\n999\n"
+.func main arity=0 locals=3
+  NEW_ARRAY 0
+  STORE_LOCAL 0
+  PUSH_INT 0
+  STORE_LOCAL 2
+  PUSH_INT 0
+  STORE_LOCAL 1
+b_top:
+  LOAD_LOCAL 1
+  PUSH_INT 1000
+  LT
+  JMP_IF_FALSE b_end
+  LOAD_LOCAL 0
+  LOAD_LOCAL 1
+  ARR_PUSH
+  LOAD_LOCAL 2
+  LOAD_LOCAL 1
+  ADD
+  STORE_LOCAL 2
+  LOAD_LOCAL 1
+  PUSH_INT 1
+  ADD
+  STORE_LOCAL 1
+  JMP b_top
+b_end:
+  LOAD_LOCAL 0
+  LEN
+  PRINT
+  LOAD_LOCAL 2
+  PRINT
+  LOAD_LOCAL 0
+  PUSH_INT 999
+  ARR_GET
+  PRINT
+  RET
+.end

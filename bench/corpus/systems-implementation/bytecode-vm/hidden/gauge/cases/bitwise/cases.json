@@ -1,0 +1,725 @@
+{
+  "group": "bitwise",
+  "description": "Bitwise AND/OR/XOR/NOT and the two shifts, including the arithmetic right shift on negative values and the shift-count range rule.",
+  "case_count": 100,
+  "cases": [
+    {
+      "id": "bitwise-001-band",
+      "mode": "exec",
+      "source": "asm/bitwise-001-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-002-band",
+      "mode": "exec",
+      "source": "asm/bitwise-002-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-003-band",
+      "mode": "exec",
+      "source": "asm/bitwise-003-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-004-band",
+      "mode": "exec",
+      "source": "asm/bitwise-004-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-005-band",
+      "mode": "exec",
+      "source": "asm/bitwise-005-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "8\n"
+    },
+    {
+      "id": "bitwise-006-band",
+      "mode": "exec",
+      "source": "asm/bitwise-006-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "15\n"
+    },
+    {
+      "id": "bitwise-007-band",
+      "mode": "exec",
+      "source": "asm/bitwise-007-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4222189076152335\n"
+    },
+    {
+      "id": "bitwise-008-band",
+      "mode": "exec",
+      "source": "asm/bitwise-008-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "bitwise-009-band",
+      "mode": "exec",
+      "source": "asm/bitwise-009-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-010-band",
+      "mode": "exec",
+      "source": "asm/bitwise-010-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "bitwise-011-band",
+      "mode": "exec",
+      "source": "asm/bitwise-011-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-012-band",
+      "mode": "exec",
+      "source": "asm/bitwise-012-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "83985669\n"
+    },
+    {
+      "id": "bitwise-013-band",
+      "mode": "exec",
+      "source": "asm/bitwise-013-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-014-band",
+      "mode": "exec",
+      "source": "asm/bitwise-014-band.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-015-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-015-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-016-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-016-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-017-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-017-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-018-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-018-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-019-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-019-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "14\n"
+    },
+    {
+      "id": "bitwise-020-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-020-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "255\n"
+    },
+    {
+      "id": "bitwise-021-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-021-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1152657617789587455\n"
+    },
+    {
+      "id": "bitwise-022-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-022-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "bitwise-023-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-023-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "bitwise-024-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-024-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "bitwise-025-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-025-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-026-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-026-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-948183201\n"
+    },
+    {
+      "id": "bitwise-027-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-027-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-028-bor",
+      "mode": "exec",
+      "source": "asm/bitwise-028-bor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2047\n"
+    },
+    {
+      "id": "bitwise-029-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-029-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-030-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-030-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-031-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-031-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-032-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-032-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-033-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-033-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "6\n"
+    },
+    {
+      "id": "bitwise-034-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-034-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "240\n"
+    },
+    {
+      "id": "bitwise-035-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-035-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1148435428713435120\n"
+    },
+    {
+      "id": "bitwise-036-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-036-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775806\n"
+    },
+    {
+      "id": "bitwise-037-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-037-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775807\n"
+    },
+    {
+      "id": "bitwise-038-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-038-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-039-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-039-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-040-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-040-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1032168870\n"
+    },
+    {
+      "id": "bitwise-041-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-041-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-042-bxor",
+      "mode": "exec",
+      "source": "asm/bitwise-042-bxor.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2047\n"
+    },
+    {
+      "id": "bitwise-043-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-043-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-044-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-044-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "bitwise-045-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-045-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-046-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-046-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-43\n"
+    },
+    {
+      "id": "bitwise-047-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-047-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "41\n"
+    },
+    {
+      "id": "bitwise-048-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-048-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "bitwise-049-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-049-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "bitwise-050-bnot",
+      "mode": "exec",
+      "source": "asm/bitwise-050-bnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-256\n"
+    },
+    {
+      "id": "bitwise-051-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-051-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "bitwise-052-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-052-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "bitwise-053-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-053-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2147483648\n"
+    },
+    {
+      "id": "bitwise-054-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-054-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4294967296\n"
+    },
+    {
+      "id": "bitwise-055-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-055-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4611686018427387904\n"
+    },
+    {
+      "id": "bitwise-056-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-056-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "bitwise-057-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-057-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "bitwise-058-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-058-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4611686018427387904\n"
+    },
+    {
+      "id": "bitwise-059-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-059-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-72057594037927936\n"
+    },
+    {
+      "id": "bitwise-060-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-060-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "bitwise-061-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-061-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-062-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-062-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "13573471044894720\n"
+    },
+    {
+      "id": "bitwise-063-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-063-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-13573471044894720\n"
+    },
+    {
+      "id": "bitwise-064-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-064-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "7\n"
+    },
+    {
+      "id": "bitwise-065-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-065-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-066-shl",
+      "mode": "exec",
+      "source": "asm/bitwise-066-shl.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1152921504606846976\n"
+    },
+    {
+      "id": "bitwise-067-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-067-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "bitwise-068-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-068-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-069-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-069-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "bitwise-070-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-070-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-071-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-071-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-072-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-072-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-073-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-073-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4611686018427387903\n"
+    },
+    {
+      "id": "bitwise-074-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-074-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "bitwise-075-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-075-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-076-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-076-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4611686018427387904\n"
+    },
+    {
+      "id": "bitwise-077-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-077-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "bitwise-078-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-078-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "bitwise-079-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-079-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-4\n"
+    },
+    {
+      "id": "bitwise-080-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-080-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-2\n"
+    },
+    {
+      "id": "bitwise-081-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-081-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-082-shr",
+      "mode": "exec",
+      "source": "asm/bitwise-082-shr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "bitwise-083-shlrange",
+      "mode": "exec",
+      "source": "asm/bitwise-083-shlrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-084-shlrange",
+      "mode": "exec",
+      "source": "asm/bitwise-084-shlrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-085-shlrange",
+      "mode": "exec",
+      "source": "asm/bitwise-085-shlrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-086-shlrange",
+      "mode": "exec",
+      "source": "asm/bitwise-086-shlrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-087-shlrange",
+      "mode": "exec",
+      "source": "asm/bitwise-087-shlrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-088-shlrange",
+      "mode": "exec",
+      "source": "asm/bitwise-088-shlrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-089-shrrange",
+      "mode": "exec",
+      "source": "asm/bitwise-089-shrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-090-shrrange",
+      "mode": "exec",
+      "source": "asm/bitwise-090-shrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-091-shrrange",
+      "mode": "exec",
+      "source": "asm/bitwise-091-shrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-092-shrrange",
+      "mode": "exec",
+      "source": "asm/bitwise-092-shrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-093-shrrange",
+      "mode": "exec",
+      "source": "asm/bitwise-093-shrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-094-shrrange",
+      "mode": "exec",
+      "source": "asm/bitwise-094-shrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "bitwise-095-bandtype",
+      "mode": "exec",
+      "source": "asm/bitwise-095-bandtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "bitwise-096-bortype",
+      "mode": "exec",
+      "source": "asm/bitwise-096-bortype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "bitwise-097-bxortype",
+      "mode": "exec",
+      "source": "asm/bitwise-097-bxortype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "bitwise-098-shltype",
+      "mode": "exec",
+      "source": "asm/bitwise-098-shltype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "bitwise-099-shrtype",
+      "mode": "exec",
+      "source": "asm/bitwise-099-shrtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "bitwise-100-bnottype",
+      "mode": "exec",
+      "source": "asm/bitwise-100-bnottype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    }
+  ]
+}

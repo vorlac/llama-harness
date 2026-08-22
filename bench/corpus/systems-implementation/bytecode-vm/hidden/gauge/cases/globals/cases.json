@@ -1,0 +1,94 @@
+{
+  "group": "globals",
+  "description": "The global name table: definition on first store, lookup failure, visibility across frames, and quoted global names.",
+  "case_count": 12,
+  "cases": [
+    {
+      "id": "globals-001-basic",
+      "mode": "exec",
+      "source": "asm/globals-001-basic.asm",
+      "expect_exit": 0,
+      "expect_stdout": "7\n"
+    },
+    {
+      "id": "globals-002-undef",
+      "mode": "exec",
+      "source": "asm/globals-002-undef.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_UNDEF_GLOBAL"
+    },
+    {
+      "id": "globals-003-undef",
+      "mode": "exec",
+      "source": "asm/globals-003-undef.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_UNDEF_GLOBAL"
+    },
+    {
+      "id": "globals-004-redefine",
+      "mode": "exec",
+      "source": "asm/globals-004-redefine.asm",
+      "expect_exit": 0,
+      "expect_stdout": "two\n"
+    },
+    {
+      "id": "globals-005-nilvalue",
+      "mode": "exec",
+      "source": "asm/globals-005-nilvalue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n"
+    },
+    {
+      "id": "globals-006-crossframe",
+      "mode": "exec",
+      "source": "asm/globals-006-crossframe.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "globals-007-quoted",
+      "mode": "exec",
+      "source": "asm/globals-007-quoted.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "globals-008-quoted",
+      "mode": "exec",
+      "source": "asm/globals-008-quoted.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n",
+      "note": "the quoted and bare forms name the same global"
+    },
+    {
+      "id": "globals-009-casesensitive",
+      "mode": "exec",
+      "source": "asm/globals-009-casesensitive.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n2\n"
+    },
+    {
+      "id": "globals-010-holdsarray",
+      "mode": "exec",
+      "source": "asm/globals-010-holdsarray.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1, 2, 3]\n"
+    },
+    {
+      "id": "globals-011-holdsclosure",
+      "mode": "exec",
+      "source": "asm/globals-011-holdsclosure.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\n"
+    },
+    {
+      "id": "globals-012-storepops",
+      "mode": "exec",
+      "source": "asm/globals-012-storepops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    }
+  ]
+}

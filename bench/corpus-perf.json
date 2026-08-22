@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "selectionCriteria": {
+    "provenance": "Three tasks, ported from the perf-optimization and concurrency-bottlenecks corpora at llama-harness-test-results. The reference implementations, the specifications, the correctness suites and the workload generators are the corpus's, unchanged in substance; the graded gates under gauge/, the seeded scripts, and the rewrites that make the material work in a flat work tree with no execute bits, are this repository's.",
+    "whatIsMeasured": "Every task here is scored on MEASURED SPEED as well as on exact output, which is a different question from the pass/fail correctness the rest of the bench asks. A cell passes only when the output is byte-exact AND the program is at least a stated factor faster than a baseline timed beside it.",
+    "howSpeedIsScored": "Never a wall clock. Each hidden test times a reference implementation and the candidate against each other, in the same process, on the same machine, at the same moment, alternating which side goes first, and requires a RATIO. An absolute second count is a property of the machine that measured it, so a threshold built on one would make the campaign irreproducible; a ratio measured in the same invocation is not. Correctness is decided first and independently in every gate, so a fast wrong answer fails as a wrong answer rather than as a slow one.",
+    "whereTheThresholdsComeFrom": "knn-search's 40x is the corpus's own TARGET_SPEEDUP and is calibrated: on this machine a straightforward exact single-threaded rewrite measures about 22x and does not clear it, while the same rewrite across threads measures 42x and above and does. log-aggregation's 6.0x is the corpus's own declared target, above the ~1.5x that merging the reference's separate passes buys on its own and far below the ~35x floor the workload's raw read and serialise costs imply. etl-pipeline's 4.0x is the one threshold this repository chose rather than inherited, because that task ships no pass/fail speed gate at all: it is the floor of its rubric's 19-point band, above the 2.3x that the deliberately-most-obvious single-threaded implementation of its own specification measures on this machine, and two bands above where that rubric says constant-factor tidying lands. It is NOT calibrated against a real solve, because no reference solution to that task exists in the material, and it should be re-checked against the first genuine one.",
+    "whyThreeAndNotFour": "The fourth task in the perf-optimization corpus, substring-index, is Rust. Its task.json declares languages ['rust'], every source is .rs, and its build is rustc with no cargo. The bench's language vocabulary is ts, python and cpp, and calling it cpp would be a false label rather than a port. Porting it honestly is a reimplementation, not a translation: src/reference.rs is the definition of correctness and is sha256-frozen together with the generator, the benchmark and the committed sample, sample/expected.txt was produced BY that reference and would have to be reproduced byte for byte across four query kinds, and the 25x target was measured against it. It is left out, and named here rather than mislabelled.",
+    "scopeLadder": "T1, T3 and T4, one task each. knn-search is one item in one file - replace the search - which is what T1 names. log-aggregation is a chain: the aggregator has to exist before run.sh can point at it and before the report writer has anything to write, which is T3. etl-pipeline is T4 because the dominant cost is not in the file the task's shape points at: the prompt is about concurrency and the pipeline's structure, and the single largest stage is the record parse in jsonsubset.py, which a plan scoping 'the concurrency' does not reach. T0 and T2 are empty and the pin says so.",
+    "hiddenTests": "The measurement lives in gauge/, which is never seeded into the work tree and is materialized only after the model's process has exited. Every gate first diffs the read-only material against a pristine copy it carries, because in all three tasks the reference is both the definition of correctness and the denominator of the ratio: a workspace that slowed the baseline down has answered a different question. Every gate then generates its own workload from a seed that appears nowhere the workspace can read, so an answer precomputed for the workload the model iterated against buys nothing.",
+    "seedIsGreen": "Each seeded repository passes its own visible suite, so a run starts from a green tree and a red visible test is the arm's doing. Each seeded repository also FAILS its hidden gate, at a ratio near 1.0, because in all three the shipped entry point delegates to the slow reference - which is the right red-first state for a speed gate.",
+    "flakiness": "Each gate runs one discarded warmup and four timed runs per side, alternates which side leads each pair so both sides get the same number of first and second slots, reads the inputs through the page cache before each pair so neither side pays for disk the other did not, and reports the MEDIAN. A first timed pair below half the target is refused there rather than paying for the rest. The measured run-to-run spread of a reference on this machine is under 10%, and the smallest margin any of these gates asks for is 4x.",
+    "concurrency": "These cells must not run beside anything else, each other included. The ratio is measured on a live machine, and a neighbour that loads the box while one side is being timed corrupts the number directly rather than adding noise to it.",
+    "languageMix": "One cpp task and two python. knn-search is the corpus's C++ task; log-aggregation and etl-pipeline are its Python ones. The Rust task is excluded above."
+  },
+  "defaults": {
+    "model": "llamacpp/qwen3.8-27b",
+    "tierTimeoutSec": {
+      "T0": 1800,
+      "T1": 2700,
+      "T2": 3600,
+      "T3": 7200,
+      "T4": 3600
+    }
+  },
+  "expectedTaskCounts": {
+    "T0": 0,
+    "T1": 1,
+    "T2": 0,
+    "T3": 1,
+    "T4": 1
+  },
+  "sweep": {
+    "rationale": "One model, because one model is served. The set holds one task in each of T1, T3 and T4, so those are the swept tiers and the two empty tiers are primary-only by vacuity.",
+    "primaryModel": "llamacpp/qwen3.8-27b",
+    "models": [
+      "llamacpp/qwen3.8-27b"
+    ],
+    "sweptTiers": [
+      "T1",
+      "T3",
+      "T4"
+    ],
+    "primaryOnlyTiers": [
+      "T0",
+      "T2"
+    ],
+    "capabilities": [
+      "none"
+    ],
+    "reps": 3
+  },
+  "tasks": [
+    {
+      "id": "knn-search-cpp",
+      "tier": "T1",
+      "mechanism": "none",
+      "expectedTrajectory": "the run produces one real item - replace the linear scan in src/knn_solution.cpp with an exact fast search - whose fileScope is that file plus the SOLUTION_FLAGS line in build.sh, and carries it to a single implement-and-verify pass",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "cpp",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "One item, one file of real work, and a threshold that is calibrated rather than chosen: the corpus measured a straightforward exact single-threaded rewrite at about 22x, which does NOT clear the 40x gate, and the same rewrite across two threads at about 42x, which does. So the gate separates 'fixed the obvious four things' from 'did the work' instead of separating 'tried' from 'did not'. It is in the set at T1 because the scope is genuinely small - the plugin's trivial path is two files and this is two files - while the work inside that scope is not, which is the combination that tells whether the process helps when the file count is no guide to the difficulty.",
+      "prompt": "This workspace answers one question: for each query vector, which k base points are closest in Euclidean distance? `src/knn_naive.hpp` answers it correctly and very slowly, and `src/knn_solution.cpp` ships as a thin driver that calls it, so the workspace starts correct and exactly as slow as the baseline.\n\nMake it fast while keeping the answer byte-identical.\n\nThe gate is a ratio, not a wall clock. `workload.conf` sets `TARGET_SPEEDUP=40`: the reference and the solution are timed against each other on the same machine in the same invocation, and the solution's median has to be at most one fortieth of the reference's. Correctness is decided first and separately, so a fast wrong answer fails as a wrong answer.\n\n`src/knn_naive.hpp` names the four reasons it is slow, and it is slow for all four independently: a fresh `std::vector` copied out for every (query, point) pair, a norm/dot expansion that recomputes both norms on every call, `std::vector::at()` on every element access, and a full `std::sort` of all n candidates per query to read the first k. Fixing one of them is not enough to clear the gate.\n\nWhat you may change: `src/knn_solution.cpp` freely, any new source or header you add under `src/`, the `SOLUTION_FLAGS` line in `build.sh`, and `run.sh` and `test.sh`. What you must not change: `src/knn_naive.hpp`, `src/knn_reference.cpp`, `src/knn_io.hpp`, `tools/`, `sample/` and `workload.conf`. Their checksums are verified and a mismatch is an automatic failure.\n\nKeep the command-line contract, which the harness depends on: `build/knn_solution --workload <dir> --out <file> [--quiet]` reads `<dir>/base.bin` and `<dir>/queries.bin`, writes the results file in the format `src/knn_io.hpp` documents, and prints `results: <file>` on stdout. Timing and any other chatter goes to stderr.\n\nNothing in the workspace carries an execute bit, so scripts are invoked through their interpreter: `bash build.sh`, `bash run.sh`, `bash test.sh`.\n\n`python3 tools/visible_check.py` must keep passing: it builds and then requires byte-identical output against the reference on the committed sample and ten probe workloads with shapes the benchmark workload does not have - k > n, all-identical points, duplicate-heavy data, d in {16, 32, 48, 64}, k in {1, 5, 10, 32, 64}. `bash test.sh` adds the 400,000-point benchmark workload and the speed target.\n\nByte-identical means byte-identical, including tie-breaking order. Approximation, sampling, early termination that can miss a true neighbour, and precomputing or memorising answers are all failures. Every exact technique is available: partial selection instead of a full sort, contiguous layouts, blocking, precomputed norms with the ||a-b||^2 = ||a||^2 + ||b||^2 - 2a.b identity, dropping the square root, SIMD, threads, an exact spatial index. README.md sets out why every one of those is bit-exact here rather than approximate, and the reasoning is worth reading before you assume you have to keep the reference's arithmetic shape.\n\nIf you use an architecture-specific compiler flag, probe for it and fall back rather than hard-failing: `build.sh` has to keep succeeding on a machine that is not this one.",
+      "seedDir": "bench/corpus/perf-optimization/knn-search/seed",
+      "hiddenDir": "bench/corpus/perf-optimization/knn-search/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/gate.py"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/visible_check.py"
+      ],
+      "behavioralPaths": [
+        "src/**",
+        "build.sh"
+      ],
+      "runTimeoutSec": 5400
+    },
+    {
+      "id": "log-aggregation-py",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the run decomposes to a chain - a single-pass parse-and-bucket module, then the report sections computed from those buckets, then run.sh pointed at the result - where each item's fileScope depends on the one before it, and the scheduler dispatches them in that order rather than in one wave",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "A genuine dependency chain: nothing can be wired into run.sh before the aggregator exists, and no report section can be computed before the buckets it reads from do. The measurement is objective and the threshold is the corpus's own - 6.0x, above the ~1.5x that merging the reference's separate passes buys on its own, and well below the ceiling the raw costs imply, since a bare read of the workload is 0.16s and serialising the finished report is 0.25s against a 42s reference. The exactness half is not negotiable either: the report carries exact nearest-rank percentiles and several tie-broken orderings, so approximation and a reversed tie-break both change the bytes.",
+      "prompt": "`reference/aggregate.py` reads a structured access log and writes one JSON report. It is correct, and it is roughly an order of magnitude slower than it needs to be. `run.sh` ships delegating to it, so the workspace starts correct and exactly as slow as the baseline.\n\nMake it fast without changing a single byte of what it outputs.\n\nWrite your aggregator as new files - put them wherever you like - and point `run.sh` at them. Leave `reference/aggregate.py` byte for byte as it is: it is the thing you are measured against, and both the correctness suite and the benchmark execute it. `FORMAT.md`, `tools/` and `sample/` are read-only for the same reason.\n\nThe gate is a ratio, not a wall clock. The required minimum is **6.0x**: `tools/bench.py` times the reference and the candidate against each other on one machine in one invocation, alternating them, and compares the median to the median. Correctness is decided first and separately, so a fast wrong answer fails as a wrong answer.\n\nThe reference is naive in several independent ways at once, and no single fix reaches the target - merging its separate full passes over the file into one, on its own, is worth about 1.5x. Read it and find the rest.\n\n`FORMAT.md` is the specification of the input format, the validity rules, the derived values - endpoint normalisation, minute label, epoch millis, exact nearest-rank percentile, mean - and the exact shape and ordering of every section of the report. `reference/aggregate.py` is the final authority where the two ever disagree.\n\n`run.sh` takes `bash run.sh [INPUT_LOG] [OUTPUT_JSON]`, defaults `data/access.log` and `out/report.json`, creates the output directory if it is missing, and exits 0 on success. It must launch Python as `\"${LOGAGG_PYTHON:-python3}\"`: the harness exports that variable as the interpreter it is itself running under and runs the reference under the same one, so both sides of the ratio use one CPython. A speedup that comes from picking a newer interpreter is a measurement error, not a result. Standard library only; no network.\n\nNothing in the workspace carries an execute bit, so scripts are invoked through their interpreter and the suite is pointed at the candidate as `--candidate \"bash run.sh\"`.\n\n`python3 tools/check_correctness.py --candidate \"bash run.sh\"` must keep passing. It compares byte for byte on ten hand-written fixtures, the committed sample, a renamed copy of it, and six generated workloads; `--salt N` moves every generated seed, so a candidate that passes at one salt and fails at another has cached or hardcoded something. `bash test.sh` adds the benchmark.\n\nApproximating any statistic is an automatic failure. p50, p95 and p99 are the exact nearest-rank values FORMAT.md section 4 defines - no sampling, no reservoir, no t-digest, no HDR histogram, no interpolation - and every other statistic is exact too. So is precomputing an answer: shipping a stored report, or keying a cache off the input's size, hash, name or mtime. So is skipping work the reference does; every section of the report is computed from the input on every run.\n\nTwo traps are worth naming. FORMAT.md guarantees the generated workload's byte shape but defines validity in JSON terms, and the fixtures include valid records with shuffled keys, inserted whitespace and escaped characters - a positional fast path has to verify its assumptions and fall back. And the report has several tie-broken orderings; getting a tie-break backwards changes the bytes without changing the answer.",
+      "seedDir": "bench/corpus/perf-optimization/log-aggregation/seed",
+      "hiddenDir": "bench/corpus/perf-optimization/log-aggregation/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/gate.py"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/check_correctness.py",
+        "--candidate",
+        "bash run.sh"
+      ],
+      "behavioralPaths": [
+        "run.sh",
+        "**/*.py"
+      ],
+      "runTimeoutSec": 7200
+    },
+    {
+      "id": "etl-pipeline-py",
+      "tier": "T4",
+      "mechanism": "scope-boundary",
+      "expectedTrajectory": "a plan built from the prompt scopes pipeline.py and the concurrency around it, and the run only reaches the target once it also opens jsonsubset.py, where the dominant per-record cost actually sits - so the interesting trajectory is whether the scope widens on evidence or the run finishes inside the scope it started with",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The task is presented as a concurrency problem and its shape points at pipeline.py, but the single largest stage is the record parse in jsonsubset.py. A plan that scopes the concurrency and stops measures as tidying; reaching 4.0x needs a file the plan would not have scoped, which is exactly what T4 names. Two correctness properties rather than one - byte-exactness against an independent implementation of SPEC.md, and identical bytes at one worker and at eight - so the usual way a parallelisation goes wrong is caught as a wrong answer rather than showing up as a fast pass. The 4.0 threshold is this repository's choice and the one number in this set that is not calibrated against a measured solve; see selectionCriteria.whereTheThresholdsComeFrom.",
+      "prompt": "This workspace holds a multi-stage record pipeline: parse, validate, normalise, deduplicate, enrich, filter, delta, aggregate, ordered emit. It reads a newline-delimited event stream and a small device lookup table and writes three files - the windowed aggregates, one row per rejected input line, and a set of run counters. It is correct and it is slow, in ways that are structural rather than cosmetic.\n\nMake it fast and make it clean, without changing a byte of what it outputs.\n\n`SPEC.md` is normative: input schema, transformation semantics, output bytes, ordering rules, CLI and exit codes all come from there. It defines semantics only - it says nothing about threads, processes, queues, batching or memory layout. Any implementation that produces the bytes it defines, from the inputs it defines, is correct, and how it gets there is what is being measured.\n\nThe gate is a ratio, not a wall clock: `S = baseline median / candidate median`, both at 8 workers, on one machine, in one invocation, with the baseline being the frozen starting implementation under `baseline/`. The required minimum is **4.0x**. `python3 tools/bench.py` measures exactly that. Correctness is decided first and separately, so a fast wrong answer fails as a wrong answer.\n\nTwo correctness properties, not one. The three output files must be byte-exact against what SPEC.md defines, which `python3 tools/verify_output.py --recompute` derives from the inputs with its own implementation rather than from a stored answer. And the bytes must not depend on how the work was scheduled: the same input at one worker and at eight must produce the same three files. That is SPEC.md section 6, and it is the property a careless parallelisation breaks.\n\n`baseline/etl/` is the denominator of the ratio and never runs as part of the pipeline. Leave it alone, along with `SPEC.md` and `tools/`. Everything under `etl/` is yours, including a rewrite from nothing if that is the right answer.\n\n`run.sh` is the scored surface. `bash run.sh [EVENTS_PATH] [DEVICES_PATH] [OUT_DIR] [WORKERS]`, all four optional and positional, each falling back to an environment variable and then to a default, per SPEC.md section 7.1. `WORKERS` of 0 chooses from the hardware concurrency and any value of 1 or more is a hard request that must be honoured exactly. `run.sh` writes nothing to stdout. It must launch Python as `\"${ETL_PYTHON:-python3}\"`, so that both sides of the ratio run under one CPython. Standard library only; no network.\n\nNothing in the workspace carries an execute bit, so scripts are invoked through their interpreter: `bash run.sh`, `bash test.sh`, `python3 tools/...`.\n\n`bash test.sh` must keep passing: it generates the small workload if it is absent, runs the pipeline over it at 4 workers, and requires the three files to be byte-exact.\n\nDo not assume the cost is where the concurrency is. Find where the time actually goes before you move anything, and say so: the stage that dominates is not the stage the shape of the code points at, and a fix that leaves the dominant stage untouched will measure as tidying.\n\nArithmetic is fixed point throughout. Every quantity is an integer count of milli-units and every division rounds half away from zero. No stage uses binary floating point, and the two six-digit conversion factors in `units.CONVERSIONS` are constants of the specification rather than physical constants: replacing them with more precise values changes the output bytes and fails verification.",
+      "seedDir": "bench/corpus/concurrency-bottlenecks/etl-pipeline/seed",
+      "hiddenDir": "bench/corpus/concurrency-bottlenecks/etl-pipeline/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/gate.py"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/env",
+        "bash",
+        "test.sh"
+      ],
+      "behavioralPaths": [
+        "etl/**",
+        "run.sh"
+      ],
+      "runTimeoutSec": 7200
+    }
+  ]
+}

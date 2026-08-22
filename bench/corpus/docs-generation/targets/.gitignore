@@ -1,0 +1,5 @@
+# Third-party source is never committed to this repository.
+# tools/fetch_docs_targets.sh clones each target from targets.json at its pinned
+# sha into checkouts/<slug>/. Those trees are disposable and reproducible; the
+# manifest is the only thing under version control.
+checkouts/

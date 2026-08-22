@@ -1,0 +1,20 @@
+# sha256 of the read-only task material. tools/verify_correctness.py
+# checks these before it checks anything else; a mismatch fails the task.
+# sample/base.bin and sample/queries.bin are decoded from the .b64 carriers
+# above them by tools/unpack_sample.py, which checks the decoded bytes against
+# the digests recorded here.
+78819811a0eaaea6df7ea02095e07db2f209e698cfe2153a00efb2a29c6d751c  workload.conf
+b619b4c9d44370f6df2794d183cd60369fe17e27b41d9c1b0abf70b140b0f06a  src/knn_io.hpp
+70cc91141cb7981952d47f622ba4d17f0cf3683477ee45149ac7450bf52c2d98  src/knn_naive.hpp
+e853b512370f0d8e5ef803db6094ceebf6ef22568796faaa281909a506434183  src/knn_reference.cpp
+c18915f2b4fdb63074f1e647c635c6d6072eb673caf0d2a3e916829a43c2dc54  tools/gen_workload.cpp
+0ea4d881aa61c70024eba27ee3261e478cd3948b301240a87e77c163d1b8e7ba  tools/verify_correctness.py
+6843595470958d052b98d3c7c31251bca32d9d3144fb4ec59387ee5853db6ced  tools/visible_check.py
+e77d705199f253bee1afd3cfa5b6c945b9e60f7e2ac96ee17b81aa7e02c706cc  tools/unpack_sample.py
+b026fab9d9b63e69ddf894ce02801803c016bd9570e52b7ca8c209b926611ab2  tools/bench.py
+4faf2a1f8427e4e278aa551871e7ffc28274e1bc1f5ab7aaa657f2c56ed90438  sample/base.bin.b64
+cfdeec9b9a1028b2303c5aea32ec1a750faad255988065826081ce0d4099acc8  sample/queries.bin.b64
+0398f1dc0fb14aff1d63740f8eb9617986a118609542e0458633b5d9c0b9352c  sample/base.bin
+f8c4aedcff1fd0045540a961e4fed755843e0a87d152e912043ab5f859862a7d  sample/queries.bin
+cf975a09730423348b9abd65dfe9a865804d8f94375fea341fd920b16a3033a8  sample/meta.json
+f960d82b7185bfad2a53258b37bf96293f7a4f185f716d5edc87adfa845639bc  sample/expected-results.txt

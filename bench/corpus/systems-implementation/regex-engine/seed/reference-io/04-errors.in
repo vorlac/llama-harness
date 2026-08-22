@@ -1,0 +1,12 @@
+COMPILE a\x5c
+COMPILE \x5cy
+COMPILE (a
+COMPILE a)
+COMPILE [a\x2dz
+COMPILE [z\x2da] 
+COMPILE [z\x2da]
+COMPILE a{2,1}
+COMPILE \x2aa
+COMPILE (?i)a
+MATCH a{2,1} aaa
+MATCH abc abc

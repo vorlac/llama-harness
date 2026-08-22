@@ -282,7 +282,8 @@ router/                  the C++23 llama-router; main.cpp plus one header per co
   UPSTREAM_CONTRACT.md     the measured llama-server /v1 contract the router must respect
 dashboard/               the optional ftxui metrics TUI (CMake option CONDUCTOR_DASHBOARD)
 tools/membench/          standalone memory-bandwidth probe
-bench/                   conductor-tasks.json - the POC benchmark task set
+bench/                   benchmark task manifests, and corpus/ - the seed and
+                         hidden trees the directory-sourced tasks draw from
 scripts/                 Python harness (serve, fetch, benchmark) + the test gates
 docs/
   user/ developer/ faq/    this documentation set

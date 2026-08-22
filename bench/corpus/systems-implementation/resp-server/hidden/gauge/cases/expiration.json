@@ -1,0 +1,3232 @@
+{
+ "group": "expiration",
+ "description": "EXPIRE, PEXPIRE, TTL, PTTL, PERSIST, lazy expiration and the active expire cycle",
+ "cases": [
+  {
+   "name": "expire-sets-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "EXPIRE",
+      "nope",
+      "100"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-zero-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "0"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-negative-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "-1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-negative-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "EXPIRE",
+      "nope",
+      "-1"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-replaces-existing-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "1000"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       999,
+       1000
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-not-an-integer",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-leading-zero-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "010"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-float-rejected",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "1.5"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-argument-above-int64",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "9223372036854775808"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-deadline-overflow",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "9223372036854775807"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'expire' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-on-a-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-on-a-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-on-a-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expire-on-expired-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-sets-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "100000"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PTTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       95000,
+       100000
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       95,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-on-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "PEXPIRE",
+      "nope",
+      "1000"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-zero-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "0"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-negative-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "-500"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-not-an-integer",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-deadline-overflow",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "9223372036854775807"
+     ],
+     "expect": [
+      "-",
+      "ERR invalid expire time in 'pexpire' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pexpire-replaces-expire",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "1000"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "5000"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PTTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       4000,
+       5000
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ttl-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "TTL",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      -2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ttl-no-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ttl-rounds-to-nearest-second",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "10400"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       9,
+       10
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pttl-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "PTTL",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      -2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pttl-no-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PTTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "pttl-tracks-elapsed-time",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "5000"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 300
+    },
+    {
+     "cmd": [
+      "PTTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       4000,
+       4800
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ttl-on-expired-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -2
+     ]
+    },
+    {
+     "cmd": [
+      "PTTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ttl-on-every-type",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "s",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "l"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "h"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "s"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "persist-removes-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PERSIST",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "persist-without-ttl",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PERSIST",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "persist-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "PERSIST",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "persist-expired-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "60"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "PERSIST",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "persist-twice",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PERSIST",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PERSIST",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "append-preserves-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "a",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "incr-preserves-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lpush-preserves-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LPUSH",
+      "k",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-preserves-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "g",
+      "w"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-preserves-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "n"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lpop-preserves-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "EXPIRE",
+      "k",
+      "100"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LPOP",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "a"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":~",
+      [
+       99,
+       100
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "set-clears-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "getset-clears-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mset-clears-expiry",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "EX",
+      "100"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MSET",
+      "k",
+      "w"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-get",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-exists",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-type",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "80"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-strlen",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "value",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-llen",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "80"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "LLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-hlen",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "80"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lazy-expire-scard",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "80"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expired-string-does-not-block-lpush",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "LPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "list"
+     ]
+    },
+    {
+     "cmd": [
+      "TTL",
+      "k"
+     ],
+     "expect": [
+      ":",
+      -1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expired-list-does-not-block-sadd",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "80"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "set"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expired-key-incr-starts-from-zero",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "100",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expired-key-append-starts-empty",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "abc",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "z"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "z"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expired-key-is-not-wrongtype",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k",
+      "80"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "expiry-is-visible-to-other-connections",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "80"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c1"
+    },
+    {
+     "sleep_ms": 250
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "c2"
+    }
+   ]
+  },
+  {
+   "name": "active-expire-single-untouched-key",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v",
+      "PX",
+      "120"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 1400
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "active-expire-many-untouched-keys",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "k00",
+      "v",
+      "k01",
+      "v",
+      "k02",
+      "v",
+      "k03",
+      "v",
+      "k04",
+      "v",
+      "k05",
+      "v",
+      "k06",
+      "v",
+      "k07",
+      "v",
+      "k08",
+      "v",
+      "k09",
+      "v",
+      "k10",
+      "v",
+      "k11",
+      "v",
+      "k12",
+      "v",
+      "k13",
+      "v",
+      "k14",
+      "v",
+      "k15",
+      "v",
+      "k16",
+      "v",
+      "k17",
+      "v",
+      "k18",
+      "v",
+      "k19",
+      "v",
+      "k20",
+      "v",
+      "k21",
+      "v",
+      "k22",
+      "v",
+      "k23",
+      "v",
+      "k24",
+      "v",
+      "k25",
+      "v",
+      "k26",
+      "v",
+      "k27",
+      "v",
+      "k28",
+      "v",
+      "k29",
+      "v",
+      "k30",
+      "v",
+      "k31",
+      "v",
+      "k32",
+      "v",
+      "k33",
+      "v",
+      "k34",
+      "v",
+      "k35",
+      "v",
+      "k36",
+      "v",
+      "k37",
+      "v",
+      "k38",
+      "v",
+      "k39",
+      "v",
+      "k40",
+      "v",
+      "k41",
+      "v",
+      "k42",
+      "v",
+      "k43",
+      "v",
+      "k44",
+      "v",
+      "k45",
+      "v",
+      "k46",
+      "v",
+      "k47",
+      "v",
+      "k48",
+      "v",
+      "k49",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k00",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k01",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k02",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k03",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k04",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k05",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k06",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k07",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k08",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k09",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k10",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k11",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k12",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k13",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k14",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k15",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k16",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k17",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k18",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k19",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k20",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k21",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k22",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k23",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k24",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k25",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k26",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k27",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k28",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k29",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k30",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k31",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k32",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k33",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k34",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k35",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k36",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k37",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k38",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k39",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k40",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k41",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k42",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k43",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k44",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k45",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k46",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k47",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k48",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k49",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      50
+     ]
+    },
+    {
+     "sleep_ms": 1400
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "active-expire-leaves-live-keys-alone",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "live",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "dead",
+      "1",
+      "PX",
+      "120"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "sleep_ms": 1400
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "live"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "active-expire-across-databases",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "7"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MSET",
+      "k00",
+      "v",
+      "k01",
+      "v",
+      "k02",
+      "v",
+      "k03",
+      "v",
+      "k04",
+      "v",
+      "k05",
+      "v",
+      "k06",
+      "v",
+      "k07",
+      "v",
+      "k08",
+      "v",
+      "k09",
+      "v",
+      "k10",
+      "v",
+      "k11",
+      "v",
+      "k12",
+      "v",
+      "k13",
+      "v",
+      "k14",
+      "v",
+      "k15",
+      "v",
+      "k16",
+      "v",
+      "k17",
+      "v",
+      "k18",
+      "v",
+      "k19",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k00",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k01",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k02",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k03",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k04",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k05",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k06",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k07",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k08",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k09",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k10",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k11",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k12",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k13",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k14",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k15",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k16",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k17",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k18",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "k19",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 1400
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "active-expire-of-non-string-types",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "s",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "l",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "h",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "PEXPIRE",
+      "s",
+      "120"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "sleep_ms": 1400
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  }
+ ]
+}

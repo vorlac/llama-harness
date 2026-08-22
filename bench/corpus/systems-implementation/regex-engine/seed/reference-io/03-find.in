@@ -1,0 +1,7 @@
+FIND an banana
+FIND a\x2a aab
+FIND - abc
+FIND \\d+ a1b22c333
+FIND \x5ea aaa
+FIND a\x24 aaa
+FIND \x2e a\x0ab

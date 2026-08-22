@@ -1,0 +1,27 @@
+{
+  "group": "empty-repeat",
+  "description": "Repetitions whose body can match the empty string. SPEC 5.6 pins the NFA-simulation rule: a thread that reaches an instruction it has already reached at the same input position is discarded, so a repetition never runs a second iteration that consumes nothing. Backtracking engines commonly differ here; the expected values below are the ones the pinned rule produces.",
+  "default_time_limit_ms": 2000,
+  "cases": [
+    {"id": "empty-repeat-001", "cmd": "match", "pattern": "(a*)*", "subject": "aa", "expect": {"match": [[0, 2], [0, 2]]}, "note": "no trailing empty iteration: group 1 keeps [0,2)"},
+    {"id": "empty-repeat-002", "cmd": "match", "pattern": "(a*)*", "subject": "-", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-003", "cmd": "match", "pattern": "(a*)*", "subject": "b", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-004", "cmd": "match", "pattern": "(a*)+", "subject": "aa", "expect": {"match": [[0, 2], [0, 2]]}},
+    {"id": "empty-repeat-005", "cmd": "match", "pattern": "(a*)+", "subject": "-", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-006", "cmd": "match", "pattern": "(a|)*", "subject": "aa", "expect": {"match": [[0, 2], [1, 2]]}, "note": "the empty branch cannot add an iteration after \"aa\""},
+    {"id": "empty-repeat-007", "cmd": "match", "pattern": "(|a)*", "subject": "aa", "expect": {"match": [[0, 0], [0, 0]]}, "note": "the empty branch is preferred, so the loop stops at 0"},
+    {"id": "empty-repeat-008", "cmd": "match", "pattern": "(a?)*", "subject": "aa", "expect": {"match": [[0, 2], [1, 2]]}},
+    {"id": "empty-repeat-009", "cmd": "match", "pattern": "(a?)*", "subject": "b", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-010", "cmd": "match", "pattern": "(a?)+", "subject": "b", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-011", "cmd": "match", "pattern": "()*", "subject": "x", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-012", "cmd": "match", "pattern": "()+", "subject": "x", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-013", "cmd": "match", "pattern": "(){3}", "subject": "x", "expect": {"match": [[0, 0], [0, 0]]}},
+    {"id": "empty-repeat-014", "cmd": "match", "pattern": "(a*)*b", "subject": "aab", "expect": {"match": [[0, 3], [0, 2]]}},
+    {"id": "empty-repeat-015", "cmd": "match", "pattern": "(a*)*b", "subject": "b", "expect": {"match": [[0, 1], [0, 0]]}},
+    {"id": "empty-repeat-016", "cmd": "match", "pattern": "((a*)*)*", "subject": "aa", "expect": {"match": [[0, 2], [0, 2], [0, 2]]}},
+    {"id": "empty-repeat-017", "cmd": "match", "pattern": "(?:a*)*", "subject": "aa", "expect": {"match": [[0, 2]]}},
+    {"id": "empty-repeat-018", "cmd": "match", "pattern": "(?:)*", "subject": "-", "expect": {"match": [[0, 0]]}},
+    {"id": "empty-repeat-019", "cmd": "match", "pattern": "(a*)*$", "subject": "aa", "expect": {"match": [[0, 2], [0, 2]]}},
+    {"id": "empty-repeat-020", "cmd": "match", "pattern": "(a*|b)*", "subject": "ab", "expect": {"match": [[0, 2], [1, 2]]}}
+  ]
+}

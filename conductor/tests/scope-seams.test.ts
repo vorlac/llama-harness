@@ -356,12 +356,15 @@ function makeTrivialItem(over: Partial<TrivialItem> = {}): TrivialItem {
   return { ...base, ...over };
 }
 
-// What conductor_classify did with a `trivial` classification carrying `trivialItem`:
-// the refusal (or null when it was accepted), what kind survived, and whether the
-// synthesized queue.json reached the disk.
+// What conductor_classify does with a `trivial` classification carrying `trivialItem`:
+// the reasons the acceptance authority gave (empty when it admitted the item), what
+// kind survived, whether the synthesized queue.json reached the disk, and whether the
+// classification was recorded. `threw` stays null on every legal outcome — §2.10's
+// disposition for a refused trivial item is an escalation, not a throw.
 interface ClassifyOutcome {
-  refusal: string | null;
+  threw: string | null;
   kind: string | null;
+  escalation: string[];
   queueWritten: boolean;
   classified: boolean;
 }
@@ -390,18 +393,20 @@ async function classifyTrivial(
     mechanical: [JSON.stringify(classification)],
     skeptic: [JSON.stringify(check)],
   });
-  let refusal: string | null = null;
+  let threw: string | null = null;
   let kind: string | null = null;
+  let escalation: string[] = [];
   try {
-    kind = (
-      await handleClassify({ store, fanout: wiring.fanout, runId, config, journal: journal.sink })
-    ).kind;
+    const result = await handleClassify({ store, fanout: wiring.fanout, runId, config, journal: journal.sink });
+    kind = result.kind;
+    escalation = result.escalation;
   } catch (error) {
-    refusal = error instanceof Error ? error.message : String(error);
+    threw = error instanceof Error ? error.message : String(error);
   }
   return {
-    refusal,
+    threw,
     kind,
+    escalation,
     queueWritten: existsSync(path.join(runDirOf(store, runId), "queue.json")),
     classified: store.loadRun(runId).classified === true,
   };
@@ -808,25 +813,41 @@ test("[scope-implementer-attempt-cap] the per-item implementer attempt count is 
 // same request `trivial` instead of `work`. The scope the §3.6 edit gate then
 // binds the implementer to comes from THAT queue, so the wildcard-head rule (the
 // first row in this file) was optional from one role.
+//
+// The two doors also DISPOSE of a refusal differently, and they must. A planner
+// whose queue is refused gets conductor_decompose's bounded re-prompt carrying the
+// named defects. The classifier has no re-prompt at all and classifierPrompt is a
+// pure function of run.prompt, so a classify that throws persists nothing, is
+// re-offered by the phase gate, and re-rolls byte-identical input — an unbounded
+// loop that cannot converge, measured live at 43.9 minutes and 337,052 tokens on one
+// request. §2.10's disposition is therefore an escalation to `work`: the same
+// acceptance authority judges the item, and the run advances to the stage that can
+// learn from the refusal instead of retrying the one that cannot.
 
-test("[scope-classify-uses-one-acceptance-authority] a `trivial` classification's synthesized queue.json passes through the SAME core validateQueue acceptance a decomposed queue does: a wildcard-headed fileScope is REFUSED from the classifier exactly as it is from the planner, and nothing reaches the disk", async () => {
+test("[scope-classify-uses-one-acceptance-authority] a `trivial` classification's synthesized queue.json passes through the SAME core validateQueue acceptance a decomposed queue does: a wildcard-headed fileScope is refused from the classifier exactly as it is from the planner, nothing reaches the disk, and the run ESCALATES to work rather than re-rolling the classifier", async () => {
   const config = makeConfig();
 
   // THE ESCAPE: the same "**" the [scope-wildcard-head] row refuses at decompose,
   // arriving as a trivialItem instead. Accepted, it wrote a queue.json whose one
   // item grants its implementer an edit over the whole tree.
   const escaped = await classifyTrivial(scratchDir("classify-wild"), config, makeTrivialItem({ fileScope: ["**"] }));
-  assert.ok(
-    escaped.refusal !== null,
-    `a wildcard-headed trivial fileScope must be REFUSED, not synthesized (handler returned kind ${String(escaped.kind)})`,
+  assert.equal(escaped.threw, null, `the disposition is an escalation, not a throw: ${escaped.threw ?? ""}`);
+  assert.equal(
+    escaped.kind,
+    "work",
+    "a wildcard-headed trivial fileScope must not be synthesized — the request is planned instead",
   );
   assert.match(
-    escaped.refusal ?? "",
+    escaped.escalation.join(" | "),
     /wildcard-headed|every path in the repository/i,
-    `and refused with core's OWN §3.2 reason, not a second spelling of it: ${escaped.refusal ?? ""}`,
+    `and the escalation carries core's OWN §3.2 reason, not a second spelling of it: ${escaped.escalation.join(" | ")}`,
   );
-  assert.equal(escaped.queueWritten, false, "legality precedes persist: no queue.json was written");
-  assert.equal(escaped.classified, false, "and the run records no classification, so the refusal is not also a wedge");
+  assert.equal(escaped.queueWritten, false, "legality precedes persist: no queue.json is written");
+  assert.equal(
+    escaped.classified,
+    true,
+    "and the escalated classification IS recorded — an unrecorded refusal leaves conductor_classify legal against the byte-identical prompt that produced it, which is the wedge",
+  );
 
   // The same authority's read-set bound, which the trivial re-check has no notion
   // of at all: one file, inside the trivialMaxFiles budget, far too big to read.
@@ -837,22 +858,26 @@ test("[scope-classify-uses-one-acceptance-authority] a `trivial` classification'
     makeConfig({ readSetTokenBudget: 10 }),
     makeTrivialItem({ fileScope: ["src/**"] }),
   );
-  assert.ok(
-    overRead.refusal !== null,
-    `a trivial item whose scope cannot be read inside the budget must be REFUSED (handler returned kind ${String(overRead.kind)})`,
+  assert.equal(overRead.threw, null, `the read-set bound disposes too: ${overRead.threw ?? ""}`);
+  assert.equal(
+    overRead.kind,
+    "work",
+    "a trivial item whose scope cannot be read inside the budget is planned, not synthesized",
   );
   assert.match(
-    overRead.refusal ?? "",
+    overRead.escalation.join(" | "),
     /read set|readSetTokenBudget/i,
-    `naming the bound it broke: ${overRead.refusal ?? ""}`,
+    `naming the bound it broke: ${overRead.escalation.join(" | ")}`,
   );
-  assert.equal(overRead.queueWritten, false, "and still nothing reached the disk");
+  assert.equal(overRead.queueWritten, false, "and still nothing reaches the disk");
+  assert.equal(overRead.classified, true, "and the escalation is recorded");
 
   // CONTROL: the ordinary trivial item is untouched — this is one acceptance
   // authority applied to both doors, not a ban on classifying anything trivial.
   const ok = await classifyTrivial(scratchDir("classify-ok"), config, makeTrivialItem());
-  assert.equal(ok.refusal, null, `a legal trivial item still classifies: ${ok.refusal ?? ""}`);
+  assert.equal(ok.threw, null, `a legal trivial item still classifies: ${ok.threw ?? ""}`);
   assert.equal(ok.kind, "trivial", "and stays trivial");
+  assert.deepEqual(ok.escalation, [], "with nothing to escalate for");
   assert.equal(ok.queueWritten, true, "and its synthesized queue.json is written");
 });
 

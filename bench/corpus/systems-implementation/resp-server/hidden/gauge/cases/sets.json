@@ -1,0 +1,2129 @@
+{
+ "group": "sets",
+ "description": "SADD, SREM, SMEMBERS, SISMEMBER, SCARD, SINTER, SUNION, SDIFF",
+ "cases": [
+  {
+   "name": "sadd-single",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "S"
+     ],
+     "expect": [
+      "+",
+      "set"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-multiple",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-existing-member-not-counted",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-duplicate-arguments-counted-once",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "a",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-mixed-new-and-existing",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-empty-string-member",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "S",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*u",
+      [
+       ""
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-binary-members",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a\r\nb",
+      "c d"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a\r\nb",
+       "c d"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-members-are-case-sensitive",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "A"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-two-hundred-members",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "m000",
+      "m001",
+      "m002",
+      "m003",
+      "m004",
+      "m005",
+      "m006",
+      "m007",
+      "m008",
+      "m009",
+      "m010",
+      "m011",
+      "m012",
+      "m013",
+      "m014",
+      "m015",
+      "m016",
+      "m017",
+      "m018",
+      "m019",
+      "m020",
+      "m021",
+      "m022",
+      "m023",
+      "m024",
+      "m025",
+      "m026",
+      "m027",
+      "m028",
+      "m029",
+      "m030",
+      "m031",
+      "m032",
+      "m033",
+      "m034",
+      "m035",
+      "m036",
+      "m037",
+      "m038",
+      "m039",
+      "m040",
+      "m041",
+      "m042",
+      "m043",
+      "m044",
+      "m045",
+      "m046",
+      "m047",
+      "m048",
+      "m049",
+      "m050",
+      "m051",
+      "m052",
+      "m053",
+      "m054",
+      "m055",
+      "m056",
+      "m057",
+      "m058",
+      "m059",
+      "m060",
+      "m061",
+      "m062",
+      "m063",
+      "m064",
+      "m065",
+      "m066",
+      "m067",
+      "m068",
+      "m069",
+      "m070",
+      "m071",
+      "m072",
+      "m073",
+      "m074",
+      "m075",
+      "m076",
+      "m077",
+      "m078",
+      "m079",
+      "m080",
+      "m081",
+      "m082",
+      "m083",
+      "m084",
+      "m085",
+      "m086",
+      "m087",
+      "m088",
+      "m089",
+      "m090",
+      "m091",
+      "m092",
+      "m093",
+      "m094",
+      "m095",
+      "m096",
+      "m097",
+      "m098",
+      "m099",
+      "m100",
+      "m101",
+      "m102",
+      "m103",
+      "m104",
+      "m105",
+      "m106",
+      "m107",
+      "m108",
+      "m109",
+      "m110",
+      "m111",
+      "m112",
+      "m113",
+      "m114",
+      "m115",
+      "m116",
+      "m117",
+      "m118",
+      "m119",
+      "m120",
+      "m121",
+      "m122",
+      "m123",
+      "m124",
+      "m125",
+      "m126",
+      "m127",
+      "m128",
+      "m129",
+      "m130",
+      "m131",
+      "m132",
+      "m133",
+      "m134",
+      "m135",
+      "m136",
+      "m137",
+      "m138",
+      "m139",
+      "m140",
+      "m141",
+      "m142",
+      "m143",
+      "m144",
+      "m145",
+      "m146",
+      "m147",
+      "m148",
+      "m149",
+      "m150",
+      "m151",
+      "m152",
+      "m153",
+      "m154",
+      "m155",
+      "m156",
+      "m157",
+      "m158",
+      "m159",
+      "m160",
+      "m161",
+      "m162",
+      "m163",
+      "m164",
+      "m165",
+      "m166",
+      "m167",
+      "m168",
+      "m169",
+      "m170",
+      "m171",
+      "m172",
+      "m173",
+      "m174",
+      "m175",
+      "m176",
+      "m177",
+      "m178",
+      "m179",
+      "m180",
+      "m181",
+      "m182",
+      "m183",
+      "m184",
+      "m185",
+      "m186",
+      "m187",
+      "m188",
+      "m189",
+      "m190",
+      "m191",
+      "m192",
+      "m193",
+      "m194",
+      "m195",
+      "m196",
+      "m197",
+      "m198",
+      "m199"
+     ],
+     "expect": [
+      ":",
+      200
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      200
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*n",
+      200
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "S",
+      "m199"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-single",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*u",
+      [
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-multiple",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "S",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-missing-member",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "S",
+      "zzz"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SREM",
+      "nope",
+      "a"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-duplicate-arguments-counted-once",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "S",
+      "a",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-last-member-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "S"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "S"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-all-members-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "S",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "S"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smembers-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SMEMBERS",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smembers-basic",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "S"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sismember-present",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sismember-absent",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "S",
+      "b"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sismember-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SISMEMBER",
+      "nope",
+      "a"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sismember-empty-member",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "S",
+      ""
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "scard-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SCARD",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "scard-basic",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "S"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-two-sets",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b",
+      "c",
+      "d"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*u",
+      [
+       "b",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-three-sets",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b",
+      "c",
+      "d"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "C",
+      "c",
+      "d",
+      "e"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A",
+      "B",
+      "C"
+     ],
+     "expect": [
+      "*u",
+      [
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-no-overlap",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-with-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-missing-key-first",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "nope",
+      "B"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-single-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-single-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SINTER",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-with-itself",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-does-not-mutate",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*u",
+      [
+       "b"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "B"
+     ],
+     "expect": [
+      "*u",
+      [
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-two-sets",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-three-sets",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "C",
+      "c"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "A",
+      "B",
+      "C"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-with-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "A",
+      "nope"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-all-missing",
+   "steps": [
+    {
+     "cmd": [
+      "SUNION",
+      "x",
+      "y"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-single-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-with-itself",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "A",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-two-sets",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "c"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-three-sets",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b",
+      "c",
+      "d"
+     ],
+     "expect": [
+      ":",
+      4
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "C",
+      "c"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A",
+      "B",
+      "C"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "d"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-first-key-missing",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "nope",
+      "B"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-other-keys-missing",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A",
+      "nope"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-with-itself",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A",
+      "A"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-removes-everything",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-single-key",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-does-not-mutate",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "A",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "B",
+      "b"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "A",
+      "B"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "A"
+     ],
+     "expect": [
+      "*u",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sadd-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "srem-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "k",
+      "m"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smembers-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sismember-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "k",
+      "m"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "scard-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-first-key-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "k",
+      "S"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-second-key-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "S",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sinter-wrong-type-beats-empty-result",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "L",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "S",
+      "nope",
+      "L"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sunion-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "S",
+      "H"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sdiff-wrong-type",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "S",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "S",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  }
+ ]
+}

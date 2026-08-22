@@ -1,0 +1,17 @@
+# Generated workloads: large, deterministic, regenerable from a seed.
+#   ./build/gen_workload --n ... --seed ... --out data/generated
+data/
+
+# Build products and run output.
+build/
+out/
+bench-result.json
+*.o
+*.dSYM/
+
+__pycache__/
+*.pyc
+
+# Decoded from the .b64 carriers by tools/unpack_sample.py.
+sample/base.bin
+sample/queries.bin

@@ -1,0 +1,38 @@
+{
+  "id": "minesweeper",
+  "title": "Terminal Minesweeper with a constraint-propagation solver and no-guess board generation",
+  "category": "tui-games",
+  "size": "M",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-minesweeper-impl-prompt.md",
+  "difficulty": 6,
+  "timeouts": {
+    "build": 300,
+    "run": 120,
+    "test": 420
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "scripts/loss.txt",
+    "scripts/win-autoplay.txt",
+    "scripts/no-guess.txt",
+    "scripts/MANIFEST.tsv",
+    "expected/loss.json",
+    "expected/win-autoplay.json",
+    "expected/no-guess.json",
+    "README.md",
+    "NOTES.md",
+    "SOLVER.md",
+    "run.json"
+  ]
+}

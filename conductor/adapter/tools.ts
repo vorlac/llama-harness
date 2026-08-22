@@ -74,6 +74,7 @@ import type { CallerIdentity } from "../core/tool-legality.ts";
 import { packSection } from "../core/mechanics.ts";
 import { impliedMustFix, renderVetCriteria } from "../core/vet-criteria.ts";
 import {
+  ITEM_MAX_FILES,
   findingBlocksItems,
   implementerAttemptBudget,
   routeFix,
@@ -711,13 +712,82 @@ function stricterKind(a: ClassificationKind, b: ClassificationKind): Classificat
 // scope (a behavioral change owes a test, §2.4); (c) a behavioral:false item whose
 // fileScope intersects verify.behavioralPaths — the §2.4 disjoint-path guard forbids
 // claiming untestability while editing behavioral production code.
-function trivialViolatesRecheck(trivialItem: TrivialItem, config: Config): boolean {
-  if (trivialItem.fileScope.length > config.workflow.trivialMaxFiles) return true;
-  if (trivialItem.behavioral && trivialItem.testScope.length === 0) return true;
-  if (!trivialItem.behavioral && scopesIntersect(trivialItem.fileScope, config.verify.behavioralPaths)) {
-    return true;
+//
+// Each bound states itself. §2.10's disposition here is an ESCALATION rather than a
+// refusal, so nothing is thrown and the reason reaches an operator only if the check
+// carries it: an escalation nobody can see is a guard nobody can watch fail.
+function trivialRecheckViolations(trivialItem: TrivialItem, config: Config): string[] {
+  const violations: string[] = [];
+  if (trivialItem.fileScope.length > config.workflow.trivialMaxFiles) {
+    violations.push(
+      "the trivial item claims " +
+        String(trivialItem.fileScope.length) +
+        " fileScope entries, over the workflow.trivialMaxFiles ceiling of " +
+        String(config.workflow.trivialMaxFiles) +
+        " (§2.4)",
+    );
   }
-  return false;
+  if (trivialItem.behavioral && trivialItem.testScope.length === 0) {
+    violations.push(
+      "the trivial item is behavioral:true and declares an empty testScope: a behavioral change owes " +
+        "the test paths that will prove it (§2.4)",
+    );
+  }
+  if (!trivialItem.behavioral && scopesIntersect(trivialItem.fileScope, config.verify.behavioralPaths)) {
+    violations.push(
+      "the trivial item is behavioral:false while its fileScope intersects verify.behavioralPaths: an " +
+        "item cannot declare itself untestable while editing behavioral production code (§2.4 " +
+        "disjoint-path guard)",
+    );
+  }
+  return violations;
+}
+
+// The §2.4 queue a `trivial` classification synthesizes: one item, the reserved id,
+// dependsOn empty. Composed in ONE place, so the queue the re-check judges and the
+// queue that reaches queue.json are the same value and cannot say different things.
+const TRIVIAL_ITEM_ID = "I1";
+
+function trivialQueue(trivialItem: TrivialItem): Queue {
+  return {
+    items: [
+      {
+        id: TRIVIAL_ITEM_ID,
+        title: trivialItem.title,
+        rationale: trivialItem.rationale,
+        fileScope: [...trivialItem.fileScope],
+        testScope: [...trivialItem.testScope],
+        acceptance: [...trivialItem.acceptance],
+        behavioral: trivialItem.behavioral,
+        dependsOn: [],
+        ponytail: { ...trivialItem.ponytail },
+      },
+    ],
+  };
+}
+
+// ONE ACCEPTANCE AUTHORITY. The §2.4 schema and the trivial re-check above answer
+// only "is this a well-formed item within the trivial bounds"; every §3.2
+// queue-acceptance rule — the wildcard-headed glob that hands the implementer the
+// whole tree, the matched-file size budget, the read-set token bound, the id shape
+// and newline rules the §3.3 commit template rests on, the testScope-inside-fileScope
+// licence — lives in core validateQueue, and was reachable only through
+// conductor_decompose. A request classified `trivial` instead of `work` therefore
+// walked past all of it and wrote the scope the §3.6 edit gate binds its implementer
+// to. Judged here by the same pure function, against the same measured scope facts
+// (ISSUE-012's entry-count hole is measured, not counted), with no relaxation: a
+// trivial item is one item, so the inter-item rows are vacuous for it and every
+// remaining row means for it exactly what it means for a planned one.
+//
+// The composed queue is judged against SCHEMAS.Queue by the same call and reported the
+// same way, because both answers answer one question — is THIS the item to synthesize
+// — and a receipt that cannot be written is not an item the acceptance table can admit.
+function trivialAcceptanceViolations(queue: Queue, config: Config, root: string): string[] {
+  const shape = validate("Queue", queue);
+  if (!shape.ok) {
+    return shape.errors.map((error) => "the synthesized queue.json is not a valid Queue: " + error);
+  }
+  return validateQueue(queue, config, measureQueueScopes(root, queue)).violations;
 }
 
 // --- decisions.jsonl (§2.7) — a handler-owned ledger at the run dir -----------
@@ -823,6 +893,10 @@ export interface ClassifyResult {
   correctedKind: ClassificationKind | null; // null IFF agreed
   itemId: string | null; // the synthesized trivial item id, else null
   runState: RunState; // ANSWERED | EXECUTING | INTAKE
+  // Every re-check reason that forced `work`, verbatim from the rule that produced
+  // it; empty when nothing escalated. The caller reads WHY a request it proposed as
+  // trivial is being planned instead.
+  escalation: string[];
 }
 
 function classifierPrompt(userPrompt: string): string {
@@ -848,8 +922,9 @@ function skepticPrompt(userPrompt: string, proposed: ClassificationKind): string
 
 // Dispatch a classifier (schema Classification) then a skeptic (schema
 // ClassificationCheck) through the injected Fanout; embed the check into
-// run.classification; escalate to the stricter kind on disagreement AND on any §2.4
-// re-check failure; on a surviving trivial, synthesize queue.json + the runtime item
+// run.classification; escalate to the stricter kind on disagreement AND to `work` on
+// any re-check failure — the §2.4 bounds, the §2.10 cross-field rule, or the §3.2
+// acceptance table; on a surviving trivial, synthesize queue.json + the runtime item
 // and advance to EXECUTING; work stays INTAKE; question advances to ANSWERED.
 export async function handleClassify(input: ClassifyInput): Promise<ClassifyResult> {
   const { store, fanout, runId, config, journal } = input;
@@ -908,20 +983,58 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
   let finalKind: ClassificationKind =
     correctedKind !== null ? stricterKind(classification.kind, correctedKind) : classification.kind;
 
-  // Handler re-check (classifier proposes, handler disposes): escalate a surviving
-  // trivial to work on any §2.4 violation, even when the skeptic AGREED trivial.
-  if (finalKind === "trivial" && classification.trivialItem !== null) {
-    if (trivialViolatesRecheck(classification.trivialItem, config)) {
-      finalKind = "work";
+  // Handler re-check (classifier proposes, handler disposes): a surviving trivial is
+  // escalated to work on ANY violation — the §2.4 bounds, the §2.10 cross-field rule,
+  // or the §3.2 acceptance table — even when the skeptic AGREED trivial. §2.10 gives
+  // escalation as the disposition for all of them, and this stage has no re-prompt of
+  // its own: a refusal that throws persists nothing, so `classified` stays false, the
+  // phase gate re-offers conductor_classify, and classifierPrompt is a pure function of
+  // run.prompt — the next roll is byte-identical input to the same model and the run
+  // never leaves INTAKE. `work` is the route that can converge, because the planner
+  // decomposes the same request under conductor_decompose's bounded re-prompt.
+  //
+  // That is what makes escalation the disposition rather than a re-prompt or an attempt
+  // counter: a re-check verdict is a FUNCTION of the prompt, so re-rolling it returns
+  // the same verdict forever, and once the classification is recorded the phase gate's
+  // once-at-intake rule makes a second conductor_classify illegal — the loop is closed
+  // by construction, with nothing left to count. The two dispatch refusals above are a
+  // different failure: a sub-session that returns no valid receipt has already spent the
+  // fan-out's own retry budget, and its reply is not a function of the prompt.
+  const proposedItem = classification.trivialItem;
+  let escalation: string[] = [];
+  let synthesized: Queue | null = null;
+  if (finalKind === "trivial") {
+    if (proposedItem === null) {
+      // A "trivial" disposition with NOTHING to synthesize: the classifier itself did
+      // not say trivial, so there is no trivialItem (the §2.10 cross-field rule ties a
+      // non-null trivialItem to kind "trivial"), and a skeptic's question→trivial
+      // correction cannot conjure one. An un-synthesizable trivial is not a legal
+      // EXECUTING run (F1).
+      escalation = [
+        'the disposition is "trivial" with no trivialItem to synthesize: the §2.10 cross-field rule ' +
+          "ties a trivialItem to a classifier that said trivial, and a correction cannot supply one",
+      ];
+    } else {
+      const candidate = trivialQueue(proposedItem);
+      escalation = trivialRecheckViolations(proposedItem, config);
+      if (escalation.length === 0) {
+        // The §3.2 table measures scopes against the tree this run executes in, so it
+        // is asked only once the cheap §2.4 bounds hold: an item already escalating
+        // owes no glob walk.
+        escalation = trivialAcceptanceViolations(candidate, config, store.root);
+      }
+      if (escalation.length === 0) synthesized = candidate;
     }
-  }
-  // A "trivial" disposition with NOTHING to synthesize — the classifier itself did not
-  // say trivial, so there is no trivialItem (the §2.10 cross-field rule ties trivialItem
-  // non-null to kind "trivial"), and a skeptic's question→trivial correction cannot
-  // conjure one — escalates FURTHER to work rather than throwing (F1). An
-  // un-synthesizable trivial is not a legal EXECUTING run.
-  if (finalKind === "trivial" && classification.trivialItem === null) {
-    finalKind = "work";
+    if (escalation.length > 0) {
+      finalKind = "work";
+      journal.log(
+        "warn",
+        "fsm",
+        "guard-reject",
+        { stage: "classify", disposition: "escalate-to-work", violations: escalation },
+        { runId, sessionID: input.sessionID },
+      );
+    }
   }
 
   // (2) persist: record the final kind + the embedded (normalized) skeptic check.
@@ -938,70 +1051,17 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
 
   let itemId: string | null = null;
   if (finalKind === "trivial") {
-    const trivialItem = classification.trivialItem;
-    if (trivialItem === null) {
-      // Unreachable: the escalation steps above already dispose a null-trivialItem
-      // "trivial" to work. Retained as a typed invariant guard (narrows trivialItem to
-      // non-null for the synthesis below), never a live throw path.
-      throw new Error("conductor_classify: a trivial classification must carry a trivialItem (§2.10)");
+    if (synthesized === null) {
+      // Unreachable: a trivial that reaches here carries a queue the §2.4 bounds, the
+      // §2.10 cross-field rule and the §3.2 table all admitted, and anything else was
+      // disposed to work above. Retained as a typed invariant guard (it narrows the
+      // queue for the write below), never a live throw path.
+      throw new Error("conductor_classify: a trivial classification must carry a synthesized queue (§2.10)");
     }
-    // Synthesize the §2.4 queue (one item; mint id; dependsOn:[]) and put it through
-    // the SAME acceptance a decomposed queue passes through, then write it at the
-    // run dir.
-    //
-    // ONE ACCEPTANCE AUTHORITY. The §2.4 schema and the trivial re-check above answer
-    // only "is this a well-formed item within the trivial bounds"; every §3.2
-    // queue-acceptance rule — the wildcard-headed glob that hands the implementer the
-    // whole tree, the matched-file size budget, the read-set token bound, the id
-    // shape and newline rules the §3.3 commit template rests on, the testScope-inside-
-    // fileScope licence — lives in core validateQueue, and was reachable only through
-    // conductor_decompose. A request classified `trivial` instead of `work` therefore
-    // walked past all of it and wrote the scope the §3.6 edit gate binds its
-    // implementer to. Judged here by the same pure function, against the same measured
-    // scope facts (ISSUE-012's entry-count hole is measured, not counted), with no
-    // relaxation: a trivial item is one item, so the inter-item rows are vacuous for
-    // it and every remaining row means for it exactly what it means for a planned one.
-    itemId = "I1";
-    const queueItem: QueueItem = {
-      id: itemId,
-      title: trivialItem.title,
-      rationale: trivialItem.rationale,
-      fileScope: [...trivialItem.fileScope],
-      testScope: [...trivialItem.testScope],
-      acceptance: [...trivialItem.acceptance],
-      behavioral: trivialItem.behavioral,
-      dependsOn: [],
-      ponytail: { ...trivialItem.ponytail },
-    };
-    const queue: Queue = { items: [queueItem] };
-    const queueResult = validate("Queue", queue);
-    if (!queueResult.ok) {
-      throw new Error(
-        "conductor_classify: refusing to write an invalid queue.json: " + queueResult.errors.join("; "),
-      );
-    }
-    const verdict = validateQueue(queue, config, measureQueueScopes(store.root, queue));
-    if (!verdict.ok) {
-      // LEGALITY BEFORE PERSIST, and the refusal carries core's own reasons verbatim
-      // — a second spelling here would be a second acceptance rule. Nothing has been
-      // written at this point (run.classified is set on the in-memory run and saved
-      // only below), so the run stays at INTAKE with no classification recorded and
-      // conductor_classify is still legal: the classifier gets another roll, which is
-      // what decompose's bounded re-prompt does for the planner.
-      journal.log(
-        "warn",
-        "fsm",
-        "guard-reject",
-        { stage: "classify", violations: verdict.violations },
-        { runId, sessionID: input.sessionID },
-      );
-      throw new Error(
-        "conductor_classify: the trivial item is REJECTED — a synthesized queue is admitted by the " +
-          "same §3.2 acceptance a decomposed one is, and this one violates it: " +
-          verdict.violations.join("; "),
-      );
-    }
-    writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(queue, null, 2));
+    // LEGALITY BEFORE PERSIST: the queue written here is the one the re-check judged,
+    // so nothing reaches the run dir that the §3.2 acceptance table has not admitted.
+    itemId = TRIVIAL_ITEM_ID;
+    writeFileAtomicSync(path.join(runDir, "queue.json"), JSON.stringify(synthesized, null, 2));
 
     // Create the §2.5 runtime item at the head of the item FSM (PENDING) via the store.
     store.saveItem(runId, newPendingItem(itemId));
@@ -1030,7 +1090,7 @@ export async function handleClassify(input: ClassifyInput): Promise<ClassifyResu
     { runId, sessionID: input.sessionID },
   );
 
-  return { kind: finalKind, agreed, correctedKind, itemId, runState: run.state };
+  return { kind: finalKind, agreed, correctedKind, itemId, runState: run.state, escalation };
 }
 
 // ---------------------------------------------------------------------------
@@ -1917,8 +1977,13 @@ export interface DecomposeResult {
 }
 
 // The queue shape the handler parses, the §3.2 rejection law taken VERBATIM from
-// doctrine decompose.md (never a second spelling of it), and the two numbers the
-// law is parameterised by from THIS workspace's config.
+// doctrine decompose.md (never a second spelling of it), and the numbers the law is
+// parameterised by: behavioralPaths and the ponytail intensity from THIS workspace's
+// config, and the per-item file cap from ITEM_MAX_FILES — the constant validateQueue's
+// item-size row applies. The cap belongs to the gate, not to the workspace:
+// config.workflow.trivialMaxFiles bounds what may skip planning altogether (§2.10), a
+// different number with a different job, and sourcing this line from it states one cap
+// to the planner while the pack's generated mechanics block and the gate state another.
 export function decomposePrompt(
   userPrompt: string,
   config: Config,
@@ -1943,7 +2008,7 @@ export function decomposePrompt(
     "- behavioralPaths (the globs that own verification): " +
     behavioralPaths +
     "\n- the per-item file cap: " +
-    String(config.workflow.trivialMaxFiles) +
+    String(ITEM_MAX_FILES) +
     " files and one acceptance cluster; split anything bigger.\n" +
     ponytailLaw(config) +
     "\nREQUEST:\n" +

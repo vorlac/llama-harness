@@ -1,0 +1,532 @@
+{
+  "group": "display",
+  "description": "The display form used by PRINT, WRITE and TOSTR, including quoting inside arrays and the type names reported by TYPEOF.",
+  "case_count": 75,
+  "cases": [
+    {
+      "id": "display-001-print",
+      "mode": "exec",
+      "source": "asm/display-001-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n"
+    },
+    {
+      "id": "display-002-tostr",
+      "mode": "exec",
+      "source": "asm/display-002-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n"
+    },
+    {
+      "id": "display-003-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-003-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "display-004-print",
+      "mode": "exec",
+      "source": "asm/display-004-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "display-005-tostr",
+      "mode": "exec",
+      "source": "asm/display-005-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "display-006-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-006-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4\n"
+    },
+    {
+      "id": "display-007-print",
+      "mode": "exec",
+      "source": "asm/display-007-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "display-008-tostr",
+      "mode": "exec",
+      "source": "asm/display-008-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "display-009-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-009-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "display-010-print",
+      "mode": "exec",
+      "source": "asm/display-010-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "display-011-tostr",
+      "mode": "exec",
+      "source": "asm/display-011-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "display-012-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-012-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "display-013-print",
+      "mode": "exec",
+      "source": "asm/display-013-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "display-014-tostr",
+      "mode": "exec",
+      "source": "asm/display-014-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "display-015-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-015-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "display-016-print",
+      "mode": "exec",
+      "source": "asm/display-016-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "display-017-tostr",
+      "mode": "exec",
+      "source": "asm/display-017-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "display-018-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-018-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "19\n"
+    },
+    {
+      "id": "display-019-print",
+      "mode": "exec",
+      "source": "asm/display-019-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "display-020-tostr",
+      "mode": "exec",
+      "source": "asm/display-020-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "display-021-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-021-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "20\n"
+    },
+    {
+      "id": "display-022-print",
+      "mode": "exec",
+      "source": "asm/display-022-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "plain\n"
+    },
+    {
+      "id": "display-023-tostr",
+      "mode": "exec",
+      "source": "asm/display-023-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "plain\n"
+    },
+    {
+      "id": "display-024-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-024-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "display-025-print",
+      "mode": "exec",
+      "source": "asm/display-025-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "display-026-tostr",
+      "mode": "exec",
+      "source": "asm/display-026-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "display-027-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-027-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "display-028-print",
+      "mode": "exec",
+      "source": "asm/display-028-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "with \"quotes\"\n"
+    },
+    {
+      "id": "display-029-tostr",
+      "mode": "exec",
+      "source": "asm/display-029-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "with \"quotes\"\n"
+    },
+    {
+      "id": "display-030-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-030-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "13\n"
+    },
+    {
+      "id": "display-031-print",
+      "mode": "exec",
+      "source": "asm/display-031-print.asm",
+      "expect_exit": 0,
+      "expect_stdout": "tab\there\n"
+    },
+    {
+      "id": "display-032-tostr",
+      "mode": "exec",
+      "source": "asm/display-032-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "tab\there\n"
+    },
+    {
+      "id": "display-033-tostrlen",
+      "mode": "exec",
+      "source": "asm/display-033-tostrlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "8\n"
+    },
+    {
+      "id": "display-034-write",
+      "mode": "exec",
+      "source": "asm/display-034-write.asm",
+      "expect_exit": 0,
+      "expect_stdout": "ab1\n"
+    },
+    {
+      "id": "display-035-write",
+      "mode": "exec",
+      "source": "asm/display-035-write.asm",
+      "expect_exit": 0,
+      "expect_stdout": "no newline"
+    },
+    {
+      "id": "display-036-array",
+      "mode": "exec",
+      "source": "asm/display-036-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[]\n"
+    },
+    {
+      "id": "display-037-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-037-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[]\n"
+    },
+    {
+      "id": "display-038-array",
+      "mode": "exec",
+      "source": "asm/display-038-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1]\n"
+    },
+    {
+      "id": "display-039-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-039-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1]\n"
+    },
+    {
+      "id": "display-040-array",
+      "mode": "exec",
+      "source": "asm/display-040-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"a\"]\n"
+    },
+    {
+      "id": "display-041-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-041-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"a\"]\n"
+    },
+    {
+      "id": "display-042-array",
+      "mode": "exec",
+      "source": "asm/display-042-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\"]\n"
+    },
+    {
+      "id": "display-043-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-043-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\"]\n"
+    },
+    {
+      "id": "display-044-array",
+      "mode": "exec",
+      "source": "asm/display-044-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"a\\nb\"]\n"
+    },
+    {
+      "id": "display-045-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-045-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"a\\nb\"]\n"
+    },
+    {
+      "id": "display-046-array",
+      "mode": "exec",
+      "source": "asm/display-046-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"q\\\"q\"]\n"
+    },
+    {
+      "id": "display-047-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-047-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"q\\\"q\"]\n"
+    },
+    {
+      "id": "display-048-array",
+      "mode": "exec",
+      "source": "asm/display-048-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"back\\\\slash\"]\n"
+    },
+    {
+      "id": "display-049-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-049-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"back\\\\slash\"]\n"
+    },
+    {
+      "id": "display-050-array",
+      "mode": "exec",
+      "source": "asm/display-050-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\t\"]\n"
+    },
+    {
+      "id": "display-051-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-051-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\t\"]\n"
+    },
+    {
+      "id": "display-052-array",
+      "mode": "exec",
+      "source": "asm/display-052-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\r\"]\n"
+    },
+    {
+      "id": "display-053-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-053-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\r\"]\n"
+    },
+    {
+      "id": "display-054-array",
+      "mode": "exec",
+      "source": "asm/display-054-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\x00\"]\n"
+    },
+    {
+      "id": "display-055-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-055-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\x00\"]\n"
+    },
+    {
+      "id": "display-056-array",
+      "mode": "exec",
+      "source": "asm/display-056-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\xff\"]\n"
+    },
+    {
+      "id": "display-057-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-057-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\xff\"]\n"
+    },
+    {
+      "id": "display-058-array",
+      "mode": "exec",
+      "source": "asm/display-058-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\x1f\"]\n"
+    },
+    {
+      "id": "display-059-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-059-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[\"\\x1f\"]\n"
+    },
+    {
+      "id": "display-060-array",
+      "mode": "exec",
+      "source": "asm/display-060-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[nil, true]\n"
+    },
+    {
+      "id": "display-061-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-061-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[nil, true]\n"
+    },
+    {
+      "id": "display-062-array",
+      "mode": "exec",
+      "source": "asm/display-062-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[[1]]\n"
+    },
+    {
+      "id": "display-063-arraytostr",
+      "mode": "exec",
+      "source": "asm/display-063-arraytostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[[1]]\n"
+    },
+    {
+      "id": "display-064-closure",
+      "mode": "exec",
+      "source": "asm/display-064-closure.asm",
+      "expect_exit": 0,
+      "expect_stdout": "<fn helper>\n"
+    },
+    {
+      "id": "display-065-closure",
+      "mode": "exec",
+      "source": "asm/display-065-closure.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[<fn helper>]\n"
+    },
+    {
+      "id": "display-066-closure",
+      "mode": "exec",
+      "source": "asm/display-066-closure.asm",
+      "expect_exit": 0,
+      "expect_stdout": "11\n"
+    },
+    {
+      "id": "display-067-typeof",
+      "mode": "exec",
+      "source": "asm/display-067-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n"
+    },
+    {
+      "id": "display-068-typeof",
+      "mode": "exec",
+      "source": "asm/display-068-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "bool\n"
+    },
+    {
+      "id": "display-069-typeof",
+      "mode": "exec",
+      "source": "asm/display-069-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "bool\n"
+    },
+    {
+      "id": "display-070-typeof",
+      "mode": "exec",
+      "source": "asm/display-070-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "int\n"
+    },
+    {
+      "id": "display-071-typeof",
+      "mode": "exec",
+      "source": "asm/display-071-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "str\n"
+    },
+    {
+      "id": "display-072-typeof",
+      "mode": "exec",
+      "source": "asm/display-072-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "array\n"
+    },
+    {
+      "id": "display-073-typeof",
+      "mode": "exec",
+      "source": "asm/display-073-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "fn\n"
+    },
+    {
+      "id": "display-074-typeofstr",
+      "mode": "exec",
+      "source": "asm/display-074-typeofstr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "str\n"
+    },
+    {
+      "id": "display-075-concatdisplay",
+      "mode": "exec",
+      "source": "asm/display-075-concatdisplay.asm",
+      "expect_exit": 0,
+      "expect_stdout": "n=42\n"
+    }
+  ]
+}

@@ -1,0 +1,337 @@
+date,reference,description,currency,amount,source,targets
+2024-01-01,TX-0001,Consulting invoice,USD,3562.74,income:consulting,assets:checking
+2024-01-02,TX-0002,Travel,EUR,594.89,assets:eur-savings,expenses:travel
+2024-01-02,TX-0003,Utilities,USD,714.43,assets:checking,expenses:utilities
+2024-01-02,TX-0004,Utilities,USD,350.50,assets:checking,expenses:utilities
+2024-01-02,TX-0005,Office supplies,USD,1214.17,assets:checking,expenses:office
+2024-01-03,TX-0006,Software subscription,EUR,188.10,assets:eur-savings,expenses:software
+2024-01-03,TX-0007,Team meal,USD,136.68,assets:checking,expenses:meals:alice|expenses:meals:bob|expenses:meals:carol
+2024-01-04,TX-0008,Travel,USD,1430.78,assets:checking,expenses:travel
+2024-01-04,TX-0009,Office supplies,USD,31.37,assets:checking,expenses:office
+2024-01-04,TX-0010,Software subscription,USD,897.65,assets:checking,expenses:software
+2024-01-04,TX-0011,Marketing spend,USD,394.97,liabilities:card,expenses:marketing
+2024-01-04,TX-0012,Marketing spend,USD,374.61,liabilities:card,expenses:marketing
+2024-01-04,TX-0013,Office supplies,USD,495.66,liabilities:card,expenses:office
+2024-01-05,TX-0014,Software subscription,USD,646.46,liabilities:card,expenses:software
+2024-01-05,TX-0015,Shipping,USD,379.43,assets:checking,expenses:shipping
+2024-01-05,TX-0016,Utilities,USD,194.28,liabilities:card,expenses:utilities
+2024-01-05,TX-0017,Software subscription,USD,1278.69,assets:checking,expenses:software
+2024-01-06,TX-0018,Shipping,USD,1155.26,assets:checking,expenses:shipping
+2024-01-06,TX-0019,Training,USD,294.15,liabilities:card,expenses:training
+2024-01-07,TX-0020,Shared cost allocation,USD,545.47,assets:checking,expenses:travel@4|expenses:marketing@3
+2024-01-07,TX-0021,Team meal,USD,363.08,assets:checking,expenses:meals:alice|expenses:meals:dan|expenses:meals:bob|expenses:meals:carol
+2024-01-07,TX-0022,Consulting invoice,USD,3025.73,income:consulting,assets:checking
+2024-01-07,TX-0023,Card payment,USD,451.49,assets:checking,liabilities:card
+2024-01-08,TX-0024,Software subscription,USD,345.41,liabilities:card,expenses:software
+2024-01-08,TX-0025,Marketing spend,USD,872.56,assets:checking,expenses:marketing
+2024-01-08,TX-0026,Team meal,USD,231.05,assets:checking,expenses:meals:bob|expenses:meals:dan
+2024-01-08,TX-0027,Card payment,USD,689.73,assets:checking,liabilities:card
+2024-01-09,TX-0028,Team meal,USD,49.69,assets:checking,expenses:meals:carol|expenses:meals:bob|expenses:meals:dan
+2024-01-09,TX-0029,Training,USD,957.82,assets:checking,expenses:training
+2024-01-09,TX-0030,Shared cost allocation,USD,522.12,assets:checking,expenses:marketing@2|expenses:shipping@1
+2024-01-10,TX-0031,Card payment,USD,1297.02,assets:checking,liabilities:card
+2024-01-10,TX-0032,Consulting invoice,USD,4839.25,income:consulting,assets:checking
+2024-01-10,TX-0033,Team meal,USD,45.49,assets:checking,expenses:meals:carol|expenses:meals:dan
+2024-01-10,TX-0034,Office supplies,EUR,189.50,assets:eur-savings,expenses:office
+2024-01-10,TX-0035,Shared cost allocation,USD,2749.62,assets:checking,expenses:software@3|expenses:shipping@1
+2024-01-11,TX-0036,Shared cost allocation,USD,370.80,assets:checking,expenses:office@2|expenses:training@1
+2024-01-11,TX-0037,Shipping,EUR,526.86,assets:eur-savings,expenses:shipping
+2024-01-11,TX-0038,Training,USD,911.98,assets:checking,expenses:training
+2024-01-12,TX-0039,Software subscription,USD,1443.92,assets:checking,expenses:software
+2024-01-13,TX-0040,Software subscription,USD,881.75,assets:checking,expenses:software
+2024-01-13,TX-0041,Team meal,USD,225.85,assets:checking,expenses:meals:dan|expenses:meals:bob|expenses:meals:alice
+2024-01-13,TX-0042,Consulting invoice,USD,3037.86,income:consulting,assets:checking
+2024-01-13,TX-0043,Shipping,USD,785.96,assets:checking,expenses:shipping
+2024-01-13,TX-0044,Shipping,USD,1165.76,assets:checking,expenses:shipping
+2024-01-13,TX-0045,Marketing spend,USD,85.02,assets:checking,expenses:marketing
+2024-01-14,TX-0046,Marketing spend,USD,222.62,liabilities:card,expenses:marketing
+2024-01-14,TX-0047,Utilities,USD,1487.43,assets:checking,expenses:utilities
+2024-01-14,TX-0048,Hardware,USD,950.35,assets:checking,expenses:hardware
+2024-01-14,TX-0049,Salary,USD,2049.91,income:salary,assets:checking
+2024-01-15,TX-0050,Hardware,USD,1309.07,assets:checking,expenses:hardware
+2024-01-16,TX-0051,Software subscription,EUR,894.52,assets:eur-savings,expenses:software@1|expenses:training@2
+2024-01-16,TX-0052,Travel,EUR,295.57,assets:eur-savings,expenses:travel
+2024-01-16,TX-0053,Shipping,USD,775.00,assets:checking,expenses:shipping
+2024-01-17,TX-0054,Travel,USD,1460.99,assets:checking,expenses:travel
+2024-01-17,TX-0055,Team meal,USD,369.96,assets:checking,expenses:meals:dan|expenses:meals:bob|expenses:meals:alice
+2024-01-18,TX-0056,Software subscription,USD,907.38,assets:checking,expenses:software
+2024-01-18,TX-0057,Shared cost allocation,USD,1833.15,assets:checking,expenses:office@4|expenses:utilities@3
+2024-01-18,TX-0058,Software subscription,USD,80.02,liabilities:card,expenses:software
+2024-01-18,TX-0059,Marketing spend,EUR,418.84,assets:eur-savings,expenses:marketing@2|expenses:software@3
+2024-01-18,TX-0060,Travel,USD,126.41,assets:checking,expenses:travel
+2024-01-19,TX-0061,Hardware,USD,1030.84,assets:checking,expenses:hardware
+2024-01-19,TX-0062,Team meal,USD,121.42,assets:checking,expenses:meals:dan|expenses:meals:alice|expenses:meals:carol
+2024-01-19,TX-0063,Shared cost allocation,USD,458.17,assets:checking,expenses:office@3|expenses:marketing@2
+2024-01-19,TX-0064,Training,USD,1199.76,assets:checking,expenses:training
+2024-01-19,TX-0065,Utilities,USD,703.94,assets:checking,expenses:utilities
+2024-01-20,TX-0066,Shared cost allocation,USD,1792.36,assets:checking,expenses:shipping@2|expenses:marketing@4
+2024-01-20,TX-0067,Shared cost allocation,USD,2625.19,assets:checking,expenses:office@4|expenses:shipping@4
+2024-01-20,TX-0068,Software subscription,USD,1144.61,assets:checking,expenses:software
+2024-01-20,TX-0069,Consulting invoice,USD,2561.73,income:consulting,assets:checking
+2024-01-21,TX-0070,Office supplies,USD,44.49,assets:checking,expenses:office
+2024-01-21,TX-0071,Hardware,USD,177.63,assets:checking,expenses:hardware
+2024-01-21,TX-0072,Card payment,USD,2369.39,assets:checking,liabilities:card
+2024-01-21,TX-0073,Utilities,USD,1472.72,assets:checking,expenses:utilities
+2024-01-21,TX-0074,Shared cost allocation,USD,2855.43,assets:checking,expenses:utilities@3|expenses:office@2
+2024-01-22,TX-0075,Training,USD,145.77,assets:checking,expenses:training
+2024-01-22,TX-0076,Shipping,EUR,623.51,assets:eur-savings,expenses:shipping@1|expenses:travel@2
+2024-01-22,TX-0077,Team meal,USD,292.93,assets:checking,expenses:meals:bob|expenses:meals:dan
+2024-01-22,TX-0078,Card payment,USD,1279.88,assets:checking,liabilities:card
+2024-01-22,TX-0079,Team meal,USD,363.48,assets:checking,expenses:meals:carol|expenses:meals:dan|expenses:meals:bob|expenses:meals:alice
+2024-01-22,TX-0080,Shared cost allocation,USD,292.49,assets:checking,expenses:hardware@4|expenses:software@3
+2024-01-22,TX-0081,Office supplies,EUR,892.85,assets:eur-savings,expenses:office
+2024-01-23,TX-0082,Hardware,EUR,293.66,assets:eur-savings,expenses:hardware
+2024-01-23,TX-0083,Software subscription,USD,1464.54,assets:checking,expenses:software
+2024-01-23,TX-0084,Card payment,USD,1121.59,assets:checking,liabilities:card
+2024-01-24,TX-0085,Travel,EUR,702.19,assets:eur-savings,expenses:travel@1|expenses:marketing@1
+2024-01-24,TX-0086,Utilities,USD,131.14,assets:checking,expenses:utilities
+2024-01-24,TX-0087,Marketing spend,USD,1288.35,assets:checking,expenses:marketing
+2024-01-24,TX-0088,Utilities,USD,470.08,assets:checking,expenses:utilities
+2024-01-24,TX-0089,Salary,USD,6612.14,income:salary,assets:checking
+2024-01-24,TX-0090,Shared cost allocation,USD,1836.79,assets:checking,expenses:hardware@4|expenses:shipping@3
+2024-01-25,TX-0091,Shared cost allocation,USD,1238.78,assets:checking,expenses:training@1|expenses:travel@4
+2024-01-25,TX-0092,Training,USD,1147.16,assets:checking,expenses:training
+2024-01-26,TX-0093,Team meal,USD,350.17,assets:checking,expenses:meals:dan|expenses:meals:carol|expenses:meals:bob
+2024-01-26,TX-0094,Software subscription,USD,506.17,assets:checking,expenses:software
+2024-01-26,TX-0095,Shipping,USD,694.88,liabilities:card,expenses:shipping
+2024-01-26,TX-0096,Card payment,USD,2354.39,assets:checking,liabilities:card
+2024-01-27,TX-0097,Shipping,USD,1236.17,assets:checking,expenses:shipping
+2024-01-27,TX-0098,Hardware,USD,929.65,assets:checking,expenses:hardware
+2024-01-27,TX-0099,Utilities,EUR,278.07,assets:eur-savings,expenses:utilities
+2024-01-27,TX-0100,Card payment,USD,2153.10,assets:checking,liabilities:card
+2024-01-28,TX-0101,Team meal,USD,219.56,assets:checking,expenses:meals:carol|expenses:meals:alice
+2024-01-28,TX-0102,Hardware,USD,554.63,liabilities:card,expenses:hardware
+2024-01-28,TX-0103,Shared cost allocation,USD,1778.52,assets:checking,expenses:training@4|expenses:shipping@2
+2024-01-28,TX-0104,Consulting invoice,USD,6109.34,income:consulting,assets:checking
+2024-01-28,TX-0105,Card payment,USD,2350.03,assets:checking,liabilities:card
+2024-01-29,TX-0106,Team meal,USD,265.90,assets:checking,expenses:meals:bob|expenses:meals:carol|expenses:meals:dan|expenses:meals:alice
+2024-01-29,TX-0107,Salary,USD,7826.52,income:salary,assets:checking
+2024-01-29,TX-0108,Software subscription,USD,1473.15,assets:checking,expenses:software
+2024-01-30,TX-0109,Shared cost allocation,USD,1990.64,assets:checking,expenses:travel@2|expenses:training@2
+2024-01-30,TX-0110,Training,USD,436.08,liabilities:card,expenses:training
+2024-01-30,TX-0111,Software subscription,EUR,438.99,assets:eur-savings,expenses:software@2|expenses:shipping@1
+2024-01-30,TX-0112,Consulting invoice,USD,7907.07,income:consulting,assets:checking
+2024-01-31,TX-0113,Training,USD,212.71,assets:checking,expenses:training
+2024-01-31,TX-0114,Team meal,USD,265.19,assets:checking,expenses:meals:carol|expenses:meals:bob|expenses:meals:alice|expenses:meals:dan
+2024-01-31,TX-0115,Training,USD,1495.50,assets:checking,expenses:training
+2024-01-31,TX-0116,Team meal,USD,107.52,assets:checking,expenses:meals:alice|expenses:meals:dan|expenses:meals:bob|expenses:meals:carol
+2024-01-31,TX-0117,Utilities,USD,229.16,assets:checking,expenses:utilities
+2024-02-01,TX-0118,Consulting invoice,USD,6386.99,income:consulting,assets:checking
+2024-02-01,TX-0119,Team meal,USD,114.16,assets:checking,expenses:meals:carol|expenses:meals:dan|expenses:meals:bob|expenses:meals:alice
+2024-02-01,TX-0120,Training,USD,1383.29,assets:checking,expenses:training
+2024-02-01,TX-0121,Marketing spend,USD,1416.34,assets:checking,expenses:marketing
+2024-02-01,TX-0122,Team meal,USD,289.12,assets:checking,expenses:meals:carol|expenses:meals:dan|expenses:meals:alice|expenses:meals:bob
+2024-02-01,TX-0123,Hardware,EUR,151.74,assets:eur-savings,expenses:hardware
+2024-02-01,TX-0124,Training,USD,1304.63,assets:checking,expenses:training
+2024-02-02,TX-0125,Shipping,USD,595.25,assets:checking,expenses:shipping
+2024-02-02,TX-0126,Utilities,USD,630.00,assets:checking,expenses:utilities
+2024-02-02,TX-0127,Office supplies,USD,403.27,assets:checking,expenses:office
+2024-02-02,TX-0128,Software subscription,USD,914.93,assets:checking,expenses:software
+2024-02-02,TX-0129,Training,USD,940.75,assets:checking,expenses:training
+2024-02-03,TX-0130,Travel,EUR,348.50,assets:eur-savings,expenses:travel@2|expenses:software@1
+2024-02-03,TX-0131,Training,USD,149.24,liabilities:card,expenses:training
+2024-02-03,TX-0132,Utilities,EUR,535.31,assets:eur-savings,expenses:utilities
+2024-02-03,TX-0133,Software subscription,USD,783.07,assets:checking,expenses:software
+2024-02-03,TX-0134,Consulting invoice,USD,6237.82,income:consulting,assets:checking
+2024-02-04,TX-0135,Office supplies,USD,546.10,assets:checking,expenses:office
+2024-02-04,TX-0136,Travel,USD,76.94,assets:checking,expenses:travel
+2024-02-04,TX-0137,Travel,USD,1026.63,assets:checking,expenses:travel
+2024-02-04,TX-0138,Office supplies,USD,767.27,assets:checking,expenses:office
+2024-02-04,TX-0139,Software subscription,USD,169.71,liabilities:card,expenses:software
+2024-02-04,TX-0140,Hardware,USD,1487.59,assets:checking,expenses:hardware
+2024-02-05,TX-0141,Shared cost allocation,USD,2875.54,assets:checking,expenses:software@4|expenses:office@4
+2024-02-05,TX-0142,Training,USD,1168.69,assets:checking,expenses:training
+2024-02-05,TX-0143,Shipping,USD,1026.01,assets:checking,expenses:shipping
+2024-02-06,TX-0144,Software subscription,USD,567.75,liabilities:card,expenses:software
+2024-02-06,TX-0145,Consulting invoice,USD,3056.35,income:consulting,assets:checking
+2024-02-06,TX-0146,Team meal,USD,298.33,assets:checking,expenses:meals:carol|expenses:meals:alice
+2024-02-06,TX-0147,Consulting invoice,USD,7518.37,income:consulting,assets:checking
+2024-02-06,TX-0148,Software subscription,USD,818.29,assets:checking,expenses:software
+2024-02-06,TX-0149,Team meal,USD,127.50,assets:checking,expenses:meals:carol|expenses:meals:dan|expenses:meals:alice
+2024-02-07,TX-0150,Marketing spend,USD,653.92,liabilities:card,expenses:marketing
+2024-02-07,TX-0151,Training,USD,1245.94,assets:checking,expenses:training
+2024-02-07,TX-0152,Consulting invoice,USD,6692.60,income:consulting,assets:checking
+2024-02-08,TX-0153,Marketing spend,USD,6.22,assets:checking,expenses:marketing
+2024-02-08,TX-0154,Team meal,USD,186.45,assets:checking,expenses:meals:dan|expenses:meals:carol|expenses:meals:alice
+2024-02-08,TX-0155,Team meal,USD,138.52,assets:checking,expenses:meals:dan|expenses:meals:bob
+2024-02-08,TX-0156,Software subscription,USD,1019.45,assets:checking,expenses:software
+2024-02-09,TX-0157,Team meal,USD,310.89,assets:checking,expenses:meals:dan|expenses:meals:carol|expenses:meals:bob
+2024-02-09,TX-0158,Software subscription,EUR,226.84,assets:eur-savings,expenses:software@1|expenses:software@1
+2024-02-10,TX-0159,Utilities,EUR,98.47,assets:eur-savings,expenses:utilities@2|expenses:hardware@2
+2024-02-10,TX-0160,Marketing spend,USD,1473.31,assets:checking,expenses:marketing
+2024-02-10,TX-0161,Shared cost allocation,USD,1833.68,assets:checking,expenses:marketing@4|expenses:office@3
+2024-02-11,TX-0162,Travel,USD,913.11,assets:checking,expenses:travel
+2024-02-11,TX-0163,Team meal,USD,114.62,assets:checking,expenses:meals:carol|expenses:meals:alice|expenses:meals:bob|expenses:meals:dan
+2024-02-11,TX-0164,Team meal,USD,380.25,assets:checking,expenses:meals:dan|expenses:meals:bob
+2024-02-11,TX-0165,Shared cost allocation,USD,608.19,assets:checking,expenses:marketing@1|expenses:utilities@1
+2024-02-13,TX-0166,Office supplies,USD,159.86,assets:checking,expenses:office
+2024-02-13,TX-0167,Training,USD,1393.94,assets:checking,expenses:training
+2024-02-13,TX-0168,Utilities,USD,822.55,assets:checking,expenses:utilities
+2024-02-14,TX-0169,Team meal,USD,370.29,assets:checking,expenses:meals:dan|expenses:meals:bob
+2024-02-14,TX-0170,Utilities,EUR,155.58,assets:eur-savings,expenses:utilities@3|expenses:software@1
+2024-02-14,TX-0171,Training,USD,556.34,liabilities:card,expenses:training
+2024-02-14,TX-0172,Travel,USD,1391.41,assets:checking,expenses:travel
+2024-02-14,TX-0173,Shipping,USD,647.08,liabilities:card,expenses:shipping
+2024-02-15,TX-0174,Hardware,USD,980.27,assets:checking,expenses:hardware
+2024-02-15,TX-0175,Shared cost allocation,USD,1729.11,assets:checking,expenses:marketing@1|expenses:shipping@1
+2024-02-15,TX-0176,Salary,USD,1819.26,income:salary,assets:checking
+2024-02-15,TX-0177,Shipping,USD,322.28,assets:checking,expenses:shipping
+2024-02-16,TX-0178,Consulting invoice,USD,8089.67,income:consulting,assets:checking
+2024-02-16,TX-0179,Salary,USD,6300.04,income:salary,assets:checking
+2024-02-16,TX-0180,Salary,USD,5346.34,income:salary,assets:checking
+2024-02-16,TX-0181,Utilities,USD,347.31,liabilities:card,expenses:utilities
+2024-02-17,TX-0182,Shipping,USD,710.98,assets:checking,expenses:shipping
+2024-02-17,TX-0183,Travel,USD,1325.63,assets:checking,expenses:travel
+2024-02-17,TX-0184,Shared cost allocation,USD,2195.78,assets:checking,expenses:utilities@2|expenses:hardware@3
+2024-02-17,TX-0185,Card payment,USD,1474.81,assets:checking,liabilities:card
+2024-02-18,TX-0186,Office supplies,USD,103.33,liabilities:card,expenses:office
+2024-02-18,TX-0187,Shared cost allocation,USD,1918.38,assets:checking,expenses:software@3|expenses:office@3
+2024-02-18,TX-0188,Team meal,USD,240.41,assets:checking,expenses:meals:carol|expenses:meals:alice|expenses:meals:dan|expenses:meals:bob
+2024-02-18,TX-0189,Office supplies,USD,835.15,assets:checking,expenses:office
+2024-02-19,TX-0190,Marketing spend,USD,556.62,liabilities:card,expenses:marketing
+2024-02-19,TX-0191,Consulting invoice,USD,3475.04,income:consulting,assets:checking
+2024-02-20,TX-0192,Hardware,USD,335.15,liabilities:card,expenses:hardware
+2024-02-20,TX-0193,Travel,USD,597.17,assets:checking,expenses:travel
+2024-02-20,TX-0194,Office supplies,USD,616.03,assets:checking,expenses:office
+2024-02-21,TX-0195,Consulting invoice,USD,5915.30,income:consulting,assets:checking
+2024-02-21,TX-0196,Shipping,USD,1199.58,assets:checking,expenses:shipping
+2024-02-22,TX-0197,Team meal,USD,139.61,assets:checking,expenses:meals:dan|expenses:meals:alice|expenses:meals:carol
+2024-02-23,TX-0198,Card payment,USD,1742.93,assets:checking,liabilities:card
+2024-02-23,TX-0199,Office supplies,USD,295.59,liabilities:card,expenses:office
+2024-02-23,TX-0200,Travel,USD,1225.77,assets:checking,expenses:travel
+2024-02-23,TX-0201,Utilities,USD,993.74,assets:checking,expenses:utilities
+2024-02-24,TX-0202,Shared cost allocation,USD,2646.66,assets:checking,expenses:hardware@1|expenses:software@4
+2024-02-24,TX-0203,Team meal,USD,272.17,assets:checking,expenses:meals:dan|expenses:meals:alice
+2024-02-24,TX-0204,Team meal,USD,45.24,assets:checking,expenses:meals:alice|expenses:meals:dan|expenses:meals:bob|expenses:meals:carol
+2024-02-24,TX-0205,Shipping,USD,579.79,assets:checking,expenses:shipping
+2024-02-25,TX-0206,Training,USD,1272.10,assets:checking,expenses:training
+2024-02-25,TX-0207,Salary,USD,3414.27,income:salary,assets:checking
+2024-02-25,TX-0208,Team meal,USD,281.09,assets:checking,expenses:meals:bob|expenses:meals:carol
+2024-02-25,TX-0209,Training,EUR,128.52,assets:eur-savings,expenses:training@2|expenses:software@1
+2024-02-26,TX-0210,Shared cost allocation,USD,1533.59,assets:checking,expenses:software@2|expenses:hardware@3
+2024-02-26,TX-0211,Marketing spend,USD,625.50,assets:checking,expenses:marketing
+2024-02-26,TX-0212,Software subscription,USD,238.10,assets:checking,expenses:software
+2024-02-26,TX-0213,Hardware,EUR,67.28,assets:eur-savings,expenses:hardware@2|expenses:training@1
+2024-02-26,TX-0214,Travel,USD,928.51,assets:checking,expenses:travel
+2024-02-26,TX-0215,Shipping,EUR,272.86,assets:eur-savings,expenses:shipping
+2024-02-26,TX-0216,Shared cost allocation,USD,1745.33,assets:checking,expenses:marketing@2|expenses:travel@4
+2024-02-26,TX-0217,Hardware,EUR,143.90,assets:eur-savings,expenses:hardware@2|expenses:office@2
+2024-02-26,TX-0218,Shared cost allocation,USD,1947.43,assets:checking,expenses:office@1|expenses:utilities@3
+2024-02-26,TX-0219,Card payment,USD,1153.89,assets:checking,liabilities:card
+2024-02-27,TX-0220,Utilities,USD,846.95,assets:checking,expenses:utilities
+2024-02-27,TX-0221,Travel,USD,1441.99,assets:checking,expenses:travel
+2024-02-27,TX-0222,Travel,USD,1150.55,assets:checking,expenses:travel
+2024-02-27,TX-0223,Software subscription,EUR,391.25,assets:eur-savings,expenses:software@2|expenses:travel@2
+2024-02-27,TX-0224,Card payment,USD,824.75,assets:checking,liabilities:card
+2024-02-27,TX-0225,Card payment,USD,738.67,assets:checking,liabilities:card
+2024-02-27,TX-0226,Team meal,USD,324.87,assets:checking,expenses:meals:alice|expenses:meals:carol|expenses:meals:dan|expenses:meals:bob
+2024-02-27,TX-0227,Card payment,USD,2423.09,assets:checking,liabilities:card
+2024-02-28,TX-0228,Team meal,USD,212.04,assets:checking,expenses:meals:alice|expenses:meals:carol|expenses:meals:bob|expenses:meals:dan
+2024-02-28,TX-0229,Hardware,USD,534.53,assets:checking,expenses:hardware
+2024-02-28,TX-0230,Marketing spend,EUR,671.32,assets:eur-savings,expenses:marketing
+2024-02-28,TX-0231,Software subscription,USD,1311.64,assets:checking,expenses:software
+2024-02-29,TX-0232,Utilities,USD,729.72,assets:checking,expenses:utilities
+2024-02-29,TX-0233,Training,USD,1131.18,assets:checking,expenses:training
+2024-02-29,TX-0234,Shared cost allocation,USD,2490.77,assets:checking,expenses:training@2|expenses:office@4
+2024-02-29,TX-0235,Software subscription,USD,932.29,assets:checking,expenses:software
+2024-03-01,TX-0236,Software subscription,USD,543.39,liabilities:card,expenses:software
+2024-03-01,TX-0237,Travel,USD,33.18,liabilities:card,expenses:travel
+2024-03-02,TX-0238,Office supplies,USD,1335.73,assets:checking,expenses:office
+2024-03-02,TX-0239,Software subscription,EUR,835.37,assets:eur-savings,expenses:software@1|expenses:travel@1
+2024-03-02,TX-0240,Office supplies,USD,627.91,assets:checking,expenses:office
+2024-03-02,TX-0241,Software subscription,EUR,710.67,assets:eur-savings,expenses:software
+2024-03-03,TX-0242,Team meal,USD,68.85,assets:checking,expenses:meals:alice|expenses:meals:carol|expenses:meals:bob
+2024-03-03,TX-0243,Marketing spend,EUR,458.46,assets:eur-savings,expenses:marketing@3|expenses:hardware@1
+2024-03-04,TX-0244,Software subscription,EUR,570.02,assets:eur-savings,expenses:software@2|expenses:hardware@2
+2024-03-04,TX-0245,Office supplies,EUR,451.56,assets:eur-savings,expenses:office@3|expenses:training@1
+2024-03-05,TX-0246,Hardware,USD,21.81,assets:checking,expenses:hardware
+2024-03-05,TX-0247,Hardware,USD,1161.46,assets:checking,expenses:hardware
+2024-03-05,TX-0248,Shipping,EUR,296.07,assets:eur-savings,expenses:shipping
+2024-03-05,TX-0249,Shipping,EUR,146.52,assets:eur-savings,expenses:shipping
+2024-03-05,TX-0250,Utilities,USD,669.22,liabilities:card,expenses:utilities
+2024-03-05,TX-0251,Team meal,USD,157.63,assets:checking,expenses:meals:dan|expenses:meals:alice|expenses:meals:bob|expenses:meals:carol
+2024-03-05,TX-0252,Salary,USD,6696.58,income:salary,assets:checking
+2024-03-06,TX-0253,Shared cost allocation,USD,2523.84,assets:checking,expenses:training@3|expenses:office@3
+2024-03-06,TX-0254,Travel,USD,1028.51,assets:checking,expenses:travel
+2024-03-07,TX-0255,Shared cost allocation,USD,1896.75,assets:checking,expenses:software@2|expenses:training@3
+2024-03-07,TX-0256,Training,USD,1319.69,assets:checking,expenses:training
+2024-03-07,TX-0257,Shipping,USD,1047.95,assets:checking,expenses:shipping
+2024-03-08,TX-0258,Card payment,USD,1459.70,assets:checking,liabilities:card
+2024-03-10,TX-0259,Software subscription,USD,412.04,assets:checking,expenses:software
+2024-03-11,TX-0260,Travel,USD,905.07,assets:checking,expenses:travel
+2024-03-12,TX-0261,Utilities,USD,723.78,assets:checking,expenses:utilities
+2024-03-12,TX-0262,Shipping,EUR,897.18,assets:eur-savings,expenses:shipping
+2024-03-12,TX-0263,Office supplies,USD,281.21,liabilities:card,expenses:office
+2024-03-12,TX-0264,Marketing spend,USD,88.08,liabilities:card,expenses:marketing
+2024-03-13,TX-0265,Software subscription,USD,679.98,liabilities:card,expenses:software
+2024-03-13,TX-0266,Utilities,USD,40.85,assets:checking,expenses:utilities
+2024-03-13,TX-0267,Software subscription,USD,118.08,assets:checking,expenses:software
+2024-03-13,TX-0268,Training,USD,202.13,assets:checking,expenses:training
+2024-03-14,TX-0269,Consulting invoice,USD,6954.65,income:consulting,assets:checking
+2024-03-14,TX-0270,Card payment,USD,2095.47,assets:checking,liabilities:card
+2024-03-14,TX-0271,Team meal,USD,236.64,assets:checking,expenses:meals:alice|expenses:meals:bob|expenses:meals:carol|expenses:meals:dan
+2024-03-14,TX-0272,Shipping,USD,214.56,liabilities:card,expenses:shipping
+2024-03-14,TX-0273,Travel,EUR,679.86,assets:eur-savings,expenses:travel
+2024-03-15,TX-0274,Team meal,USD,321.29,assets:checking,expenses:meals:carol|expenses:meals:bob|expenses:meals:alice
+2024-03-15,TX-0275,Software subscription,USD,452.73,liabilities:card,expenses:software
+2024-03-15,TX-0276,Salary,USD,3058.09,income:salary,assets:checking
+2024-03-15,TX-0277,Office supplies,USD,1167.84,assets:checking,expenses:office
+2024-03-15,TX-0278,Team meal,USD,201.38,assets:checking,expenses:meals:alice|expenses:meals:dan|expenses:meals:carol
+2024-03-16,TX-0279,Software subscription,USD,1377.68,assets:checking,expenses:software
+2024-03-16,TX-0280,Shared cost allocation,USD,1837.45,assets:checking,expenses:training@2|expenses:shipping@4
+2024-03-17,TX-0281,Hardware,USD,1068.65,assets:checking,expenses:hardware
+2024-03-17,TX-0282,Shipping,EUR,533.05,assets:eur-savings,expenses:shipping@3|expenses:hardware@1
+2024-03-17,TX-0283,Card payment,USD,1529.98,assets:checking,liabilities:card
+2024-03-18,TX-0284,Card payment,USD,759.80,assets:checking,liabilities:card
+2024-03-18,TX-0285,Shared cost allocation,USD,1719.48,assets:checking,expenses:shipping@1|expenses:utilities@3
+2024-03-18,TX-0286,Shared cost allocation,USD,2670.72,assets:checking,expenses:marketing@1|expenses:utilities@2
+2024-03-18,TX-0287,Shipping,USD,420.28,liabilities:card,expenses:shipping
+2024-03-18,TX-0288,Software subscription,USD,936.10,assets:checking,expenses:software
+2024-03-19,TX-0289,Hardware,USD,1316.21,assets:checking,expenses:hardware
+2024-03-19,TX-0290,Shared cost allocation,USD,2269.56,assets:checking,expenses:hardware@1|expenses:training@4
+2024-03-19,TX-0291,Salary,USD,1955.51,income:salary,assets:checking
+2024-03-19,TX-0292,Salary,USD,2030.90,income:salary,assets:checking
+2024-03-19,TX-0293,Software subscription,USD,26.79,assets:checking,expenses:software
+2024-03-19,TX-0294,Travel,USD,516.75,assets:checking,expenses:travel
+2024-03-20,TX-0295,Salary,USD,3322.30,income:salary,assets:checking
+2024-03-20,TX-0296,Salary,USD,7487.65,income:salary,assets:checking
+2024-03-20,TX-0297,Team meal,USD,89.78,assets:checking,expenses:meals:carol|expenses:meals:dan|expenses:meals:alice|expenses:meals:bob
+2024-03-21,TX-0298,Marketing spend,USD,1210.63,assets:checking,expenses:marketing
+2024-03-21,TX-0299,Shipping,USD,518.75,assets:checking,expenses:shipping
+2024-03-22,TX-0300,Utilities,USD,336.22,liabilities:card,expenses:utilities
+2024-03-23,TX-0301,Shared cost allocation,USD,2289.74,assets:checking,expenses:marketing@4|expenses:utilities@4
+2024-03-23,TX-0302,Software subscription,USD,1379.17,assets:checking,expenses:software
+2024-03-23,TX-0303,Salary,USD,3370.45,income:salary,assets:checking
+2024-03-23,TX-0304,Team meal,USD,269.51,assets:checking,expenses:meals:carol|expenses:meals:dan
+2024-03-23,TX-0305,Shared cost allocation,USD,1214.41,assets:checking,expenses:marketing@2|expenses:hardware@2
+2024-03-23,TX-0306,Software subscription,USD,454.17,assets:checking,expenses:software
+2024-03-23,TX-0307,Office supplies,USD,693.08,liabilities:card,expenses:office
+2024-03-24,TX-0308,Shipping,USD,1376.80,assets:checking,expenses:shipping
+2024-03-24,TX-0309,Utilities,USD,270.80,assets:checking,expenses:utilities
+2024-03-24,TX-0310,Team meal,USD,274.94,assets:checking,expenses:meals:carol|expenses:meals:alice
+2024-03-24,TX-0311,Card payment,USD,623.71,assets:checking,liabilities:card
+2024-03-25,TX-0312,Utilities,EUR,764.75,assets:eur-savings,expenses:utilities
+2024-03-25,TX-0313,Utilities,USD,664.47,assets:checking,expenses:utilities
+2024-03-26,TX-0314,Marketing spend,USD,1013.68,assets:checking,expenses:marketing
+2024-03-27,TX-0315,Utilities,USD,144.64,liabilities:card,expenses:utilities
+2024-03-27,TX-0316,Card payment,USD,431.65,assets:checking,liabilities:card
+2024-03-27,TX-0317,Travel,USD,266.79,assets:checking,expenses:travel
+2024-03-28,TX-0318,Office supplies,USD,332.88,assets:checking,expenses:office
+2024-03-28,TX-0319,Salary,USD,5743.13,income:salary,assets:checking
+2024-03-28,TX-0320,Salary,USD,3552.87,income:salary,assets:checking
+2024-03-28,TX-0321,Team meal,USD,159.51,assets:checking,expenses:meals:bob|expenses:meals:dan
+2024-03-28,TX-0322,Hardware,USD,1355.78,assets:checking,expenses:hardware
+2024-03-28,TX-0323,Team meal,USD,174.86,assets:checking,expenses:meals:bob|expenses:meals:alice|expenses:meals:dan
+2024-03-28,TX-0324,Software subscription,USD,1366.25,assets:checking,expenses:software
+2024-03-28,TX-0325,Consulting invoice,USD,8984.90,income:consulting,assets:checking
+2024-03-28,TX-0326,Team meal,USD,52.50,assets:checking,expenses:meals:bob|expenses:meals:carol|expenses:meals:alice|expenses:meals:dan
+2024-03-29,TX-0327,Shipping,EUR,95.72,assets:eur-savings,expenses:shipping@1|expenses:travel@1
+2024-03-29,TX-0328,Consulting invoice,USD,4266.87,income:consulting,assets:checking
+2024-03-29,TX-0329,Utilities,USD,551.29,liabilities:card,expenses:utilities
+2024-03-29,TX-0330,Marketing spend,USD,192.67,liabilities:card,expenses:marketing
+2024-03-29,TX-0331,Software subscription,EUR,810.01,assets:eur-savings,expenses:software@1|expenses:office@3
+2024-03-30,TX-0332,Shared cost allocation,USD,2739.94,assets:checking,expenses:shipping@3|expenses:training@1
+2024-03-30,TX-0333,Training,USD,1170.06,assets:checking,expenses:training
+2024-03-30,TX-0334,Team meal,USD,176.76,assets:checking,expenses:meals:bob|expenses:meals:dan|expenses:meals:alice
+2024-03-30,TX-0335,Team meal,USD,93.29,assets:checking,expenses:meals:alice|expenses:meals:bob|expenses:meals:carol|expenses:meals:dan
+2024-03-31,TX-0336,Shipping,USD,18.45,liabilities:card,expenses:shipping

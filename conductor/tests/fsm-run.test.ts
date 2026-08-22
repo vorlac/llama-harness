@@ -183,8 +183,12 @@ for (const [from, to] of [
 // a decompose from anywhere but a CLASSIFIED INTAKE").
 //
 // Measured in the 13.2 live smoke, run r-20260821-47df: conductor_classify refused
-// its own trivialItem on a real size violation, so nothing was recorded — and the
-// orchestrator's next call was conductor_decompose, which the gate allowed.
+// its own trivialItem, so nothing was recorded — and the orchestrator's next call
+// was conductor_decompose, which the gate allowed. The edge is gated on the fact
+// that nothing is recorded, never on why: a refused stage, a stage that never ran,
+// and an out-of-order first call are one unclassified INTAKE to it. (That refusal
+// was itself a miscount by the acceptance-cluster subject scan; the edge's rule
+// does not depend on it.)
 //
 //   seq 32 fsm guard-reject {"stage": "classify", "violations": ["item \"I1\" is too large ..."]}
 //   seq 34 gates allow {"toolName": "conductor_decompose", "toolClass": "conductor"}

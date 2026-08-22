@@ -1,0 +1,13 @@
+{
+  "name": "relay",
+  "version": "0.4.2",
+  "private": true,
+  "type": "module",
+  "description": "relay - HTTP ingest daemon. Pre-migration configuration handling.",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

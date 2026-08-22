@@ -1,0 +1,111 @@
+{
+  "_comment": "The question each generated bench task asks, written here in this repository's own words. scripts/generate_euler_tasks.py reads this file and expected-answers.json and nothing else: no Project Euler statement, image or data file is read at generation time and none is committed here. That is what lets bench/corpus-euler.json be a committed artifact while project-euler/problems/ stays fetched and gitignored in the source corpus.",
+  "_contract": "Every problem carrying a non-null answer in expected-answers.json must appear here exactly once, either with a 'question' (the generator emits a task) or with an 'omitted' reason (the generator emits none and says why). A problem present in neither is a refusal, so the answer key and this file cannot drift apart in silence.",
+  "_titles": "Titles are the short factual labels Project Euler gives its problems. The source corpus already commits sixty-nine of them in hard-subset.json; a label is not the statement.",
+  "problems": {
+    "1": {
+      "title": "Multiples of 3 or 5",
+      "question": "Add up every positive integer strictly less than 1000 that 3 divides evenly or that 5 divides evenly."
+    },
+    "2": {
+      "title": "Even Fibonacci Numbers",
+      "question": "The Fibonacci sequence here opens 1, 2, and every later term is what the two before it add to. Total the terms that are even and no greater than four million."
+    },
+    "3": {
+      "title": "Largest Prime Factor",
+      "question": "Report the largest prime that divides 600851475143."
+    },
+    "4": {
+      "title": "Largest Palindrome Product",
+      "question": "Among all products of two three-digit factors, report the greatest whose decimal digits read alike in both directions."
+    },
+    "5": {
+      "title": "Smallest Multiple",
+      "question": "Report the least positive integer that each of 1 through 20 divides leaving no remainder."
+    },
+    "6": {
+      "title": "Sum Square Difference",
+      "question": "Take the first one hundred positive integers. Square their total; separately square each and total those. Report the former minus the latter."
+    },
+    "7": {
+      "title": "10001st Prime",
+      "question": "Report the 10001st prime, counting 2 as the first."
+    },
+    "9": {
+      "title": "Special Pythagorean Triplet",
+      "question": "Exactly one triple of positive integers a < b < c satisfies a*a + b*b == c*c together with a + b + c == 1000. Report a*b*c."
+    },
+    "10": {
+      "title": "Summation of Primes",
+      "question": "Total every prime strictly below 2000000."
+    },
+    "12": {
+      "title": "Highly Divisible Triangular Number",
+      "question": "The nth triangle number is 1 + 2 + ... + n. Report the earliest one carrying more than five hundred divisors, where 1 and the number itself both count."
+    },
+    "14": {
+      "title": "Longest Collatz Sequence",
+      "question": "From a positive integer, the successor is half of it when even and three times it plus one when odd, and the chain stops on reaching 1. Report the starting value below 1000000 whose chain is longest. Terms partway along a chain may run past 1000000."
+    },
+    "15": {
+      "title": "Lattice Paths",
+      "question": "Count the monotone lattice routes across a 20 by 20 arrangement of squares: begin at the upper left corner, step only rightwards or downwards along the grid lines, and end at the lower right corner."
+    },
+    "16": {
+      "title": "Power Digit Sum",
+      "question": "Write 2 raised to the power 1000 in decimal and total its digits."
+    },
+    "17": {
+      "title": "Number Letter Counts",
+      "question": "Spell every integer from 1 to 1000 inclusive in British English words, which inserts \"and\" - 342 is \"three hundred and forty-two\" and 115 is \"one hundred and fifteen\" - and report how many letters that takes altogether. Neither spaces nor hyphens count."
+    },
+    "19": {
+      "title": "Counting Sundays",
+      "question": "1 January 1900 fell on a Monday. September, April, June and November each run 30 days; February runs 28, or 29 in a leap year; the rest run 31. A year is a leap year when 4 divides it, except that a century year must also have 400 dividing it. Over 1901 through 2000 inclusive, count the months whose opening day was a Sunday."
+    },
+    "20": {
+      "title": "Factorial Digit Sum",
+      "question": "Compute the factorial of 100 and total the decimal digits of the result."
+    },
+    "21": {
+      "title": "Amicable Numbers",
+      "question": "Let d(n) total those divisors of n that are smaller than n. Two values a and b make an amicable pair when d(a) == b, d(b) == a and a != b, and each member of such a pair is an amicable number. Total every amicable number below 10000."
+    },
+    "23": {
+      "title": "Non-Abundant Sums",
+      "question": "Call n abundant when the divisors of n that are smaller than n total more than n; 12 is the least such value. Analysis establishes that every integer past 28123 is a total of two abundant values, and the same argument cannot lower that bound. Total all positive integers that no two abundant values add to."
+    },
+    "24": {
+      "title": "Lexicographic Permutations",
+      "question": "List every arrangement of the ten digits 0 through 9 in increasing numeric order and report the one at position 1000000, counting from 1. Return it as an integer."
+    },
+    "25": {
+      "title": "1000-digit Fibonacci Number",
+      "question": "Index the Fibonacci sequence so that F(1) == 1 and F(2) == 1. Report the least index n for which F(n) carries 1000 decimal digits."
+    },
+    "8": {
+      "title": "Largest Product in a Series",
+      "omitted": "The thousand-digit number this problem operates on is supplied by the statement and is the statement. A restatement that leaves it out gives the solver nothing to compute against, and one that includes it commits Project Euler material to this repository, which the source corpus gitignores for exactly that reason."
+    },
+    "11": {
+      "title": "Largest Product in a Grid",
+      "omitted": "The twenty-by-twenty grid of numbers this problem operates on is supplied by the statement and is the statement. Same reason as problem 8."
+    },
+    "13": {
+      "title": "Large Sum",
+      "omitted": "The fifty fifty-digit numbers this problem operates on are supplied by the statement and are the statement. Same reason as problem 8."
+    },
+    "18": {
+      "title": "Maximum Path Sum I",
+      "omitted": "The fifteen-row triangle this problem operates on is supplied by the statement and is the statement. Same reason as problem 8. The source corpus marks this problem as brute-force-proof, so it is a real loss to the set rather than a convenient one."
+    },
+    "22": {
+      "title": "Names Scores",
+      "omitted": "The problem reads a names file that the source corpus fetches and gitignores as Project Euler's. A seeded work tree would have to carry that file, and this repository does not carry it."
+    },
+    "67": {
+      "title": "Maximum Path Sum II",
+      "omitted": "The problem reads a triangle file that the source corpus fetches and gitignores as Project Euler's. Same reason as problem 22. The source corpus marks this problem as brute-force-proof."
+    }
+  }
+}

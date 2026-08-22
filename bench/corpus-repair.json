@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "selectionCriteria": {
+    "provenance": "Five tasks, ported from the debugging-repair and refactor-migration corpora at llama-harness-test-results. The codebases, their specifications, their seeded faults and their frozen suites are the corpus's, unchanged in substance; the seed/hidden split, the graded suites under gauge/, the field reports in BUGS.md, and the rewrites that make the material work in a flat work tree with no execute bits are this repository's.",
+    "whyTheseTwo": "Repair and migration are the two things a harness can measure that a from-scratch task cannot. A repair asks whether the process can localise a fault in code it did not write; a migration asks whether it can carry one coherent change across a tree without leaving half of it behind. Both are failure modes that a green test suite hides, which is why both have a hidden measurement that the visible suite does not reproduce.",
+    "whatIsBlocked": "Two of the seven candidate tasks are Go: graph-scheduler-race and error-taxonomy-migration. LANGUAGES in scripts/conductor_bench.py is ts, python, cpp, so neither can enter a manifest without widening that vocabulary, and neither is here. They are not mislabelled as something else.",
+    "theCarve": "The three debugging tasks ship a deliberately RED visible suite: the tests that prove the faults are in it. That fails the seed-green invariant, and it also wedges a conductor cell, whose per-item test is the visible suite - an item that correctly repairs one of four independent faults would still see a red suite and could never mark green. The fault-proving tests were therefore MOVED into gauge/, not copied, and the seeds start green. The cost is real and is the thing to argue with: the corpus prompts say 'the failing test suite is the specification', and that premise is gone. Each seed instead carries BUGS.md, four field reports written from the symptom rather than from the fix, naming no file, function or line. The measurement is now 'repair a fault from a symptom report', which is a real debugging measurement but not the one the corpus designed.",
+    "hiddenTests": "Every gauge/ carries its own copy of the whole instrument - the harness, the fixtures and the data - so a working tree that edited or deleted anything under its own test directory is still measured by the suite the task was set with. For the three debugging tasks the graded suite is the corpus's complete suite, so it scores the repair and every regression guard at once. For the two migration tasks it is the migration's own stated completion criterion, run without the escape hatch the shipped checker has.",
+    "seedIsGreen": "Every seeded repository passes its own visible suite untouched, so a run starts from a green tree and a red visible test is the arm's doing. For a debugging task that is the subtle half: the visible suite must be green while the fault is present, or the fault is not hidden and the task is trivial.",
+    "languageMix": "ts, python and cpp, each once at T2; ts and python again at T3. cpp appears once because lru-cache-eviction is the only C++ task among the seven candidates.",
+    "scopeLadder": "T2 and T3 only, and the pin says so. The three repairs are T2: four independent faults, disjoint or nearly disjoint, which is the several-independent-items shape T2 names. The two migrations are T3: one change that has to propagate through a tree, which is the dependency-chain shape T3 names. T0, T1 and T4 are empty."
+  },
+  "defaults": {
+    "model": "llamacpp/qwen3.8-27b",
+    "tierTimeoutSec": {
+      "T0": 1800,
+      "T1": 2700,
+      "T2": 3600,
+      "T3": 7200,
+      "T4": 3600
+    }
+  },
+  "expectedTaskCounts": {
+    "T0": 0,
+    "T1": 0,
+    "T2": 3,
+    "T3": 2,
+    "T4": 0
+  },
+  "sweep": {
+    "rationale": "One model, because one model is served. The swept tiers are the two that hold tasks; T0, T1 and T4 are primary-only by vacuity and the empty pin says so.",
+    "primaryModel": "llamacpp/qwen3.8-27b",
+    "models": [
+      "llamacpp/qwen3.8-27b"
+    ],
+    "sweptTiers": [
+      "T2",
+      "T3"
+    ],
+    "primaryOnlyTiers": [
+      "T0",
+      "T1",
+      "T4"
+    ],
+    "capabilities": [
+      "none"
+    ],
+    "reps": 3
+  },
+  "tasks": [
+    {
+      "id": "date-range-scheduler-ts",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to four items, one per reported fault, over three files - src/timezone.ts, src/recurrence.ts and src/overlap.ts - so three items have disjoint fileScopes and can share one wave while the two recurrence items must serialise against each other",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Four independent faults in three modules, each with a named regression guard beside it, so the wave scheduler has more than one dependency-ready item and a partial repair is distinguishable from a complete one. The measurement is calibrated: the corpus verified that fixing any one fault alone flips exactly its own tests, so the graded suite's failure set names precisely which faults survived. DIAGNOSIS.md is asked for because the corpus task asks for it, and it is NOT mechanically graded - the gauge scores the repair.",
+      "prompt": "This workspace holds `date-range-scheduler`, a dependency-free TypeScript library that expands recurring events into concrete occurrences and detects booking conflicts between them. Node runs the sources directly by stripping types, so there is nothing to install and no network is available. `bash test.sh` runs the suite, `bash build.sh` loads every module, `bash run.sh` expands the demo schedule.\n\nFour faults have been reported against it and reproduced. `BUGS.md` holds the four field reports. None of them names a file, a function or a line, because locating the fault is the work. `docs/SEMANTICS.md` is the behavioural specification and is authoritative: where the code and that document disagree, the document is right.\n\nThe suite in `test/` passes as it stands, so it will not point at the faults for you.\n\nDiagnose before you edit. Read a report, find the code path that produces the behaviour it describes, and form a concrete explanation - which value is wrong, where it becomes wrong, and why the surrounding code produces it - before you change a character. Some of the defective code sits beside code that looks similar and is correct.\n\nDo not edit, delete, rename, skip or relax anything under `test/`, and do not add to it. Do not rewrite `docs/SEMANTICS.md` to match the code: it describes the intended behaviour. Do not rewrite a module - this is a repair, and the expected diff is a handful of lines. Do not branch on a date, a zone, an instant or an event id taken from anywhere; the fix must be the general one.\n\nEvery test that passes now must still pass. Several of them exist to catch an over-correction of a nearby fault, and each field report names the behaviour nearest to it that must not move.\n\nWrite `DIAGNOSIS.md` at the root with one section per root cause: where the fault lives, what the code actually does in terms of values, why that is wrong against `docs/SEMANTICS.md`, and the change you made. If you could not resolve one, say so plainly - an accurate account of an incomplete repair is worth more than a confident one that is wrong.",
+      "seedDir": "bench/corpus/debugging-repair/date-range-scheduler/seed",
+      "hiddenDir": "bench/corpus/debugging-repair/date-range-scheduler/hidden",
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/civil.test.ts",
+        "gauge/overlap.test.ts",
+        "gauge/recurrence.test.ts",
+        "gauge/schedule.test.ts",
+        "gauge/timezone.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "test/civil.test.ts",
+        "test/overlap.test.ts",
+        "test/recurrence.test.ts",
+        "test/schedule.test.ts",
+        "test/timezone.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 3600
+    },
+    {
+      "id": "ledger-rounding-py",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to four items, one per reported fault, in four different modules - ledger/balances.py, ledger/periods.py, ledger/allocation.py and ledger/reconcile.py - with disjoint fileScopes, and the scheduler dispatches them in one wave",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The cleanest parallel-waves shape of the five: four faults, four modules, no shared edit, and the corpus verified that the thirty failing cases partition exactly across the four - no case fails for two reasons and no repair fixes another's symptom. Three of the four also have a cheap wrong repair that trades one wrong answer for another, and the graded suite carries the guard that catches each one, so the measurement separates a repair from a patch. DIAGNOSIS.md is asked for because the corpus task asks for it, and it is NOT mechanically graded.",
+      "prompt": "This workspace holds `ledger`, a double-entry ledger and reconciliation engine for a small multi-currency book of accounts. It is standard library only; there is nothing to install and no network is available. `bash test.sh` runs the suite, `bash build.sh` byte-compiles the package, `bash run.sh` prints the report over `data/`.\n\nFour faults have been reported against it and reproduced. `BUGS.md` holds the four field reports. None of them names a module, a function or a line, because locating the fault is the work. The README and the docstrings state the intended contracts; where the code and a stated contract disagree, the contract is right.\n\nThe suite in `tests/` passes as it stands, so it will not point at the faults for you.\n\nDiagnose before you edit. Read a report, find the code path that produces the behaviour it describes, and form a concrete explanation - which value is wrong, where it becomes wrong, and why the surrounding code produces it - before you change a character. Two of the four faults are one minor unit wide and only show on the real data under `data/`, not on the short fixtures.\n\nDo not edit, delete, rename, skip or relax anything under `tests/` or under `data/`, and do not add to either. Do not rewrite a module - this is a repair, and the expected diff is well under sixty lines across four files. Do not branch on a value taken from a fixture; the fix must be the general one.\n\nEvery test that passes now must still pass. Each field report names the behaviour nearest to its fault that must not move, because three of the four faults have a cheap repair that trades one wrong answer for another.\n\nWrite `DIAGNOSIS.md` at the root with one section per root cause: where the fault lives, what the code actually does in terms of values, why that is wrong, and why your change is the general fix rather than a patch over the symptom. If you could not resolve one, say so plainly.",
+      "seedDir": "bench/corpus/debugging-repair/ledger-rounding/seed",
+      "hiddenDir": "bench/corpus/debugging-repair/ledger-rounding/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "--start-directory",
+        "gauge",
+        "--top-level-directory",
+        "."
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "--start-directory",
+        "tests",
+        "--top-level-directory",
+        "."
+      ],
+      "behavioralPaths": [
+        "ledger/**"
+      ],
+      "runTimeoutSec": 3600
+    },
+    {
+      "id": "lru-cache-eviction-cpp",
+      "tier": "T2",
+      "mechanism": "none",
+      "expectedTrajectory": "the run decomposes to four items, one per reported fault, and all four land in include/lru/lru_cache.hpp, so no two have disjoint fileScopes and the items must serialise however the scheduler is configured; a run that dispatches two of them into one wave is the finding",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "cpp",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "The single-file counterpart to the other two repairs: four independent faults in four different functions of one header, so the work decomposes but the file scopes do not. mechanism is none rather than parallel-waves because the wave scheduler CANNOT dispatch these together and declaring otherwise would name a trajectory the run cannot take. difficulty is multi-file because the bench vocabulary has only one-function and multi-file and this is not a one-function change; the contention is single-file, which that vocabulary cannot say.",
+      "prompt": "This workspace holds `lru`, a weight-bounded LRU cache with per-entry expiry, written in C++17. One header carries the cache template; the two translation units under `src/` carry the clock and the counters. `bash test.sh` builds and runs the suite, `bash build.sh` builds everything, `bash run.sh` runs the demonstration workload. The build must stay free of warnings under `-Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor`.\n\nFour faults have been reported against it and reproduced. `BUGS.md` holds the four field reports. None of them names a file, a function or a line, because locating the fault is the work. The header comments and the README state the intended contracts; where the code and a stated contract disagree, the contract is right.\n\nThe suite in `tests/` passes as it stands, so it will not point at the faults for you.\n\nDiagnose before you edit. Read a report, find the code path that produces the behaviour it describes, and form a concrete explanation - which value is wrong, where it becomes wrong, and why the surrounding code produces it - before you change a character. Three of the four faults only show on a particular sequence of operations, so a change made without a diagnosis is as likely to break a passing test as to repair anything.\n\nDo not edit, delete, rename, skip or relax anything under `tests/`, and do not add to it. Do not rewrite the header - this is a repair, and the expected diff is a handful of lines. Do not branch on a key, a weight or a timestamp taken from anywhere; the fix must be the general one.\n\nEvery test that passes now must still pass. Each field report names the behaviour nearest to its fault that must not move.\n\nSome things that look like faults are deliberate and correct: the hash finaliser on top of `std::hash` exists because `std::hash` is the identity for integral keys, rehashing at the current slot count is the tombstone sweep, `peek` deliberately leaves recency and the counters alone, the cache does not claim to be thread-safe, and the key listing deliberately includes entries that have timed out but have not been reclaimed yet.\n\nWrite `DIAGNOSIS.md` at the root with one section per root cause: where the fault lives, what the code actually does in terms of values, why that is wrong, and the change you made. If you could not resolve one, say so plainly.",
+      "seedDir": "bench/corpus/debugging-repair/lru-cache-eviction/seed",
+      "hiddenDir": "bench/corpus/debugging-repair/lru-cache-eviction/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/build.py"
+      ],
+      "repoTestCommand": [
+        "bash",
+        "test.sh"
+      ],
+      "behavioralPaths": [
+        "include/**",
+        "src/**"
+      ],
+      "runTimeoutSec": 3600
+    },
+    {
+      "id": "config-schema-migration-ts",
+      "tier": "T3",
+      "mechanism": "ambiguous-requirement",
+      "expectedTrajectory": "the plan reaches the twelve open questions in section 4 of MIGRATION-SPEC.md and surfaces at least one of them rather than resolving it silently, then decomposes to a schema item that every consumer item depends on, so the consumer items cannot start until the schema exists",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED",
+        "surfaced"
+      ],
+      "language": "ts",
+      "difficulty": "multi-file",
+      "behavioral": false,
+      "rationale": "A pure refactor whose suite is already green and must stay green, so no red-green test can be written first and behavioral is false with behavioralPaths over src/**. The mechanism is ambiguous-requirement because the specification deliberately refuses to resolve twelve questions - two keys have contradictory defaults in two modules at once, five more have module fallbacks the defaults table makes unreachable - and each has to be decided and written down. The graded checks are the specification's own words: section 2 gives the two greps and says they must print nothing, section 5 says the package keeps no dependencies.",
+      "prompt": "This workspace holds `relay`, an HTTP ingest daemon written in TypeScript. It reads configuration from four sources - a defaults table, a JSON file, `RELAY_*` environment variables and the command line - merges them into a single `Record<string, any>` keyed by dotted strings, and lets twenty-one modules index into it with six different accessor idioms and their own inline fallbacks. Three hand-maintained key tables have drifted apart, and only three keys are validated at all.\n\nReplace that with one declarative schema module, a validator you write here, a fully typed deeply frozen configuration object, and every consumer switched to typed field access.\n\nRead `MIGRATION-SPEC.md` before you write any code. It is the specification: the target state, a before/after table of every idiom that changes, the behaviour that must be preserved exactly, and twelve questions that are genuinely open. It does not answer those twelve; answering them is the work.\n\nThe suite in `test/` is six files and seventy-six tests and it passes on the code you were given. Do not change, delete, rename, move or add a file under `test/`, and do not change `test.sh`, which names all six suites explicitly. The suite asserts observable behaviour, so a correct migration keeps it green without touching it. If a test fails, the migration changed behaviour: repair the migration, not the test.\n\nThe migration must be complete. Check it yourself from the workspace root:\n\n    grep -rn --include='*.ts' -E '\\[\\s*\"(server|auth|rateLimit|cors|pipeline|retry|sink|transform|log|metrics|spool)\\.' src | grep -v '^src/config/' | grep -v '^src/testsupport/'\n    grep -rn --include='*.ts' -E '\\b(getStr|getNum|getBool|getList)\\(' src | grep -v '^src/config/'\n\nOn the code you started from the first prints 15 lines and the second prints 29. Both must print nothing when you are done.\n\nLeaving a compatibility shim in place to avoid migrating call sites is a failure: no `get(key: string)` helper for production modules to keep using, no `toLegacyBag()` that reconstitutes the untyped record, no keeping `getStr`/`getNum`/`getBool`/`getList` alive so the consumers do not have to change, no `as any` at the boundary. The call sites are the point.\n\n`src/testsupport/harness.ts` is the one deliberate exception. Its exported signatures are frozen because the frozen tests import them, and `effective(key)` and `keys()` must keep resolving canonical dotted keys. Implement them by walking the schema - that is what a declarative schema is for. Reconstructing an untyped bag inside the harness, or hard-coding a lookup table there, defeats the exercise even though the tests go green.\n\nOnly erasable TypeScript works, because Node strips types rather than compiling them: no `enum`, no `namespace`, no parameter properties, no decorators. Use `const` objects and union types. Imports keep their `.ts` extension. `types/node-builtins.d.ts` stands in for `@types/node`; weakening a configuration type by editing it does not count as type safety. `package.json` has no dependencies today and must have none when you are done.\n\n`bash build.sh`, `bash run.sh` and `bash test.sh` must all still exit 0. `build.sh` type-checks when a TypeScript compiler is present and degrades to a parse check with a `TYPE CHECK SKIPPED` note when one is not; keep that behaviour.\n\nWrite `MIGRATION-NOTES.md` at the root. For each of the twelve open questions in section 4 of `MIGRATION-SPEC.md`: what you decided, why, and what deciding the other way would have broken. Add an entry for every other conflict you found - there is at least one key whose default disagrees between two modules at runtime, and several whose module fallback is unreachable because the defaults table always supplies a value. Say which value you put in the schema and why. Notes that restate the diff instead of resolving the questions are worth nothing.",
+      "seedDir": "bench/corpus/refactor-migration/config-schema-migration/seed",
+      "hiddenDir": "bench/corpus/refactor-migration/config-schema-migration/hidden",
+      "hiddenTestCommand": [
+        "node",
+        "--test",
+        "gauge/spec.test.ts",
+        "gauge/config-precedence.test.ts",
+        "gauge/config-validation.test.ts",
+        "gauge/observability.test.ts",
+        "gauge/pipeline.test.ts",
+        "gauge/server.test.ts",
+        "gauge/storage.test.ts"
+      ],
+      "repoTestCommand": [
+        "node",
+        "--test",
+        "test/config-precedence.test.ts",
+        "test/config-validation.test.ts",
+        "test/observability.test.ts",
+        "test/pipeline.test.ts",
+        "test/server.test.ts",
+        "test/storage.test.ts"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 7200
+    },
+    {
+      "id": "http-client-v2-py",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the plan orders the work by what async propagation forces: the session pool and the gateway first, then the retry decorator, the tracing scope, the poller and the fan-out that call them, then the test-support helpers whose synchronous signatures the frozen suite depends on; items dispatched out of that order will not compile against each other",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED",
+        "surfaced"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": false,
+      "rationale": "The dependency chain is the task: four files import the old client, but about forty functions across twelve modules change colour once async propagates through them, and no item can be finished before the one below it. behavioral is false because the sixty-four-test suite is frozen and already green, so behavioralPaths over feedservice/** is what still holds each item to the suite. repoTestCommand is the unittest discover ALONE and not bash test.sh: test.sh also runs the completeness gate, which flips from baseline to strict the moment anything imports the new client, which would turn the visible suite red part-way through the migration and wedge every item at RED.",
+      "prompt": "This workspace holds `feedservice`, a Python service that reads a product catalog, a pricing service and an inventory service, joins them into one report, caches the results, retries transient failures and keeps a background poller warming the cache. It is built entirely on `legacy_http`, a deprecated synchronous internal HTTP client. `modern_http` is the supported asynchronous replacement and is already vendored beside it. Move the whole service onto it.\n\nRead `MIGRATION-SPEC.md` first: the target state, a side-by-side table of the two APIs, the behaviour that must be preserved exactly, the frozen surface, and twelve decisions the spec deliberately does not make for you. Then `ARCHITECTURE.md` for how a request flows through the service, and `modern_http/` itself - `python3 -m modern_http._selfcheck` runs a worked example of every call form it supports.\n\nThe two libraries do not agree about anything. One reports failures as `status_code == 0` plus an `error_kind` string, the other raises a five-deep exception hierarchy. One takes a float timeout meaning the whole request, the other takes a `Timeout` object with separate connect, read and total budgets. One hands back a stream handle that stops quietly when the connection dies, the other raises mid-iteration. One is used by construction and `close()`, the other refuses to work unless entered as an async context manager.\n\nThe four files that `import legacy_http` are the easy part. The rest is what changes colour once async propagates: a retry decorator that sleeps between attempts, a reentrant session scope holding ambient state in a `threading.local` and handing it to worker threads explicitly, a tracing context manager in production code that installs a client hook on every dashboard build, a background poller thread with an `Event`-driven sleep and a stop protocol, a parallel-refresh fan-out over a thread pool sharing one session pool, and the test-support helpers in `feedservice/testing.py` whose synchronous signatures the frozen suite calls directly.\n\n`feedservice.app.Application` keeps its synchronous public surface. Everything below it becomes async. Where the loop lives, and how the poller shares it with foreground calls, is your call and one of the decisions you must document.\n\nRules. Do not edit anything under `tests/`: it asserts observable behaviour - report contents, request counts, cache sources, error types, counters - and a correct migration keeps it green without a single edit. If a test fails, the code is wrong. Do not edit `legacy_http/`, `modern_http/`, `wirenet/`, `feedservice/demo_upstreams.py` or `scripts/`. Finish the migration: no call site may stay on the old API, `legacy_http` stays in the tree unimported and unedited. Check it yourself:\n\n    grep -rn legacy_http feedservice tests\n    python3 scripts/poison_legacy.py\n    bash scripts/check_migration.sh\n\nThe first must print nothing, the second must exit 0, and the third must reach strict mode with no `FAIL:` lines.\n\nRe-creating `legacy_http`'s interface is a failure even with a green suite: no wrapper returning objects with `.status_code` and `.error_kind`, no helper turning exceptions back into status codes, no adapter that lets call sites stay as they are. The point of the exercise is that the call sites move to the new idiom.\n\nThere is no network. Everything runs against the vendored in-process fake network.\n\n`bash build.sh`, `bash run.sh` and `bash test.sh` must all still exit 0.\n\nWrite `MIGRATION-NOTES.md` at the root. For every decision in section 5 of `MIGRATION-SPEC.md`: what you chose, what you rejected, why, and what evidence in the suite or the libraries drove it. Name any place where the two error taxonomies genuinely cannot be made to line up, and say what you gave up.",
+      "seedDir": "bench/corpus/refactor-migration/http-client-v2/seed",
+      "hiddenDir": "bench/corpus/refactor-migration/http-client-v2/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-t",
+        "."
+      ],
+      "behavioralPaths": [
+        "feedservice/**"
+      ],
+      "runTimeoutSec": 7200
+    }
+  ]
+}

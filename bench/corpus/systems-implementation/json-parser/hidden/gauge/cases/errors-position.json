@@ -1,0 +1,30 @@
+{
+  "group": "errors-position",
+  "description": "Byte offset, line and column reporting.",
+  "cases": [
+    {"id": "errors-position-001", "note": "b'[\\n1,\\n]'", "input": "[\n1,\n]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 5, "line": 3, "column": 1},
+    {"id": "errors-position-002", "note": "b'[\\n  1,\\n  2,\\n  ]'", "input": "[\n  1,\n  2,\n  ]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 14, "line": 4, "column": 3},
+    {"id": "errors-position-003", "note": "b'{\\n  \"a\": 1,\\n  \"b\": }'", "input": "{\n  \"a\": 1,\n  \"b\": }", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 19, "line": 3, "column": 8},
+    {"id": "errors-position-004", "note": "b'{\\n  \"a\": 1\\n  \"b\": 2\\n}'", "input": "{\n  \"a\": 1\n  \"b\": 2\n}", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 13, "line": 3, "column": 3},
+    {"id": "errors-position-005", "note": "b'{\\n\"a\":\\t,\\n}'", "input": "{\n\"a\":\t,\n}", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 7, "line": 2, "column": 6},
+    {"id": "errors-position-006", "note": "b'[1,\\n2,\\n3'", "input": "[1,\n2,\n3", "expect": "reject", "code": "E_UNEXPECTED_EOF", "offset": 8, "line": 3, "column": 2},
+    {"id": "errors-position-007", "note": "b'[\"\\xc3\\xa9\", ]'", "input": "[\"\u00e9\", ]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 7, "line": 1, "column": 8},
+    {"id": "errors-position-008", "note": "b'[\"\\xc3\\xa9\\xc3\\xa9\\xc3\\xa9\", ]'", "input": "[\"\u00e9\u00e9\u00e9\", ]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 11, "line": 1, "column": 12},
+    {"id": "errors-position-009", "note": "b'[\"\\xf0\\x9f\\x98\\x80\", ]'", "input": "[\"\ud83d\ude00\", ]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 9, "line": 1, "column": 10},
+    {"id": "errors-position-010", "note": "b'{\"\\xe2\\x82\\xac\": }'", "input": "{\"\u20ac\": }", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 8, "line": 1, "column": 9},
+    {"id": "errors-position-011", "note": "b'[\\r\\n1,\\r\\n]'", "input": "[\r\n1,\r\n]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 7, "line": 3, "column": 1},
+    {"id": "errors-position-012", "note": "b'[1,\\r]'", "input": "[1,\r]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 4, "line": 1, "column": 5},
+    {"id": "errors-position-013", "note": "b'[\\n\\n\\n\\nx]'", "input": "[\n\n\n\nx]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 5, "line": 5, "column": 1},
+    {"id": "errors-position-014", "note": "b'[\"a\",\\n \"b\",\\n 01]'", "input": "[\"a\",\n \"b\",\n 01]", "expect": "reject", "code": "E_BAD_NUMBER", "offset": 14, "line": 3, "column": 3},
+    {"id": "errors-position-015", "note": "b'{\\n \"a\": \"x\\x00y\"\\n}'", "input": "{\n \"a\": \"x\u0000y\"\n}", "expect": "reject", "code": "E_CONTROL_CHAR", "offset": 10, "line": 2, "column": 9},
+    {"id": "errors-position-016", "note": "b'{\\n \"a\": \"\\\\q\"\\n}'", "input": "{\n \"a\": \"\\q\"\n}", "expect": "reject", "code": "E_BAD_STRING_ESCAPE", "offset": 10, "line": 2, "column": 9},
+    {"id": "errors-position-017", "note": "b'{\\n \"a\": \"\\\\u12zz\"\\n}'", "input": "{\n \"a\": \"\\u12zz\"\n}", "expect": "reject", "code": "E_BAD_UNICODE_ESCAPE", "offset": 13, "line": 2, "column": 12},
+    {"id": "errors-position-018", "note": "b'[\\n \"ok\",\\n \"\\\\ud800\"\\n]'", "input": "[\n \"ok\",\n \"\\ud800\"\n]", "expect": "reject", "code": "E_LONE_SURROGATE", "offset": 11, "line": 3, "column": 3},
+    {"id": "errors-position-019", "note": "b'[]\\n\\nx'", "input": "[]\n\nx", "expect": "reject", "code": "E_TRAILING", "offset": 4, "line": 3, "column": 1},
+    {"id": "errors-position-020", "note": "b'\\n\\n\\n'", "input": "\n\n\n", "expect": "reject", "code": "E_EMPTY", "offset": 3, "line": 4, "column": 1},
+    {"id": "errors-position-021", "note": "b'[1,2]\\n[3]'", "input": "[1,2]\n[3]", "expect": "reject", "code": "E_TRAILING", "offset": 6, "line": 2, "column": 1},
+    {"id": "errors-position-022", "note": "b'{\"a\":1}\\n\\n{\"b\":2}'", "input": "{\"a\":1}\n\n{\"b\":2}", "expect": "reject", "code": "E_TRAILING", "offset": 9, "line": 3, "column": 1},
+    {"id": "errors-position-023", "note": "b'[\\n1 2\\n]'", "input": "[\n1 2\n]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 4, "line": 2, "column": 3},
+    {"id": "errors-position-024", "note": "b'[\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...", "input": "[\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" \"y\"]", "expect": "reject", "code": "E_UNEXPECTED_BYTE", "offset": 304, "line": 1, "column": 305}
+  ]
+}

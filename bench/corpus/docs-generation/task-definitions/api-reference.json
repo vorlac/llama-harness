@@ -1,0 +1,31 @@
+{
+  "id": "api-reference",
+  "title": "Reference documentation for the public API surface",
+  "category": "docs-generation",
+  "description": "Enumerate the public surface a consumer of the target actually depends on - exported functions, types, commands, or endpoints - emit it mechanically as symbols.txt, then document each entry with its signature, parameters, return and error behaviour, cited to the definition site. Coverage relative to the real surface and citation accuracy dominate the score; the symbols.txt/index consistency check replaces the diagram check used by the other tasks.",
+  "size": "large",
+  "languages": ["markdown"],
+  "prompt": "docs-generation/docs-api-reference-prompt.md",
+  "difficulty": 6,
+  "timeouts": {
+    "build": 60,
+    "run": 2400,
+    "test": 600
+  },
+  "verify": "check_docs.py",
+  "verify_target": "API-REFERENCE.md",
+  "verify_args": [
+    "--min-words", "3000",
+    "--max-words", "8000",
+    "--require-section", "Enumeration method",
+    "--require-section", "Symbol index",
+    "--require-section", "Reference",
+    "--require-section", "Coverage",
+    "--require-section", "Open questions"
+  ],
+  "starting_material": null,
+  "artifacts": ["API-REFERENCE.md", "symbols.txt"],
+  "workspace_task_id": "{{TARGET}}-api-reference",
+  "variables": ["{{TARGET}}"],
+  "targets": ["*"]
+}

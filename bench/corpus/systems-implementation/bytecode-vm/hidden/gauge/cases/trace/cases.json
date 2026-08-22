@@ -1,0 +1,91 @@
+{
+  "group": "trace",
+  "description": "The instruction trace: one line per executed instruction with the frame depth, function index, byte offset and stack size.",
+  "case_count": 4,
+  "cases": [
+    {
+      "id": "trace-001-smoke",
+      "mode": "trace",
+      "source": "asm/trace-001-smoke.asm",
+      "expect_exit": 0,
+      "expect_stdout": "hello, svm\n42\n",
+      "expect_stderr": [
+        "trace: depth=1 fn=0 pc=0000 op=PUSH_STR sp=0",
+        "trace: depth=1 fn=0 pc=0003 op=PRINT sp=1",
+        "trace: depth=1 fn=0 pc=0004 op=PUSH_INT sp=0",
+        "trace: depth=1 fn=0 pc=0007 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=000a op=MUL sp=2",
+        "trace: depth=1 fn=0 pc=000b op=PRINT sp=1",
+        "trace: depth=1 fn=0 pc=000c op=RET sp=0"
+      ]
+    },
+    {
+      "id": "trace-002-call",
+      "mode": "trace",
+      "source": "asm/trace-002-call.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\n",
+      "expect_stderr": [
+        "trace: depth=1 fn=0 pc=0000 op=CLOSURE sp=0",
+        "trace: depth=1 fn=0 pc=0003 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=0006 op=CALL sp=2",
+        "trace: depth=2 fn=1 pc=0000 op=LOAD_LOCAL sp=0",
+        "trace: depth=2 fn=1 pc=0002 op=PUSH_INT sp=1",
+        "trace: depth=2 fn=1 pc=0005 op=ADD sp=2",
+        "trace: depth=2 fn=1 pc=0006 op=RET sp=1",
+        "trace: depth=1 fn=0 pc=0008 op=PRINT sp=1",
+        "trace: depth=1 fn=0 pc=0009 op=RET sp=0"
+      ]
+    },
+    {
+      "id": "trace-003-loop",
+      "mode": "trace",
+      "source": "asm/trace-003-loop.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9\n",
+      "expect_stderr": [
+        "trace: depth=1 fn=0 pc=0000 op=PUSH_INT sp=0",
+        "trace: depth=1 fn=0 pc=0003 op=STORE_LOCAL sp=1",
+        "trace: depth=1 fn=0 pc=0005 op=LOAD_LOCAL sp=0",
+        "trace: depth=1 fn=0 pc=0007 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=000a op=NE sp=2",
+        "trace: depth=1 fn=0 pc=000b op=JMP_IF_FALSE sp=1",
+        "trace: depth=1 fn=0 pc=000e op=LOAD_LOCAL sp=0",
+        "trace: depth=1 fn=0 pc=0010 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=0013 op=SUB sp=2",
+        "trace: depth=1 fn=0 pc=0014 op=STORE_LOCAL sp=1",
+        "trace: depth=1 fn=0 pc=0016 op=JMP sp=0",
+        "trace: depth=1 fn=0 pc=0005 op=LOAD_LOCAL sp=0",
+        "trace: depth=1 fn=0 pc=0007 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=000a op=NE sp=2",
+        "trace: depth=1 fn=0 pc=000b op=JMP_IF_FALSE sp=1",
+        "trace: depth=1 fn=0 pc=000e op=LOAD_LOCAL sp=0",
+        "trace: depth=1 fn=0 pc=0010 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=0013 op=SUB sp=2",
+        "trace: depth=1 fn=0 pc=0014 op=STORE_LOCAL sp=1",
+        "trace: depth=1 fn=0 pc=0016 op=JMP sp=0",
+        "trace: depth=1 fn=0 pc=0005 op=LOAD_LOCAL sp=0",
+        "trace: depth=1 fn=0 pc=0007 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=000a op=NE sp=2",
+        "trace: depth=1 fn=0 pc=000b op=JMP_IF_FALSE sp=1",
+        "trace: depth=1 fn=0 pc=0019 op=PUSH_INT sp=0",
+        "trace: depth=1 fn=0 pc=001c op=PRINT sp=1",
+        "trace: depth=1 fn=0 pc=001d op=RET sp=0"
+      ]
+    },
+    {
+      "id": "trace-004-trap",
+      "mode": "trace",
+      "source": "asm/trace-004-trap.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_DIV_ZERO",
+      "expect_stderr": [
+        "trace: depth=1 fn=0 pc=0000 op=PUSH_INT sp=0",
+        "trace: depth=1 fn=0 pc=0003 op=PUSH_INT sp=1",
+        "trace: depth=1 fn=0 pc=0006 op=DIV sp=2"
+      ],
+      "note": "the trace stops at the trapping instruction"
+    }
+  ]
+}

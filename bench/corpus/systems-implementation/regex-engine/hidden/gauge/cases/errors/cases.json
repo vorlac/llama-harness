@@ -1,0 +1,1169 @@
+{
+  "group": "errors",
+  "description": "Compile errors. Every case gives the exact error code and the 0-based CODE POINT index in the pattern that the SPEC 7 table assigns to it.",
+  "default_time_limit_ms": 2000,
+  "cases": [
+    {
+      "id": "errors-001",
+      "cmd": "compile",
+      "pattern": "\\\\",
+      "expect": {
+        "error": [
+          "trailing-backslash",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-002",
+      "cmd": "compile",
+      "pattern": "a\\\\",
+      "expect": {
+        "error": [
+          "trailing-backslash",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-003",
+      "cmd": "compile",
+      "pattern": "(a)\\\\",
+      "expect": {
+        "error": [
+          "trailing-backslash",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-004",
+      "cmd": "compile",
+      "pattern": "[a\\\\",
+      "expect": {
+        "error": [
+          "trailing-backslash",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-005",
+      "cmd": "match",
+      "pattern": "abc\\\\",
+      "expect": {
+        "error": [
+          "trailing-backslash",
+          3
+        ]
+      },
+      "subject": "aaa"
+    },
+    {
+      "id": "errors-006",
+      "cmd": "compile",
+      "pattern": "\\\\y",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-007",
+      "cmd": "compile",
+      "pattern": "\\\\A",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-008",
+      "cmd": "compile",
+      "pattern": "\\\\z",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-009",
+      "cmd": "compile",
+      "pattern": "\\\\1",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-010",
+      "cmd": "compile",
+      "pattern": "(a)\\\\1",
+      "expect": {
+        "error": [
+          "bad-escape",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-011",
+      "cmd": "compile",
+      "pattern": "\\\\p",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-012",
+      "cmd": "compile",
+      "pattern": "\\\\Q",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-013",
+      "cmd": "compile",
+      "pattern": "a\\\\e",
+      "expect": {
+        "error": [
+          "bad-escape",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-014",
+      "cmd": "compile",
+      "pattern": "\\\\u0041",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-015",
+      "cmd": "compile",
+      "pattern": "\\\\x",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-016",
+      "cmd": "compile",
+      "pattern": "\\\\x4",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-017",
+      "cmd": "compile",
+      "pattern": "\\\\xg1",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-018",
+      "cmd": "compile",
+      "pattern": "a\\\\x4z",
+      "expect": {
+        "error": [
+          "bad-escape",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-019",
+      "cmd": "compile",
+      "pattern": "[\\\\b]",
+      "expect": {
+        "error": [
+          "bad-escape",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-020",
+      "cmd": "compile",
+      "pattern": "[\\\\q]",
+      "expect": {
+        "error": [
+          "bad-escape",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-021",
+      "cmd": "compile",
+      "pattern": "[a\\x2d\\\\d]",
+      "expect": {
+        "error": [
+          "bad-escape",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-022",
+      "cmd": "compile",
+      "pattern": "(",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-023",
+      "cmd": "compile",
+      "pattern": "(a",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-024",
+      "cmd": "compile",
+      "pattern": "a(b",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-025",
+      "cmd": "compile",
+      "pattern": "((a)",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-026",
+      "cmd": "compile",
+      "pattern": "(?:a",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-027",
+      "cmd": "match",
+      "pattern": "(a|b",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          0
+        ]
+      },
+      "subject": "aaa"
+    },
+    {
+      "id": "errors-028",
+      "cmd": "compile",
+      "pattern": ")",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-029",
+      "cmd": "compile",
+      "pattern": "a)",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-030",
+      "cmd": "compile",
+      "pattern": "(a))",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-031",
+      "cmd": "compile",
+      "pattern": "(a)b)c",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          4
+        ]
+      }
+    },
+    {
+      "id": "errors-032",
+      "cmd": "compile",
+      "pattern": "]",
+      "expect": {
+        "error": [
+          "unexpected-bracket",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-033",
+      "cmd": "compile",
+      "pattern": "a]",
+      "expect": {
+        "error": [
+          "unexpected-bracket",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-034",
+      "cmd": "compile",
+      "pattern": "(a)]b",
+      "expect": {
+        "error": [
+          "unexpected-bracket",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-035",
+      "cmd": "compile",
+      "pattern": "a\\\\]]",
+      "expect": {
+        "error": [
+          "unexpected-bracket",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-036",
+      "cmd": "compile",
+      "pattern": "[",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-037",
+      "cmd": "compile",
+      "pattern": "[a",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-038",
+      "cmd": "compile",
+      "pattern": "[a\\x2dz",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-039",
+      "cmd": "compile",
+      "pattern": "[^abc",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-040",
+      "cmd": "compile",
+      "pattern": "a[bc",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-041",
+      "cmd": "compile",
+      "pattern": "[\\\\]",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-042",
+      "cmd": "compile",
+      "pattern": "[]",
+      "expect": {
+        "error": [
+          "empty-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-043",
+      "cmd": "compile",
+      "pattern": "[^]",
+      "expect": {
+        "error": [
+          "empty-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-044",
+      "cmd": "compile",
+      "pattern": "[]]",
+      "expect": {
+        "error": [
+          "empty-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-045",
+      "cmd": "compile",
+      "pattern": "[]a]",
+      "expect": {
+        "error": [
+          "empty-class",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-046",
+      "cmd": "compile",
+      "pattern": "a[]",
+      "expect": {
+        "error": [
+          "empty-class",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-047",
+      "cmd": "compile",
+      "pattern": "[z\\x2da]",
+      "expect": {
+        "error": [
+          "class-range-out-of-order",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-048",
+      "cmd": "compile",
+      "pattern": "[9\\x2d0]",
+      "expect": {
+        "error": [
+          "class-range-out-of-order",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-049",
+      "cmd": "compile",
+      "pattern": "[a\\x2dc][z\\x2dx]",
+      "expect": {
+        "error": [
+          "class-range-out-of-order",
+          7
+        ]
+      }
+    },
+    {
+      "id": "errors-050",
+      "cmd": "compile",
+      "pattern": "[\\\\x41\\x2d\\\\x30]",
+      "expect": {
+        "error": [
+          "class-range-out-of-order",
+          5
+        ]
+      }
+    },
+    {
+      "id": "errors-051",
+      "cmd": "compile",
+      "pattern": "[a\\x2db0\\x2d9Z\\x2dA]",
+      "expect": {
+        "error": [
+          "class-range-out-of-order",
+          8
+        ]
+      }
+    },
+    {
+      "id": "errors-052",
+      "cmd": "compile",
+      "pattern": "*",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-053",
+      "cmd": "compile",
+      "pattern": "+",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-054",
+      "cmd": "compile",
+      "pattern": "?",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-055",
+      "cmd": "compile",
+      "pattern": "*a",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-056",
+      "cmd": "compile",
+      "pattern": "a**",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-057",
+      "cmd": "compile",
+      "pattern": "a*+",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-058",
+      "cmd": "compile",
+      "pattern": "a+*",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-059",
+      "cmd": "compile",
+      "pattern": "a???",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-060",
+      "cmd": "compile",
+      "pattern": "(*)",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-061",
+      "cmd": "compile",
+      "pattern": "(?:*)",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-062",
+      "cmd": "compile",
+      "pattern": "|*",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-063",
+      "cmd": "compile",
+      "pattern": "a|*b",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-064",
+      "cmd": "compile",
+      "pattern": "^*",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-065",
+      "cmd": "compile",
+      "pattern": "$*",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-066",
+      "cmd": "compile",
+      "pattern": "\\\\b?",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-067",
+      "cmd": "compile",
+      "pattern": "{2}",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-068",
+      "cmd": "compile",
+      "pattern": "a*{2}",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-069",
+      "cmd": "match",
+      "pattern": "a{2}{3}",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          4
+        ]
+      },
+      "subject": "aaa"
+    },
+    {
+      "id": "errors-070",
+      "cmd": "compile",
+      "pattern": "a{",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-071",
+      "cmd": "compile",
+      "pattern": "a{}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-072",
+      "cmd": "compile",
+      "pattern": "a{,3}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-073",
+      "cmd": "compile",
+      "pattern": "a{2,1}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-074",
+      "cmd": "compile",
+      "pattern": "a{a}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-075",
+      "cmd": "compile",
+      "pattern": "a{2",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-076",
+      "cmd": "compile",
+      "pattern": "a{2,",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-077",
+      "cmd": "compile",
+      "pattern": "a{2,3",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-078",
+      "cmd": "compile",
+      "pattern": "{",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-079",
+      "cmd": "compile",
+      "pattern": "}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-080",
+      "cmd": "compile",
+      "pattern": "a}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-081",
+      "cmd": "compile",
+      "pattern": "a{2}}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          4
+        ]
+      }
+    },
+    {
+      "id": "errors-082",
+      "cmd": "compile",
+      "pattern": "a{1001}",
+      "expect": {
+        "error": [
+          "repeat-too-large",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-083",
+      "cmd": "compile",
+      "pattern": "a{0,1001}",
+      "expect": {
+        "error": [
+          "repeat-too-large",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-084",
+      "cmd": "compile",
+      "pattern": "a{2000,3000}",
+      "expect": {
+        "error": [
+          "repeat-too-large",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-085",
+      "cmd": "compile",
+      "pattern": "(?i)a",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-086",
+      "cmd": "compile",
+      "pattern": "(?P<n>a)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-087",
+      "cmd": "compile",
+      "pattern": "(?=a)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-088",
+      "cmd": "compile",
+      "pattern": "(?!a)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-089",
+      "cmd": "compile",
+      "pattern": "(?<=a)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-090",
+      "cmd": "compile",
+      "pattern": "(?#c)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-091",
+      "cmd": "compile",
+      "pattern": "(?)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-092",
+      "cmd": "compile",
+      "pattern": "(?",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-093",
+      "cmd": "compile",
+      "pattern": "a(?s:b)",
+      "expect": {
+        "error": [
+          "unsupported-group",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-094",
+      "cmd": "compile",
+      "pattern": "\\xc3\\xa9\\\\y",
+      "expect": {
+        "error": [
+          "bad-escape",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-095",
+      "cmd": "compile",
+      "pattern": "\\xc3\\xa9(",
+      "expect": {
+        "error": [
+          "unbalanced-paren",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-096",
+      "cmd": "compile",
+      "pattern": "\\xe6\\x97\\xa5\\xe6\\x9c\\xac[",
+      "expect": {
+        "error": [
+          "unterminated-class",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-097",
+      "cmd": "compile",
+      "pattern": "\\xe2\\x82\\xaca{2,1}",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-098",
+      "cmd": "compile",
+      "pattern": "\\xf0\\x9f\\x98\\x80**",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-099",
+      "cmd": "compile",
+      "pattern": "[z\\x2da",
+      "expect": {
+        "error": [
+          "class-range-out-of-order",
+          2
+        ]
+      }
+    },
+    {
+      "id": "errors-100",
+      "cmd": "compile",
+      "pattern": "(*",
+      "expect": {
+        "error": [
+          "nothing-to-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-101",
+      "cmd": "compile",
+      "pattern": "a{2,1}b)",
+      "expect": {
+        "error": [
+          "bad-repeat",
+          1
+        ]
+      }
+    },
+    {
+      "id": "errors-102",
+      "cmd": "compile",
+      "pattern": "\\\\y)",
+      "expect": {
+        "error": [
+          "bad-escape",
+          0
+        ]
+      }
+    },
+    {
+      "id": "errors-103",
+      "cmd": "compile",
+      "pattern": "[a]]*",
+      "expect": {
+        "error": [
+          "unexpected-bracket",
+          3
+        ]
+      }
+    },
+    {
+      "id": "errors-104",
+      "cmd": "compile",
+      "pattern_build": [
+        [
+          "((a{100}){100}){100}",
+          1
+        ]
+      ],
+      "expect": {
+        "error": [
+          "program-too-large",
+          -1
+        ]
+      },
+      "note": "roughly one million instructions after expansion, over the 100000-instruction ceiling of SPEC 8"
+    },
+    {
+      "id": "errors-105",
+      "cmd": "compile",
+      "pattern": "(a{100}){100}",
+      "expect": {
+        "compile": "ok"
+      },
+      "note": "control: ten thousand instructions is under the ceiling and must compile"
+    }
+  ]
+}

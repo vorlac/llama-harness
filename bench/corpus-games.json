@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "selectionCriteria": {
+    "provenance": "Two tasks, authored against the tui-games corpus at llama-harness-test-results. The rules, the constants, the generators, the merge table and the recorded conformance vectors are the corpus's. The seeds, the visible suites and the hidden gauges are this repository's, because the corpus ships none: its tui-games tasks are self-graded, and porting one as written would have imported a metric that cannot fail.",
+    "whyOnlyTwo": "Eight tui-games tasks exist and six are not here. A tui-games task is scored by the model's own test.sh comparing the model's output against expected files the same model was told to generate, so the corpus's defence against that is a cross-language majority vote over five languages plus a human reviewer - neither of which a one-language headless cell has. An authored hidden gauge is only honest when the specification pins enough ground truth to prove the gauge itself right, and only snake and 2048 pin that much. bench/corpus/DEFERRED.md names the other six, one by one, with what each would need.",
+    "whatIsMeasured": "The pure rules half only. Both tasks are headless: no terminal, no raw mode, no signal handling, no pacing, no flicker and no idle-CPU budget. Roughly a third of the corpus's own snake rubric - terminal hygiene and loop discipline - is unmeasurable in a headless cell and is not measured here. Neither task claims to score a TUI.",
+    "scopeLadder": "T2 and T3, one task each. grid2048-headless-py names two independent requirements in two files that share nothing, which is the disjoint-scope shape T2 names. snake-headless-py is a four-module chain where each module imports the one before it, which is the shape T3 names. T0, T1 and T4 are empty and the pin says so.",
+    "hiddenTests": "The measurement lives in gauge/, which is never seeded into the work tree and is materialized only after the model's process has exited. Every expectation in it is either pinned by the seeded specification or produced by a reference implementation validated against those pins; nothing is compared against the work tree's own recorded output, which is the failure mode the corpus's own acceptance notes call out by name.",
+    "seedIsGreen": "Both seeded repositories pass their own visible suite, so a run starts from a green tree and a red visible test is the arm's doing. grid2048-headless-py additionally keeps its visible suite green once both requirements are met, which was checked against a complete implementation rather than assumed.",
+    "languageMix": "python only. Both tasks are pure logic over integers and lists with no build step, and the corpus's five-language list exists to feed the cross-language vote this campaign does not run.",
+    "preAnsweredMaterial": "Each seed's SPEC.md carries the specification's own worked examples, and the hidden gauge asserts some of them: the two generator sequences, the three first-food cells and the 1061-byte summary line for snake; the three generator vector rows, the five initial boards and the twelve-row merge table for 2048. Removing them would gut the normative document the task is built against. The recorded replay vectors - which is where each gauge's discrimination actually lives - appear nowhere in either seed."
+  },
+  "defaults": {
+    "model": "llamacpp/qwen3.8-27b",
+    "tierTimeoutSec": {
+      "T0": 1800,
+      "T1": 2700,
+      "T2": 3600,
+      "T3": 7200,
+      "T4": 3600
+    }
+  },
+  "expectedTaskCounts": {
+    "T0": 0,
+    "T1": 0,
+    "T2": 1,
+    "T3": 1,
+    "T4": 0
+  },
+  "sweep": {
+    "rationale": "One model, because one model is served. The set holds one T2 and one T3 task, so the two tiers that have a task in them are the swept ones and every other tier is primary-only by vacuity.",
+    "primaryModel": "llamacpp/qwen3.8-27b",
+    "models": [
+      "llamacpp/qwen3.8-27b"
+    ],
+    "sweptTiers": [
+      "T2",
+      "T3"
+    ],
+    "primaryOnlyTiers": [
+      "T0",
+      "T1",
+      "T4"
+    ],
+    "capabilities": [
+      "none"
+    ],
+    "reps": 3
+  },
+  "tasks": [
+    {
+      "id": "grid2048-headless-py",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to two independent items - the merge rule in src/moves.py and the rewind in src/undo.py - with disjoint fileScopes, and the scheduler dispatches them in one wave",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two named requirements, two files, no shared edit: neither module imports the other and src/session.py calls into both without either knowing the other exists, so the wave scheduler has two dependency-ready items with disjoint scopes and can dispatch them together. The gate is calibrated rather than assumed - on the unmodified seed 14 of the 24 graded cases fail, implementing only the merge rule leaves 7 failing, implementing only the rewind leaves 13 failing, and implementing both leaves none - so a cell passes exactly when both blocks are right and nothing else regressed.",
+      "prompt": "This workspace holds a headless 2048, specified by SPEC.md. The generator, the board, the spawn protocol, the counters, the script parser, the replay loop and the summary are written and pass the visible suite. Two requirements are not implemented, and NOTES.md keeps the index of which is where:\n\n- R7 step 2, in src/moves.py: slide_left gathers a row's non-zero values and pads the row back to four, but never combines a pair, so it emits every tile it was given and always reports a gain of zero. SPEC.md section 5 has the rule and the twelve-row table it has to satisfy. src/moves.py already routes all four directions through slide_left, so the rule lands once for all of them.\n- R13 and R14, in src/undo.py: a snapshot carries the board and the score only. The move counter and the generator's state are not recorded and not restored, so `moves` keeps climbing across an undo and a direction replayed after an undo draws fresh numbers and spawns a different tile. CAPACITY is declared and not enforced, so the stack grows without bound.\n\nImplement both. They touch different files and neither depends on the other. Do not regress anything that already works: the specification is normative in full, and the graded run checks the merge table row by row and column by column, move legality and rejection, the score, the rewind, and whole recorded summary lines byte for byte including the generator's state word.\n\npython3 tools/run_tests.py tests must keep passing. Keep NOTES.md honest: its requirement index is the workspace's own account of itself, so a requirement that stops being unimplemented moves in that table too.\n\nDo not change src/rng.py, src/board.py, src/summary.py, src/session.py or src/replay.py. Do not special-case an input by its values, its length or the seed it came from.",
+      "seedDir": "bench/corpus/tui-games/grid2048-headless/seed",
+      "hiddenDir": "bench/corpus/tui-games/grid2048-headless/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 3600
+    },
+    {
+      "id": "snake-headless-py",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the run decomposes to items chained rng -> food -> engine -> replay, producing three or more waves, with each later item held until the one it imports publishes",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "A four-module chain that cannot be reordered: food placement indexes a generator draw, the game consumes a placement per growth tick, and the replay drives the game from a fixed directive list. The graded run drives it with recorded scripts and compares whole summaries, so an arm that welds the rules into the replay loop still passes and an arm that gets the draw order wrong does not. Every expectation in the gauge was proved against a reference implementation written from the seeded specification alone, which reproduced the two pinned generator sequences, the three pinned first-food cells and the 1061-byte worked example byte for byte.",
+      "prompt": "This workspace holds a headless game of Snake, specified by SPEC.md. There is no terminal in it anywhere: a seed and a script of directives go in, one line of JSON comes out, and the same two inputs always produce the same bytes.\n\nsrc/board.py and src/summary.py are written. Four modules are not, and each one needs the one before it:\n\n1. src/rng.py exports Lcg. Lcg(seed) sets the state to seed modulo 2**32 and next() advances it by the multiplier and increment SPEC.md section 4 pins. Both sequences in that section must reproduce.\n2. src/food.py exports place(snake, rng). It indexes the free cells - src.board.free_cells already produces them in the order the placement depends on - with exactly one draw, and returns None on a full board.\n3. src/engine.py exports Game, per SPEC.md section 5: the initial state, the direction rule, pause, the tick with its wall, self and growth cases, the win condition, and restart.\n4. src/replay.py exports ScriptError, parse, replay and fields, per SPEC.md sections 6 to 8.\n\nDo not change src/board.py or src/summary.py, and keep the rules out of src/replay.py: the replay applies directives and nothing else.\n\npython3 tools/run_tests.py tests must keep passing. The graded run drives recorded scripts the workspace does not contain and compares whole summaries, so a partial field check is worth nothing there.\n\nNothing may sleep, read the wall clock, read a real random source, or open a socket. Do not special-case a script or a seed by its bytes, its length or its value.",
+      "seedDir": "bench/corpus/tui-games/snake-headless/seed",
+      "hiddenDir": "bench/corpus/tui-games/snake-headless/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run.py",
+        "gauge"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "tools/run_tests.py",
+        "tests"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 7200
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "group": "locals",
+  "description": "Local slots: default initialisation, store and load, parameter binding, per-frame isolation, and the stack shuffling opcodes.",
+  "case_count": 15,
+  "cases": [
+    {
+      "id": "locals-001-uninit",
+      "mode": "exec",
+      "source": "asm/locals-001-uninit.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\nnil\nnil\n"
+    },
+    {
+      "id": "locals-002-storeload",
+      "mode": "exec",
+      "source": "asm/locals-002-storeload.asm",
+      "expect_exit": 0,
+      "expect_stdout": "7\nseven\n"
+    },
+    {
+      "id": "locals-003-overwrite",
+      "mode": "exec",
+      "source": "asm/locals-003-overwrite.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n"
+    },
+    {
+      "id": "locals-004-storepops",
+      "mode": "exec",
+      "source": "asm/locals-004-storepops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9\n"
+    },
+    {
+      "id": "locals-005-maxslots",
+      "mode": "exec",
+      "source": "asm/locals-005-maxslots.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\nnil\n"
+    },
+    {
+      "id": "locals-006-params",
+      "mode": "exec",
+      "source": "asm/locals-006-params.asm",
+      "expect_exit": 0,
+      "expect_stdout": "10\n20\n30\nnil\n"
+    },
+    {
+      "id": "locals-007-paramextra",
+      "mode": "exec",
+      "source": "asm/locals-007-paramextra.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\nnil\n0\n"
+    },
+    {
+      "id": "locals-008-isolation",
+      "mode": "exec",
+      "source": "asm/locals-008-isolation.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "locals-009-dup",
+      "mode": "exec",
+      "source": "asm/locals-009-dup.asm",
+      "expect_exit": 0,
+      "expect_stdout": "8\n"
+    },
+    {
+      "id": "locals-010-swap",
+      "mode": "exec",
+      "source": "asm/locals-010-swap.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-7\n"
+    },
+    {
+      "id": "locals-011-pop",
+      "mode": "exec",
+      "source": "asm/locals-011-pop.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "locals-012-dupref",
+      "mode": "exec",
+      "source": "asm/locals-012-dupref.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[1]\n"
+    },
+    {
+      "id": "locals-013-slotrange",
+      "mode": "exec",
+      "source": "asm/locals-013-slotrange.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "locals-014-slotrange",
+      "mode": "exec",
+      "source": "asm/locals-014-slotrange.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "locals-015-slotrange",
+      "mode": "exec",
+      "source": "asm/locals-015-slotrange.asm",
+      "expect_exit": 2,
+      "expect_stdout": "",
+      "expect_error": "E_ASM"
+    }
+  ]
+}

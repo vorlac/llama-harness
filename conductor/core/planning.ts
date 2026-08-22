@@ -285,12 +285,19 @@ function firstCoveringGlob(
 const VAGUE_ACCEPTANCE: ReadonlyArray<{ label: string; pattern: RegExp }> = [
   {
     label: 'the "make it better" shape — a wish, not a check',
+    // "more"/"less" name a quality only when no threshold follows: "make it more
+    // than 3 retries" and "make it less than 200ms" are bounds an assertion runs,
+    // which is what this rule's own docstring promises about "make it <outcome>".
     pattern:
-      /\bmake\s+it\s+(?:better|nicer|cleaner|faster|prettier|simpler|smaller|tidier|robust|solid|good|great|pretty|neat|more\s+\w+|less\s+\w+)\b/i,
+      /\bmake\s+it\s+(?:better|nicer|cleaner|faster|prettier|simpler|smaller|tidier|robust|solid|good|great|pretty|neat|more\s+(?!than\b)\w+|less\s+(?!than\b)\w+)\b/i,
   },
   {
     label: "opens with a bare quality verb and names no observable outcome",
-    pattern: /^\s*(?:improve|enhance|polish|tidy|optimi[sz]e|clean\s*up|refactor)\b/i,
+    // The verb must be an English word, not an IDENTIFIER that happens to spell
+    // one. `refactor(ast) preserves the token count` and `cleanup() removes the
+    // temp dir` are observable checks about functions with those names, and
+    // refusing them wedged a run exactly as a miscounted cluster did.
+    pattern: /^\s*(?:improve|enhance|polish|tidy|optimi[sz]e|clean\s*up|refactor)\b(?![(._-])/i,
   },
   {
     label: "ends on a quality adjective in place of an outcome",
@@ -308,14 +315,22 @@ export function vagueAcceptance(criterion: string): string | null {
   return null;
 }
 
-// Words that are never the SUBJECT of a criterion. Without this, ordinary
-// English broke the cluster count in both directions: every criterion opening
-// with an article collapsed to the subject "the" (so "the parser rejects X" and
-// "the router retries Y" — exactly the two-things smell the size row targets —
-// counted as ONE cluster), while one subject phrased with and without an
-// article ("parser rejects…" + "the parser preserves…") counted as TWO and was
-// rejected with the nonsense reason "spans 2 clusters (parser, the)".
-const NON_SUBJECT_TOKENS = new Set([
+// The DETERMINERS, conjunctions and temporal openers a criterion may carry in
+// front of its subject. The scan walks past them rather than reading one as the
+// subject: without this, every criterion opening with an article collapsed to
+// the subject "the" (so "the parser rejects X" and "the router retries Y" —
+// exactly the two-things smell the size row targets — counted as ONE cluster),
+// while one subject phrased with and without an article ("parser rejects…" plus
+// "the parser preserves…") counted as TWO and was rejected with the nonsense
+// reason "spans 2 clusters (parser, the)".
+//
+// This set stays a set of DETERMINERS. Widening it with the generic nouns and
+// gerunds ordinary acceptance opens with is the wrong instrument twice over: it
+// is an open-ended English word list, and walking PAST such a word lands the
+// scan on the verb that follows it, which is a worse subject than the noun was.
+// Those shapes are handled by the abstention grammar below, which ends the scan
+// instead of advancing it.
+const DETERMINERS = new Set([
   "the", "a", "an", "its", "it", "this", "that", "these", "those",
   "each", "every", "all", "any", "no", "our", "their", "his", "her",
   "when", "if", "given", "after", "before", "and", "or", "but", "then",
@@ -325,39 +340,435 @@ const NON_SUBJECT_TOKENS = new Set([
 // separators an identifier carries in the languages this build plans against —
 // the dot of `config.load`, the slash of a path, the hyphen of a kebab name.
 // A parenthesis or a quote is not one of them: they open the ARGUMENTS of a
-// call, which are no part of what the criterion is about.
+// call, which are no part of what the criterion is about. It is also the whole
+// alphabet a cluster NAME is drawn from, which is what structurally keeps a
+// quoted name from carrying an unbalanced delimiter or the ", " the violation
+// joins names with.
 const SUBJECT_CHARS = /^[\w./-]+/;
 
+// A criterion may arrive as a markdown list row. The marker is layout, not
+// language, and reading one as a subject produced the cluster names "-" and
+// "1." — names that exist nowhere in the item.
+const LIST_MARKER = /^\s*(?:[-*+•]|\d+[.)]|\[[ xX]\])\s+/;
+
+// A bare number is a value the criterion asserts ABOUT something, never the
+// something. "233168 is returned by solve()" is about solve.
+const NUMERIC_TOKEN = /^[\d.,]+$/;
+
+// ---------------------------------------------------------------------------
+// PRESERVATION claims: the criteria that do not divide an item
+// ---------------------------------------------------------------------------
+//
+// "src/registry.py is not modified" and "tests/check_visible.py still passes"
+// are regression GUARDS, not things the item is about. The test is a PROOF, not
+// a preference: splitting an item does not divide such a criterion — every half
+// still owes it — so it can never be a reason the item is two items. Counting
+// them made the size row charge a planner for its non-regression discipline:
+// the more carefully it promised not to break things, the likelier its item was
+// refused as too large.
+//
+// Both halves of each pattern are closed vocabularies — a set of EDIT verbs and
+// a set of BUILD properties — because negation-of-change is a small grammatical
+// family in a way that "nouns that are not subjects" is not.
+//
+// Two of those vocabularies are split, because half of each is also ordinary
+// RUNTIME vocabulary. `src/state.ts is not changed` preserves a file; "the queue
+// entry is not removed until the TTL expires" and "the daemon still runs after a
+// config reload" are the deliverables of an eviction item and a hot-reload item.
+// The discriminator is structural rather than lexical: a guard NAMES the
+// artifact it promises to leave alone — a path, a filename, a call, an
+// identifier carrying a name mark. A criterion using the ambiguous half of the
+// vocabulary over prose that names no artifact is delivering behaviour, and is
+// counted like any other deliverable.
+//
+// A guard is also read at the CLAUSE it occupies rather than at the whole
+// sentence. Dropping the sentence let one clause of ordinary non-regression
+// discipline carry a second deliverable past the row: "src/registry.py is not
+// modified and src/telemetry.ts sends a heartbeat every 30s" asserts nothing at
+// all in its first half and a whole second component in its second.
+const SOURCE_EDIT_PARTICIPLE = "modified|edited|altered|rewritten|regenerated|touched|reformatted";
+const ARTIFACT_EDIT_PARTICIPLE = "changed|removed|deleted|renamed|moved|broken|affected|regressed";
+const EDIT_PARTICIPLE = `${SOURCE_EDIT_PARTICIPLE}|${ARTIFACT_EDIT_PARTICIPLE}`;
+const BUILD_PROPERTY = "importable|passing|compiling|building|green|installable";
+const ARTIFACT_BUILD_PROPERTY = "working|loadable|runnable";
+const STILL_BUILD = "passes|pass|compiles|compile|builds|build|holds|green|succeeds|imports";
+const STILL_ARTIFACT = "runs|run|works|work|loads|load";
+// The modal and nominal spellings of the same promise. A planner reading a
+// migration spec writes "must not be modified" and "no changes to X" as readily
+// as "is not modified", and the violation text itself uses the modal form to
+// describe the concept it then refused as input.
+const MODAL = "must|should|shall|will|would|may|might|can";
+
+// The guard shapes whose vocabulary says nothing but preservation, whatever the
+// criterion is about.
+const PRESERVATION_CLAIMS: readonly RegExp[] = [
+  new RegExp(String.raw`\b(?:is|are|was|were|gets?|stays?|remains?)\s+not\s+(?:being\s+)?(?:${SOURCE_EDIT_PARTICIPLE})\b`, "i"),
+  new RegExp(
+    String.raw`\b(?:is|are|was|were|stays?|remains?)\s+(?:unchanged|unmodified|untouched|unaffected|intact|the\s+same|as\s+before|byte-for-byte)\b`,
+    "i",
+  ),
+  new RegExp(String.raw`\bstill\s+(?:${STILL_BUILD})\b`, "i"),
+  new RegExp(String.raw`\bcontinues?\s+to\s+(?:pass|compile|build|work|run|import|load)\b`, "i"),
+  new RegExp(String.raw`\b(?:leaves|keeps?|preserves?)\b[^,;]*?\b(?:${BUILD_PROPERTY})\b`, "i"),
+  new RegExp(String.raw`\bno\s+(?:existing|other|current)\s+[\w./-]+\s+(?:is|are)\s+(?:${EDIT_PARTICIPLE})\b`, "i"),
+  new RegExp(String.raw`\b(?:${MODAL})\s+not\s+(?:be\s+)?(?:${SOURCE_EDIT_PARTICIPLE})\b`, "i"),
+  new RegExp(String.raw`\b(?:${MODAL})\s+not\s+(?:be\s+)?(?:change[sd]?|move[sd]?|broken|regressed?)\b`, "i"),
+  new RegExp(String.raw`\bno\s+changes?\s+to\b`, "i"),
+];
+
+// The guard shapes whose vocabulary is also ordinary runtime English. Each holds
+// only over a criterion that names the artifact it preserves.
+const ARTIFACT_PRESERVATION_CLAIMS: readonly RegExp[] = [
+  new RegExp(String.raw`\b(?:is|are|was|were|gets?|stays?|remains?)\s+not\s+(?:being\s+)?(?:${ARTIFACT_EDIT_PARTICIPLE})\b`, "i"),
+  new RegExp(String.raw`\b(?:${MODAL})\s+not\s+(?:be\s+)?(?:${ARTIFACT_EDIT_PARTICIPLE})\b`, "i"),
+  new RegExp(String.raw`\bstill\s+(?:${STILL_ARTIFACT})\b`, "i"),
+  new RegExp(String.raw`\b(?:leaves|keeps?|preserves?)\b[^,;]*?\b(?:${ARTIFACT_BUILD_PROPERTY})\b`, "i"),
+];
+
+// A preservation claim that carves out an exception is not a guard: it delivers
+// the exception. "src/router.ts is unchanged apart from the added retry" works.
+const ADVERSATIVE = /\b(?:apart\s+from|except|other\s+than|besides|aside\s+from|save\s+for)\b/i;
+
+/** Whether a criterion names a file, a test or a symbol — what a guard preserves. */
+function namesAnArtifact(criterion: string): boolean {
+  return clauseTokens(criterion).some((token) => nameMarked(token));
+}
+
+/** Whether a criterion promises that something does NOT change. */
+function preservationClaim(criterion: string): boolean {
+  if (ADVERSATIVE.test(criterion)) return false;
+  if (PRESERVATION_CLAIMS.some((pattern) => pattern.test(criterion))) return true;
+  if (!ARTIFACT_PRESERVATION_CLAIMS.some((pattern) => pattern.test(criterion))) return false;
+  return namesAnArtifact(criterion);
+}
+
+// Where one criterion carries more than one clause. The separators are the ones
+// that join independent clauses in the acceptance prose a planner writes; the
+// split is consulted only when the criterion reads as a guard, so an ordinary
+// deliverable carrying a comma — `backoffDelays(3, 100) === [100, 200]` — is
+// never cut.
+const CLAUSE_SEPARATOR = /\s*;\s*|\s+and\s+|\s+but\s+|,\s+/i;
+
+// What makes a fragment a CLAUSE rather than half of a coordinated noun phrase:
+// a finite verb. "export name" and "signature are unchanged" is one guard over a
+// coordinated subject; "src/registry.py is not modified" and "src/telemetry.ts
+// sends a heartbeat" is a guard beside a deliverable.
+const FINITE_VERB =
+  /\b(?:is|are|was|were|be|been|being|has|have|had|does|do|did|can|could|may|might|must|shall|should|will|would|[a-z]{3,}(?:es|ed|s))\b/i;
+const CLAUSE_MIN_TOKENS = 3;
+
 /**
- * The distinct acceptance CLUSTERS an item's criteria fall into, approximated by
- * the SUBJECT each criterion asserts about — its first token that is not a
- * determiner, reduced to that token's leading identifier and case folded ("the
- * config.load(cfg) rejects an unknown key…" -> `config.load`). §3.2's size row
- * rejects "> 1 acceptance cluster", and two criteria about two different
- * subjects is exactly the "this item covers two things" smell that row is aimed
- * at. Criteria that share a subject stay ONE cluster however many they are, so
- * an item may pin several observable checks on the same behaviour.
- *
- * The token is reduced in TWO steps, and the order carries the two fixes this
- * scan has needed. Punctuation is stripped off both ends FIRST, because the
- * determiner test below is a lookup on a whole word and "the," is not "the" —
- * scanning for the identifier before that step would let a comma smuggle an
- * article back in as a subject and revive "spans 2 clusters (parser, the)".
- * Only then is the leading identifier taken, stopping at the first character
- * that cannot appear inside one. Stripping the ENDS alone was not enough: it
- * left the call syntax §3.2's observable-check row actively asks for embedded
- * in the middle, so `pad("a") === "[a]"` and `pad("") === ""` — two checks on
- * ONE function — yielded the subjects `pad("a` and `pad` and were rejected as
- * two clusters, with the name `pad("a` quoted back at the planner.
+ * What a criterion DELIVERS: the criterion itself when it is not a guard, the
+ * one clause of it that delivers something when the rest is a guard, and null
+ * when the whole criterion only promises that something does not change.
  */
-export function acceptanceClusters(acceptance: readonly string[]): string[] {
+function deliverableText(criterion: string, context: ClusterContext | undefined): string | null {
+  if (!preservationClaim(criterion)) return criterion;
+  for (const segment of criterion.split(CLAUSE_SEPARATOR)) {
+    const clause = segment.trim();
+    if (clause.length === 0) continue;
+    if (preservationClaim(clause)) continue;
+    if (clauseTokens(clause).length < CLAUSE_MIN_TOKENS) continue;
+    if (!FINITE_VERB.test(clause)) continue;
+    if (criterionSubject(clause, context) === null) continue;
+    return clause;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// The abstention grammar: when a criterion's first word is not its subject
+// ---------------------------------------------------------------------------
+//
+// English routinely opens a sentence with something other than the subject, and
+// each of these forms produced a cluster named for a word that names nothing:
+// "leading" (a passive's patient), "calling" (a gerund), "there" (existential),
+// "on" (a preposition), "module" and "output" (generic nouns). A criterion in
+// one of these forms yields NO subject rather than a fabricated one — the count
+// only ever falls, so a criterion the scan cannot read can never be a reason to
+// refuse an item.
+//
+// The passive is read at the MAIN clause, not at the sentence: "router retries
+// when the connection is dropped" has the active head "router", and suppressing
+// it for a passive five words downstream hid a whole second component behind a
+// subordinate clause anyone can append.
+const PASSIVE_VOICE = /\b(?:is|are|was|were|gets|get|been|being)\s+(?:not\s+)?(?:being\s+)?([a-z]+(?:ed|wn|en))\b/i;
+// Where a subordinate clause begins. Only after a first word: a criterion may
+// legitimately OPEN with one ("when input is '!!!' slugify returns ''"), and
+// there the whole sentence is the reading.
+const SUBORDINATE_CLAUSE =
+  /\s+(?:when|whenever|while|if|unless|until|once|after|before|because|since|though|although|whereas|provided)\s+/i;
+// Passive voice puts the subject after "by", where a positional scan never
+// reaches it: "a 502 response is retried by the router" is about the router.
+// An AGENT is what that "by" has to introduce. English also puts a manner, a
+// deadline and a sort key there — "by default", "by 2pm", "sorted by name" —
+// and reading one of those as the subject fabricated the cluster names this
+// module's own list-marker rule was written to stop. An agent is marked: it
+// carries a determiner, it carries a name mark, or the item's own scope
+// corroborates it.
+const BY_PHRASE = /\bby\s+/i;
+const AGENT_DETERMINER = /^(?:the|a|an|its|this|that|these|those|each|every|our|their|his|her)\s+/i;
+const GERUND_HEAD = /^[a-z]{3,}ing$/;
+// Written as split word lists: each is prose read as a vocabulary, and a quoted
+// member of the prepositions reads to the purity scanner as a module specifier.
+const DEICTIC_HEADS = new Set(
+  "there here both either neither exactly only nothing everything something".split(" "),
+);
+const PREPOSITION_HEADS = new Set(
+  "on in at for with from to under over during within without per by about into across".split(" "),
+);
+const GENERIC_HEADS = new Set(
+  ("module package file files script program binary library header function method class command " +
+    "output outputs result results code value values behaviour behavior implementation logic api tool " +
+    "field input data content report table entry entries").split(" "),
+);
+// A criterion saying a file does NOT touch something is not saying the something
+// lives there.
+const NEGATION_TOKENS = new Set("never not neither nor without unlike".split(" "));
+
+// How far past a criterion's opening word a subject may still be found. Three
+// tokens covers "calling parse_duration(…)" and "given an empty input slugify…"
+// without reaching the OBJECT of the verb: an unbounded look would read
+// "passing an unknown unit raises ValueError" as a criterion about ValueError.
+// It is also how far from the file it names a symbol may sit and still be read
+// as living there.
+const SUBJECT_WINDOW = 3;
+
+// The marks that make a token a NAME rather than an English word: call syntax, a
+// path separator, a dotted member, camelCase, PascalCase, snake_case.
+const CALL_SYNTAX = /^[\w./-]+\(/;
+const CAMEL_CASE = /^[a-z][a-z0-9]*[A-Z]/;
+const PASCAL_CASE = /^[A-Z][a-z0-9]+[A-Z]/;
+const SNAKE_CASE = /^[a-z][a-z0-9]*_[a-z0-9]/i;
+
+// A scope entry that names a TERRITORY rather than a file. "src/**" is a legal
+// fileScope — only a wildcard-HEADED entry is refused — and it is not a thing an
+// acceptance criterion can be about, so it never becomes a cluster NAME.
+const GLOB_CHARACTER = /[*?[\]{}]/;
+
+/**
+ * The item context the cluster count reads: what the item DECLARES it writes and
+ * tests. It is the only structural evidence available about what a criterion is
+ * about, and the size row already holds it — the file budget five lines above
+ * reads the same field. An acceptance judged without it is judged on its prose
+ * alone, which is what every unit call below does deliberately.
+ */
+export type ClusterContext = Pick<QueueItem, "fileScope" | "testScope">;
+
+interface SubjectToken {
+  raw: string;
+  identifier: string;
+}
+
+/** A criterion's tokens, list marker and determiners walked past. */
+function clauseTokens(criterion: string): SubjectToken[] {
+  const tokens: SubjectToken[] = [];
+  for (const word of criterion.replace(LIST_MARKER, "").trim().split(/\s+/)) {
+    const raw = word.replace(/^[^\w./-]+/, "");
+    const clean = raw.replace(/[^\w./-]+$/, "").replace(/^\.\//, "").toLowerCase();
+    if (clean.length === 0) continue;
+    if (DETERMINERS.has(clean)) continue;
+    const identifier = SUBJECT_CHARS.exec(clean);
+    if (identifier === null) continue;
+    tokens.push({ raw, identifier: identifier[0] });
+  }
+  return tokens;
+}
+
+function nameMarked(token: SubjectToken): boolean {
+  if (NUMERIC_TOKEN.test(token.identifier)) return false;
+  if (CALL_SYNTAX.test(token.raw)) return true;
+  if (token.identifier.includes("/")) return true;
+  if (DOTTED_FILENAME.test(token.identifier)) return true;
+  if (CAMEL_CASE.test(token.raw) || PASCAL_CASE.test(token.raw)) return true;
+  return SNAKE_CASE.test(token.identifier);
+}
+
+function declaredScope(context: ClusterContext | undefined): string[] {
+  if (context === undefined) return [];
+  return [...context.fileScope, ...context.testScope];
+}
+
+/** The final segment of a path with its extension removed ("src/p001.py" -> "p001"). */
+function stemOf(pathLike: string): string {
+  const base = basenameOf(pathLike);
+  const dot = base.lastIndexOf(".");
+  return (dot > 0 ? base.slice(0, dot) : base).toLowerCase();
+}
+
+/**
+ * Whether `entry` is the scope entry a token names. The three token shapes are
+ * matched by three different rules on purpose:
+ *   - a token carrying a directory is matched by the conservative overlap the
+ *     wave scheduler uses, so `src/lib/a.ts` resolves against `src/lib/**`;
+ *   - a bare dotted filename is matched by BASENAME, which is what makes
+ *     `p001.py` and `src/solvers/p001.py` one file;
+ *   - a bare identifier is matched by STEM, which is what lets one criterion
+ *     name a file and a sibling criterion name the symbol inside it.
+ * A full path is never matched by basename: `src/a/util.ts` and `src/b/util.ts`
+ * are two files, and folding them would be the mirror defect of splitting one.
+ */
+function entryNamedBy(token: string, entry: string): boolean {
+  if (token.includes("/")) return scopesIntersect([token], [entry]);
+  if (DOTTED_FILENAME.test(token)) return basenameOf(entry).toLowerCase() === token;
+  return stemOf(entry) === token;
+}
+
+/** Whether the item's own declaration corroborates a token as something it names. */
+function corroborated(token: SubjectToken, context: ClusterContext | undefined): boolean {
+  if (NUMERIC_TOKEN.test(token.identifier)) return false;
+  return declaredScope(context).some((entry) => entryNamedBy(token.identifier, entry));
+}
+
+/**
+ * The FILE a token names: the declared scope entry when the item declares that
+ * file, the token itself when it is a path the item does not declare, and null
+ * when the token is not a file at all.
+ *
+ * The key is the file, not the entry that matched it. A declared entry is the
+ * canonical spelling of ONE file, so every way a criterion spells that file
+ * folds onto it — but a directory glob is a territory rather than a file, and
+ * keying by the entry there collapsed every path under `src/**` into one
+ * cluster, making the row weakest exactly where the item declares the most.
+ *
+ * A path the item does NOT declare still resolves to itself rather than being
+ * dropped: a criterion actively asserting about a file outside the write scope
+ * is either a second thing or an under-declared scope, and both are worth the
+ * refusal. Only a criterion PRESERVING such a file is dropped, and that happens
+ * one step earlier.
+ */
+function resolveFile(token: string, context: ClusterContext | undefined): string | null {
+  const entries = declaredScope(context).filter((entry) => !GLOB_CHARACTER.test(entry));
+  if (token.includes("/")) {
+    for (const entry of entries) {
+      if (scopesIntersect([token], [entry])) return entry;
+    }
+    return token;
+  }
+  if (NUMERIC_TOKEN.test(token)) return null;
+  if (DOTTED_FILENAME.test(token)) {
+    for (const entry of entries) {
+      if (basenameOf(entry).toLowerCase() === token) return entry;
+    }
+    return null;
+  }
+  for (const entry of entries) {
+    if (stemOf(entry) === token) return entry;
+  }
+  return null;
+}
+
+/** The criterion up to the first subordinate clause that follows a word of it. */
+function mainClause(criterion: string): string {
+  const sentence = criterion.replace(LIST_MARKER, "").trim();
+  const boundary = SUBORDINATE_CLAUSE.exec(sentence);
+  if (boundary === null) return sentence;
+  return sentence.slice(0, boundary.index);
+}
+
+/**
+ * The AGENT a passive criterion names, or null when its "by" introduces a
+ * manner, a deadline or a sort key instead. Every by-phrase in the criterion is
+ * read, so an adverbial one in front cannot shadow the agent behind it.
+ */
+function passiveAgent(criterion: string, context: ClusterContext | undefined): SubjectToken | null {
+  const phrases = criterion.split(BY_PHRASE).slice(1);
+  for (const phrase of phrases) {
+    const introduced = AGENT_DETERMINER.test(phrase);
+    const tokens = clauseTokens(phrase);
+    if (tokens.length === 0) continue;
+    const candidate = tokens[0];
+    if (NUMERIC_TOKEN.test(candidate.identifier)) continue;
+    if (GERUND_HEAD.test(candidate.identifier)) continue;
+    if (DEICTIC_HEADS.has(candidate.identifier)) continue;
+    if (PREPOSITION_HEADS.has(candidate.identifier)) continue;
+    if (GENERIC_HEADS.has(candidate.identifier)) continue;
+    if (introduced || nameMarked(candidate) || corroborated(candidate, context)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The subject one criterion asserts about, or null when it names none.
+ *
+ * The order is the rule: a token the item's own scope corroborates comes first,
+ * then a HEAD that carries a name, then a head the grammar leaves standing, then
+ * the agent of a passive, and only then a name deeper in the opening window.
+ *
+ * The head outranks a name deeper in the window because a criterion's OBJECT is
+ * a name as often as its subject is: "the generator writes docs/api.md" and "the
+ * generator exits 0" are two checks on one generator, and reading the first as a
+ * criterion about docs/api.md split one subject in two. The window still reads
+ * the criteria whose head is not a subject at all, which is the whole reason it
+ * exists.
+ *
+ * An unremarkable opening word STANDS rather than being dropped for want of
+ * corroboration, and that asymmetry is where the row keeps its teeth. "parser
+ * rejects an unknown key" and "router retries on 502" name nothing the item
+ * declares and carry no mark, and they are the two-things smell the size row
+ * exists for. Requiring corroboration would drop both and accept the item.
+ * A criterion is therefore refused a subject only when the GRAMMAR says its
+ * opening word is not one — which is a closed set of forms, where "words that
+ * happen not to be subjects" is not.
+ */
+function criterionSubject(criterion: string, context: ClusterContext | undefined): SubjectToken | null {
+  const tokens = clauseTokens(criterion);
+  if (tokens.length === 0) return null;
+  const window = tokens.slice(0, SUBJECT_WINDOW);
+
+  for (const token of window) {
+    if (corroborated(token, context)) return token;
+  }
+
+  const head = tokens[0];
+  if (nameMarked(head)) return head;
+
+  const passive = PASSIVE_VOICE.test(mainClause(criterion));
+  if (
+    !passive &&
+    !NUMERIC_TOKEN.test(head.identifier) &&
+    !GERUND_HEAD.test(head.identifier) &&
+    !DEICTIC_HEADS.has(head.identifier) &&
+    !PREPOSITION_HEADS.has(head.identifier) &&
+    !GENERIC_HEADS.has(head.identifier)
+  ) {
+    return head;
+  }
+
+  if (passive) {
+    const agent = passiveAgent(criterion, context);
+    if (agent !== null) return agent;
+  }
+
+  for (const token of window) {
+    if (nameMarked(token)) return token;
+  }
+  return null;
+}
+
+/**
+ * The positional reading: each criterion's first non-determiner token, reduced
+ * to its leading identifier and case folded. It is what the scan above falls
+ * back to when NOTHING in an acceptance resolves — no name, no path, no call, no
+ * token the item's own scope corroborates.
+ *
+ * It is deliberately the floor rather than an empty answer. Acceptance that
+ * names nothing is exactly the prose in which a two-things item hides best, and
+ * a row that goes silent there would be a guard nobody can see failing. The
+ * floor is strict and sometimes wrong in the direction a journal records.
+ *
+ * It reads what the acceptance DELIVERS, never the guards: a floor that counted
+ * a preservation claim made the count RISE when a planner promised not to break
+ * something, which is the inversion the guard rule exists to remove.
+ */
+function positionalSubjects(delivered: readonly string[]): string[] {
   const subjects: string[] = [];
-  for (const criterion of acceptance) {
+  for (const criterion of delivered) {
     let subject = "";
-    for (const raw of criterion.trim().split(/\s+/)) {
+    for (const raw of criterion.replace(LIST_MARKER, "").trim().split(/\s+/)) {
       const token = raw.replace(/^[^\w./-]+/, "").replace(/[^\w./-]+$/, "").toLowerCase();
       if (token.length === 0) continue;
-      if (NON_SUBJECT_TOKENS.has(token)) continue;
+      if (DETERMINERS.has(token)) continue;
       const identifier = SUBJECT_CHARS.exec(token);
       if (identifier === null) continue;
       subject = identifier[0];
@@ -366,6 +777,138 @@ export function acceptanceClusters(acceptance: readonly string[]): string[] {
     if (subject.length > 0 && !subjects.includes(subject)) subjects.push(subject);
   }
   return subjects;
+}
+
+/**
+ * The distinct acceptance CLUSTERS an item's criteria fall into. §3.2's size row
+ * rejects "> 1 acceptance cluster", and two criteria about two different subjects
+ * is the "this item covers two things" smell that row is aimed at. Criteria that
+ * share a subject stay ONE cluster however many they are, so an item may pin
+ * several observable checks on the same behaviour.
+ *
+ * The plan (line 1109) fixes the THRESHOLD and leaves the UNIT undefined, and
+ * this is the unit: the SUBJECT a criterion asserts about, resolved against the
+ * files the item declares wherever the criterion names one. Four properties
+ * carry it, and each answers a measured refusal of an item that covers one thing:
+ *
+ *   - a criterion that PRESERVES rather than delivers contributes nothing,
+ *     because splitting an item never divides such a criterion;
+ *   - a criterion whose grammar puts no subject at its front contributes
+ *     nothing, rather than contributing the word that happens to be there;
+ *   - a file the item declares is ONE cluster however a criterion spells it,
+ *     and a symbol a criterion introduces beside its file belongs to that file;
+ *   - the count never RISES for anything a planner adds out of discipline: a
+ *     guard costs nothing wherever it appears, including in the floor.
+ *
+ * Against each of those sits the property that keeps the row's teeth, because
+ * every one of them is also a shape a planner under re-prompt pressure can
+ * reach for: a guard is dropped at its own CLAUSE and only over an artifact it
+ * names, a symbol is homed only where it sits beside its file, a passive
+ * suppresses only the clause it is in, a directory glob folds nothing, and two
+ * declared files fold only where a criterion RELATES them rather than listing
+ * them.
+ *
+ * `context` is the item. Without it the reading is prose-only, which is what
+ * makes the function answerable on an acceptance list alone.
+ *
+ * The return is the cluster NAMES and nothing else, deliberately: a richer
+ * partition (deliverables, guards, unresolved) would read better in a violation,
+ * and it would also move every assertion that pins this scan's answers — the
+ * assertions that certify the row is neither loosened into uselessness nor
+ * re-broken in the ways it has been broken already. The legibility that
+ * partition buys is bought instead by the violation text, which names the three
+ * legal moves rather than the one illegal one.
+ *
+ * Two token reductions are load-bearing and their ORDER is the rule. Punctuation
+ * is stripped off both ends FIRST, because the determiner test is a lookup on a
+ * whole word and "the," is not "the" — scanning for the identifier before that
+ * step lets a comma smuggle an article back in as a subject and revives "spans 2
+ * clusters (parser, the)". Only then is the leading identifier taken, stopping at
+ * the first character that cannot appear inside one; stripping the ENDS alone
+ * left the call syntax §3.2's observable-check row actively asks for embedded in
+ * the middle, so `pad("a") === "[a]"` and `pad("") === ""` — two checks on ONE
+ * function — yielded the subjects `pad("a` and `pad` and counted as two clusters,
+ * with the name `pad("a` quoted back at the planner.
+ */
+export function acceptanceClusters(
+  acceptance: readonly string[],
+  context?: ClusterContext,
+): string[] {
+  const delivered: string[] = [];
+  for (const criterion of acceptance) {
+    const text = deliverableText(criterion, context);
+    if (text !== null) delivered.push(text);
+  }
+
+  // A criterion naming both a file and a symbol says where the symbol lives, so
+  // a sibling criterion about that symbol is about that file. The symbol has to
+  // sit BESIDE the file to be read as living in it: an unbounded look let one
+  // trailing mention of another component's function ("… and never calls
+  // telemetry.send()") adopt that function permanently, folding a sibling
+  // criterion that was genuinely about the other component.
+  const symbolHome = new Map<string, string>();
+  for (const text of delivered) {
+    const tokens = clauseTokens(text);
+    let home: string | null = null;
+    let at = -1;
+    for (let i = 0; i < tokens.length; i += 1) {
+      home = resolveFile(tokens[i].identifier, context);
+      if (home !== null) {
+        at = i;
+        break;
+      }
+    }
+    if (home === null) continue;
+    for (let i = 0; i < tokens.length; i += 1) {
+      const token = tokens[i];
+      if (NEGATION_TOKENS.has(token.identifier)) break;
+      if (Math.abs(i - at) > SUBJECT_WINDOW) continue;
+      if (resolveFile(token.identifier, context) !== null) continue;
+      if (NUMERIC_TOKEN.test(token.identifier)) continue;
+      if (nameMarked(token)) symbolHome.set(token.identifier, home);
+    }
+  }
+
+  const clusters: string[] = [];
+  for (const text of delivered) {
+    const subject = criterionSubject(text, context);
+    if (subject === null) continue;
+    const file = resolveFile(subject.identifier, context);
+    const key = file ?? symbolHome.get(subject.identifier) ?? subject.identifier;
+    if (!clusters.includes(key)) clusters.push(key);
+  }
+
+  if (clusters.length === 0) return positionalSubjects(delivered);
+  if (context === undefined || clusters.length < 2) return clusters;
+
+  // One criterion RELATING two of the item's own declared files is the item
+  // saying those files are one piece of work — an implementation and the package
+  // init that exports it, a header and the source that defines it. Two declared
+  // files that no criterion ever relates stay two clusters.
+  //
+  // Relating them is not the same as listing them. "src/lexer.ts and
+  // src/parser.ts are both formatted" asserts nothing a reader could not have
+  // assumed and names no work, and folding on it let one line the format gate
+  // already owns collapse a lexer and a parser into one item. The two mentions
+  // must therefore be separated by at least one word of the criterion — the verb
+  // that relates them — where a coordination puts them side by side.
+  for (const text of delivered) {
+    const tokens = clauseTokens(text);
+    const named: Array<{ entry: string; at: number }> = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      for (const entry of context.fileScope) {
+        if (!entryNamedBy(tokens[i].identifier, entry)) continue;
+        if (named.some((seen) => seen.entry === entry)) continue;
+        named.push({ entry, at: i });
+      }
+    }
+    for (let i = 1; i < named.length; i += 1) {
+      if (named[i].at - named[i - 1].at < 2) continue;
+      const folded = clusters.indexOf(named[i].entry);
+      if (folded >= 0 && clusters.includes(named[0].entry)) clusters.splice(folded, 1);
+    }
+  }
+  return clusters;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,10 +1108,18 @@ export function validateQueue(
         );
       }
     }
-    const clusters = acceptanceClusters(item.acceptance);
+    // The cluster count reads the ITEM, not the acceptance list alone: the files
+    // it declares are the only structural evidence of what its criteria are
+    // about, and the file budget above already reads the same field.
+    //
+    // The remedy names the three legal moves and not the fourth. "Split it into
+    // one item per cluster" was unreachable advice whenever the clusters shared
+    // a file: obeying it produced fresh violations from the inter-item
+    // disjointness row below, so the guard prescribed a move the table refuses.
+    const clusters = acceptanceClusters(item.acceptance, item);
     if (clusters.length > 1) {
       violations.push(
-        `item "${id}" is too large: its acceptance spans ${String(clusters.length)} clusters (${clusters.join(", ")}), over the one-cluster item budget — split it into one item per cluster (§3.2)`,
+        `item "${id}" is too large: its acceptance spans ${String(clusters.length)} clusters (${clusters.join(", ")}), over the one-cluster item budget — give each subject its own item with its own files, declare a path in fileScope if this item really writes it, or phrase a criterion about a file it must not change as a preservation guard ("… is not modified") (§3.2)`,
       );
     }
 

@@ -1,0 +1,16 @@
+{
+  "name": "date-range-scheduler",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Recurring-event expansion, timezone-aware occurrences and booking-conflict detection.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "start": "node src/cli.ts",
+    "test": "node --test 'test/*.test.ts'"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

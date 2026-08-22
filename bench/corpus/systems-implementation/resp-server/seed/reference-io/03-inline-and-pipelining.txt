@@ -1,0 +1,86 @@
+# 03 - inline commands, quoting, pipelining and split reads
+#      (SPEC.md sections 3.3 and 3.4)
+
+# The simplest inline command.
+C: PING\r\n
+S: +PONG\r\n
+
+# A bare LF terminator is also accepted.
+C: PING\n
+S: +PONG\r\n
+
+# Leading and trailing whitespace is ignored, runs of whitespace separate args.
+C:    ECHO     hello   \r\n
+S: $5\r\nhello\r\n
+
+# A tab separates arguments too.
+C: ECHO\thello\r\n
+S: $5\r\nhello\r\n
+
+# An empty line produces NO reply at all. The connection stays open.
+C: \r\n
+S: (nothing)
+C: PING\r\n
+S: +PONG\r\n
+
+# Double quotes make one argument out of several words.
+C: ECHO "hello world"\r\n
+S: $11\r\nhello world\r\n
+
+# \xHH inside double quotes is a byte. 0x41 is 'A'.
+C: ECHO "a\x41b"\r\n
+S: $3\r\naAb\r\n
+
+# \t \n \r \b \a are the usual control bytes; any other escape is literal.
+C: ECHO "a\tb"\r\n
+S: $3\r\na\tb\r\n
+C: ECHO "a\zb"\r\n
+S: $3\r\nazb\r\n
+
+# Single quotes escape only \'. A backslash before anything else is literal.
+C: ECHO 'a b'\r\n
+S: $3\r\na b\r\n
+C: ECHO 'it\'s'\r\n
+S: $4\r\nit's\r\n
+C: ECHO 'a\nb'\r\n
+S: $4\r\na\\nb\r\n
+
+# A quote glued to more text is malformed, and is fatal to the connection.
+C: ECHO "abc"def\r\n
+S: -ERR Protocol error: unbalanced quotes in request\r\n
+S: (connection closed)
+
+# --- pipelining ------------------------------------------------------------
+# Four requests in ONE write. Four replies, in order.
+C: *3\r\n$3\r\nSET\r\n$1\r\na\r\n$1\r\n1\r\n*2\r\n$4\r\nINCR\r\n$1\r\na\r\n*2\r\n$3\r\nGET\r\n$1\r\na\r\n*1\r\n$4\r\nPING\r\n
+S: +OK\r\n
+S: :2\r\n
+S: $1\r\n2\r\n
+S: +PONG\r\n
+
+# Inline and multibulk may be mixed inside a single write.
+C: PING\r\n*1\r\n$4\r\nPING\r\nECHO x\r\n
+S: +PONG\r\n
+S: +PONG\r\n
+S: $1\r\nx\r\n
+
+# --- split reads -----------------------------------------------------------
+# One request arriving in five writes. There is no reply until it is complete.
+C: *3\r\n$3\r\nSE
+S: (nothing)
+C: T\r\n$1\r\nk
+S: (nothing)
+C: \r\n$5\r\nab
+S: (nothing)
+C: cde
+S: (nothing)
+C: \r\n
+S: +OK\r\n
+C: *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+S: $5\r\nabcde\r\n
+
+# A split inside the trailing CRLF must also reassemble.
+C: *1\r\n$4\r\nPING\r
+S: (nothing)
+C: \n
+S: +PONG\r\n

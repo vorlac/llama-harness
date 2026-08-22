@@ -1,0 +1,300 @@
+{
+  "group": "gc",
+  "description": "The observable heap: which operations allocate, what the root set contains, that cycles are reclaimed, and that a bounded heap is enough for an unbounded amount of garbage.",
+  "case_count": 34,
+  "cases": [
+    {
+      "id": "gc-001-empty",
+      "mode": "exec",
+      "source": "asm/gc-001-empty.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "gc-002-constants",
+      "mode": "exec",
+      "source": "asm/gc-002-constants.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n",
+      "note": "constant-pool strings are permanent and are never counted"
+    },
+    {
+      "id": "gc-003-array",
+      "mode": "exec",
+      "source": "asm/gc-003-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "gc-004-array",
+      "mode": "exec",
+      "source": "asm/gc-004-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "gc-005-array",
+      "mode": "exec",
+      "source": "asm/gc-005-array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "gc-006-concat",
+      "mode": "exec",
+      "source": "asm/gc-006-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "gc-007-concat",
+      "mode": "exec",
+      "source": "asm/gc-007-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "gc-008-concatempty",
+      "mode": "exec",
+      "source": "asm/gc-008-concatempty.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n",
+      "note": "CONCAT always allocates, even when the result is empty"
+    },
+    {
+      "id": "gc-009-tostr",
+      "mode": "exec",
+      "source": "asm/gc-009-tostr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "gc-010-chr",
+      "mode": "exec",
+      "source": "asm/gc-010-chr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "gc-011-substr",
+      "mode": "exec",
+      "source": "asm/gc-011-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "gc-012-typeof",
+      "mode": "exec",
+      "source": "asm/gc-012-typeof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "gc-013-closure",
+      "mode": "exec",
+      "source": "asm/gc-013-closure.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n",
+      "note": "the entry closure is permanent and is not counted"
+    },
+    {
+      "id": "gc-014-local",
+      "mode": "exec",
+      "source": "asm/gc-014-local.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n0\n"
+    },
+    {
+      "id": "gc-015-global",
+      "mode": "exec",
+      "source": "asm/gc-015-global.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n0\n"
+    },
+    {
+      "id": "gc-016-nested",
+      "mode": "exec",
+      "source": "asm/gc-016-nested.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n0\n"
+    },
+    {
+      "id": "gc-017-strings_in_array",
+      "mode": "exec",
+      "source": "asm/gc-017-strings_in_array.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n0\n"
+    },
+    {
+      "id": "gc-018-cycle",
+      "mode": "exec",
+      "source": "asm/gc-018-cycle.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n0\n",
+      "note": "a two-object cycle must be reclaimed; reference counting cannot"
+    },
+    {
+      "id": "gc-019-selfcycle",
+      "mode": "exec",
+      "source": "asm/gc-019-selfcycle.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n0\n"
+    },
+    {
+      "id": "gc-020-upvalroot",
+      "mode": "exec",
+      "source": "asm/gc-020-upvalroot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n0\n",
+      "note": "a captured upvalue keeps its referent reachable"
+    },
+    {
+      "id": "gc-021-callerroot",
+      "mode": "exec",
+      "source": "asm/gc-021-callerroot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n[1, 2, 3]\n",
+      "note": "the caller's locals and the running frame's closure are roots"
+    },
+    {
+      "id": "gc-022-callerstackroot",
+      "mode": "exec",
+      "source": "asm/gc-022-callerstackroot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n",
+      "note": "values on a suspended frame's operand stack are roots"
+    },
+    {
+      "id": "gc-023-gcopcode",
+      "mode": "exec",
+      "source": "asm/gc-023-gcopcode.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "gc-024-gcopcode",
+      "mode": "exec",
+      "source": "asm/gc-024-gcopcode.asm",
+      "expect_exit": 0,
+      "expect_stdout": "nil\n",
+      "note": "an object still on the stack survives an explicit collection"
+    },
+    {
+      "id": "gc-025-oom",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "4"
+      ],
+      "source": "asm/gc-025-oom.asm",
+      "expect_exit": 6,
+      "expect_stdout": "",
+      "expect_error": "E_OOM"
+    },
+    {
+      "id": "gc-026-oom",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "5"
+      ],
+      "source": "asm/gc-026-oom.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[]\n"
+    },
+    {
+      "id": "gc-027-oom",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "1"
+      ],
+      "source": "asm/gc-027-oom.asm",
+      "expect_exit": 6,
+      "expect_stdout": "",
+      "expect_error": "E_OOM"
+    },
+    {
+      "id": "gc-028-reclaim",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "1"
+      ],
+      "source": "asm/gc-028-reclaim.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[]\n",
+      "note": "the collector must run when the budget is reached"
+    },
+    {
+      "id": "gc-029-reclaim",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "1"
+      ],
+      "source": "asm/gc-029-reclaim.asm",
+      "expect_exit": 0,
+      "expect_stdout": "[]\n"
+    },
+    {
+      "id": "gc-030-churn",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "4"
+      ],
+      "source": "asm/gc-030-churn.asm",
+      "expect_exit": 0,
+      "expect_stdout": "xy\n1\n"
+    },
+    {
+      "id": "gc-031-churnstress",
+      "mode": "exec",
+      "args": [
+        "--gc-stress",
+        "--heap",
+        "4"
+      ],
+      "source": "asm/gc-031-churnstress.asm",
+      "expect_exit": 0,
+      "expect_stdout": "xy\n1\n"
+    },
+    {
+      "id": "gc-032-cyclechurn",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "8"
+      ],
+      "source": "asm/gc-032-cyclechurn.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n",
+      "note": "2000 discarded cycles must fit in a heap of 8 objects"
+    },
+    {
+      "id": "gc-033-cyclechurn",
+      "mode": "exec",
+      "args": [
+        "--gc-stress",
+        "--heap",
+        "8"
+      ],
+      "source": "asm/gc-033-cyclechurn.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "gc-034-retained",
+      "mode": "exec",
+      "args": [
+        "--heap",
+        "1024"
+      ],
+      "source": "asm/gc-034-retained.asm",
+      "expect_exit": 0,
+      "expect_stdout": "500\n501\n",
+      "note": "500 retained strings plus the array that holds them"
+    }
+  ]
+}

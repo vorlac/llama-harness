@@ -1,0 +1,9 @@
+MATCH (a)(b) ab
+MATCH (a)(b)? a
+MATCH (a)|(b) b
+MATCH (?:a)(b) ab
+MATCH ((a)(b)) xaby
+MATCH (a)* aaa
+MATCH (a(b)?)+ aba
+MATCH (\\w+)@(\\w+) mail\x20bob@host\x20end
+MATCH (a|ab)(c|bcd) abcd

@@ -1,0 +1,38 @@
+{
+  "id": "snake",
+  "title": "Terminal Snake with headless replay",
+  "category": "tui-games",
+  "size": "S",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-snake-impl-prompt.md",
+  "difficulty": 2,
+  "timeouts": {
+    "build": 300,
+    "run": 60,
+    "test": 300
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "README.md",
+    "NOTES.md",
+    "run.json",
+    "scripts/demo.txt",
+    "scripts/demo.expected.json",
+    "scripts/eat.txt",
+    "scripts/eat.expected.json",
+    "scripts/crash-wall.txt",
+    "scripts/crash-wall.expected.json",
+    "scripts/crash-self.txt",
+    "scripts/crash-self.expected.json"
+  ]
+}

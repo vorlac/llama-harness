@@ -1,0 +1,11 @@
+OK ex-01 {"a":[1,2],"b":1}
+OK ex-02 [1.5,-0,1e400]
+OK ex-03 "caf\u00e9 / ok"
+OK ex-04 true
+ERR ex-05 E_UNEXPECTED_BYTE 3 1 4 msg=nonempty
+ERR ex-06 E_UNEXPECTED_BYTE 5 1 6 msg=nonempty
+ERR ex-07 E_EMPTY 0 1 1 msg=nonempty
+ERR ex-08 E_BAD_NUMBER 9 2 8 msg=nonempty
+ERR ex-09 E_BAD_NUMBER 3 1 4 msg=nonempty
+ERR ex-10 E_UNEXPECTED_EOF 2 1 3 msg=nonempty
+END responses=10 exit=0

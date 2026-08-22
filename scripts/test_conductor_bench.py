@@ -26,7 +26,9 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
+import socket
 import subprocess
 import sys
 import sysconfig
@@ -45,19 +47,25 @@ import conductor_bench as cb  # noqa: E402
 # than spawning a python interpreter, and neither reads stdin.
 FALSE_BIN = "/usr/bin/false"
 TRUE_BIN = "/usr/bin/true"
+# A gate that outlives the clock it was given, for the modes that must tell a
+# killed gate apart from a gate that answered.
+SLEEP_BIN = "/bin/sleep"
 
-# The synthetic set is built to satisfy the module's own per-tier pin, so the
-# loader under test is never handed a shape it would refuse for a reason the
-# test did not intend. The report and plan fixtures below use the first ten of
-# these against the hand-written PATTERN table.
+# The per-tier shape the synthetic manifest declares for itself. The fixture is
+# built to satisfy it, so the loader under test is never handed a shape it would
+# refuse for a reason the test did not intend. The report and plan fixtures
+# below use the first ten of these against the hand-written PATTERN table.
+SYNTHETIC_COUNTS = {"T0": 10, "T1": 4, "T2": 3, "T3": 3, "T4": 3}
+
+
 def _synthetic_tiers() -> List[str]:
-    """The pin's tier counts, dealt round-robin.
+    """The declared tier counts, dealt round-robin.
 
     Dealt rather than blocked so the first ten - the slice PATTERN is written
     for - span every tier, which is what makes the per-tier rollups testable
     on the same fixture as everything else.
     """
-    remaining = dict(cb.EXPECTED_TASK_COUNTS)
+    remaining = dict(SYNTHETIC_COUNTS)
     out: List[str] = []
     while sum(remaining.values()):
         for tier in cb.TIERS:
@@ -70,6 +78,10 @@ def _synthetic_tiers() -> List[str]:
 SYNTHETIC_TIERS = _synthetic_tiers()
 TASK_COUNT = len(SYNTHETIC_TIERS)
 TASK_IDS = ["bt%02d" % n for n in range(1, TASK_COUNT + 1)]
+
+# The one model this campaign serves. The corpus manifests declare it,
+# and a second id in one of them would be a model nothing here can run.
+CAMPAIGN_MODEL = "llamacpp/qwen3.8-27b"
 
 SENTINEL_MODEL = "llamacpp/sentinel-model-x"
 SENTINEL_MODEL_B = "llamacpp/sentinel-model-y"
@@ -184,10 +196,11 @@ def manifest_dict(count: int = TASK_COUNT, **over: object) -> Dict[str, object]:
             "scopeLadder": "every tier from T0 to T4 carries tasks",
         },
         "defaults": {
-            "model": cb.DEFAULT_MODEL,
+            "model": SENTINEL_MODEL,
             "tierTimeoutSec": dict(cb.TIER_TIMEOUT_SEC),
         },
         "sweep": sweep_dict(),
+        "expectedTaskCounts": dict(SYNTHETIC_COUNTS),
         "tasks": [task_dict(i) for i in range(count)],
     }
     doc.update(over)
@@ -198,8 +211,8 @@ def sweep_dict(**over: object) -> Dict[str, object]:
     """A well-formed §22.8 sweep block: one primary model, no second model."""
     doc = {
         "rationale": "the synthetic sweep runs one model so the fixture stays cheap",
-        "primaryModel": cb.DEFAULT_MODEL,
-        "models": [cb.DEFAULT_MODEL],
+        "primaryModel": SENTINEL_MODEL,
+        "models": [SENTINEL_MODEL],
         "sweptTiers": ["T0", "T1"],
         "primaryOnlyTiers": ["T2", "T3", "T4"],
         "capabilities": ["none"],
@@ -207,6 +220,85 @@ def sweep_dict(**over: object) -> Dict[str, object]:
     }
     doc.update(over)
     return doc
+
+
+def committed_expected_counts() -> Dict[str, int]:
+    """The per-tier pin the committed manifest declares for itself."""
+    return json.loads(cb.MANIFEST_PATH.read_text())["expectedTaskCounts"]
+
+
+# The keys under which a conformance suite in this repository's corpora holds
+# its list of cases. A case that spells its identifier `name` is held to the
+# same rule as one that spells it `id`, and reading only `id` leaves a whole
+# 869-case suite outside a guard the manifest claims over the whole set. The
+# key is scoped to a case list so a group label - `group_info` carries one
+# beside a description and a count - is not read as a case identifier: a group
+# is named in prose the seed is meant to contain.
+CASE_LIST_KEYS = ("cases", "tests", "vectors")
+
+
+def case_identifiers(files: Dict[str, str]) -> List[str]:
+    """Every case identifier a JSON file in this map states, at any depth.
+
+    A conformance suite names its cases, and the names are the one thing in it
+    that could only have come from reading it.
+    """
+    found: List[str] = []
+
+    def walk(node: object, in_case: bool) -> None:
+        if isinstance(node, dict):
+            for key in node:
+                value = node[key]
+                named = key == "id" or (in_case and key == "name")
+                if named and isinstance(value, str) and value.strip():
+                    found.append(value)
+                walk(value, key in CASE_LIST_KEYS and isinstance(value, list))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, in_case)
+
+    for relpath in sorted(files):
+        try:
+            walk(json.loads(files[relpath]), False)
+        except ValueError:
+            continue
+    return found
+
+
+
+# One line per shape a suite in this repository's corpora uses to name a test.
+TEST_NAME_PATTERNS = (
+    re.compile(r'^\s*test\(\s*"([^"]+)"'),
+    re.compile(r"^\s*def (test_[A-Za-z0-9_]+)\s*\("),
+    re.compile(r"^\s*TEST\(([A-Za-z0-9_]+)\)"),
+)
+
+
+def declared_test_names(files: Dict[str, str]) -> List[str]:
+    """Every test a map of source files declares, however it spells one.
+
+    A test's name is the suite's own account of the behaviour it measures, so a
+    name that only the graded suite declares is a name that describes a fault
+    the model is graded on finding.
+    """
+    found: List[str] = []
+    for relpath in sorted(files):
+        for line in files[relpath].split("\n"):
+            for pattern in TEST_NAME_PATTERNS:
+                match = pattern.match(line)
+                if match is not None:
+                    found.append(match.group(1))
+                    break
+    return found
+
+
+def write_tree(root: Path, files: Dict[str, str]) -> Path:
+    """A directory of corpus material, built from a relpath -> body map."""
+    for relpath in sorted(files):
+        target = root / relpath
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(files[relpath])
+    return root
 
 
 def write_manifest(root: Path, doc: Dict[str, object], name: str = "tasks.json") -> Path:
@@ -391,8 +483,12 @@ class ManifestTests(unittest.TestCase):
         )
 
         tasks = cb.load_tasks(path)
-        self.assertEqual(len(tasks), sum(cb.EXPECTED_TASK_COUNTS.values()))
-        self.assertEqual(cb.EXPECTED_TASK_COUNTS["T0"], 10)
+        self.assertEqual(len(tasks), sum(SYNTHETIC_COUNTS.values()))
+        self.assertEqual(
+            dict((tier, len(group)) for tier, group in cb.tasks_by_tier(tasks).items()),
+            SYNTHETIC_COUNTS,
+            "the loaded set must match the shape the manifest declares",
+        )
         self.assertEqual([t.id for t in tasks], TASK_IDS, "manifest order must be preserved")
         self.assertEqual(len({t.id for t in tasks}), TASK_COUNT)
 
@@ -472,6 +568,847 @@ class ManifestTests(unittest.TestCase):
         doc["tasks"][idx].update(over)
         return doc
 
+    def _dir_sourced(self, seed: str, hidden: str, **over: object):
+        """A manifest whose first task draws both file sets from directories."""
+        doc = manifest_dict()
+        entry = doc["tasks"][0]
+        entry.pop("seedFiles")
+        entry.pop("hiddenFiles")
+        entry["seedDir"] = seed
+        entry["hiddenDir"] = hidden
+        entry.update(over)
+        return doc
+
+    def test_directory_sourced_task_files(self):
+        """[23B.2-directory-sourced-files] a task may draw its seed and hidden
+        file sets from directories instead of inline maps; the walk is sorted,
+        every inline validation still holds over the walked map, and a path that
+        leaves its declared directory, a binary body, an empty directory or a
+        seed/hidden collision is a named refusal rather than a surprise."""
+        corpus = self.tmp / "corpus"
+        write_tree(
+            corpus / "seed",
+            {
+                "README.md": "readme body\n",
+                "src/parser.py": "parser body\n",
+                "src/lib/util.py": "util body\n",
+            },
+        )
+        write_tree(corpus / "hidden", {"gauge/runner.py": "runner body\n"})
+
+        good = self._dir_sourced("corpus/seed", "corpus/hidden")
+        path = write_manifest(self.tmp, good, name="dir-good.json")
+        tasks = cb.load_tasks(path, root=self.tmp)
+        first = tasks[0]
+        self.assertEqual(
+            first.seed_files,
+            {
+                "README.md": "readme body\n",
+                "src/parser.py": "parser body\n",
+                "src/lib/util.py": "util body\n",
+            },
+            "the walk must flatten to repo-relative keys with exact bodies",
+        )
+        self.assertEqual(first.hidden_files, {"gauge/runner.py": "runner body\n"})
+        self.assertEqual(
+            sorted(first.seed_files),
+            list(first.seed_files),
+            "the walk must be sorted, so two runs seed identical trees",
+        )
+        again = cb.load_tasks(path, root=self.tmp)[0]
+        self.assertEqual(
+            list(again.seed_files.items()),
+            list(first.seed_files.items()),
+            "two loads of the same directory must produce identical maps",
+        )
+        # A directory-sourced task is indistinguishable downstream: the same
+        # accessor that reports an inline task's seed reports this one's.
+        self.assertEqual(cb.seeded_paths(first), sorted(first.seed_files))
+
+        both = self._dir_sourced("corpus/seed", "corpus/hidden")
+        both["tasks"][0]["seedFiles"] = {"src/x.txt": "x\n"}
+        neither = manifest_dict()
+        neither["tasks"][0].pop("seedFiles")
+        hidden_both = self._dir_sourced("corpus/seed", "corpus/hidden")
+        hidden_both["tasks"][0]["hiddenFiles"] = {"t/x.txt": "x\n"}
+        hidden_neither = manifest_dict()
+        hidden_neither["tasks"][0].pop("hiddenFiles")
+
+        nested = self.tmp / "nested"
+        write_tree(nested / "seed", {"run.sh": "run\n"})
+        write_tree(nested / "seed" / "gauge", {"runner.py": "runner\n"})
+
+        collide = self.tmp / "collide"
+        write_tree(collide / "seed", {"run.sh": "run\n"})
+        write_tree(collide / "hidden", {"run.sh": "hidden run\n"})
+
+        (self.tmp / "empty").mkdir()
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("answer key\n")
+        (self.tmp / "linked").symlink_to(outside, target_is_directory=True)
+        write_tree(self.tmp / "leaky", {"ok.txt": "ok\n"})
+        (self.tmp / "leaky" / "escape.txt").symlink_to(outside / "secret.txt")
+        write_tree(self.tmp / "binary", {"ok.txt": "ok\n"})
+        (self.tmp / "binary" / "session.request").write_bytes(b"CASE x 3\n\xff\xfe\x00\n")
+
+        bad_cases = {
+            "both-seed-sources": both,
+            "no-seed-source": neither,
+            "both-hidden-sources": hidden_both,
+            "no-hidden-source": hidden_neither,
+            "absolute-seed-dir": self._dir_sourced(str(corpus / "seed"), "corpus/hidden"),
+            "dotdot-seed-dir": self._dir_sourced("corpus/../corpus/seed", "corpus/hidden"),
+            "empty-seed-dir": self._dir_sourced("empty", "corpus/hidden"),
+            "missing-seed-dir": self._dir_sourced("corpus/absent", "corpus/hidden"),
+            "seed-dir-is-a-file": self._dir_sourced("corpus/seed/README.md", "corpus/hidden"),
+            "symlinked-seed-dir": self._dir_sourced("linked", "corpus/hidden"),
+            "symlink-escapes-seed-dir": self._dir_sourced("leaky", "corpus/hidden"),
+            "binary-seed-file": self._dir_sourced("binary", "corpus/hidden"),
+            "binary-hidden-file": self._dir_sourced("corpus/seed", "binary"),
+            "hidden-dir-inside-seed-dir": self._dir_sourced("nested/seed", "nested/seed/gauge"),
+            "seed-dir-inside-hidden-dir": self._dir_sourced("nested/seed/gauge", "nested/seed"),
+            "same-dir-both-sides": self._dir_sourced("corpus/seed", "corpus/seed"),
+            "colliding-relpaths": self._dir_sourced("collide/seed", "collide/hidden"),
+        }
+        for label, doc in bad_cases.items():
+            bad_path = write_manifest(self.tmp, doc, name="bad-%s.json" % label)
+            with self.assertRaises(cb.BenchError, msg=label) as ctx:
+                cb.load_tasks(bad_path, root=self.tmp)
+            message = str(ctx.exception)
+            self.assertIn(TASK_IDS[0], message, "%s: message must name the task id" % label)
+
+        # The binary refusal must name the file, because "somewhere under this
+        # directory" is not enough to act on.
+        binary_path = write_manifest(
+            self.tmp, bad_cases["binary-seed-file"], name="named-binary.json"
+        )
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(binary_path, root=self.tmp)
+        self.assertIn("session.request", str(ctx.exception))
+
+        # A relative directory resolves against the repo root by default, which
+        # is what lets a committed manifest name bench/corpus/... and mean it.
+        escaping = self._dir_sourced("corpus/seed", "corpus/hidden")
+        escaping_path = write_manifest(self.tmp, escaping, name="default-root.json")
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(escaping_path)
+        self.assertIn(TASK_IDS[0], str(ctx.exception))
+
+    def test_directory_source_guards_refuse_what_a_cell_cannot_seed(self):
+        """[23B.2-directory-source-guards] the four refusals the walk owns
+        beyond path shape - a seeded `.git`, an entry that is not a regular
+        file, a body over the per-file ceiling, and a set over the per-set
+        ceiling. Each names the task id and what it refused, each tree loads
+        once its one offending entry is gone, and the two ceilings are the
+        committed numbers rather than whatever the walk happens to tolerate."""
+        self.assertEqual(cb.MAX_SOURCE_FILE_BYTES, 1 << 20)
+        self.assertEqual(cb.MAX_SOURCE_DIR_BYTES, 8 << 20)
+        write_tree(self.tmp / "hid", {"gauge/runner.py": "runner body\n"})
+
+        # A gitlink is a plain UTF-8 file, so it clears the symlink, regular
+        # file, ceiling and decode guards on its own. The .git refusal is the
+        # only thing between a submodule or linked-worktree checkout and a cell
+        # whose history is not the seed commit the conductor arm is graded on.
+        write_tree(
+            self.tmp / "gitlink",
+            {"src/main.py": "main body\n", ".git": "gitdir: ../elsewhere\n"},
+        )
+        write_tree(
+            self.tmp / "gitdir",
+            {"src/main.py": "main body\n", ".git/HEAD": "ref: refs/heads/main\n"},
+        )
+
+        big = write_tree(self.tmp / "big", {"src/main.py": "main body\n"})
+        (big / "workload.txt").write_text("w" * (cb.MAX_SOURCE_FILE_BYTES + 1))
+
+        # Every body sits on the per-file ceiling, so only the per-set total
+        # can refuse this tree.
+        span = cb.MAX_SOURCE_DIR_BYTES // cb.MAX_SOURCE_FILE_BYTES + 1
+        wide = write_tree(
+            self.tmp / "wide",
+            dict(
+                ("part-%02d.txt" % index, "u" * cb.MAX_SOURCE_FILE_BYTES)
+                for index in range(span)
+            ),
+        )
+
+        special = write_tree(self.tmp / "special", {"main.py": "main body\n"})
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(listener.close)
+        listener.bind(str(special / "s"))
+
+        refusals = {
+            "gitlink-file": ("gitlink", "seeded .git tree"),
+            "git-directory": ("gitdir", "seeded .git tree"),
+            "over-per-file-ceiling": ("big", "per-file"),
+            "over-per-set-ceiling": ("wide", "ceiling for one file set"),
+            "not-a-regular-file": ("special", "not a regular file"),
+        }
+        for label in sorted(refusals):
+            source, expected = refusals[label]
+            path = write_manifest(
+                self.tmp, self._dir_sourced(source, "hid"), name="guard-%s.json" % label
+            )
+            with self.assertRaises(cb.BenchError, msg=label) as ctx:
+                cb.load_tasks(path, root=self.tmp)
+            message = str(ctx.exception)
+            self.assertIn(TASK_IDS[0], message, label)
+            self.assertIn(expected, message, label)
+
+        (self.tmp / "gitlink" / ".git").unlink()
+        shutil.rmtree(str(self.tmp / "gitdir" / ".git"))
+        (big / "workload.txt").unlink()
+        (wide / ("part-%02d.txt" % (span - 1))).unlink()
+        (special / "s").unlink()
+        for source in ("gitlink", "gitdir", "big", "wide", "special"):
+            path = write_manifest(
+                self.tmp, self._dir_sourced(source, "hid"), name="clean-%s.json" % source
+            )
+            self.assertTrue(cb.load_tasks(path, root=self.tmp)[0].seed_files, source)
+
+    def test_an_empty_task_set_is_refused(self):
+        """[23C.1-empty-task-set] a manifest whose task array is empty is a
+        refusal at load, whether or not it declares a per-tier pin.
+
+        Every driver mode reports success over the set it was handed, so a set
+        with nothing in it makes --verify-tasks print that every hidden test
+        failed, --seed-green print that every seed starts green, and the report
+        claim full coverage of a campaign that measured nothing. The floor is
+        the task count itself, not the pin: a manifest may decline to state a
+        shape, and a generator that derives its pin from what it emitted
+        declares an all-zero one.
+        """
+        for label, over in (
+            ("no-pin", {"tasks": [], "expectedTaskCounts": None}),
+            ("zero-pin", {"tasks": [], "expectedTaskCounts": dict((t, 0) for t in cb.TIERS)}),
+        ):
+            doc = manifest_dict()
+            doc["tasks"] = []
+            if over["expectedTaskCounts"] is None:
+                doc.pop("expectedTaskCounts")
+            else:
+                doc["expectedTaskCounts"] = over["expectedTaskCounts"]
+            path = write_manifest(self.tmp, doc, name="empty-%s.json" % label)
+            with self.assertRaises(cb.BenchError, msg=label) as ctx:
+                cb.load_manifest(path)
+            self.assertIn("tasks", str(ctx.exception), label)
+
+        buf = io.StringIO()
+        doc = manifest_dict()
+        doc["tasks"] = []
+        doc.pop("expectedTaskCounts")
+        empty = write_manifest(self.tmp, doc, name="empty-cli.json")
+        for mode in ("--verify-tasks", "--seed-green", "--plan-only"):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                code = cb.main(
+                    [
+                        mode,
+                        "--manifest",
+                        str(empty),
+                        "--work-root",
+                        str(self.tmp / ("empty-" + mode.strip("-"))),
+                        "--run-manifest",
+                        str(self.tmp / "empty-run-manifest.json"),
+                    ]
+                )
+            self.assertEqual(code, 2, "%s over an empty set: %s" % (mode, buf.getvalue()))
+
+    def test_directory_walk_skips_what_the_tree_ignores(self):
+        """[23C.2-walk-skips-build-output] the walk reads the source a tree
+        commits and steps over the artifacts a build and a tool leave in it.
+
+        Every corpus seed's own .gitignore enumerates its generated data and its
+        build directory, and the repository ignores __pycache__ and .DS_Store
+        everywhere, so none of it is reportable by `git status`. A walk that read
+        them would refuse the whole task set over a byte no author wrote, and the
+        refusal would name a file the operator cannot find in any diff.
+        """
+        tree = self.tmp / "artifacts"
+        write_tree(
+            tree / "seed",
+            {
+                ".gitignore": "# generated\ndata/\nbuild/\n*.report.json\nsample/base.bin\n",
+                "README.md": "readme\n",
+                "src/solver.py": "solver\n",
+            },
+        )
+        write_tree(tree / "hidden", {"gauge/run.py": "run\n"})
+        # What Finder, a build and an interpreter leave behind.
+        (tree / "seed" / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1" + b"\xff" * 64)
+        (tree / "seed" / "src" / "__pycache__").mkdir()
+        (tree / "seed" / "src" / "__pycache__" / "solver.cpython-39.pyc").write_bytes(
+            b"\xf3\x0d\x0d\x0a\x00\x01\x02"
+        )
+        (tree / "seed" / "build").mkdir()
+        (tree / "seed" / "build" / "reference").write_bytes(b"\xcf\xfa\xed\xfe binary")
+        (tree / "seed" / "data").mkdir()
+        (tree / "seed" / "data" / "generated.bin").write_bytes(b"\x00\xff" * 32)
+        (tree / "seed" / "sample").mkdir()
+        (tree / "seed" / "sample" / "base.bin").write_bytes(b"\x99" * 16)
+        (tree / "seed" / "run.report.json").write_text("{}\n")
+        (tree / "hidden" / "gauge" / "__pycache__").mkdir()
+        (tree / "hidden" / "gauge" / "__pycache__" / "run.cpython-39.pyc").write_bytes(
+            b"\xf3\x0d\x0d\x0a"
+        )
+
+        doc = self._dir_sourced("artifacts/seed", "artifacts/hidden")
+        path = write_manifest(self.tmp, doc, name="artifacts.json")
+        task = cb.load_tasks(path, root=self.tmp)[0]
+        self.assertEqual(
+            sorted(task.seed_files),
+            [".gitignore", "README.md", "src/solver.py"],
+            "the walk must hand the model the committed source and nothing else",
+        )
+        self.assertEqual(sorted(task.hidden_files), ["gauge/run.py"])
+
+        # A tree that states an ignore rule this walk cannot honour is a named
+        # refusal, never a silently wider or narrower skip.
+        negated = self.tmp / "negated"
+        write_tree(
+            negated / "seed",
+            {".gitignore": "build/\n!build/keep.txt\n", "src/a.py": "a\n"},
+        )
+        write_tree(negated / "hidden", {"gauge/run.py": "run\n"})
+        bad = write_manifest(
+            self.tmp, self._dir_sourced("negated/seed", "negated/hidden"), name="negated.json"
+        )
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(bad, root=self.tmp)
+        self.assertIn("!build/keep.txt", str(ctx.exception))
+
+        # A binary file the tree does NOT ignore is still the refusal it was.
+        stray = self.tmp / "stray"
+        write_tree(stray / "seed", {"src/a.py": "a\n"})
+        (stray / "seed" / "src" / "fixture.dat").write_bytes(b"\xff\xfe\x00")
+        write_tree(stray / "hidden", {"gauge/run.py": "run\n"})
+        stray_path = write_manifest(
+            self.tmp, self._dir_sourced("stray/seed", "stray/hidden"), name="stray.json"
+        )
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(stray_path, root=self.tmp)
+        self.assertIn("fixture.dat", str(ctx.exception))
+
+    def test_corpus_games_manifest(self):
+        """[23C.3-corpus-games-manifest] the committed headless-games manifest
+        is directory-sourced, runs the one model this campaign has, and hands
+        the model a tree that carries none of the gauge's own expectations.
+
+        Its four sibling corpus manifests each carry a row like this one. A
+        manifest with no row is a file whose model id, whose seed directories
+        and whose graded command can all be broken without a gate noticing,
+        and the break surfaces on a live campaign as a result nobody can
+        attribute.
+        """
+        path = cb.REPO_ROOT / "bench" / "corpus-games.json"
+        manifest = cb.load_manifest(path)
+        document = json.loads(path.read_text())
+        self.assertEqual(manifest.defaults["model"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["primaryModel"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["models"], [CAMPAIGN_MODEL])
+        self.assertTrue(manifest.selection_criteria, "the set must say why it is the set")
+        self.assertTrue(manifest.tasks, "an empty manifest measures nothing")
+        self.assertEqual(cb.check_commands_spawnable(manifest.tasks), [])
+
+        for entry in document["tasks"]:
+            self.assertIn("seedDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertIn("hiddenDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertNotIn("seedFiles", entry)
+            self.assertNotIn("hiddenFiles", entry)
+
+        for task in manifest.tasks:
+            self.assertFalse(
+                set(task.seed_files) & set(task.hidden_files),
+                "%s: a hidden file the model can read measures nothing" % task.id,
+            )
+            seed_bodies = "\n".join(task.seed_files[k] for k in sorted(task.seed_files))
+            for relpath in sorted(task.hidden_files):
+                self.assertNotIn(
+                    relpath,
+                    task.prompt,
+                    "%s: the prompt names the graded path %s" % (task.id, relpath),
+                )
+                basename = re.compile(
+                    r"(?<![\w./-])" + re.escape(os.path.basename(relpath))
+                )
+                self.assertIsNone(
+                    basename.search(task.prompt),
+                    "%s: the prompt names the graded file %s" % (task.id, relpath),
+                )
+                # A graded file that is byte-for-byte a whole seed file is the
+                # same instrument kept out of reach - a generic runner is one -
+                # and carries no expectation the seed did not already state. A
+                # graded body that turns up INSIDE a larger seed file is the
+                # other thing, and is refused.
+                body = task.hidden_files[relpath]
+                if body in seed_bodies:
+                    self.assertIn(
+                        body,
+                        set(task.seed_files.values()),
+                        "%s: graded file %s appears inside a seed file rather "
+                        "than as a copy of one" % (task.id, relpath),
+                    )
+            for case_id in sorted(case_identifiers(task.hidden_files)):
+                self.assertNotIn(
+                    case_id,
+                    seed_bodies,
+                    "%s: the seed names the graded case %s" % (task.id, case_id),
+                )
+                self.assertNotIn(
+                    case_id,
+                    task.prompt,
+                    "%s: the prompt names the graded case %s" % (task.id, case_id),
+                )
+            carved = set(declared_test_names(task.hidden_files)) - set(
+                declared_test_names(task.seed_files)
+            )
+            for name in sorted(carved):
+                self.assertNotIn(
+                    name,
+                    seed_bodies,
+                    "%s: the seed names the graded test %r" % (task.id, name),
+                )
+                self.assertNotIn(
+                    name,
+                    task.prompt,
+                    "%s: the prompt names the graded test %r" % (task.id, name),
+                )
+            # The visible gate and the graded gate are different commands over
+            # different trees; a task whose two commands agree measures the seed
+            # twice and the model never.
+            self.assertNotEqual(task.repo_test_command, task.hidden_test_command)
+
+    def test_corpus_systems_manifest(self):
+        """[23B.3-corpus-systems-manifest] the committed systems-implementation
+        manifest is directory-sourced, runs the one model this campaign has, and
+        hands the model a tree that cannot answer its own hidden suite."""
+        manifest = cb.load_manifest(cb.CORPUS_SYSTEMS_MANIFEST_PATH)
+        document = json.loads(cb.CORPUS_SYSTEMS_MANIFEST_PATH.read_text())
+        self.assertEqual(manifest.defaults["model"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["primaryModel"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["models"], [CAMPAIGN_MODEL])
+        self.assertTrue(manifest.selection_criteria, "the set must say why it is the set")
+        self.assertTrue(manifest.tasks, "an empty manifest measures nothing")
+        self.assertEqual(cb.check_commands_spawnable(manifest.tasks), [])
+
+        for entry in document["tasks"]:
+            self.assertIn("seedDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertIn("hiddenDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertNotIn("seedFiles", entry)
+            self.assertNotIn("hiddenFiles", entry)
+
+        for task in manifest.tasks:
+            self.assertFalse(
+                set(task.seed_files) & set(task.hidden_files),
+                "%s: a hidden file the model can read measures nothing" % task.id,
+            )
+            seed_bodies = "\n".join(task.seed_files[k] for k in sorted(task.seed_files))
+            for relpath in task.hidden_files:
+                self.assertNotIn(
+                    relpath,
+                    task.prompt,
+                    "%s: the prompt names the hidden path %s" % (task.id, relpath),
+                )
+                self.assertNotIn(
+                    os.path.basename(relpath),
+                    task.prompt,
+                    "%s: the prompt names the hidden file %s" % (task.id, relpath),
+                )
+            for relpath in sorted(task.hidden_files):
+                body = task.hidden_files[relpath]
+                self.assertNotIn(
+                    body,
+                    seed_bodies,
+                    "%s: hidden file %s is reproduced in the seed" % (task.id, relpath),
+                )
+            # A case identifier is the suite's own name for one measurement, so
+            # a seed that names one names a case the model is graded on. The
+            # cases' expected VALUES are not checked here: a specification
+            # carries worked examples, and demanding that it carry none would
+            # gut the document the task is built against.
+            #
+            # A suite spells its identifier `id` or `name`, and both are read:
+            # resp-server's 869 cases carry only `name`, so reading `id` alone
+            # left one of the four tasks outside a claim the manifest makes over
+            # the whole set. Where a corpus's own specification publishes a case
+            # name - which two of them do - the manifest says so in the very
+            # field that makes the claim, and the collision is measured against
+            # that disclosure. An undisclosed one is a failure, and a disclosure
+            # for a collision that no longer exists cannot hide a later one.
+            disclosure = manifest.selection_criteria["hiddenTests"]
+            for case_id in sorted(set(case_identifiers(task.hidden_files))):
+                if case_id in seed_bodies:
+                    self.assertIn(
+                        case_id,
+                        disclosure,
+                        "%s: the seed names the hidden case %s and the manifest "
+                        "does not disclose it" % (task.id, case_id),
+                    )
+                self.assertNotIn(
+                    case_id,
+                    task.prompt,
+                    "%s: the prompt names the hidden case %s" % (task.id, case_id),
+                )
+            # The visible gate and the graded gate are different commands over
+            # different trees; a task whose two commands agree measures the seed
+            # twice and the model never.
+            self.assertNotEqual(task.repo_test_command, task.hidden_test_command)
+
+    def test_corpus_repair_manifest(self):
+        """[23B.4-corpus-repair-manifest] the committed repair-and-migration
+        manifest is directory-sourced, runs the one model this campaign has,
+        seeds a tree that passes its own visible suite while still failing the
+        graded one, and carries none of the corpus's operator-only material."""
+        path = cb.REPO_ROOT / "bench" / "corpus-repair.json"
+        manifest = cb.load_manifest(path)
+        document = json.loads(path.read_text())
+        self.assertEqual(manifest.defaults["model"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["primaryModel"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["models"], [CAMPAIGN_MODEL])
+        self.assertTrue(manifest.selection_criteria, "the set must say why it is the set")
+        self.assertTrue(manifest.tasks, "an empty manifest measures nothing")
+        self.assertEqual(cb.check_commands_spawnable(manifest.tasks), [])
+
+        for entry in document["tasks"]:
+            self.assertIn("seedDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertIn("hiddenDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertNotIn("seedFiles", entry)
+            self.assertNotIn("hiddenFiles", entry)
+
+        for task in manifest.tasks:
+            self.assertFalse(
+                set(task.seed_files) & set(task.hidden_files),
+                "%s: a hidden file the model can read measures nothing" % task.id,
+            )
+            seed_bodies = "\n".join(task.seed_files[k] for k in sorted(task.seed_files))
+            for relpath in sorted(task.hidden_files):
+                self.assertNotIn(
+                    relpath,
+                    task.prompt,
+                    "%s: the prompt names the hidden path %s" % (task.id, relpath),
+                )
+                self.assertNotIn(
+                    os.path.basename(relpath),
+                    task.prompt,
+                    "%s: the prompt names the hidden file %s" % (task.id, relpath),
+                )
+                # A graded file that is byte-for-byte a seed file is the same
+                # instrument kept out of reach, which is the point: a model
+                # cannot weaken what it cannot edit. A graded body that turns up
+                # INSIDE a larger seed file is the other thing - a fragment of
+                # the measurement pasted into the tree - and is refused.
+                body = task.hidden_files[relpath]
+                if body in seed_bodies:
+                    self.assertIn(
+                        body,
+                        set(task.seed_files.values()),
+                        "%s: graded file %s appears inside a seed file rather "
+                        "than as a copy of one" % (task.id, relpath),
+                    )
+            # The corpus ships an answer key beside each repair task: the fault,
+            # its line, and the corrected source. None of that material, and no
+            # marker that would tell a model such a document exists, may reach a
+            # seeded tree.
+            for marker in ("solution-notes", "OPERATOR-ONLY", "Ground truth", "expected_failing_tests"):
+                self.assertNotIn(
+                    marker,
+                    seed_bodies,
+                    "%s: the seed carries the operator-only marker %r" % (task.id, marker),
+                )
+                self.assertNotIn(
+                    marker,
+                    task.prompt,
+                    "%s: the prompt carries the operator-only marker %r" % (task.id, marker),
+                )
+            # A test the graded suite declares and the seeded suite does not is
+            # a test that proves a fault. Naming one in the seed, or in the
+            # prompt, hands over the fault the run is supposed to localise.
+            carved = set(declared_test_names(task.hidden_files)) - set(
+                declared_test_names(task.seed_files)
+            )
+            for name in sorted(carved):
+                self.assertNotIn(
+                    name,
+                    seed_bodies,
+                    "%s: the seed names the graded test %r" % (task.id, name),
+                )
+                self.assertNotIn(
+                    name,
+                    task.prompt,
+                    "%s: the prompt names the graded test %r" % (task.id, name),
+                )
+            # The visible gate and the graded gate are different commands over
+            # different trees; a task whose two commands agree measures the seed
+            # twice and the model never.
+            self.assertNotEqual(task.repo_test_command, task.hidden_test_command)
+
+    def test_corpus_perf_manifest(self):
+        """[23B.5-corpus-perf-manifest] the committed speed-gate manifest is
+        directory-sourced, runs the one model this campaign has, keeps every
+        pristine copy its graded gate measures against in step with the seed
+        file it guards, and states in the prompt the same speedup factor the
+        gate enforces."""
+        path = cb.REPO_ROOT / "bench" / "corpus-perf.json"
+        manifest = cb.load_manifest(path)
+        document = json.loads(path.read_text())
+        self.assertEqual(manifest.defaults["model"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["primaryModel"], CAMPAIGN_MODEL)
+        self.assertEqual(manifest.sweep["models"], [CAMPAIGN_MODEL])
+        self.assertTrue(manifest.selection_criteria, "the set must say why it is the set")
+        self.assertTrue(manifest.tasks, "an empty manifest measures nothing")
+        self.assertEqual(cb.check_commands_spawnable(manifest.tasks), [])
+
+        for entry in document["tasks"]:
+            self.assertIn("seedDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertIn("hiddenDir", entry, "%s must be directory-sourced" % entry["id"])
+            self.assertNotIn("seedFiles", entry)
+            self.assertNotIn("hiddenFiles", entry)
+
+        target_pattern = re.compile(r"TARGET_SPEEDUP\s*=\s*([0-9]+(?:\.[0-9]+)?)")
+        for task in manifest.tasks:
+            self.assertFalse(
+                set(task.seed_files) & set(task.hidden_files),
+                "%s: a hidden file the model can read measures nothing" % task.id,
+            )
+            seed_bodies = "\n".join(task.seed_files[k] for k in sorted(task.seed_files))
+
+            # Every graded gate here decides a ratio between a candidate and a
+            # reference it re-times beside it, and refuses a workspace whose
+            # reference no longer holds the bytes gauge/pristine holds. A
+            # pristine copy that drifted from the seed it guards fails that
+            # check on every run before anything is measured, so the two are
+            # pinned equal here rather than discovered on a live campaign.
+            guarded = [r for r in task.hidden_files if r.startswith("gauge/pristine/")]
+            self.assertTrue(
+                guarded,
+                "%s: the gate holds no pristine copy and can vouch for nothing" % task.id,
+            )
+            for relpath in sorted(guarded):
+                seed_relpath = relpath[len("gauge/pristine/"):]
+                self.assertIn(
+                    seed_relpath,
+                    task.seed_files,
+                    "%s: pristine %s guards nothing in the seed" % (task.id, seed_relpath),
+                )
+                self.assertEqual(
+                    task.hidden_files[relpath],
+                    task.seed_files[seed_relpath],
+                    "%s: pristine %s has drifted from the seed file it guards"
+                    % (task.id, seed_relpath),
+                )
+
+            # Only the files that exist nowhere in the seed are a leak risk;
+            # the pristine copies are seed files by construction.
+            for relpath in sorted(set(task.hidden_files) - set(guarded)):
+                self.assertNotIn(
+                    relpath,
+                    task.prompt,
+                    "%s: the prompt names the graded path %s" % (task.id, relpath),
+                )
+                # The basename is matched as a whole path token: a plain
+                # substring test reads `aggregate.py` as naming `gate.py`.
+                basename = re.compile(
+                    r"(?<![\w./-])" + re.escape(os.path.basename(relpath))
+                )
+                self.assertIsNone(
+                    basename.search(task.prompt),
+                    "%s: the prompt names the graded file %s" % (task.id, relpath),
+                )
+                self.assertNotIn(
+                    task.hidden_files[relpath],
+                    seed_bodies,
+                    "%s: graded file %s is reproduced in the seed" % (task.id, relpath),
+                )
+
+            # A wall-clock threshold is a property of the machine that measured
+            # it, so the gate states a factor and the prompt states the same
+            # one. A task whose prompt names a different number is asking for
+            # something other than what it grades.
+            bodies = list(task.seed_files.values()) + list(task.hidden_files.values())
+            targets = set()
+            for body in bodies:
+                targets.update(target_pattern.findall(body))
+            self.assertEqual(
+                len(targets),
+                1,
+                "%s: the tree declares %d speedup targets, not one" % (task.id, len(targets)),
+            )
+            target = targets.pop()
+            self.assertIn(
+                target,
+                task.prompt,
+                "%s: the gate requires x%s and the prompt never says so" % (task.id, target),
+            )
+
+            # The measurement is a median over repeated runs of both sides, not
+            # a single timing of either.
+            gate = task.hidden_files["gauge/gate.py"]
+            for word in ("median", "TARGET_SPEEDUP" if "TARGET_SPEEDUP" in gate else "speedup"):
+                self.assertIn(word, gate, "%s: the gate never mentions %r" % (task.id, word))
+
+            # The corpus ships operator notes beside each of these tasks that
+            # publish the calibration table, the expected failure modes and the
+            # measured baseline. None of that, and no pointer to a document
+            # this workspace does not contain, may reach a seeded tree.
+            for marker in ("operator notes", "Interpreting a partial result",
+                           "Known failure modes", "Measured baseline",
+                           "new_workspace", "OPTIMIZATION-NOTES", "CONVENTIONS.md",
+                           "rubric.md", "solutions/"):
+                self.assertNotIn(
+                    marker,
+                    seed_bodies,
+                    "%s: the seed carries the operator-only marker %r" % (task.id, marker),
+                )
+                self.assertNotIn(
+                    marker,
+                    task.prompt,
+                    "%s: the prompt carries the operator-only marker %r" % (task.id, marker),
+                )
+
+            # The visible gate and the graded gate are different commands over
+            # different trees; a task whose two commands agree measures the seed
+            # twice and the model never.
+            self.assertNotEqual(task.repo_test_command, task.hidden_test_command)
+
+    def test_corpus_python_material_imports_inside_a_cell(self):
+        """[23B.8-corpus-imports-inside-a-cell] every module the committed
+        Python material imports resolves under the environment a cell actually
+        runs in.
+
+        build_cell_env redirects HOME, and CPython derives the per-user site
+        directory from HOME, so a package installed with `pip install --user`
+        sits on the driver's import path and off the model's. A seed that
+        reaches for one hands the model a suite whose first command fails, and
+        every preflight that runs under the operator's own environment reports
+        it green.
+        """
+        provided = set()
+        roots = set()
+        for path in sorted((cb.REPO_ROOT / "bench").glob("*.json")):
+            for task in cb.load_manifest(path).tasks:
+                bodies = dict(task.seed_files)
+                bodies.update(task.hidden_files)
+                for relpath in sorted(bodies):
+                    # Anything the task ships is resolvable from inside the
+                    # task: a top-level package, a module beside its importer,
+                    # a directory a runner puts on the path. Only the names
+                    # nothing in the tree provides have to come from outside.
+                    for segment in relpath.split("/"):
+                        provided.add(
+                            segment[:-3] if segment.endswith(".py") else segment
+                        )
+                    if not relpath.endswith(".py"):
+                        continue
+                    for node in ast.walk(ast.parse(bodies[relpath])):
+                        if isinstance(node, ast.Import):
+                            for alias in node.names:
+                                roots.add(alias.name.split(".")[0])
+                        elif isinstance(node, ast.ImportFrom) and not node.level:
+                            roots.add((node.module or "").split(".")[0])
+        roots -= provided
+        roots.discard("")
+        self.assertTrue(roots, "the corpus imports nothing; the scan found no material")
+
+        cell_dir = self.tmp / "cell"
+        cell_dir.mkdir(parents=True, exist_ok=True)
+        env = cb.build_cell_env(cell_dir, cell_dir / "config.json")
+        for key in ("HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME",
+                    "XDG_CACHE_HOME"):
+            Path(env[key]).mkdir(parents=True, exist_ok=True)
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir(exist_ok=True)
+
+        unreachable = []
+        for root in sorted(roots):
+            probe = subprocess.run(
+                ["/usr/bin/python3", "-c", "import %s" % root],
+                cwd=str(elsewhere), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            if probe.returncode != 0:
+                unreachable.append("%s: %s" % (root, probe.stdout.decode().strip()))
+        self.assertEqual(
+            unreachable,
+            [],
+            "the corpus imports modules a cell cannot resolve:\n%s"
+            % "\n".join(unreachable),
+        )
+
+    def test_expected_task_counts_is_a_manifest_field(self):
+        """[23B.1-expected-task-counts] the per-tier task-set pin is declared by
+        the manifest document, not by the driver: a manifest that declares
+        expectedTaskCounts is held to it, one that omits the field is held to no
+        per-tier shape, and an explicit expected_counts argument overrides
+        both."""
+        # Declaring the pin keeps the guard: trading a T3 task for a T2 one
+        # leaves the total unchanged and must still be refused.
+        pinned = manifest_dict()
+        dropped = next(i for i, t in enumerate(pinned["tasks"]) if t["tier"] == "T3")
+        pinned["tasks"].pop(dropped)
+        pinned["tasks"].append(task_dict(0, id="bt-extra", tier="T2"))
+        pinned_path = write_manifest(self.tmp, pinned, name="pinned-mix.json")
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_tasks(pinned_path)
+        self.assertIn("T3", str(ctx.exception))
+
+        # The same set without the field loads clean: no declared shape, no pin.
+        unpinned = dict(pinned)
+        unpinned.pop("expectedTaskCounts")
+        unpinned_path = write_manifest(self.tmp, unpinned, name="unpinned-mix.json")
+        loaded = cb.load_tasks(unpinned_path)
+        self.assertEqual(len(loaded), TASK_COUNT)
+        self.assertEqual(
+            len(cb.tasks_by_tier(loaded)["T3"]),
+            SYNTHETIC_COUNTS["T3"] - 1,
+            "an unpinned manifest keeps whatever shape it has",
+        )
+
+        # An explicit argument is the caller checking a set against a shape the
+        # document does not declare, and wins over the document either way.
+        with self.assertRaises(cb.BenchError):
+            cb.load_tasks(unpinned_path, expected_counts=dict(SYNTHETIC_COUNTS))
+        wider = dict(SYNTHETIC_COUNTS)
+        wider["T3"] = SYNTHETIC_COUNTS["T3"] - 1
+        wider["T2"] = SYNTHETIC_COUNTS["T2"] + 1
+        self.assertEqual(
+            len(cb.load_tasks(pinned_path, expected_counts=wider)),
+            TASK_COUNT,
+            "an explicit shape overrides the document's own",
+        )
+
+        # A declared pin is validated as a shape, and every refusal names the field.
+        bad_counts = {
+            "not-an-object": [10, 4, 3, 3, 3],
+            "unknown-tier": dict(list(SYNTHETIC_COUNTS.items()) + [("T9", 1)]),
+            "missing-tier": dict(
+                (tier, n) for tier, n in SYNTHETIC_COUNTS.items() if tier != "T3"
+            ),
+            "negative-count": dict(SYNTHETIC_COUNTS, T3=-1),
+            "boolean-count": dict(SYNTHETIC_COUNTS, T3=True),
+        }
+        for label, value in bad_counts.items():
+            doc = manifest_dict(expectedTaskCounts=value)
+            bad = write_manifest(self.tmp, doc, name="bad-counts-%s.json" % label)
+            with self.assertRaises(cb.BenchError, msg=label) as ctx:
+                cb.load_tasks(bad)
+            self.assertIn("expectedTaskCounts", str(ctx.exception), label)
+
+        # The committed ladder declares its own pin, so it keeps the guard it
+        # had when the driver carried one.
+        committed = json.loads(cb.MANIFEST_PATH.read_text())
+        self.assertEqual(
+            committed["expectedTaskCounts"],
+            {"T0": 10, "T1": 4, "T2": 3, "T3": 3, "T4": 3},
+            "the committed manifest must declare the ladder it is held to",
+        )
+
+        # No module-level shape is left to be applied to an arbitrary manifest.
+        self.assertFalse(
+            hasattr(cb, "EXPECTED_TASK_COUNTS"),
+            "the driver must carry no per-tier pin of its own",
+        )
+
     def test_manifest_selection_criteria(self):
         """[14.1-manifest-selection-criteria] the committed
         bench/conductor-tasks.json satisfies the plan's stated selection
@@ -482,7 +1419,7 @@ class ManifestTests(unittest.TestCase):
         )
         manifest = cb.load_manifest(cb.MANIFEST_PATH)
         tasks = manifest.tasks
-        self.assertEqual(len(tasks), sum(cb.EXPECTED_TASK_COUNTS.values()))
+        self.assertEqual(len(tasks), sum(committed_expected_counts().values()))
 
         languages = {t.language for t in tasks}
         for lang in ("ts", "python", "cpp"):
@@ -514,7 +1451,7 @@ class ManifestTests(unittest.TestCase):
             self.assertGreaterEqual(
                 len(by_tier[tier]), 3, "tier %s carries fewer than three tasks" % tier
             )
-            self.assertEqual(len(by_tier[tier]), cb.EXPECTED_TASK_COUNTS[tier], tier)
+            self.assertEqual(len(by_tier[tier]), committed_expected_counts()[tier], tier)
         self.assertEqual(len(by_tier["T0"]), 10, "T0 is the ten-task cost floor")
 
         for task in tasks:
@@ -636,6 +1573,119 @@ class ManifestTests(unittest.TestCase):
             self.assertFalse(cb.command_is_spawnable(["definitely-not-a-real-runner"]))
 
 
+class CorpusSpeedGateTests(unittest.TestCase):
+    """The speed gates decide a ratio, so what they time has to be two things."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cbench-gate-"))
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+
+    @staticmethod
+    def _load_module(name, path):
+        spec = importlib.util.spec_from_file_location(name, str(path))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _etl_workspace(self, delay_seconds):
+        """The etl-pipeline work tree, with the FROZEN baseline slowed down.
+
+        The delay goes into both copies of the frozen implementation - the
+        workspace's `baseline/` and the gate's `gauge/pristine/baseline/` - so
+        the gate's integrity check still sees the two as equal. `etl/`, the
+        package the task hands to the model, is left exactly as seeded. A gate
+        that times the frozen baseline therefore measures the delay; a gate
+        that re-imports `etl/` under the baseline's name measures nothing.
+        """
+        manifest = cb.load_manifest(cb.REPO_ROOT / "bench" / "corpus-perf.json")
+        task = next(t for t in manifest.tasks if t.id == "etl-pipeline-py")
+        root = self.tmp / "ws"
+        root.mkdir()
+        cb.materialize_files(root, task.seed_files)
+        cb.materialize_files(root, task.hidden_files)
+        delay = "\nimport time as _delay_clock\n_delay_clock.sleep(%r)\n" % delay_seconds
+        for relpath in ("baseline/etl/__init__.py",
+                        "gauge/pristine/baseline/etl/__init__.py"):
+            target = root / relpath
+            target.write_text(target.read_text() + delay)
+        return root, task
+
+    def test_etl_gate_times_the_frozen_baseline(self):
+        """[23B.7-etl-baseline-not-shadowed] the etl-pipeline gate's baseline
+        side runs the frozen implementation under gauge/pristine, not the
+        workspace package the model is handed."""
+        delay = 0.45
+        root, _task = self._etl_workspace(delay)
+        gate = self._load_module("etl_gate_under_test", root / "gauge" / "gate.py")
+        self.assertEqual(gate.ROOT, str(root))
+
+        # A gate reading this workspace must still call the material intact:
+        # the delay went into both copies of the frozen baseline.
+        self.assertTrue(gate.check_integrity())
+
+        os.makedirs(gate.WORK, exist_ok=True)
+        env = gate.pinned_environment()
+        paths = gate.generate(env, os.path.join(gate.WORK, "tiny"), 3000, 11, "40")
+        self.assertIsNotNone(paths)
+
+        gate.GATE_WARMUP_RUNS = 0
+        gate.GATE_TIMED_RUNS = 2
+        gate.TARGET_SPEEDUP = 2.0
+        gate.GATE_WORKERS = "2"
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            met = gate.check_speed(env, paths[0], paths[1])
+        report = buf.getvalue()
+
+        timed = re.compile(
+            r"run \d+/\d+\s+baseline\s+([\d.]+)s\s+candidate\s+([\d.]+)s\s+x([\d.]+)"
+        )
+        ratios = [float(match.group(3)) for match in timed.finditer(report)]
+        self.assertTrue(ratios, report)
+        self.assertGreater(
+            max(ratios),
+            2.0,
+            "the baseline carries a %.2fs delay the candidate does not; a ratio "
+            "at 1.0 means both sides ran the same package:\n%s" % (delay, report),
+        )
+        self.assertTrue(met, report)
+
+    def test_etl_self_measurement_times_the_frozen_baseline(self):
+        """[23B.7-etl-bench-not-shadowed] tools/bench.py, the harness the prompt
+        tells the model to trust, measures the same two things the gate does."""
+        delay = 0.45
+        root, _task = self._etl_workspace(delay)
+        env = dict(os.environ)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        work = self.tmp / "workload"
+        generated = subprocess.run(
+            [sys.executable, "tools/gen_workload.py", "--out", str(work),
+             "--records", "3000", "--seed", "11", "--devices", "40", "--quiet"],
+            cwd=str(root), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        self.assertEqual(generated.returncode, 0, generated.stdout.decode())
+
+        completed = subprocess.run(
+            [sys.executable, "tools/bench.py",
+             "--events", str(work / "events.ndjson"),
+             "--devices", str(work / "devices.tsv"),
+             "--workers", "2", "--runs", "2", "--warmup", "0",
+             "--outdir", str(self.tmp / "bench-out")],
+            cwd=str(root), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        output = completed.stdout.decode()
+        self.assertEqual(completed.returncode, 0, output)
+        payload = json.loads(output.rsplit("BENCHMARK_JSON ", 1)[1].splitlines()[0])
+        self.assertTrue(payload["outputs_identical"], output)
+        self.assertGreater(
+            payload["speedup"],
+            2.0,
+            "the baseline carries a %.2fs delay the candidate does not; a "
+            "speedup at 1.0 means both sides ran the same package:\n%s"
+            % (delay, output),
+        )
+
+
 class ArmTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="cbench-arm-"))
@@ -667,13 +1717,18 @@ class ArmTests(unittest.TestCase):
             self.build("")
 
         tasks = load_synthetic(self.tmp)
-        plan = cb.build_run_plan(tasks)
+        plan = cb.build_run_plan(tasks, models=[SENTINEL_MODEL])
         self.assertEqual({cell.arm for cell in plan}, set(cb.ARMS))
 
     def test_arms_same_model_g13(self):
         """[14.1-arms-same-model-g13] the model identifier is one parameter that
         reaches all three arms, and no arm carries a model literal."""
-        self.assertEqual(cb.DEFAULT_MODEL, "llamacpp/qwen3.6-27b")
+        source = (cb.REPO_ROOT / "scripts" / "conductor_bench.py").read_text()
+        self.assertNotIn(
+            "qwen",
+            source,
+            "a model id in the driver plans a campaign no manifest declared",
+        )
         configs = {arm: self.build(arm) for arm in cb.ARMS}
         selections = set()
         for arm, cfg in configs.items():
@@ -910,6 +1965,51 @@ class ArmTests(unittest.TestCase):
             )
             self.assertIs(cfg["autoupdate"], False, "%s did not override a base true" % arm)
 
+    def test_test_commands_run_under_the_cell_environment(self):
+        """[23B.8-graded-run-is-hermetic] a hidden or visible test command runs
+        under the same scrubbed homes the model's own process did.
+
+        HOME is what decides the per-user site directory, so a graded run under
+        the operator's HOME resolves imports the model's run could not - and a
+        preflight under the operator's HOME reports such a task green."""
+        probe = self.tmp / "probe.py"
+        probe.write_text(
+            "import json, os, site\n"
+            "seen = {\n"
+            "    'home': os.environ.get('HOME'),\n"
+            "    'usersite': site.getusersitepackages(),\n"
+            "    'keys': sorted(os.environ),\n"
+            "}\n"
+            "open('probe.json', 'w').write(json.dumps(seen))\n"
+        )
+        outcome = cb.default_test_runner(["/usr/bin/python3", str(probe)], self.tmp, 60)
+        self.assertEqual(outcome.exit_code, 0)
+        self.assertIsNone(outcome.spawn_error)
+
+        seen = json.loads((self.tmp / "probe.json").read_text())
+        self.assertNotEqual(
+            seen["home"],
+            os.path.expanduser("~"),
+            "a test command that inherits the operator's HOME is graded against "
+            "the operator's machine",
+        )
+        self.assertTrue(
+            seen["usersite"].startswith(seen["home"]),
+            "the per-user site directory must follow the scrubbed HOME, not the "
+            "operator's: %s" % seen["usersite"],
+        )
+        for key in cb.hermetic_home_env(self.tmp / "unused"):
+            self.assertIn(key, seen["keys"], "the hermetic env is missing %s" % key)
+        # Nothing that redirects an interpreter's search may reach a graded
+        # command. A blanket "these keys and no others" assertion cannot be made
+        # here: macOS injects __CF_USER_TEXT_ENCODING into every process, and
+        # the /usr/bin/python3 stub re-execs itself with SDKROOT and friends.
+        for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "VIRTUAL_ENV",
+                    "OPENCODE_CONFIG", "OPENCODE_TEST_HOME"):
+            self.assertNotIn(
+                key, seen["keys"], "%s reached a graded command" % key
+            )
+
     def test_cell_env_hermetic(self):
         """[14.1-cell-env-hermetic] the cell env carries the verified hermetic
         triple plus state isolation, all inside the cell's own directory, and
@@ -963,7 +2063,7 @@ class PlanAndCellTests(unittest.TestCase):
         """[14.1-run-plan-90-balanced] the plan is 90 uniquely-named cells,
         ordered repetition-major and arm-interleaved so any abort leaves the
         arms balanced."""
-        plan = cb.build_run_plan(self.tasks)
+        plan = cb.build_run_plan(self.tasks, models=[SENTINEL_MODEL])
         self.assertEqual(len(plan), 90)
         ids = [cell.cell_id for cell in plan]
         self.assertEqual(len(set(ids)), 90)
@@ -1009,7 +2109,7 @@ class PlanAndCellTests(unittest.TestCase):
             )
 
         for reps in (1, 2, 5):
-            other = cb.build_run_plan(self.tasks, reps=reps)
+            other = cb.build_run_plan(self.tasks, models=[SENTINEL_MODEL], reps=reps)
             self.assertEqual(len(other), reps * len(self.tasks) * len(cb.ARMS))
 
     def test_cells_carry_model_and_capability(self):
@@ -1053,7 +2153,9 @@ class PlanAndCellTests(unittest.TestCase):
                 self.assertLessEqual(max(counts) - min(counts), 1, (start, length, counts))
 
         # The capability dimension is carried by every arm alike.
-        capable = cb.build_run_plan(self.tasks, capabilities=cb.CAPABILITIES)
+        capable = cb.build_run_plan(
+            self.tasks, models=[SENTINEL_MODEL], capabilities=cb.CAPABILITIES
+        )
         for arm in cb.ARMS:
             self.assertEqual(
                 sorted({c.capability for c in capable if c.arm == arm}),
@@ -1299,6 +2401,26 @@ class PlanAndCellTests(unittest.TestCase):
                 commands = [scope["command"] for scope in scopes.values()]
                 self.assertIn(list(task.repo_test_command), commands)
 
+    def test_cell_journals_every_allow(self):
+        """[14.2-cell-journals-every-allow] the cell gathers its record at debug,
+        because a read allow is journaled below info and a run gathered at info
+        looks complete while holding no data behind the campaign's central
+        question."""
+        for task in self.tasks:
+            with self.subTest(task=task.id):
+                cfg = cb.build_conductor_cell_config(task)
+                level = cfg["logging"]["level"]
+                # conductor/adapter/tools.ts:496 journals a read-shaped allow at
+                # debug and only an R3 side effect at warn, so a cell gathered at
+                # info records the denies and the network allows and nothing
+                # else. What each arm REACHED is the measurement; at info there
+                # is nothing behind it.
+                self.assertEqual(
+                    level,
+                    "debug",
+                    "a cell gathered at %r drops every read allow" % (level,),
+                )
+
     def test_cell_timeout_kills_group(self):
         """[14.1-cell-timeout-kills-group] a hung cell is killed by process
         group, recorded as a timeout, and does not eat the overnight."""
@@ -1498,6 +2620,541 @@ class PlanAndCellTests(unittest.TestCase):
         self.assertIn(TASK_IDS[6], report["passedUnmodified"])
         self.assertEqual(report["exitCodes"][TASK_IDS[6]], 0)
         self.assertEqual(report["exitCodes"][TASK_IDS[0]], 1)
+
+
+    def test_sweep_refuses_every_flag_it_would_discard(self):
+        """[23C.4-sweep-refuses-discarded-flags] --sweep is refused alongside
+        every flag the sweep branch overwrites, not only --task and --tier.
+
+        The sweep branch reads models, capabilities and reps from the manifest's
+        own sweep block and never from argv, so `--sweep --reps 1` plans the
+        manifest's repetitions and says nothing about it: the operator asked for
+        one pass over a lane whose cells are hours long and gets three. An
+        explicitly named model discarded in silence is the same confound the
+        one-model campaign rule exists to prevent.
+        """
+        path = write_manifest(self.tmp, manifest_dict(), name="sweep-flags.json")
+        run_manifest_path = self.tmp / "sweep-run-manifest.json"
+
+        def plan(*extra):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                code = cb.main(
+                    ["--plan-only", "--manifest", str(path), "--run-manifest",
+                     str(run_manifest_path)] + list(extra)
+                )
+            return code, buf.getvalue()
+
+        # The sweep alone runs the shape the manifest declares.
+        code, output = plan("--sweep")
+        self.assertEqual(code, 0, output)
+        swept = json.loads(run_manifest_path.read_text())
+        self.assertEqual(swept["reps"], sweep_dict()["reps"])
+
+        before = run_manifest_path.read_text()
+        for label, extra in (
+            ("model", ("--model", SENTINEL_MODEL_B)),
+            ("capability", ("--capability", "readonly")),
+            ("reps", ("--reps", "1")),
+            ("tier", ("--tier", "T0")),
+        ):
+            code, output = plan("--sweep", *extra)
+            self.assertEqual(code, 2, "%s composed with --sweep: %s" % (label, output))
+            self.assertIn("--sweep", output, label)
+            self.assertIn("--" + label, output, "the refusal must name the flag it refused")
+            self.assertEqual(
+                run_manifest_path.read_text(),
+                before,
+                "a refused composition must not overwrite the run manifest",
+            )
+
+        # Typing the manifest's own repetition count is still typing --reps, so
+        # the refusal cannot be spelled as "the value differs from the default".
+        code, output = plan("--sweep", "--reps", str(sweep_dict()["reps"]))
+        self.assertEqual(code, 2, output)
+
+        # Without --sweep the same three flags are the plan.
+        code, output = plan("--reps", "1", "--model", SENTINEL_MODEL_B)
+        self.assertEqual(code, 0, output)
+        narrowed = json.loads(run_manifest_path.read_text())
+        self.assertEqual(narrowed["reps"], 1)
+        self.assertEqual(narrowed["models"], [SENTINEL_MODEL_B])
+
+    def test_verify_modes_refuse_a_gate_they_could_not_wait_out(self):
+        """[23C.5-verify-timeout-is-not-a-failure] a hidden test the floor
+        killed on the clock is reported as a timeout and refuses the mode; it is
+        never read as proof that the test failed on its seed.
+
+        --verify-tasks exists to catch a hidden test that passes on its
+        unmodified seed. Mapping a killed gate to a non-zero code makes that
+        gate indistinguishable from an honest failure, so the one task the check
+        exists to catch is the one it certifies clean - and a corpus gate that
+        compiles a reference and runs timed workloads is exactly the gate that
+        runs long enough to be killed.
+        """
+        doc = manifest_dict()
+        doc["tasks"][3]["hiddenTestCommand"] = [SLEEP_BIN, "3"]
+        doc["tasks"][3]["repoTestCommand"] = [SLEEP_BIN, "3"]
+        path = write_manifest(self.tmp, doc, name="verify-slow.json")
+        tasks = cb.load_tasks(path)
+
+        report = cb.verify_tasks(tasks, work_root=self.tmp / "vt", timeout_sec=0.4)
+        self.assertFalse(report["ok"], "a gate that was killed proves nothing")
+        self.assertEqual(report["timedOut"], [TASK_IDS[3]])
+        self.assertEqual(report["passedUnmodified"], [])
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cb.main(
+                ["--verify-tasks", "--manifest", str(path), "--work-root",
+                 str(self.tmp / "vt2"), "--verify-timeout", "0.4"]
+            )
+        output = buf.getvalue()
+        self.assertNotEqual(code, 0, output)
+        self.assertIn(TASK_IDS[3], output, "the refusal must name the task")
+        self.assertIn("timed out", output)
+
+        green = cb.verify_seed_green(tasks, work_root=self.tmp / "vs", timeout_sec=0.4)
+        self.assertFalse(green["ok"])
+        self.assertEqual(green["timedOut"], [TASK_IDS[3]])
+        self.assertEqual(green["startedRed"], [], "a killed suite is not a red suite")
+
+        # The operator can hand the floor the wall clock the gate needs rather
+        # than being hard-capped at a constant - and the slow gate this fixture
+        # carries turns out to PASS on its unmodified seed, which is the
+        # hollowness the floor exists to catch and the short clock hid.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cb.main(
+                ["--verify-tasks", "--manifest", str(path), "--work-root",
+                 str(self.tmp / "vt3"), "--verify-timeout", "10"]
+            )
+        output = buf.getvalue()
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("passed unmodified", output)
+        self.assertIn(TASK_IDS[3], output)
+        waited = cb.verify_tasks(tasks, work_root=self.tmp / "vt4", timeout_sec=10)
+        self.assertEqual(waited["timedOut"], [])
+        self.assertEqual(waited["passedUnmodified"], [TASK_IDS[3]])
+
+    def test_a_work_root_inside_the_repository_is_refused(self):
+        """[23C.6-work-root-outside-the-repository] the cell work trees live
+        outside this repository, and a work root inside it is a refusal.
+
+        A cell's cwd is <work_root>/<model>/<cap>/<arm>/<task>/rN/repo. Under
+        the repository that is a constant number of `..` segments from
+        bench/corpus/**/hidden/**, where every answer key the campaign grades
+        against sits - so an arm that walks up out of its own tree, which a
+        model debugging a failing run does by hand, reads the measurement. The
+        driver materializes the hidden files only after opencode exits for
+        exactly this reason; a relative path around that ordering defeats it.
+        """
+        self.assertFalse(
+            cb._is_within(cb.WORK_ROOT.resolve(), cb.REPO_ROOT.resolve()),
+            "the default work root must not sit under the repository",
+        )
+        path = write_manifest(self.tmp, manifest_dict(), name="work-root.json")
+        inside = cb.REPO_ROOT / ".data" / "benchmark" / "conductor" / "work"
+        for mode in ("--plan-only", "--verify-tasks", "--seed-green"):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                code = cb.main(
+                    [mode, "--manifest", str(path), "--work-root", str(inside),
+                     "--run-manifest", str(self.tmp / "wr.json")]
+                )
+            output = buf.getvalue()
+            self.assertEqual(code, 2, "%s: %s" % (mode, output))
+            self.assertIn(str(cb.REPO_ROOT), output, "the refusal must name the boundary")
+
+    def test_default_model_is_the_manifests_own(self):
+        """[23B.6-default-model-from-manifest] with neither --sweep nor --model,
+        every cell is planned against the model the manifest declares, and one
+        run manifest cannot record two campaigns."""
+        declared = "llamacpp/declared-model-z"
+        document = manifest_dict()
+        document["defaults"]["model"] = declared
+        document["sweep"] = sweep_dict(primaryModel=declared, models=[declared])
+        path = write_manifest(self.tmp, document, name="declared.json")
+        run_manifest_path = self.tmp / "run-manifest.json"
+
+        buf = io.StringIO()
+        argv = [
+            "--plan-only",
+            "--manifest",
+            str(path),
+            "--run-manifest",
+            str(run_manifest_path),
+        ]
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cb.main(argv)
+        output = buf.getvalue()
+        self.assertEqual(code, 0, output)
+
+        recorded = json.loads(run_manifest_path.read_text())
+        self.assertEqual(recorded["models"], [declared])
+        self.assertEqual(
+            recorded["models"],
+            recorded["sweep"]["models"],
+            "one artifact recording two model sets is a provenance record that "
+            "contradicts itself",
+        )
+        planned = [line.strip() for line in output.splitlines() if "/none/" in line]
+        self.assertTrue(planned, output)
+        for cell_id in planned:
+            self.assertTrue(
+                cell_id.startswith(cb.model_slug(declared) + "/"),
+                "%s was planned against a model the manifest never declared" % cell_id,
+            )
+
+        # A manifest whose two model declarations disagree is refused at load,
+        # rather than planning one of them and reporting the other.
+        split = manifest_dict()
+        split["defaults"]["model"] = declared
+        split["sweep"] = sweep_dict(
+            primaryModel=SENTINEL_MODEL, models=[SENTINEL_MODEL]
+        )
+        split_path = write_manifest(self.tmp, split, name="split.json")
+        with self.assertRaises(cb.BenchError) as ctx:
+            cb.load_manifest(split_path)
+        self.assertIn(declared, str(ctx.exception))
+
+        for bad in (None, "", "   ", 7):
+            broken = manifest_dict()
+            broken["defaults"]["model"] = bad
+            broken_path = write_manifest(self.tmp, broken, name="broken.json")
+            with self.assertRaises(cb.BenchError):
+                cb.load_manifest(broken_path)
+
+    def test_every_committed_manifest_names_the_one_model(self):
+        """[23B.6-one-model-per-campaign] every manifest under bench/ names the
+        one model this campaign serves in all three places a model is declared,
+        so no two lanes of one campaign run on different weights."""
+        paths = sorted((cb.REPO_ROOT / "bench").glob("*.json"))
+        self.assertTrue(paths, "the campaign has no manifests")
+        for path in paths:
+            manifest = cb.load_manifest(path)
+            self.assertEqual(manifest.defaults["model"], CAMPAIGN_MODEL, path.name)
+            self.assertEqual(manifest.sweep["primaryModel"], CAMPAIGN_MODEL, path.name)
+            self.assertEqual(manifest.sweep["models"], [CAMPAIGN_MODEL], path.name)
+
+    def test_every_committed_manifest_is_named_in_the_operator_docs(self):
+        """[23B.6-manifests-are-documented] both documents an operator plans a
+        campaign from name every manifest under bench/, and scripts/README.md
+        states each one's task count. `--manifest` takes a single path and the
+        driver discovers nothing, so a set no document names is a set nobody
+        runs - and a whole-manifest run reports full coverage of the one set it
+        was given, which is exactly the sentence that hides the others."""
+        docs = [
+            cb.REPO_ROOT / "scripts" / "README.md",
+            cb.REPO_ROOT / "docs" / "user" / "benchmarking.md",
+        ]
+        paths = sorted((cb.REPO_ROOT / "bench").glob("*.json"))
+        self.assertTrue(paths, "the campaign has no manifests")
+        counted = (cb.REPO_ROOT / "scripts" / "README.md").read_text()
+        for doc in docs:
+            body = doc.read_text()
+            for path in paths:
+                self.assertIn(
+                    "bench/%s" % path.name,
+                    body,
+                    "%s never names bench/%s" % (doc.name, path.name),
+                )
+        for path in paths:
+            declared = len(cb.load_manifest(path).tasks)
+            row = re.search(
+                r"\|\s*`bench/%s`\s*\|\s*(\d+)\s*\|" % re.escape(path.name), counted
+            )
+            self.assertIsNotNone(
+                row, "scripts/README.md has no task-count row for bench/%s" % path.name
+            )
+            self.assertEqual(
+                int(row.group(1)),
+                declared,
+                "scripts/README.md states %s tasks for bench/%s; it holds %d"
+                % (row.group(1), path.name, declared),
+            )
+
+    def _plan_only(self, manifest_path, *extra):
+        """cb.main in the dry-run mode that stops before any router config."""
+        buf = io.StringIO()
+        argv = [
+            "--plan-only",
+            "--manifest",
+            str(manifest_path),
+            "--run-manifest",
+            str(self.tmp / "run-manifest.json"),
+            "--model",
+            SENTINEL_MODEL,
+        ] + list(extra)
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cb.main(argv)
+        return code, buf.getvalue()
+
+    def test_task_and_tier_selection_narrows_the_run(self):
+        """[23B.2-task-tier-filters] --task and --tier are repeatable, union
+        inside a dimension and intersect across the two, refuse an unknown id
+        and a zero-match selection out loud, and are recorded in the run
+        manifest and the report so a narrowed run cannot be read as the
+        campaign."""
+        path = write_manifest(self.tmp, manifest_dict(), name="filters.json")
+        run_manifest_path = self.tmp / "run-manifest.json"
+        all_tasks = cb.load_tasks(path)
+        by_tier = cb.tasks_by_tier(all_tasks)
+        t0_ids = [t.id for t in by_tier["T0"]]
+        t1_ids = [t.id for t in by_tier["T1"]]
+        cells_per_task = len(cb.ARMS) * cb.DEFAULT_REPS
+
+        # No selection: the whole set, recorded as a whole-set run.
+        code, output = self._plan_only(path)
+        self.assertEqual(code, 0, output)
+        whole = json.loads(run_manifest_path.read_text())
+        self.assertFalse(whole["partial"], "an unfiltered run covers the manifest")
+        self.assertEqual(whole["filters"]["taskIds"], [])
+        self.assertEqual(whole["filters"]["tiers"], [])
+        self.assertEqual(len(whole["filters"]["selectedTaskIds"]), TASK_COUNT)
+        self.assertEqual(whole["taskIdsByTier"], whole["manifestTaskIdsByTier"])
+
+        # Repeated --task unions inside the dimension.
+        code, output = self._plan_only(path, "--task", t0_ids[0], "--task", t1_ids[0])
+        self.assertEqual(code, 0, output)
+        self.assertIn("%d cell(s) planned" % (2 * cells_per_task), output)
+        picked = json.loads(run_manifest_path.read_text())
+        self.assertEqual(sorted(picked["filters"]["selectedTaskIds"]), sorted([t0_ids[0], t1_ids[0]]))
+        self.assertTrue(picked["partial"], "a narrowed run must record that it is one")
+        self.assertEqual(picked["filters"]["taskIds"], [t0_ids[0], t1_ids[0]])
+        self.assertEqual(picked["taskIdsByTier"]["T0"], [t0_ids[0]])
+        self.assertEqual(picked["taskIdsByTier"]["T2"], [])
+        self.assertEqual(
+            picked["manifestTaskIdsByTier"],
+            whole["manifestTaskIdsByTier"],
+            "the declared set stays on the record beside what was planned",
+        )
+        self.assertEqual(picked["tiers"], ["T0", "T1"], "only the planned tiers are recorded")
+
+        # Repeated --tier unions the same way.
+        code, output = self._plan_only(path, "--tier", "T1", "--tier", "T4")
+        self.assertEqual(code, 0, output)
+        tiered = json.loads(run_manifest_path.read_text())
+        self.assertEqual(
+            sorted(tiered["filters"]["selectedTaskIds"]),
+            sorted([t.id for t in all_tasks if t.tier in ("T1", "T4")]),
+        )
+
+        # The two dimensions intersect.
+        code, output = self._plan_only(path, "--task", t0_ids[0], "--task", t1_ids[0], "--tier", "T0")
+        self.assertEqual(code, 0, output)
+        crossed = json.loads(run_manifest_path.read_text())
+        self.assertEqual(crossed["filters"]["selectedTaskIds"], [t0_ids[0]])
+
+        # An intersection with nothing in it is a refusal, never a zero-cell run.
+        before = run_manifest_path.read_text()
+        code, output = self._plan_only(path, "--task", t0_ids[0], "--tier", "T4")
+        self.assertEqual(code, 2, output)
+        self.assertIn(t0_ids[0], output, "the refusal must name what was asked for")
+        self.assertIn("T4", output)
+        self.assertEqual(
+            run_manifest_path.read_text(),
+            before,
+            "a refused selection must not overwrite the run manifest",
+        )
+
+        # An unknown id names itself and what it was near.
+        typo = t0_ids[0] + "z"
+        code, output = self._plan_only(path, "--task", typo)
+        self.assertEqual(code, 2, output)
+        self.assertIn(typo, output)
+        self.assertIn(t0_ids[0], output, "a near match must be offered")
+
+        # An unknown tier is refused by the closed vocabulary.
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                cb.build_parser().parse_args(["--tier", "T9"])
+
+        # The sweep block is the manifest's own declared campaign shape, so the
+        # two ways of saying what to run are refused together rather than
+        # silently composed.
+        code, output = self._plan_only(path, "--sweep", "--tier", "T0")
+        self.assertEqual(code, 2, output)
+        self.assertIn("--sweep", output)
+
+        # --review-sample draws from the narrowed plan only.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cb.main(
+                [
+                    "--review-sample",
+                    "1",
+                    "--manifest",
+                    str(path),
+                    "--run-manifest",
+                    str(run_manifest_path),
+                    "--model",
+                    SENTINEL_MODEL,
+                    "--tier",
+                    "T1",
+                ]
+            )
+        sample = buf.getvalue()
+        self.assertEqual(code, 0, sample)
+        self.assertTrue(sample.strip(), "a narrowed review sample must still name cells")
+        for line in sample.splitlines():
+            self.assertIn("tier T1", line, "the sample must not reach outside the selection")
+
+        # --verify-tasks checks the selected tasks and no others.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cb.main(
+                [
+                    "--verify-tasks",
+                    "--manifest",
+                    str(path),
+                    "--work-root",
+                    str(self.tmp / "vf"),
+                    "--task",
+                    t1_ids[0],
+                ]
+            )
+        verified = buf.getvalue()
+        self.assertEqual(code, 0, verified)
+        self.assertEqual(
+            [line for line in verified.splitlines() if t0_ids[0] in line],
+            [],
+            "an unselected task must not be spawned",
+        )
+        self.assertTrue([line for line in verified.splitlines() if t1_ids[0] in line])
+
+        # The narrowing is legible in the report, so a filtered report cannot be
+        # read as a full campaign rendered at a smaller scale.
+        selected = cb.select_tasks(all_tasks, task_ids=[t1_ids[0]], tiers=["T1"])
+        self.assertEqual([t.id for t in selected], [t1_ids[0]])
+        record = cb.task_filter_record(
+            all_tasks, selected, task_ids=[t1_ids[0]], tiers=["T1"]
+        )
+        report = cb.render_report(
+            [],
+            selected,
+            models=[SENTINEL_MODEL],
+            arms=cb.ARMS,
+            reps=1,
+            task_filter=record,
+        )
+        scope = section_of(report, cb.SECTION_SCOPE)
+        self.assertIn(t1_ids[0], scope)
+        self.assertIn("T1", scope)
+        self.assertLess(
+            report.index(cb.SECTION_SCOPE),
+            report.index(cb.SECTION_PER_TASK),
+            "what the run covered belongs above every number it qualifies",
+        )
+        self.assertNotIn(
+            t0_ids[0],
+            report,
+            "a task that was never planned must not render as a missing cell",
+        )
+        full = cb.render_report(
+            [],
+            all_tasks,
+            models=[SENTINEL_MODEL],
+            arms=cb.ARMS,
+            reps=1,
+            task_filter=cb.task_filter_record(all_tasks, all_tasks),
+        )
+        self.assertIn(cb.SECTION_SCOPE, full, "a whole-set run states that it is one")
+        self.assertIn(
+            "with no `--task` or `--tier` selection", section_of(full, cb.SECTION_SCOPE)
+        )
+
+    def test_a_selection_that_covers_everything_is_still_reported_as_given(self):
+        """[23B.2-scope-states-the-selection] `partial` is coverage arithmetic
+        and carries no record of what was typed, so a `--tier` enumeration that
+        happens to name every tier leaves it false. The scope section states
+        the flags it was given whenever there were any, and reserves the claim
+        that none were given for a run that had none, because a reader diffing
+        two reports has nothing else to tell the two invocations apart."""
+        path = write_manifest(self.tmp, manifest_dict(), name="covering.json")
+        all_tasks = cb.load_tasks(path)
+        every_tier = list(cb.TIERS)
+        selected = cb.select_tasks(all_tasks, tiers=every_tier)
+        self.assertEqual(len(selected), len(all_tasks))
+        record = cb.task_filter_record(all_tasks, selected, tiers=every_tier)
+        self.assertFalse(record["partial"], "a covering selection narrows nothing")
+
+        scope = section_of(
+            cb.render_report(
+                [],
+                selected,
+                models=[SENTINEL_MODEL],
+                arms=cb.ARMS,
+                reps=1,
+                task_filter=record,
+            ),
+            cb.SECTION_SCOPE,
+        )
+        self.assertIn("whole declared task set", scope)
+        self.assertNotIn(
+            "with no `--task` or `--tier` selection",
+            scope,
+            "the run was invoked with a selection and the report must not deny it",
+        )
+        for tier in every_tier:
+            self.assertIn("`--tier %s`" % tier, scope, tier)
+
+        # One task named explicitly, alongside every tier, is still a covering
+        # selection - and both flags belong in the sentence.
+        with_task = cb.task_filter_record(
+            all_tasks, selected, task_ids=[all_tasks[0].id], tiers=every_tier
+        )
+        scope = section_of(
+            cb.render_report(
+                [],
+                selected,
+                models=[SENTINEL_MODEL],
+                arms=cb.ARMS,
+                reps=1,
+                task_filter=with_task,
+            ),
+            cb.SECTION_SCOPE,
+        )
+        self.assertIn("`--task %s`" % all_tasks[0].id, scope)
+        self.assertIn("`--tier %s`" % every_tier[0], scope)
+
+    def test_a_report_with_no_filter_record_claims_no_coverage(self):
+        """[23B.2-scope-needs-provenance] render_report holds the tasks it was
+        handed and no manifest, so with no filter record it cannot know what
+        the declared set is. It says nothing about coverage rather than
+        asserting that whatever subset it was given is the whole of it."""
+        path = write_manifest(self.tmp, manifest_dict(), name="unrecorded.json")
+        all_tasks = cb.load_tasks(path)
+        subset = all_tasks[:2]
+        self.assertLess(len(subset), len(all_tasks))
+
+        scope = section_of(
+            cb.render_report(
+                [], subset, models=[SENTINEL_MODEL], arms=cb.ARMS, reps=1
+            ),
+            cb.SECTION_SCOPE,
+        )
+        self.assertNotIn(
+            "whole declared task set",
+            scope,
+            "a report with no provenance cannot claim to have covered a set",
+        )
+        self.assertIn("not recorded with this report", scope)
+
+        # run_benchmark carries the same optional record, so the layer above
+        # cannot manufacture the claim by omitting one keyword either.
+        outcome = cb.run_benchmark(
+            subset,
+            results_dir=self.tmp / "unrecorded-results",
+            report_path=self.tmp / "unrecorded-report.md",
+            work_root=self.tmp / "unrecorded-work",
+            models=[SENTINEL_MODEL],
+            arms=("baseline",),
+            reps=1,
+            report_only=True,
+        )
+        rendered = Path(outcome["reportPath"]).read_text()
+        self.assertNotIn("whole declared task set", rendered)
 
 
 class ResultTests(unittest.TestCase):
@@ -2260,6 +3917,87 @@ class DriverTests(unittest.TestCase):
             )
 
 
+    def test_report_only_describes_the_selection_it_states(self):
+        """[23C.7-report-only-selection] a report rebuilt over a --task or
+        --tier selection counts only the cells of the tasks it names.
+
+        The scope section states that every number below it describes the
+        selected tasks only. report-only reads every cell on disk rather than
+        the plan, and the rubric lane keys off those rows with no task of its
+        own to filter by - so a narrowed rebuild renders hand-scored medians and
+        verbatim findings from tasks it just said it was not describing, under a
+        heading that says otherwise, beside per-task tables that are correct.
+        """
+        results_dir = self.tmp / "ro-runs"
+        rubric_dir = self.tmp / "ro-rubrics"
+        report_path = self.tmp / "ro-report.md"
+        kept, dropped = TASK_IDS[0], TASK_IDS[1]
+        for task_id in (kept, dropped):
+            for arm in cb.ARMS:
+                cb.write_result(results_dir, make_result(arm, task_id, 1))
+        cb.write_rubric(
+            rubric_dir,
+            {
+                "cellId": make_cell("conductor", dropped, 1).cell_id,
+                "reviewer": "owner",
+                "scores": dict((c, 3) for c in cb.RUBRIC_CRITERIA),
+                "findings": ["a finding about the unselected task %s" % dropped],
+                "notes": "",
+            },
+        )
+
+        selected = [task for task in self.tasks if task.id == kept]
+        record = cb.task_filter_record(self.tasks, selected, task_ids=[kept], tiers=[])
+        outcome = cb.run_benchmark(
+            selected,
+            results_dir=results_dir,
+            report_path=report_path,
+            work_root=self.tmp / "ro-work",
+            models=[SENTINEL_MODEL],
+            reps=1,
+            rubric_dir=rubric_dir,
+            report_only=True,
+            task_filter=record,
+        )
+        self.assertEqual(
+            len(outcome["results"]),
+            len(cb.ARMS),
+            "report-only must load the selected tasks' cells and no others",
+        )
+        text = report_path.read_text()
+        self.assertNotIn(
+            dropped,
+            text,
+            "a task the run states it did not cover must not appear in it",
+        )
+        rubric_section = section_of(text, cb.SECTION_RUBRIC)
+        self.assertNotIn(
+            "a finding about the unselected task",
+            rubric_section,
+            "a finding from outside the selection must not render under it",
+        )
+        for line in rubric_section.splitlines():
+            if line.startswith("| conductor"):
+                self.assertIn(
+                    "| 0 |", line, "no cell of the selected task was reviewed"
+                )
+
+        # Unnarrowed, the same call renders the whole set, so the filter is what
+        # narrows the rubric lane rather than the lane having gone blind.
+        whole = self.tmp / "ro-report-all.md"
+        cb.run_benchmark(
+            self.tasks,
+            results_dir=results_dir,
+            report_path=whole,
+            work_root=self.tmp / "ro-work-all",
+            models=[SENTINEL_MODEL],
+            reps=1,
+            rubric_dir=rubric_dir,
+            report_only=True,
+        )
+        self.assertIn("a finding about the unselected task", whole.read_text())
+
+
 class IntegrityTests(unittest.TestCase):
     """Phase 22 and 22A: the corrections that make the output believable."""
 
@@ -2473,6 +4211,51 @@ class IntegrityTests(unittest.TestCase):
         self.assertIn("scope-boundary", section)
         self.assertIn(make_cell("conductor", TASK_IDS[0], 2).cell_id, section)
 
+    def test_stop_kinds_are_compared_for_every_task(self):
+        """[23C.8-stop-kind-every-task] the stop kind a task declares is
+        compared for every task, not only for the ones that name a mechanism.
+
+        expectedStopKinds is the one half of a declared trajectory a machine can
+        check, and a coverage task's list is authored as carefully as a stress
+        task's: a T1 whose list omits TRIVIAL_DONE is saying that a run routed
+        into the plugin's trivial path took a route the task rules out. Skipping
+        every mechanism-none task drops that comparison for most of the
+        committed corpus, and the divergence then appears in no section at all
+        while the cell records a clean pass.
+        """
+        doc = manifest_dict()
+        doc["tasks"][0]["mechanism"] = "none"
+        doc["tasks"][0]["expectedStopKinds"] = ["done", "REPORTED"]
+        tasks = cb.load_tasks(write_manifest(self.tmp, doc, name="coverage.json"))[:PATTERN_TASKS]
+        results = fixture_results(tasks, ("conductor",))
+        by_id = {row["cellId"]: row for row in results}
+        trivial = make_cell("conductor", TASK_IDS[0], 1).cell_id
+        by_id[trivial]["stopKind"] = "TRIVIAL_DONE"
+        by_id[trivial]["passed"] = True
+        by_id[trivial]["outcome"] = "pass"
+
+        divergences = cb.trajectory_divergences(results, tasks, arms=("conductor",))
+        diverged = [row["cellId"] for row in divergences]
+        self.assertIn(
+            trivial,
+            diverged,
+            "a passing cell that stopped where its task rules out is still the finding",
+        )
+        row = [r for r in divergences if r["cellId"] == trivial][0]
+        self.assertEqual(row["observed"], "TRIVIAL_DONE")
+        self.assertEqual(row["expected"], ["done", "REPORTED"])
+        self.assertEqual(row["mechanism"], "none")
+
+        # A stop kind the task does list is not a divergence, so the comparison
+        # is the declared list rather than a blanket complaint.
+        for rep in (2, 3):
+            self.assertNotIn(make_cell("conductor", TASK_IDS[0], rep).cell_id, diverged)
+
+        report = cb.render_report(
+            results, tasks, models=[SENTINEL_MODEL], arms=("conductor",), reps=3
+        )
+        self.assertIn(trivial, section_of(report, cb.SECTION_TRAJECTORIES))
+
     def test_rubric_lane_beside_the_pass_fail_lane(self):
         """[22A.3b-rubric] a human-scored rubric rides beside the objective
         lane, an absent rubric reads as unmeasured rather than as zero, and the
@@ -2621,7 +4404,7 @@ class ModuleHygieneTests(unittest.TestCase):
         before = snapshot(self.tmp)
         with no_subprocess():
             cb.load_tasks(self.tmp / "tasks.json")
-            cb.build_run_plan(tasks)
+            cb.build_run_plan(tasks, models=[SENTINEL_MODEL])
             cb.build_arm_config(
                 "baseline",
                 model=SENTINEL_MODEL,

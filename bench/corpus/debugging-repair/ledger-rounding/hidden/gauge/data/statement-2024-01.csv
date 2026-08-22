@@ -1,0 +1,96 @@
+# account: assets:checking
+# currency: USD
+date,reference,description,amount
+2024-01-01,TX-0001,Consulting invoice,3562.74
+2024-01-02,TX-0003,Utilities,-714.43
+2024-01-02,TX-0004,Utilities,-350.50
+2024-01-02,TX-0005,Office supplies,-1214.17
+2024-01-03,TX-0007,Team meal,-136.68
+2024-01-04,TX-0008,Travel,-1430.78
+2024-01-04,TX-0008,Travel,-1430.78
+2024-01-04,TX-0009,Office supplies,-31.37
+2024-01-04,TX-0010,Software subscription,-897.65
+2024-01-05,TX-0015,Shipping,-379.43
+2024-01-05,TX-0017,Software subscription,-1278.69
+2024-01-06,TX-0018,Shipping,-1155.26
+2024-01-07,TX-0020,Shared cost allocation,-545.47
+2024-01-07,TX-0022,Consulting invoice,3025.73
+2024-01-07,TX-0023,Card payment,-451.49
+2024-01-08,TX-0025,Marketing spend,-872.56
+2024-01-08,TX-0026,Team meal,-231.05
+2024-01-08,TX-0027,Card payment,-689.73
+2024-01-09,TX-0028,Team meal,-49.69
+2024-01-09,TX-0029,Training,-957.82
+2024-01-09,TX-0030,Shared cost allocation,-522.12
+2024-01-10,TX-0031,Card payment,-1300.02
+2024-01-10,TX-0032,Consulting invoice,4839.25
+2024-01-10,TX-0033,Team meal,-45.49
+2024-01-10,TX-0035,Shared cost allocation,-2749.62
+2024-01-11,TX-0036,Shared cost allocation,-370.80
+2024-01-11,TX-0038,Training,-911.98
+2024-01-12,TX-0039,Software subscription,-1443.92
+2024-01-13,TX-0040,Software subscription,-881.75
+2024-01-13,TX-0041,Team meal,-225.85
+2024-01-13,TX-0042,Consulting invoice,3037.86
+2024-01-13,TX-0043,Shipping,-785.96
+2024-01-13,TX-0044,Shipping,-1165.76
+2024-01-13,TX-0045,Marketing spend,-85.02
+2024-01-14,TX-0047,Utilities,-1487.43
+2024-01-14,TX-0048,Hardware,-950.35
+2024-01-14,TX-0049,Salary,2049.91
+2024-01-15,TX-0050,Hardware,-1309.07
+2024-01-16,TX-0053,Shipping,-775.00
+2024-01-17,TX-0054,Travel,-1460.99
+2024-01-17,TX-0055,Team meal,-369.96
+2024-01-18,TX-0056,Software subscription,-907.38
+2024-01-18,TX-0057,Shared cost allocation,-1833.15
+2024-01-18,TX-0060,Travel,-126.41
+2024-01-19,TX-0061,Hardware,-1030.84
+2024-01-19,TX-0062,Team meal,-121.42
+2024-01-19,TX-0063,Shared cost allocation,-458.17
+2024-01-19,TX-0064,Training,-1199.76
+2024-01-19,TX-0065,Utilities,-703.94
+2024-01-20,TX-0066,Shared cost allocation,-1792.36
+2024-01-20,TX-0067,Shared cost allocation,-2625.19
+2024-01-20,TX-0068,Software subscription,-1144.61
+2024-01-20,TX-0069,Consulting invoice,2561.73
+2024-01-21,TX-0070,Office supplies,-44.49
+2024-01-21,TX-0071,Hardware,-177.63
+2024-01-21,TX-0072,Card payment,-2369.39
+2024-01-21,TX-0073,Utilities,-1472.72
+2024-01-21,TX-0074,Shared cost allocation,-2855.43
+2024-01-22,TX-0075,Training,-145.77
+2024-01-22,TX-0077,Team meal,-292.93
+2024-01-22,TX-0078,Card payment,-1279.88
+2024-01-22,TX-0079,Team meal,-363.48
+2024-01-22,TX-0080,Shared cost allocation,-292.49
+2024-01-23,TX-0083,Software subscription,-1464.54
+2024-01-23,TX-0084,Card payment,-1121.59
+2024-01-24,TX-0086,Utilities,-131.14
+2024-01-24,TX-0087,Marketing spend,-1288.35
+2024-01-24,TX-0088,Utilities,-470.08
+2024-01-24,TX-0089,Salary,6612.14
+2024-01-24,TX-0090,Shared cost allocation,-1836.79
+2024-01-25,TX-0091,Shared cost allocation,-1238.78
+2024-01-25,TX-0092,Training,-1147.16
+2024-01-26,TX-0093,Team meal,-350.17
+2024-01-26,TX-0094,Software subscription,-506.17
+2024-01-26,TX-0096,Card payment,-2354.39
+2024-01-27,TX-0097,Shipping,-1236.17
+2024-01-27,TX-0098,Hardware,-929.65
+2024-01-27,TX-0100,Card payment,-2153.10
+2024-01-28,TX-0101,Team meal,-219.56
+2024-01-28,TX-0103,Shared cost allocation,-1778.52
+2024-01-28,TX-0104,Consulting invoice,6109.34
+2024-01-28,TX-0105,Card payment,-2350.03
+2024-01-29,TX-0106,Team meal,-265.90
+2024-01-29,TX-0107,Salary,7826.52
+2024-01-29,TX-0108,Software subscription,-1473.15
+2024-01-30,TX-0109,Shared cost allocation,-1990.64
+2024-01-30,TX-0112,Consulting invoice,7907.07
+2024-01-31,BANK-FEE-0001,Account maintenance fee,-12.50
+2024-01-31,TX-0113,Training,-212.71
+2024-01-31,TX-0114,Team meal,-265.19
+2024-01-31,TX-0115,Training,-1495.50
+2024-01-31,TX-0116,Team meal,-107.52
+2024-01-31,TX-0117,Utilities,-229.16

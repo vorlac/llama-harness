@@ -1,0 +1,69 @@
+{
+  "name": "platform-team-march-2026",
+  "window": { "start": "2026-03-01T00:00:00Z", "end": "2026-04-01T00:00:00Z" },
+  "events": [
+    {
+      "id": "standup",
+      "title": "Daily standup",
+      "timeZone": "America/New_York",
+      "start": "2026-03-02T09:15",
+      "durationMinutes": 15,
+      "resource": "room-atlas",
+      "recurrence": {
+        "frequency": "WEEKLY",
+        "interval": 1,
+        "byDay": ["MO", "TU", "WE", "TH", "FR"],
+        "until": "2026-04-01T00:00:00Z"
+      },
+      "exceptionDates": ["2026-03-17"]
+    },
+    {
+      "id": "design-review",
+      "title": "Design review",
+      "timeZone": "America/New_York",
+      "start": "2026-03-02T09:30",
+      "durationMinutes": 60,
+      "resource": "room-atlas",
+      "recurrence": {
+        "frequency": "WEEKLY",
+        "interval": 2,
+        "byDay": ["MO"],
+        "count": 3
+      }
+    },
+    {
+      "id": "oncall-handover",
+      "title": "On-call handover",
+      "timeZone": "Europe/Berlin",
+      "start": "2026-03-02T17:00",
+      "durationMinutes": 30,
+      "resource": "room-borealis",
+      "recurrence": {
+        "frequency": "DAILY",
+        "interval": 7,
+        "count": 5
+      }
+    },
+    {
+      "id": "month-end-close",
+      "title": "Month-end close",
+      "timeZone": "UTC",
+      "start": "2026-01-31T16:00",
+      "durationMinutes": 90,
+      "resource": "room-borealis",
+      "recurrence": {
+        "frequency": "MONTHLY",
+        "interval": 1,
+        "count": 12
+      }
+    },
+    {
+      "id": "quarterly-planning",
+      "title": "Quarterly planning",
+      "timeZone": "America/New_York",
+      "start": "2026-03-30T13:00",
+      "durationMinutes": 180,
+      "resource": "room-atlas"
+    }
+  ]
+}

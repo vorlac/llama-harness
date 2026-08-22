@@ -115,7 +115,7 @@ Each restart is from a clean seed, after a green gate.
 | `r-20260821-b8de` | INTAKE | F09: the planner got the wrong doctrine, guessed the ladder, and the idle engine stopped the run `noop` while it was mid-retry |
 | `r-20260821-c82b` | **EXECUTING** | F19: `conductor_submit_test` refused the item because the cell covers no scope |
 | `r-20260821-113c` | **EXECUTING, test-writer dispatched, test written** | F17: the test-writer could not name `ImplementerResult.status`'s enum in three attempts, so `conductor_submit_test` refused. The shape block that answers it landed after this run started |
-| `r-20260821-47df` | **DECOMPOSED** | stopped by hand. It verified F17, produced the campaign's first `trivial` classification — refused by the one acceptance authority on a real size violation — and then exposed F22 by decomposing anyway |
+| `r-20260821-47df` | **DECOMPOSED** | stopped by hand. It verified F17, produced the campaign's first `trivial` classification — refused by the one acceptance authority on a size violation that does not stand — and then exposed F22 by decomposing anyway |
 
 The fourth run is the one that matters for the shape of this report: it decomposed,
 planned, passed a four-lens plan review clean (`survivingMajors: 0`), reached
@@ -140,7 +140,8 @@ seq 67 fsm transition {"to": "DECOMPOSED", "items": 1}
 Two things in that trace are worth naming. The classifier's first receipt failed on a
 field it had never been shown (F17, predicted in writing beforehand). And the
 classification it eventually produced was **`work`, not `trivial`** — for a three-line
-change, with the skeptic agreeing. The §2.10 trivial route therefore still has not run.
+change, with the skeptic agreeing. The §2.10 trivial route therefore still has not
+run — the run after this one is the first to reach it.
 
 ## F09 — the registry had two writers and no protocol between them
 
@@ -511,8 +512,10 @@ Marked, so a reader can tell what was seen from what is believed.
   Every defect in this campaign was found by running one stage further than anyone had
   run before, and those stages are further still. The last run reached the test-writer,
   found F17 waiting there, and stopped — which is the pattern, not an exception.
-- Whether the model can produce a §2.10 `trivialItem` at all. It has not been asked
-  successfully yet, and the classifier judged this task `work`.
+- Whether a §2.10 `trivialItem` survives the stage end to end. The model produces one:
+  run `r-20260821-47df` returned a schema-valid `trivialItem` that reached the
+  acceptance table, where a miscounted size row refused it. No trivial run has reached
+  EXECUTING, so the route past the refusal is unmeasured.
 - Whether `scopesIntersect` over-approximates in practice. It has never scheduled a
   multi-item wave.
 - Cost at tiers above T0. The only tier measured is the cheapest one.
@@ -681,13 +684,22 @@ The last finding of the campaign, and it arrived because the run before it final
 reached a stage nobody had watched. The classifier proposed `trivial`, and §2.10's
 synthesis put its item through the SAME acceptance a decomposed queue passes —
 deliberately, so a trivial item cannot walk past the size and scope rules. It was
-refused, correctly, on a real violation:
+refused:
 
 ```
 seq 32 fsm guard-reject {"stage": "classify", "violations": ["item \"I1\" is too large: its acceptance spans 3 clusters
                           (slugify, leading, export), over the one-cluster item budget — split it into one item per cluster (§3.2)"]}
 seq 34 gates allow {"toolName": "conductor_decompose", "toolClass": "conductor", "sideEffect": null}
 ```
+
+That refusal does not stand. The three criteria — `slugify("Hello There World") ===
+"hello-there-world"`, `leading and trailing hyphens are removed`, `export name and
+signature are unchanged` — all assert about the one function, and the cluster scan read
+each criterion's first non-determiner word as its subject, so two sentence-leading words
+counted as two more subjects. The size row is the only violation in that verdict and
+`validateQueue` returns every violation it finds, so the rest of the §3.2 table admits
+this item. The one acceptance authority is sound; what refused here is a defect in how
+it counted subjects, and the register carries the repair.
 
 Nothing was recorded by the refused classify, so `run.classified` stayed false — and
 the very next call decomposed the run. It went on to plan and execute carrying

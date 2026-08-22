@@ -28,7 +28,9 @@ and it is entered by a person rather than derived.
 from __future__ import annotations
 
 import argparse
+import difflib
 import copy
+import fnmatch
 import json
 import os
 import re
@@ -36,6 +38,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -60,10 +63,39 @@ BENCH_DIR = REPO_ROOT / ".data" / "benchmark"
 REPORT_PATH = BENCH_DIR / "conductor-report.md"
 RESULTS_DIR = BENCH_DIR / "conductor" / "runs"
 RUBRIC_DIR = BENCH_DIR / "conductor" / "rubrics"
-WORK_ROOT = BENCH_DIR / "conductor" / "work"
+# The cell work trees sit outside the repository on purpose. A cell's cwd is
+# <work_root>/<model>/<capability>/<arm>/<task>/rN/repo, so a work root under
+# this repository puts every answer key the campaign grades against - the
+# bench/corpus/**/hidden/** trees - a constant number of `..` segments away from
+# every cell. The driver materializes the hidden files only after opencode has
+# exited so the measurement is never inside the tree the model reads; a
+# relative path around that ordering would defeat it. Outside the repository,
+# an arm that walks up out of its own tree finds other cells' work trees.
+WORK_ROOT = Path(tempfile.gettempdir()) / "llama-harness-conductor-work"
 RUN_MANIFEST_PATH = BENCH_DIR / "conductor-run-manifest.json"
 
 MANIFEST_PATH = REPO_ROOT / "bench" / "conductor-tasks.json"
+# The systems-implementation set, whose tasks are far too large to carry
+# their file bodies inline and are drawn from bench/corpus/ instead.
+CORPUS_SYSTEMS_MANIFEST_PATH = REPO_ROOT / "bench" / "corpus-systems.json"
+
+# Ceilings on a directory-sourced file set. Every body is read into memory at
+# load time and written again per cell, per arm, per rep, so a source directory
+# that has grown a build output tree is a refusal with a size in it rather than
+# a run that swaps and a report nobody can explain.
+MAX_SOURCE_FILE_BYTES = 1 << 20
+MAX_SOURCE_DIR_BYTES = 8 << 20
+
+# What a build, an interpreter and a file browser leave inside a source tree.
+# The repository root ignores all of it for the whole workspace, so no corpus
+# seed's own .gitignore restates it and `git status` never reports one.
+# A .git tree is deliberately absent: seeding one is a refusal with its own
+# message, not something to step over quietly.
+ALWAYS_IGNORED_DIR_NAMES = frozenset(
+    {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+)
+ALWAYS_IGNORED_NAMES = frozenset({".DS_Store", "Thumbs.db"})
+ALWAYS_IGNORED_SUFFIXES = (".pyc", ".pyo")
 DOCTRINE_DIR = REPO_ROOT / "conductor" / "doctrine"
 FRAGMENT_PATH = REPO_ROOT / "conductor" / "opencode-fragment.json"
 ROUTER_CONFIG_PATH = REPO_ROOT / conductor_wiring.ROUTER_CONFIG_RELPATH
@@ -71,7 +103,6 @@ ROUTER_CONFIG_PATH = REPO_ROOT / conductor_wiring.ROUTER_CONFIG_RELPATH
 DOCTRINE_PROMPT_NAME = "doctrine-prompt.md"
 SEED_COMMIT_MESSAGE = "bench seed"
 
-DEFAULT_MODEL = "llamacpp/qwen3.6-27b"
 DEFAULT_REPS = 3
 
 # A hidden test run against an untouched seed either fails in seconds or is
@@ -111,16 +142,6 @@ ARM_AGENTS = {
 # independent ones, T3 a dependency chain, and T4 work that needs a file no
 # plan would have scoped.
 TIERS = ("T0", "T1", "T2", "T3", "T4")
-
-# The task-set pin, per tier. A scalar total cannot tell a lost T3 task from a
-# gained T2 one, and the tier a task sits in is the whole point of the set.
-EXPECTED_TASK_COUNTS = {
-    "T0": 10,
-    "T1": 4,
-    "T2": 3,
-    "T3": 3,
-    "T4": 3,
-}
 
 # One wall clock per tier. A T3 build that ran out of half an hour is a cost
 # datum, and scoring it as a wrong answer would convert process cost into
@@ -202,6 +223,9 @@ SWEEP_REQUIRED_KEYS = (
     "reps",
 )
 
+# Every field a task must carry outright. The two file sets are absent
+# because each has two spellings - an inline map or a directory to walk -
+# and "exactly one of them" is a check a membership loop cannot make.
 TASK_REQUIRED_KEYS = (
     "id",
     "tier",
@@ -213,8 +237,6 @@ TASK_REQUIRED_KEYS = (
     "behavioral",
     "rationale",
     "prompt",
-    "seedFiles",
-    "hiddenFiles",
     "hiddenTestCommand",
     "repoTestCommand",
     "behavioralPaths",
@@ -238,6 +260,7 @@ ROLE_TEMPERATURE = {
 NA = "n/a"
 PARTIAL_MARKER = "(partial)"
 
+SECTION_SCOPE = "## Run scope"
 SECTION_METHOD = "## Method"
 SECTION_ASYMMETRIES = "## Declared asymmetries"
 SECTION_SWEEP = "## Sweep shape"
@@ -313,8 +336,6 @@ DEFAULT_BASE_CONFIG = {
             "models": {},
         }
     },
-    "model": DEFAULT_MODEL,
-    "small_model": DEFAULT_MODEL,
 }
 
 
@@ -445,14 +466,24 @@ class CellInvocation(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def load_manifest(path: Any, expected_counts: Optional[Dict[str, int]] = None) -> Manifest:
+def load_manifest(
+    path: Any,
+    expected_counts: Optional[Dict[str, int]] = None,
+    root: Optional[Any] = None,
+) -> Manifest:
     """Parse and fully validate the task manifest at ``path``.
 
-    ``expected_counts`` is the per-tier pin the set must match; it defaults to
-    this module's own, which is what the committed manifest is held to.
+    The per-tier task-set pin belongs to the document: a manifest states the
+    shape it is held to under ``expectedTaskCounts``, and one that states none
+    is held to none. ``expected_counts`` overrides the document, which is how a
+    caller checks a set against a shape the document does not declare.
+
+    ``root`` is what a task's ``seedDir`` and ``hiddenDir`` are relative to, and
+    the boundary neither may leave. It is the repository root, which is what
+    lets a committed manifest name ``bench/corpus/...`` and mean the same tree
+    from any working directory.
     """
-    if expected_counts is None:
-        expected_counts = EXPECTED_TASK_COUNTS
+    base_root = REPO_ROOT if root is None else Path(root)
     manifest_path = Path(path)
     try:
         raw = manifest_path.read_text()
@@ -479,20 +510,48 @@ def load_manifest(path: Any, expected_counts: Optional[Dict[str, int]] = None) -
     defaults = document.get("defaults")
     if not isinstance(defaults, dict):
         raise BenchError("%s: defaults must be an object" % manifest_path)
-    if "model" not in defaults:
-        raise BenchError("%s: defaults is missing 'model'" % manifest_path)
+    # The model a run with no --model plans. It is read, not merely declared:
+    # a manifest that states one model and plans another produces a run
+    # manifest that records two campaigns and a report that names the wrong
+    # weights for every cell in it.
+    model = defaults.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise BenchError(
+            "%s: defaults.model must be the model id a run plans when no "
+            "--model is given" % manifest_path
+        )
     tier_timeouts = _parse_tier_timeouts(defaults.get("tierTimeoutSec"), manifest_path)
 
     sweep = _parse_sweep(document.get("sweep"), manifest_path)
+    if model not in sweep["models"]:
+        raise BenchError(
+            "%s: defaults.model %r is not in sweep.models %s, so one manifest "
+            "declares one campaign and plans another"
+            % (manifest_path, model, ", ".join(sweep["models"]))
+        )
+    declared_counts = _parse_expected_counts(
+        document.get("expectedTaskCounts"), manifest_path
+    )
 
     entries = document.get("tasks")
     if not isinstance(entries, list):
         raise BenchError("%s: tasks must be an array" % manifest_path)
+    # The floor is the count itself, not the pin. A manifest may decline to
+    # state a shape, and a generator that derives its pin from what it emitted
+    # declares an all-zero one - so neither pin refuses a set with nothing in
+    # it, and every driver mode would then report success over zero tasks:
+    # every hidden test failed, every seed starts green, and a report claiming
+    # full coverage of a campaign that measured nothing.
+    if not entries:
+        raise BenchError(
+            "%s: tasks is empty, so every mode would report success over a set "
+            "that measures nothing" % manifest_path
+        )
 
     tasks: List[Task] = []
     seen: Dict[str, int] = {}
     for index, entry in enumerate(entries):
-        task = _parse_task(entry, index, tier_timeouts)
+        task = _parse_task(entry, index, tier_timeouts, base_root)
         if task.id in seen:
             raise BenchError(
                 "task %r appears twice (positions %d and %d): task ids must be unique"
@@ -501,7 +560,9 @@ def load_manifest(path: Any, expected_counts: Optional[Dict[str, int]] = None) -
         seen[task.id] = index
         tasks.append(task)
 
-    _check_tier_counts(tasks, expected_counts, manifest_path)
+    pin = expected_counts if expected_counts is not None else declared_counts
+    if pin is not None:
+        _check_tier_counts(tasks, pin, manifest_path)
 
     return Manifest(
         version=version,
@@ -536,6 +597,44 @@ def _parse_tier_timeouts(value: Any, manifest_path: Any) -> Dict[str, int]:
         if tier not in TIERS:
             raise BenchError(
                 "%s: defaults.tierTimeoutSec names %r, which is outside %s"
+                % (manifest_path, tier, ", ".join(TIERS))
+            )
+    return out
+
+
+def _parse_expected_counts(value: Any, manifest_path: Any) -> Optional[Dict[str, int]]:
+    """The per-tier task-set pin the manifest declares for itself, if it does.
+
+    A scalar total cannot tell a lost T3 task from a gained T2 one, and the
+    tier a task sits in is the whole point of the set - so the pin is per tier
+    and, when declared, names every tier, leaving no tier's count to be
+    inferred from its absence. The field is optional: a manifest that states no
+    shape, such as one assembled from a corpus, is held to none.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise BenchError(
+            "%s: expectedTaskCounts must be an object mapping every tier to a "
+            "task count" % manifest_path
+        )
+    out: Dict[str, int] = {}
+    for tier in TIERS:
+        if tier not in value:
+            raise BenchError(
+                "%s: expectedTaskCounts has no entry for tier %s" % (manifest_path, tier)
+            )
+        count = value[tier]
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise BenchError(
+                "%s: expectedTaskCounts[%s] must be a non-negative integer"
+                % (manifest_path, tier)
+            )
+        out[tier] = count
+    for tier in value:
+        if tier not in TIERS:
+            raise BenchError(
+                "%s: expectedTaskCounts names %r, which is outside %s"
                 % (manifest_path, tier, ", ".join(TIERS))
             )
     return out
@@ -638,12 +737,20 @@ def tasks_by_tier(tasks: Sequence[Task]) -> Dict[str, List[Task]]:
     return out
 
 
-def load_tasks(path: Any, expected_counts: Optional[Dict[str, int]] = None) -> List[Task]:
-    """The manifest's tasks, in manifest order."""
-    return load_manifest(path, expected_counts=expected_counts).tasks
+def load_tasks(
+    path: Any,
+    expected_counts: Optional[Dict[str, int]] = None,
+    root: Optional[Any] = None,
+) -> List[Task]:
+    """The manifest's tasks, in manifest order.
+
+    ``expected_counts`` and ``root`` mean exactly what they mean for
+    ``load_manifest``.
+    """
+    return load_manifest(path, expected_counts=expected_counts, root=root).tasks
 
 
-def _parse_task(entry: Any, index: int, tier_timeouts: Dict[str, int]) -> Task:
+def _parse_task(entry: Any, index: int, tier_timeouts: Dict[str, int], root: Path) -> Task:
     """One validated task record; every rejection names the task and the field."""
     if not isinstance(entry, dict):
         raise BenchError("task at position %d is not an object" % index)
@@ -711,14 +818,32 @@ def _parse_task(entry: Any, index: int, tier_timeouts: Dict[str, int]) -> Task:
     if not isinstance(prompt, str) or not prompt.strip():
         raise BenchError("task %r: field 'prompt' must be non-empty" % task_id)
 
-    seed_files = _parse_file_map(entry["seedFiles"], task_id, "seedFiles")
-    hidden_files = _parse_file_map(entry["hiddenFiles"], task_id, "hiddenFiles")
+    seed_files, seed_dir = _parse_file_source(
+        entry, root, task_id, "seedFiles", "seedDir"
+    )
+    hidden_files, hidden_dir = _parse_file_source(
+        entry, root, task_id, "hiddenFiles", "hiddenDir"
+    )
     overlap = sorted(set(seed_files) & set(hidden_files))
     if overlap:
         raise BenchError(
-            "task %r: field 'hiddenFiles' overlaps seedFiles at %s - a hidden test "
+            "task %r: the hidden file set overlaps the seed at %s - a hidden test "
             "the model can read measures nothing" % (task_id, ", ".join(overlap))
         )
+    # Two directories walked from different roots produce relative paths that
+    # never collide as keys, so the check above cannot see a hidden tree sitting
+    # inside the seed tree. Containment is the check that can.
+    if seed_dir is not None and hidden_dir is not None:
+        for outer, inner, outer_field, inner_field in (
+            (seed_dir, hidden_dir, "seedDir", "hiddenDir"),
+            (hidden_dir, seed_dir, "hiddenDir", "seedDir"),
+        ):
+            if inner == outer or _is_within(inner, outer):
+                raise BenchError(
+                    "task %r: field %r at %s sits inside %r at %s - a hidden test "
+                    "the model can read measures nothing"
+                    % (task_id, inner_field, inner, outer_field, outer)
+                )
 
     hidden_command = _parse_command(entry["hiddenTestCommand"], task_id, "hiddenTestCommand")
     repo_command = _parse_command(entry["repoTestCommand"], task_id, "repoTestCommand")
@@ -753,6 +878,255 @@ def _parse_task(entry: Any, index: int, tier_timeouts: Dict[str, int]) -> Task:
     )
 
 
+def _parse_file_source(
+    entry: Dict[str, Any],
+    root: Path,
+    task_id: str,
+    inline_field: str,
+    dir_field: str,
+) -> Tuple[Dict[str, str], Optional[Path]]:
+    """One side's file set, however the task chose to state it.
+
+    A task states each side once: an inline path -> body map for a handful of
+    small files, or a directory to walk for corpus material too large to sit in
+    a JSON string. Both spellings yield the identical validated map, so nothing
+    downstream of this function can tell them apart; the directory, when there
+    was one, comes back beside it only so the seed/hidden containment check has
+    something to compare.
+    """
+    has_inline = inline_field in entry
+    has_dir = dir_field in entry
+    if has_inline and has_dir:
+        raise BenchError(
+            "task %r: fields %r and %r both state the same file set; a task "
+            "states each side once" % (task_id, inline_field, dir_field)
+        )
+    if not has_inline and not has_dir:
+        raise BenchError(
+            "task %r: neither %r nor %r is present; a task states each side once"
+            % (task_id, inline_field, dir_field)
+        )
+    if has_inline:
+        return _parse_file_map(entry[inline_field], task_id, inline_field), None
+    base = _resolve_source_dir(entry[dir_field], root, task_id, dir_field)
+    return _read_dir_map(base, task_id, dir_field), base
+
+
+def _resolve_source_dir(value: Any, root: Path, task_id: str, field: str) -> Path:
+    """The real directory a ``seedDir``/``hiddenDir`` names, or a refusal.
+
+    The declared value is repo-relative and stays inside the repository, and
+    the directory itself is a real directory rather than a symlink pointing at
+    one: a symlink resolves to a tree the manifest does not name, and the file
+    it would seed is not the file the repository holds.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise BenchError("task %r: field %r must name a directory" % (task_id, field))
+    _validate_relpath(value, task_id, field)
+    base = root / value
+    if base.is_symlink():
+        raise BenchError(
+            "task %r: field %r path %r is a symlink; a source directory is the "
+            "tree the manifest names" % (task_id, field, value)
+        )
+    if not base.exists():
+        raise BenchError(
+            "task %r: field %r path %r does not exist under %s"
+            % (task_id, field, value, root)
+        )
+    if not base.is_dir():
+        raise BenchError(
+            "task %r: field %r path %r is not a directory" % (task_id, field, value)
+        )
+    resolved = base.resolve()
+    if not _is_within(resolved, root.resolve()):
+        raise BenchError(
+            "task %r: field %r path %r resolves to %s, outside %s"
+            % (task_id, field, value, resolved, root)
+        )
+    return resolved
+
+
+def _read_ignore_rules(base: Path, task_id: str, field: str) -> List[Tuple[Tuple[str, ...], str, bool]]:
+    """The skip rules the walked tree states for itself, in git's own spelling.
+
+    One rule per pattern: the directory segments the ``.gitignore`` stating it
+    sits in, the pattern, and whether it matches directories only. A tree that
+    states a rule this cannot honour - a re-inclusion, which needs ordering
+    this does not model - is refused by name rather than skipped wider or
+    narrower than the tree asked for.
+    """
+    rules: List[Tuple[Tuple[str, ...], str, bool]] = []
+    for path in sorted(base.rglob(".gitignore")):
+        if not path.is_file():
+            continue
+        where = path.relative_to(base).parts[:-1]
+        relpath = "/".join(path.relative_to(base).parts)
+        try:
+            stated = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BenchError(
+                "task %r: field %r file %r is not UTF-8 text (byte %d): %s"
+                % (task_id, field, relpath, exc.start, exc.reason)
+            )
+        for raw in stated.split("\n"):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("!"):
+                raise BenchError(
+                    "task %r: field %r holds %s, which re-includes %r; this walk "
+                    "cannot honour a re-inclusion and will not guess at it"
+                    % (task_id, field, "/".join(where + (".gitignore",)), line)
+                )
+            directory_only = line.endswith("/")
+            pattern = line.rstrip("/")
+            if pattern:
+                rules.append((where, pattern, directory_only))
+    return rules
+
+
+def _is_ignored(relparts: Tuple[str, ...], rules: Sequence[Tuple[Tuple[str, ...], str, bool]]) -> bool:
+    """Whether the tree's own rules, or this repository's, skip one file.
+
+    The three ``ALWAYS_IGNORED`` sets carry what a build, an interpreter and a
+    file browser leave in every tree here and no ``.gitignore`` under a corpus
+    restates, because the repository root already ignores it for the whole
+    workspace. ``rules`` carries what the walked tree declares for itself.
+    """
+    name = relparts[-1]
+    if name in ALWAYS_IGNORED_NAMES or name.endswith(ALWAYS_IGNORED_SUFFIXES):
+        return True
+    if set(relparts[:-1]) & ALWAYS_IGNORED_DIR_NAMES:
+        return True
+    for where, pattern, directory_only in rules:
+        if relparts[: len(where)] != where:
+            continue
+        rest = relparts[len(where):]
+        if "/" in pattern:
+            anchored = tuple(part for part in pattern.strip("/").split("/") if part)
+            span = rest[: len(anchored)]
+            if len(span) == len(anchored) and all(
+                fnmatch.fnmatch(span[i], anchored[i]) for i in range(len(anchored))
+            ):
+                if not directory_only or len(rest) > len(anchored):
+                    return True
+            continue
+        candidates = rest[:-1] if directory_only else rest
+        for segment in candidates:
+            if fnmatch.fnmatch(segment, pattern):
+                return True
+    return False
+
+
+def _read_dir_map(base: Path, task_id: str, field: str) -> Dict[str, str]:
+    """Every file under ``base``, flattened into the inline form's map.
+
+    The walk is sorted by relative path, so two loads of the same tree seed
+    byte-identical work trees in a byte-identical order.
+
+    What the tree's own ``.gitignore`` skips is skipped here too, and so is
+    what this repository ignores everywhere. A seed's build directory, its
+    generated workload and the ``__pycache__`` an interpreter drops in it are
+    invisible to ``git status`` by the corpus author's own declaration, so a
+    walk that read them would refuse a whole task set over bytes nobody wrote,
+    naming a file the operator cannot find in any diff. The map this returns is
+    the source the repository holds, which is the tree the model is handed.
+
+    Bodies are text, and a file this cannot decode as UTF-8 is refused by name.
+    The whole seeding path is text - the inline form is a JSON string,
+    ``materialize_files`` writes with ``write_text``, and the result is
+    committed - so a byte-exact binary file cannot survive it. Decoding it with
+    a replacement character would hand the model a file that differs from the
+    one the repository holds, in a way no test would report; a corpus that needs
+    exact bytes states them in a text encoding its own tooling decodes.
+    """
+    entries: List[Tuple[str, Path]] = []
+    total = 0
+    rules = _read_ignore_rules(base, task_id, field)
+    for path in base.rglob("*"):
+        parts = path.relative_to(base).parts
+        relpath = "/".join(parts)
+        if _is_ignored(parts, rules):
+            continue
+        if ".git" in parts:
+            raise BenchError(
+                "task %r: field %r holds %r; a seeded .git tree is written before "
+                "the cell repository is initialised and would replace it"
+                % (task_id, field, relpath)
+            )
+        if path.is_symlink():
+            raise BenchError(
+                "task %r: field %r holds the symlink %r; the seeded tree is the "
+                "tree the repository holds" % (task_id, field, relpath)
+            )
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise BenchError(
+                "task %r: field %r holds %r, which is not a regular file"
+                % (task_id, field, relpath)
+            )
+        if not _is_within(path.resolve(), base):
+            raise BenchError(
+                "task %r: field %r path %r resolves to %s, outside %s"
+                % (task_id, field, relpath, path.resolve(), base)
+            )
+        size = path.stat().st_size
+        if size > MAX_SOURCE_FILE_BYTES:
+            raise BenchError(
+                "task %r: field %r file %r is %d bytes, over the %d-byte per-file "
+                "ceiling" % (task_id, field, relpath, size, MAX_SOURCE_FILE_BYTES)
+            )
+        total += size
+        if total > MAX_SOURCE_DIR_BYTES:
+            raise BenchError(
+                "task %r: field %r exceeds the %d-byte ceiling for one file set"
+                % (task_id, field, MAX_SOURCE_DIR_BYTES)
+            )
+        entries.append((relpath, path))
+    if not entries:
+        raise BenchError(
+            "task %r: field %r walks %s and finds no file" % (task_id, field, base)
+        )
+    out: Dict[str, str] = {}
+    for relpath, path in sorted(entries):
+        _validate_relpath(relpath, task_id, field)
+        try:
+            body = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BenchError(
+                "task %r: field %r file %r is not UTF-8 text (byte %d): %s"
+                % (task_id, field, relpath, exc.start, exc.reason)
+            )
+        out[relpath] = body
+    return out
+
+
+def _is_within(candidate: Path, base: Path) -> bool:
+    """Whether ``candidate`` sits under ``base``, both already resolved."""
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_relpath(relpath: Any, task_id: str, field: str) -> None:
+    """The path rules both file-set spellings are held to."""
+    if not isinstance(relpath, str) or not relpath.strip():
+        raise BenchError("task %r: field %r has an empty path" % (task_id, field))
+    if os.path.isabs(relpath) or relpath.startswith("/"):
+        raise BenchError(
+            "task %r: field %r path %r is absolute; paths are repo-relative"
+            % (task_id, field, relpath)
+        )
+    if ".." in Path(relpath).parts:
+        raise BenchError(
+            "task %r: field %r path %r escapes the work tree" % (task_id, field, relpath)
+        )
+
+
 def _parse_file_map(value: Any, task_id: str, field: str) -> Dict[str, str]:
     """A repo-relative path -> content map that cannot escape the work tree."""
     if not isinstance(value, dict) or not value:
@@ -760,21 +1134,10 @@ def _parse_file_map(value: Any, task_id: str, field: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for relpath in value:
         body = value[relpath]
-        if not isinstance(relpath, str) or not relpath.strip():
-            raise BenchError("task %r: field %r has an empty path" % (task_id, field))
+        _validate_relpath(relpath, task_id, field)
         if not isinstance(body, str):
             raise BenchError(
                 "task %r: field %r path %r must map to file text" % (task_id, field, relpath)
-            )
-        if os.path.isabs(relpath) or relpath.startswith("/"):
-            raise BenchError(
-                "task %r: field %r path %r is absolute; paths are repo-relative"
-                % (task_id, field, relpath)
-            )
-        parts = Path(relpath).parts
-        if ".." in parts:
-            raise BenchError(
-                "task %r: field %r path %r escapes the work tree" % (task_id, field, relpath)
             )
         out[relpath] = body
     return out
@@ -1024,6 +1387,31 @@ def build_opencode_argv(arm: str, model: str, work_dir: Any, prompt: str) -> Lis
     ]
 
 
+def hermetic_home_env(home: Any) -> Dict[str, str]:
+    """PATH, plus every home a spawned process must not read the operator's.
+
+    One definition for the model's process and for the test commands measured
+    beside it. HOME is the load-bearing key beyond opencode state: CPython
+    derives the per-user site directory from it, so a process given the
+    operator's HOME can import a `pip install --user` package and a process
+    given a cell's cannot. Two environments here means a graded run that
+    resolves imports the model's own run could not.
+    """
+    root = Path(home)
+    return {
+        # ISSUE-107: opencode and git are spawned by bare name, so the cell needs
+        # a PATH to resolve them; without it every cell spawn-fails against
+        # os.defpath. Hermeticity is over process STATE (the homes below), not
+        # over the executable search path.
+        "PATH": CELL_PATH,
+        "HOME": str(root),
+        "XDG_CONFIG_HOME": str(root / "config"),
+        "XDG_STATE_HOME": str(root / "state"),
+        "XDG_DATA_HOME": str(root / "data"),
+        "XDG_CACHE_HOME": str(root / "cache"),
+    }
+
+
 def build_cell_env(cell_dir: Any, config_path: Any) -> Dict[str, str]:
     """The hermetic environment one cell runs in.
 
@@ -1032,22 +1420,11 @@ def build_cell_env(cell_dir: Any, config_path: Any) -> Dict[str, str]:
     worktrees cannot reach the next cell's. Nothing is inherited from the user's
     own environment, so a developer's opencode state cannot enter a measurement.
     """
-    cell = Path(cell_dir)
-    home = cell / "home"
-    return {
-        # ISSUE-107: opencode and git are spawned by bare name, so the cell needs
-        # a PATH to resolve them; without it every cell spawn-fails against
-        # os.defpath. Hermeticity is over opencode STATE (the homes below), not
-        # over the executable search path.
-        "PATH": CELL_PATH,
-        "OPENCODE_CONFIG": str(Path(config_path)),
-        "OPENCODE_TEST_HOME": str(home),
-        "HOME": str(home),
-        "XDG_CONFIG_HOME": str(home / "config"),
-        "XDG_STATE_HOME": str(home / "state"),
-        "XDG_DATA_HOME": str(home / "data"),
-        "XDG_CACHE_HOME": str(home / "cache"),
-    }
+    home = Path(cell_dir) / "home"
+    env = hermetic_home_env(home)
+    env["OPENCODE_CONFIG"] = str(Path(config_path))
+    env["OPENCODE_TEST_HOME"] = str(home)
+    return env
 
 
 def file_refs(config: Any) -> List[str]:
@@ -1094,9 +1471,9 @@ def validate_config_file_refs(config: Dict[str, Any]) -> None:
 
 def build_run_plan(
     tasks: Sequence[Task],
+    models: Sequence[str],
     arms: Sequence[str] = ARMS,
     reps: int = DEFAULT_REPS,
-    models: Sequence[str] = (DEFAULT_MODEL,),
     capabilities: Sequence[str] = (DEFAULT_CAPABILITY,),
 ) -> List[Cell]:
     """Every cell, model-major, then repetition-major and arm-interleaved.
@@ -1138,6 +1515,76 @@ def _plan_cells(
     return plan
 
 
+def select_tasks(
+    tasks: Sequence[Task],
+    task_ids: Sequence[str] = (),
+    tiers: Sequence[str] = (),
+) -> List[Task]:
+    """The subset a `--task`/`--tier` selection names, in manifest order.
+
+    Values union inside a dimension and the two dimensions intersect, so
+    `--task euler-cli-py --tier T1` is that task if it sits in T1 and nothing
+    otherwise. Both an unknown id and a selection that matches nothing are
+    refusals: a benchmark that plans zero cells and exits green is the reading
+    this driver exists to make impossible.
+    """
+    if not task_ids and not tiers:
+        return list(tasks)
+    known = dict((task.id, task) for task in tasks)
+    unknown = [task_id for task_id in task_ids if task_id not in known]
+    if unknown:
+        named = []
+        for task_id in unknown:
+            near = difflib.get_close_matches(task_id, sorted(known), n=3, cutoff=0.6)
+            named.append(
+                "%r (did you mean %s?)" % (task_id, ", ".join(near))
+                if near
+                else "%r (no id in the manifest is close to it)" % task_id
+            )
+        raise BenchError(
+            "--task names %s; the manifest holds %d task(s)"
+            % ("; ".join(named), len(tasks))
+        )
+    wanted_ids = set(task_ids)
+    wanted_tiers = set(tiers)
+    selected = [
+        task
+        for task in tasks
+        if (not wanted_ids or task.id in wanted_ids)
+        and (not wanted_tiers or task.tier in wanted_tiers)
+    ]
+    if not selected:
+        raise BenchError(
+            "the selection matched no task: --task %s and --tier %s have nothing "
+            "in common"
+            % (
+                ", ".join(task_ids) or "(unset)",
+                ", ".join(tiers) or "(unset)",
+            )
+        )
+    return selected
+
+
+def task_filter_record(
+    manifest_tasks: Sequence[Task],
+    selected: Sequence[Task],
+    task_ids: Sequence[str] = (),
+    tiers: Sequence[str] = (),
+) -> Dict[str, Any]:
+    """What was asked for and how much of the declared set it left.
+
+    Written whether or not a selection was given, because `partial` false is a
+    positive statement that the run covered the manifest, which an absent key
+    is not.
+    """
+    return {
+        "taskIds": list(task_ids),
+        "tiers": list(tiers),
+        "selectedTaskIds": [task.id for task in selected],
+        "partial": len(selected) < len(manifest_tasks),
+    }
+
+
 def models_for_tier(sweep: Dict[str, Any], tier: str) -> List[str]:
     """Which models a tier is run on under the declared sweep shape.
 
@@ -1172,24 +1619,42 @@ def build_run_manifest(
     arms: Sequence[str] = ARMS,
     reps: int = DEFAULT_REPS,
     capabilities: Sequence[str] = CAPABILITIES,
+    tasks: Optional[Sequence[Task]] = None,
+    filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """What this campaign is, recorded before any cell runs.
 
     A coverage claim written after the fact describes what finished in time.
     This is the design, and the report is rendered against it.
+
+    ``tasks`` is what the run actually plans, which a selection can narrow to a
+    subset of the manifest. Both sets ride the record - ``taskIdsByTier`` is
+    what ran and ``manifestTaskIdsByTier`` is what the manifest declares - so a
+    narrowed run at the single run-manifest path can never be read as the
+    campaign.
     """
+    planned = list(manifest.tasks) if tasks is None else list(tasks)
+    selection = (
+        filters if filters is not None else task_filter_record(manifest.tasks, planned)
+    )
+    planned_by_tier = tasks_by_tier(planned)
     return {
         "startedIso": utc_now_iso(),
         "models": list(models),
         "capabilities": list(capabilities),
         "arms": list(arms),
         "reps": reps,
-        "tiers": list(TIERS),
+        "tiers": [tier for tier in TIERS if planned_by_tier[tier]],
         "tierTimeoutSec": dict(manifest.defaults["tierTimeoutSec"]),
         "sweep": dict(manifest.sweep),
         "asymmetries": declared_asymmetries(),
         "exclusionReasons": list(EXCLUSION_REASONS),
+        "filters": selection,
+        "partial": selection["partial"],
         "taskIdsByTier": dict(
+            (tier, [task.id for task in group]) for tier, group in planned_by_tier.items()
+        ),
+        "manifestTaskIdsByTier": dict(
             (tier, [task.id for task in group])
             for tier, group in tasks_by_tier(manifest.tasks).items()
         ),
@@ -1338,7 +1803,12 @@ def build_conductor_cell_config(task: Task) -> Dict[str, Any]:
         "models": {"default": "", "roles": {}},
         "ponytail": "full",
         "retention": {"keepRuns": 20, "maxRunDirBytes": 52428800, "pruneOnRunCreate": True},
-        "logging": {"level": "info", "components": {}},
+        # conductor/adapter/tools.ts journals a read-shaped allow at debug and
+        # only an R3 side effect at warn. The campaign's central question is what
+        # each arm REACHED and whether reaching it correlates with passing, so a
+        # cell gathered at info holds the denies and the network allows and
+        # nothing behind that question.
+        "logging": {"level": "debug", "components": {}},
     }
 
 
@@ -1408,8 +1878,20 @@ def _kill_process_group(process: "subprocess.Popen") -> None:
 
 
 def default_test_runner(argv: Sequence[str], cwd: Any, timeout_sec: float) -> CommandOutcome:
-    """Run a hidden or visible test command in a work tree."""
-    return run_command(argv, cwd, timeout_sec)
+    """Run a hidden or visible test command in a work tree.
+
+    Under the same scrubbed homes the model's own process ran under, and a
+    fresh one per command so no run leaves state for the next. Inheriting the
+    operator's environment here would grade a tree against tools the model was
+    never given, and would leave every preflight blind to a task whose suite
+    only runs on the operator's machine.
+    """
+    with tempfile.TemporaryDirectory(prefix="bench-test-home-") as home:
+        env = hermetic_home_env(home)
+        for key in ("HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME",
+                    "XDG_CACHE_HOME"):
+            Path(env[key]).mkdir(parents=True, exist_ok=True)
+        return run_command(argv, cwd, timeout_sec, env=env)
 
 
 def default_cell_invocation_runner(invocation: CellInvocation) -> CommandOutcome:
@@ -1971,7 +2453,7 @@ def exclusion_reason(row: Dict[str, Any]) -> Optional[str]:
 def aggregate(
     results: Sequence[Dict[str, Any]],
     tasks: Sequence[Task],
-    model: str = DEFAULT_MODEL,
+    model: str,
     arms: Sequence[str] = ARMS,
     reps: int = DEFAULT_REPS,
     capability: str = DEFAULT_CAPABILITY,
@@ -2170,12 +2652,19 @@ def _empty_tier_row() -> Dict[str, Any]:
 def trajectory_divergences(
     results: Sequence[Dict[str, Any]], tasks: Sequence[Task], arms: Sequence[str] = ARMS
 ) -> List[Dict[str, Any]]:
-    """Every stress cell whose run took a trajectory the task did not expect.
+    """Every cell whose run stopped somewhere its task rules out.
 
     A stress task is written to strain a named mechanism, and the trajectory it
-    declares is the claim under test. A cell that stopped somewhere else is the
-    finding - which is a different thing from a cell that failed its hidden
-    test, and is reported as one.
+    declares is the claim under test. A coverage task names no mechanism and
+    still declares the stop kinds it expects, authored as deliberately: a T1
+    that lists `done` and `REPORTED` and not `TRIVIAL_DONE` is saying that a run
+    routed into the plugin's trivial path took a route the task rules out. The
+    declared list is the comparison for both, so the finding is not lost for the
+    tasks that name no mechanism - which is most of the committed corpus.
+
+    A divergence is a different thing from a cell that failed its hidden test,
+    and is reported as one: a cell can pass its gauge and still have arrived
+    somewhere the task says it should not have.
     """
     by_task = dict((task.id, task) for task in tasks)
     out: List[Dict[str, Any]] = []
@@ -2183,7 +2672,7 @@ def trajectory_divergences(
         if row["arm"] not in arms:
             continue
         task = by_task.get(row["taskId"])
-        if task is None or task.mechanism == "none":
+        if task is None:
             continue
         observed = row.get("stopKind")
         if not isinstance(observed, str) or observed in task.expected_stop_kinds:
@@ -2386,6 +2875,7 @@ def render_report(
     capabilities: Sequence[str] = (DEFAULT_CAPABILITY,),
     rubrics: Sequence[Dict[str, Any]] = (),
     sweep: Optional[Dict[str, Any]] = None,
+    task_filter: Optional[Dict[str, Any]] = None,
 ) -> str:
     """The markdown report: per-task spread first, comparison only after it.
 
@@ -2394,6 +2884,11 @@ def render_report(
     below the table that shows what it is made of - and the asymmetries the
     arms carry are printed above all of it, because they qualify every number
     underneath.
+
+    ``task_filter`` is the run's provenance and this function has no other
+    source for it: ``tasks`` is what to render, not what was declared. An
+    omitted record therefore means unknown provenance, and the scope section
+    says so rather than measuring the rendered list against itself.
     """
     strata = [(model, capability) for model in models for capability in capabilities]
     aggs = dict(
@@ -2407,6 +2902,7 @@ def render_report(
     tier_of = dict((task.id, task.tier) for task in tasks)
     lines: List[str] = ["# Conductor three-arm benchmark", ""]
 
+    lines.extend(_scope_lines(task_filter))
     lines.extend(_method_lines(models, capabilities, arms, reps))
     lines.extend(_asymmetry_lines())
     if sweep is not None:
@@ -2429,6 +2925,76 @@ def render_report(
 
 def _stratum_label(model: str, capability: str) -> str:
     return "### %s / capability %s" % (model, capability)
+
+
+def _selection_flags(task_filter: Dict[str, Any]) -> str:
+    """The selection as the flags that carried it, or empty for none given.
+
+    ``partial`` answers how much of the declared set a run covered, which is a
+    different question from whether a selection was typed: a `--tier`
+    enumeration naming every tier covers everything. Both answers are stated,
+    and neither stands in for the other.
+    """
+    given = ["`--task %s`" % value for value in task_filter["taskIds"]]
+    given += ["`--tier %s`" % value for value in task_filter["tiers"]]
+    return ", ".join(given)
+
+
+def _scope_lines(task_filter: Optional[Dict[str, Any]]) -> List[str]:
+    """What the run covered, above every number that covering qualifies.
+
+    The tables below are rendered over the planned tasks alone, so a narrowed
+    run reads exactly like a whole one at a smaller scale unless the narrowing
+    is said out loud. It is said here, first.
+
+    An absent record is a report whose provenance was never handed to the
+    renderer, which holds the tasks it was given and no manifest to measure
+    them against. It states that and nothing more: a coverage claim assembled
+    out of the rendered list alone is a claim about a set nobody supplied.
+    """
+    lines = [SECTION_SCOPE, ""]
+    if task_filter is None:
+        lines.append(
+            "The task selection was not recorded with this report, so it makes "
+            "no claim about how much of any declared task set the numbers below "
+            "cover."
+        )
+        lines.append("")
+        return lines
+    selected = task_filter["selectedTaskIds"]
+    given = _selection_flags(task_filter)
+    if not task_filter["partial"]:
+        lines.append(
+            "This run covers the whole declared task set: %d task(s), %s."
+            % (
+                len(selected),
+                "selected by %s, which excluded nothing" % given
+                if given
+                else "with no `--task` or `--tier` selection",
+            )
+        )
+        lines.append("")
+        return lines
+    lines.append(
+        "**This run is a selection out of the declared task set, not the "
+        "campaign.** Every number below describes the selected tasks only, and "
+        "a task outside the selection was never planned and is not a missing "
+        "cell."
+    )
+    lines.append("")
+    lines.append(
+        "- Tasks planned: %s" % ", ".join("`%s`" % task_id for task_id in selected)
+    )
+    lines.append(
+        "- `--task`: %s"
+        % (", ".join("`%s`" % t for t in task_filter["taskIds"]) or "not given")
+    )
+    lines.append(
+        "- `--tier`: %s"
+        % (", ".join("`%s`" % t for t in task_filter["tiers"]) or "not given")
+    )
+    lines.append("")
+    return lines
 
 
 def _method_lines(
@@ -2753,9 +3319,10 @@ def _trajectory_lines(
     lines = [SECTION_TRAJECTORIES, ""]
     divergences = trajectory_divergences(results, tasks, arms=arms)
     lines.append(
-        "%d stress cell(s) took a trajectory their task did not expect. A "
-        "divergence here is the finding; it is neither a pass nor a fail."
-        % len(divergences)
+        "%d cell(s) stopped somewhere their task rules out. Every task declares "
+        "the stop kinds it expects, whether or not it names a mechanism to "
+        "strain, and a divergence here is the finding; it is neither a pass nor "
+        "a fail." % len(divergences)
     )
     if divergences:
         lines.append("")
@@ -2949,6 +3516,7 @@ def run_benchmark(
     sweep: Optional[Dict[str, Any]] = None,
     rubric_dir: Optional[Any] = None,
     report_only: bool = False,
+    task_filter: Optional[Dict[str, Any]] = None,
     cell_runner: Optional[Callable[[Cell, Task, Any], Dict[str, Any]]] = None,
     router_config: Optional[Dict[str, Any]] = None,
     base_config: Optional[Dict[str, Any]] = None,
@@ -2976,7 +3544,14 @@ def run_benchmark(
     rows: List[Dict[str, Any]] = []
 
     if report_only:
-        rows = load_results(results_path)
+        # The plan is what a run covers, and a rebuild covers the same thing: a
+        # cell belonging to a task outside the selection is not this report's to
+        # describe. The scope section states that every number below it
+        # describes the selected tasks only, and the rubric lane keys off these
+        # rows with no task list of its own to filter by, so an unfiltered read
+        # renders another task's hand-scored medians and findings under a
+        # heading that just said otherwise.
+        rows = [row for row in load_results(results_path) if row["taskId"] in by_task]
     else:
         runner = cell_runner
         if runner is None:
@@ -3014,6 +3589,7 @@ def run_benchmark(
             capabilities=capabilities,
             rubrics=load_rubrics(rubric_dir) if rubric_dir is not None else (),
             sweep=sweep,
+            task_filter=task_filter,
         )
     )
     return {
@@ -3035,10 +3611,18 @@ def verify_tasks(
 
     A hidden test that already passes on the seed measures nothing: every arm
     would score it, and the task would silently inflate all three.
+
+    A gate the clock killed answered nothing, and is reported as its own
+    outcome rather than folded into the non-zero codes. Folding it in is the
+    one reading that certifies the opposite of the truth: a gate that passes on
+    its seed - the hollowness this exists to catch - is also the gate that runs
+    longest, because it never short-circuits on the refusal an honest seed
+    trips first.
     """
     runner = default_test_runner if test_runner is None else test_runner
-    exit_codes: Dict[str, int] = {}
+    exit_codes: Dict[str, Optional[int]] = {}
     passed_unmodified: List[str] = []
+    timed_out: List[str] = []
     for task in tasks:
         scratch = Path(work_root) / task.id
         if scratch.exists():
@@ -3047,13 +3631,15 @@ def verify_tasks(
         materialize_files(scratch, task.seed_files)
         materialize_files(scratch, task.hidden_files)
         outcome = runner(list(task.hidden_test_command), scratch, timeout_sec)
-        code = outcome.exit_code if outcome.exit_code is not None else -1
-        exit_codes[task.id] = code
-        if code == 0:
+        exit_codes[task.id] = outcome.exit_code
+        if outcome.timed_out:
+            timed_out.append(task.id)
+        elif outcome.exit_code == 0:
             passed_unmodified.append(task.id)
     return {
-        "ok": not passed_unmodified,
+        "ok": not passed_unmodified and not timed_out,
         "passedUnmodified": passed_unmodified,
+        "timedOut": timed_out,
         "exitCodes": exit_codes,
     }
 
@@ -3069,10 +3655,15 @@ def verify_seed_green(
     A seed that starts red makes a red visible test ambiguous: nobody can tell
     the arm's damage from the task's. The hidden files are not materialized
     here, so this is the tree the model is handed, exactly.
+
+    A suite the clock killed is reported as its own outcome, the same way the
+    hidden-test floor reports one: a killed suite is not a red suite, and
+    naming it one sends the operator after a seed that is not broken.
     """
     runner = default_test_runner if test_runner is None else test_runner
-    exit_codes: Dict[str, int] = {}
+    exit_codes: Dict[str, Optional[int]] = {}
     started_red: List[str] = []
+    timed_out: List[str] = []
     for task in tasks:
         scratch = Path(work_root) / task.id
         if scratch.exists():
@@ -3080,15 +3671,37 @@ def verify_seed_green(
         scratch.mkdir(parents=True)
         materialize_files(scratch, task.seed_files)
         outcome = runner(list(task.repo_test_command), scratch, timeout_sec)
-        code = outcome.exit_code if outcome.exit_code is not None else -1
-        exit_codes[task.id] = code
-        if code != 0:
+        exit_codes[task.id] = outcome.exit_code
+        if outcome.timed_out:
+            timed_out.append(task.id)
+        elif outcome.exit_code != 0:
             started_red.append(task.id)
     return {
-        "ok": not started_red,
+        "ok": not started_red and not timed_out,
         "startedRed": started_red,
+        "timedOut": timed_out,
         "exitCodes": exit_codes,
     }
+
+
+def work_root_problem(work_root: Path) -> str:
+    """Why a work root cannot be used, or the empty string.
+
+    A cell's cwd is <work_root>/<model>/<capability>/<arm>/<task>/rN/repo, so a
+    work root under this repository sits a constant number of `..` segments from
+    bench/corpus/**/hidden/**, where every answer key the campaign grades
+    against lives. The driver keeps the hidden files out of the work tree until
+    opencode has exited; a relative path around that ordering defeats it, and
+    nothing in a cell's record would tell such a cell from an honest pass.
+    """
+    resolved = Path(work_root).expanduser().resolve()
+    if _is_within(resolved, REPO_ROOT.resolve()):
+        return (
+            "work root %s lies inside %s, which puts every graded gauge a constant "
+            "relative path from every cell; name one outside the repository"
+            % (resolved, REPO_ROOT)
+        )
+    return ""
 
 
 def load_router_config(path: Any) -> Dict[str, Any]:
@@ -3120,10 +3733,41 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan-only", action="store_true", dest="plan_only")
     parser.add_argument("--sweep", action="store_true", dest="sweep")
     # Repeatable: model is a matrix dimension, and the plan is grouped by it.
-    parser.add_argument("--model", action="append", dest="models")
+    # Absent, the model is the manifest's own `defaults.model`, so a manifest
+    # cannot declare one model and plan another.
+    parser.add_argument(
+        "--model",
+        action="append",
+        dest="models",
+        help="repeatable; default: the manifest's defaults.model",
+    )
     parser.add_argument("--capability", action="append", dest="capabilities")
+    # Repeatable: a selection unions inside a dimension and intersects across
+    # the two. --tier is spelled against the closed vocabulary so argparse
+    # refuses an unknown one before the manifest is even read.
+    parser.add_argument("--task", action="append", dest="task_ids")
+    parser.add_argument("--tier", action="append", dest="tiers", choices=TIERS)
     parser.add_argument("--review-sample", type=int, default=0, dest="review_sample")
-    parser.add_argument("--reps", type=int, default=DEFAULT_REPS)
+    # Left unset rather than defaulted, so "the operator typed the default" and
+    # "the operator typed nothing" stay distinguishable: --sweep reads the
+    # repetition count from the manifest and refuses to be handed a second one.
+    parser.add_argument(
+        "--reps",
+        type=int,
+        default=None,
+        help="repetitions per (arm, task) cell; default: %d" % DEFAULT_REPS,
+    )
+    # The wall clock one gate gets under --verify-tasks and --seed-green. A
+    # corpus gate that compiles a reference and runs timed workloads needs more
+    # than the floor's default on a loaded machine, and a killed gate proves
+    # nothing either way.
+    parser.add_argument(
+        "--verify-timeout",
+        type=float,
+        default=float(VERIFY_TIMEOUT_SEC),
+        dest="verify_timeout",
+        help="seconds one hidden test or visible suite gets; default: %d" % VERIFY_TIMEOUT_SEC,
+    )
     parser.add_argument(
         "--router-config", default=str(ROUTER_CONFIG_PATH), dest="router_config"
     )
@@ -3138,8 +3782,61 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except BenchError as exc:
         print("bench: %s" % exc)
         return 2
-    tasks = manifest.tasks
+    requested_task_ids = list(args.task_ids) if args.task_ids else []
+    requested_tiers = list(args.tiers) if args.tiers else []
 
+    # The sweep block is the manifest's own declared campaign shape - which
+    # tiers run on which models, on which capabilities, for how many
+    # repetitions - and a command-line selection is a second, narrower
+    # statement of what to run. Composed, the plan is neither: the sweep's model
+    # list would still name models a tier selection had emptied, and the
+    # report's sweep section would describe a campaign that did not happen. A
+    # narrower sweep is a narrower sweep block.
+    #
+    # Every flag the sweep branch overwrites is named here. Accepting one and
+    # discarding it is worse than refusing it: `--sweep --reps 1` plans the
+    # manifest's repetitions over a lane whose cells are hours long, and
+    # `--sweep --model X` measures a model the operator did not name, which is
+    # the confound the one-model campaign rule exists to prevent.
+    if args.sweep:
+        composed = [
+            flag
+            for flag, given in (
+                ("--task", bool(requested_task_ids)),
+                ("--tier", bool(requested_tiers)),
+                ("--model", args.models is not None),
+                ("--capability", args.capabilities is not None),
+                ("--reps", args.reps is not None),
+            )
+            if given
+        ]
+        if composed:
+            print(
+                "bench: --sweep runs the shape the manifest declares; state %s "
+                "in the manifest's sweep block rather than on the command line"
+                % ", ".join(composed)
+            )
+            return 2
+
+    problem = work_root_problem(Path(args.work_root))
+    if problem:
+        print("bench: %s" % problem)
+        return 2
+
+    try:
+        tasks = select_tasks(
+            manifest.tasks, task_ids=requested_task_ids, tiers=requested_tiers
+        )
+    except BenchError as exc:
+        print("bench: %s" % exc)
+        return 2
+    task_filter = task_filter_record(
+        manifest.tasks, tasks, task_ids=requested_task_ids, tiers=requested_tiers
+    )
+
+    # The preflight covers what this invocation will launch. A whole-set run
+    # still checks every committed task, which is where a broken runner is
+    # caught; a selection is not blocked by the runner of a task it excludes.
     problems = check_commands_spawnable(tasks)
     if problems:
         for problem in problems:
@@ -3147,35 +3844,67 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     if args.verify_tasks:
-        report = verify_tasks(tasks, work_root=Path(args.work_root))
+        report = verify_tasks(
+            tasks, work_root=Path(args.work_root), timeout_sec=args.verify_timeout
+        )
+        timed_out = set(report["timedOut"])
         for task in tasks:
-            print(
-                "%s: hidden test exited %d on the unmodified seed"
-                % (task.id, report["exitCodes"][task.id])
-            )
+            if task.id in timed_out:
+                print(
+                    "%s: hidden test timed out after %gs and answered nothing"
+                    % (task.id, args.verify_timeout)
+                )
+            else:
+                print(
+                    "%s: hidden test exited %d on the unmodified seed"
+                    % (task.id, report["exitCodes"][task.id])
+                )
         if report["ok"]:
             print("every hidden test failed on its unmodified seed")
             return 0
-        print(
-            "these tasks measure nothing, their hidden test passed unmodified: %s"
-            % ", ".join(report["passedUnmodified"])
-        )
+        if report["passedUnmodified"]:
+            print(
+                "these tasks measure nothing, their hidden test passed unmodified: %s"
+                % ", ".join(report["passedUnmodified"])
+            )
+        if report["timedOut"]:
+            print(
+                "these gates were killed on the clock, so this floor proves "
+                "nothing about them; raise --verify-timeout: %s"
+                % ", ".join(report["timedOut"])
+            )
         return 1
 
     if args.seed_green:
-        green = verify_seed_green(tasks, work_root=Path(args.work_root))
+        green = verify_seed_green(
+            tasks, work_root=Path(args.work_root), timeout_sec=args.verify_timeout
+        )
+        timed_out = set(green["timedOut"])
         for task in tasks:
-            print(
-                "%s: visible suite exited %d on the unmodified seed"
-                % (task.id, green["exitCodes"][task.id])
-            )
+            if task.id in timed_out:
+                print(
+                    "%s: visible suite timed out after %gs and answered nothing"
+                    % (task.id, args.verify_timeout)
+                )
+            else:
+                print(
+                    "%s: visible suite exited %d on the unmodified seed"
+                    % (task.id, green["exitCodes"][task.id])
+                )
         if green["ok"]:
             print("every seeded repository starts green")
             return 0
-        print(
-            "these seeds do not start green, so a red visible test would not be "
-            "the arm's doing: %s" % ", ".join(green["startedRed"])
-        )
+        if green["startedRed"]:
+            print(
+                "these seeds do not start green, so a red visible test would not be "
+                "the arm's doing: %s" % ", ".join(green["startedRed"])
+            )
+        if green["timedOut"]:
+            print(
+                "these suites were killed on the clock, so this floor proves "
+                "nothing about them; raise --verify-timeout: %s"
+                % ", ".join(green["timedOut"])
+            )
         return 1
 
     if args.sweep:
@@ -3184,13 +3913,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         reps = manifest.sweep["reps"]
         plan = build_sweep_plan(manifest)
     else:
-        models = list(args.models) if args.models else [DEFAULT_MODEL]
+        models = list(args.models) if args.models else [manifest.defaults["model"]]
         capabilities = list(args.capabilities) if args.capabilities else [DEFAULT_CAPABILITY]
-        reps = args.reps
+        reps = DEFAULT_REPS if args.reps is None else args.reps
         plan = build_run_plan(tasks, reps=reps, models=models, capabilities=capabilities)
 
     run_manifest = build_run_manifest(
-        manifest, models=models, reps=reps, capabilities=capabilities
+        manifest,
+        models=models,
+        reps=reps,
+        capabilities=capabilities,
+        tasks=tasks,
+        filters=task_filter,
     )
     write_run_manifest(Path(args.run_manifest), run_manifest)
 
@@ -3201,6 +3935,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.plan_only:
         print("run manifest at %s" % args.run_manifest)
+        if task_filter["partial"]:
+            print(
+                "selection: %d of %d task(s) - %s"
+                % (
+                    len(tasks),
+                    len(manifest.tasks),
+                    ", ".join(task_filter["selectedTaskIds"]),
+                )
+            )
         for model in models:
             grouped = [cell for cell in plan if cell.model == model]
             print("%s: %d cell(s)" % (model, len(grouped)))
@@ -3225,6 +3968,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         capabilities=capabilities,
         plan=plan,
         sweep=manifest.sweep,
+        task_filter=task_filter,
         rubric_dir=Path(args.rubric_dir),
         report_only=args.report_only,
         router_config=router_config,

@@ -1,0 +1,39 @@
+{
+  "id": "2048-solver",
+  "title": "Terminal 2048 with an expectimax solver",
+  "category": "tui-games",
+  "size": "L",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-2048-solver-prompt.md",
+  "difficulty": 7,
+  "timeouts": {
+    "build": 300,
+    "run": 300,
+    "test": 900
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "README.md",
+    "NOTES.md",
+    "BENCHMARK.md",
+    "run.json",
+    "scripts/vector-01.txt",
+    "scripts/vector-01.expected.json",
+    "scripts/vector-02.txt",
+    "scripts/vector-02.expected.json",
+    "scripts/vector-03.txt",
+    "scripts/vector-03.expected.json",
+    "scripts/vector-04.txt",
+    "scripts/vector-04.expected.json"
+  ]
+}

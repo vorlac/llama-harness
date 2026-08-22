@@ -1,0 +1,392 @@
+{
+  "group": "control",
+  "description": "Conditional and unconditional jumps, truthiness, loop shapes, and the stack discipline of the conditional branches.",
+  "case_count": 55,
+  "cases": [
+    {
+      "id": "control-001-iffalse",
+      "mode": "exec",
+      "source": "asm/control-001-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-002-iffalse",
+      "mode": "exec",
+      "source": "asm/control-002-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-003-iffalse",
+      "mode": "exec",
+      "source": "asm/control-003-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-004-iffalse",
+      "mode": "exec",
+      "source": "asm/control-004-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-005-iffalse",
+      "mode": "exec",
+      "source": "asm/control-005-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-006-iffalse",
+      "mode": "exec",
+      "source": "asm/control-006-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-007-iffalse",
+      "mode": "exec",
+      "source": "asm/control-007-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-008-iffalse",
+      "mode": "exec",
+      "source": "asm/control-008-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-009-iffalse",
+      "mode": "exec",
+      "source": "asm/control-009-iffalse.asm",
+      "expect_exit": 0,
+      "expect_stdout": "yes\ndone\n"
+    },
+    {
+      "id": "control-010-iftrue",
+      "mode": "exec",
+      "source": "asm/control-010-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-011-iftrue",
+      "mode": "exec",
+      "source": "asm/control-011-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "fell\ndone\n"
+    },
+    {
+      "id": "control-012-iftrue",
+      "mode": "exec",
+      "source": "asm/control-012-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "fell\ndone\n"
+    },
+    {
+      "id": "control-013-iftrue",
+      "mode": "exec",
+      "source": "asm/control-013-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-014-iftrue",
+      "mode": "exec",
+      "source": "asm/control-014-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-015-iftrue",
+      "mode": "exec",
+      "source": "asm/control-015-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-016-iftrue",
+      "mode": "exec",
+      "source": "asm/control-016-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-017-iftrue",
+      "mode": "exec",
+      "source": "asm/control-017-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-018-iftrue",
+      "mode": "exec",
+      "source": "asm/control-018-iftrue.asm",
+      "expect_exit": 0,
+      "expect_stdout": "done\n"
+    },
+    {
+      "id": "control-019-not",
+      "mode": "exec",
+      "source": "asm/control-019-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-020-notnot",
+      "mode": "exec",
+      "source": "asm/control-020-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-021-not",
+      "mode": "exec",
+      "source": "asm/control-021-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-022-notnot",
+      "mode": "exec",
+      "source": "asm/control-022-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-023-not",
+      "mode": "exec",
+      "source": "asm/control-023-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-024-notnot",
+      "mode": "exec",
+      "source": "asm/control-024-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-025-not",
+      "mode": "exec",
+      "source": "asm/control-025-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-026-notnot",
+      "mode": "exec",
+      "source": "asm/control-026-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-027-not",
+      "mode": "exec",
+      "source": "asm/control-027-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-028-notnot",
+      "mode": "exec",
+      "source": "asm/control-028-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-029-not",
+      "mode": "exec",
+      "source": "asm/control-029-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-030-notnot",
+      "mode": "exec",
+      "source": "asm/control-030-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-031-not",
+      "mode": "exec",
+      "source": "asm/control-031-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-032-notnot",
+      "mode": "exec",
+      "source": "asm/control-032-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-033-not",
+      "mode": "exec",
+      "source": "asm/control-033-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-034-notnot",
+      "mode": "exec",
+      "source": "asm/control-034-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-035-not",
+      "mode": "exec",
+      "source": "asm/control-035-not.asm",
+      "expect_exit": 0,
+      "expect_stdout": "false\n"
+    },
+    {
+      "id": "control-036-notnot",
+      "mode": "exec",
+      "source": "asm/control-036-notnot.asm",
+      "expect_exit": 0,
+      "expect_stdout": "true\n"
+    },
+    {
+      "id": "control-037-jmpfwd",
+      "mode": "exec",
+      "source": "asm/control-037-jmpfwd.asm",
+      "expect_exit": 0,
+      "expect_stdout": "after\n"
+    },
+    {
+      "id": "control-038-jmpzero",
+      "mode": "exec",
+      "source": "asm/control-038-jmpzero.asm",
+      "expect_exit": 0,
+      "expect_stdout": "fallthrough\n"
+    },
+    {
+      "id": "control-039-branchpops",
+      "mode": "exec",
+      "source": "asm/control-039-branchpops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "111\n"
+    },
+    {
+      "id": "control-040-branchpops",
+      "mode": "exec",
+      "source": "asm/control-040-branchpops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "222\n"
+    },
+    {
+      "id": "control-041-nops",
+      "mode": "exec",
+      "source": "asm/control-041-nops.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "control-042-countdown",
+      "mode": "exec",
+      "source": "asm/control-042-countdown.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n4\n3\n2\n1\nliftoff\n"
+    },
+    {
+      "id": "control-043-sum100",
+      "mode": "exec",
+      "source": "asm/control-043-sum100.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5050\n"
+    },
+    {
+      "id": "control-044-zeroiter",
+      "mode": "exec",
+      "source": "asm/control-044-zeroiter.asm",
+      "expect_exit": 0,
+      "expect_stdout": "after\n"
+    },
+    {
+      "id": "control-045-break",
+      "mode": "exec",
+      "source": "asm/control-045-break.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n1\n2\nstopped\n"
+    },
+    {
+      "id": "control-046-nestedloop",
+      "mode": "exec",
+      "source": "asm/control-046-nestedloop.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0,0\n0,1\n1,0\n1,1\n2,0\n2,1\n"
+    },
+    {
+      "id": "control-047-sign",
+      "mode": "exec",
+      "source": "asm/control-047-sign.asm",
+      "expect_exit": 0,
+      "expect_stdout": "positive\n"
+    },
+    {
+      "id": "control-048-sign",
+      "mode": "exec",
+      "source": "asm/control-048-sign.asm",
+      "expect_exit": 0,
+      "expect_stdout": "negative\n"
+    },
+    {
+      "id": "control-049-sign",
+      "mode": "exec",
+      "source": "asm/control-049-sign.asm",
+      "expect_exit": 0,
+      "expect_stdout": "zero\n"
+    },
+    {
+      "id": "control-050-fizzbuzz",
+      "mode": "exec",
+      "source": "asm/control-050-fizzbuzz.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz\n"
+    },
+    {
+      "id": "control-051-max3",
+      "mode": "exec",
+      "source": "asm/control-051-max3.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "control-052-max3",
+      "mode": "exec",
+      "source": "asm/control-052-max3.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "control-053-max3",
+      "mode": "exec",
+      "source": "asm/control-053-max3.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "control-054-max3",
+      "mode": "exec",
+      "source": "asm/control-054-max3.asm",
+      "expect_exit": 0,
+      "expect_stdout": "5\n"
+    },
+    {
+      "id": "control-055-max3",
+      "mode": "exec",
+      "source": "asm/control-055-max3.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    }
+  ]
+}

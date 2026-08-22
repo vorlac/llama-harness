@@ -1,0 +1,2051 @@
+{
+ "group": "pubsub",
+ "description": "SUBSCRIBE, UNSUBSCRIBE, PUBLISH, subscribed-mode restrictions and message delivery",
+ "cases": [
+  {
+   "name": "subscribe-reply-shape",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "news"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "news",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribe-multiple-channels-one-command",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "c",
+       3
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribe-multiple-commands",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribe-same-channel-twice-keeps-count",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribe-empty-channel-name",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      ""
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribe-binary-channel-name",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a\r\nb"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a\r\nb",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribe-channel-names-are-case-sensitive",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "News"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "News",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "news"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "news",
+       2
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "publish-with-no-subscribers",
+   "steps": [
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "hi"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "publish-to-one-subscriber",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "hello"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "hello"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "publish-to-two-subscribers",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s2"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "hello"
+     ],
+     "expect": [
+      ":",
+      2
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "hello"
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "hello"
+      ]
+     ],
+     "client": "s2"
+    }
+   ]
+  },
+  {
+   "name": "publish-only-reaches-matching-channel",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       1
+      ]
+     ],
+     "client": "s2"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "a",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "a",
+       "x"
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "expect_nothing_ms": 150,
+     "client": "s2"
+    }
+   ]
+  },
+  {
+   "name": "publish-preserves-order-for-one-subscriber",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "1"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "2"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "3"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "1"
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "2"
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "3"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "publish-empty-payload",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       ""
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "publish-binary-payload",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "a\r\n*1\r\nb"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "a\r\n*1\r\nb"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "publish-large-payload",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "subscriber-receives-on-multiple-channels",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "b",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "a",
+      "y"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "b",
+       "x"
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "a",
+       "y"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "channels-are-global-across-databases",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "pub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "publish-count-drops-after-disconnect",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "close": true,
+     "client": "sub"
+    },
+    {
+     "sleep_ms": 200
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "y"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "pub"
+    }
+   ]
+  },
+  {
+   "name": "publish-count-drops-after-quit",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "QUIT"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "sub"
+    },
+    {
+     "expect_closed": true,
+     "client": "sub"
+    },
+    {
+     "sleep_ms": 150
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "y"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "pub"
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-specific-channel",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "a",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-all-with-no-arguments",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "b",
+       0
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-when-not-subscribed",
+   "steps": [
+    {
+     "cmd": [
+      "UNSUBSCRIBE"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       null,
+       0
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-from-unsubscribed-channel-still-replies",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "zzz"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "zzz",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-named-channel-when-not-subscribed",
+   "steps": [
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "zzz"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "zzz",
+       0
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-multiple-channels",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a",
+      "b",
+      "c"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "c",
+       3
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "a",
+       2
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "b",
+       1
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unsubscribe-stops-delivery",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "ch",
+       0
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "pub"
+    },
+    {
+     "expect_nothing_ms": 150,
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-rejects-get",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'get': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-rejects-set",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'set': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-rejects-publish",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'publish': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-rejects-multi",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'multi': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-rejects-select",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SELECT",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'select': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-uses-canonical-lowercase-name",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "HgEtAlL",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'hgetall': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-unknown-command-is-still-unknown",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "BOGUS"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'BOGUS'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-rejection-keeps-connection",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'get': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-ping-is-an-array",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "*",
+      [
+       "pong",
+       ""
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-ping-with-message",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "PING",
+      "hello"
+     ],
+     "expect": [
+      "*",
+      [
+       "pong",
+       "hello"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscribed-mode-quit-works",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "QUIT"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "expect_closed": true
+    }
+   ]
+  },
+  {
+   "name": "leaving-subscribed-mode-restores-normal-commands",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'get': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "ch",
+       0
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "partially-leaving-subscribed-mode-stays-restricted",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "a",
+      "b"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "b",
+       2
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "UNSUBSCRIBE",
+      "a"
+     ],
+     "expect": [
+      "*",
+      [
+       "unsubscribe",
+       "a",
+       1
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR Can't execute 'get': only SUBSCRIBE / UNSUBSCRIBE / PING / QUIT are allowed in this context"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "subscription-is-per-connection",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "c2"
+    }
+   ]
+  },
+  {
+   "name": "publisher-is-not-in-subscribed-mode",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "pub"
+    }
+   ]
+  },
+  {
+   "name": "many-subscribers-one-channel",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s0"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s2"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s3"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s4"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s5"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s6"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "s7"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "x"
+     ],
+     "expect": [
+      ":",
+      8
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s0"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s1"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s2"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s3"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s4"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s5"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s6"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "x"
+      ]
+     ],
+     "client": "s7"
+    }
+   ]
+  },
+  {
+   "name": "messages-are-not-delivered-to-late-subscribers",
+   "steps": [
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "early"
+     ],
+     "expect": [
+      ":",
+      0
+     ],
+     "client": "pub"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "expect_nothing_ms": 150,
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "PUBLISH",
+      "ch",
+      "late"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "pub"
+    },
+    {
+     "expect": [
+      "*",
+      [
+       "message",
+       "ch",
+       "late"
+      ]
+     ],
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "subscribe-does-not-affect-keyspace",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "k"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "k",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "c2"
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "c2"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,815 @@
+{
+  "group": "strops",
+  "description": "String operations: concatenation, byte-indexed substring, search, length, chr/ord and the string/integer conversions.",
+  "case_count": 110,
+  "cases": [
+    {
+      "id": "strops-001-concat",
+      "mode": "exec",
+      "source": "asm/strops-001-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "strops-002-concat",
+      "mode": "exec",
+      "source": "asm/strops-002-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "a\n"
+    },
+    {
+      "id": "strops-003-concat",
+      "mode": "exec",
+      "source": "asm/strops-003-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "a\n"
+    },
+    {
+      "id": "strops-004-concat",
+      "mode": "exec",
+      "source": "asm/strops-004-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "abcd\n"
+    },
+    {
+      "id": "strops-005-concat",
+      "mode": "exec",
+      "source": "asm/strops-005-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "hello, world\n"
+    },
+    {
+      "id": "strops-006-concat",
+      "mode": "exec",
+      "source": "asm/strops-006-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n\t\n"
+    },
+    {
+      "id": "strops-007-concat",
+      "mode": "exec",
+      "source": "asm/strops-007-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n"
+    },
+    {
+      "id": "strops-008-concat",
+      "mode": "exec",
+      "source": "asm/strops-008-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "00\n"
+    },
+    {
+      "id": "strops-009-concat",
+      "mode": "exec",
+      "source": "asm/strops-009-concat.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\\\"\n"
+    },
+    {
+      "id": "strops-010-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-010-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-011-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-011-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-012-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-012-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-013-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-013-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "4\n"
+    },
+    {
+      "id": "strops-014-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-014-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "12\n"
+    },
+    {
+      "id": "strops-015-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-015-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-016-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-016-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "80\n"
+    },
+    {
+      "id": "strops-017-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-017-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-018-concatlen",
+      "mode": "exec",
+      "source": "asm/strops-018-concatlen.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-019-substr",
+      "mode": "exec",
+      "source": "asm/strops-019-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "hello\n"
+    },
+    {
+      "id": "strops-020-substr",
+      "mode": "exec",
+      "source": "asm/strops-020-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "strops-021-substr",
+      "mode": "exec",
+      "source": "asm/strops-021-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "strops-022-substr",
+      "mode": "exec",
+      "source": "asm/strops-022-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "ell\n"
+    },
+    {
+      "id": "strops-023-substr",
+      "mode": "exec",
+      "source": "asm/strops-023-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "o\n"
+    },
+    {
+      "id": "strops-024-substr",
+      "mode": "exec",
+      "source": "asm/strops-024-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "cd\n"
+    },
+    {
+      "id": "strops-025-substr",
+      "mode": "exec",
+      "source": "asm/strops-025-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "strops-026-substr",
+      "mode": "exec",
+      "source": "asm/strops-026-substr.asm",
+      "expect_exit": 0,
+      "expect_stdout": "\n"
+    },
+    {
+      "id": "strops-027-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-027-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-028-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-028-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-029-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-029-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-030-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-030-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-031-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-031-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-032-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-032-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-033-substrrange",
+      "mode": "exec",
+      "source": "asm/strops-033-substrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-034-indexof",
+      "mode": "exec",
+      "source": "asm/strops-034-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-035-indexof",
+      "mode": "exec",
+      "source": "asm/strops-035-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "strops-036-indexof",
+      "mode": "exec",
+      "source": "asm/strops-036-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "strops-037-indexof",
+      "mode": "exec",
+      "source": "asm/strops-037-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-038-indexof",
+      "mode": "exec",
+      "source": "asm/strops-038-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-039-indexof",
+      "mode": "exec",
+      "source": "asm/strops-039-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "strops-040-indexof",
+      "mode": "exec",
+      "source": "asm/strops-040-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-041-indexof",
+      "mode": "exec",
+      "source": "asm/strops-041-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-042-indexof",
+      "mode": "exec",
+      "source": "asm/strops-042-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "strops-043-indexof",
+      "mode": "exec",
+      "source": "asm/strops-043-indexof.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-044-len",
+      "mode": "exec",
+      "source": "asm/strops-044-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-045-len",
+      "mode": "exec",
+      "source": "asm/strops-045-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-046-len",
+      "mode": "exec",
+      "source": "asm/strops-046-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "strops-047-len",
+      "mode": "exec",
+      "source": "asm/strops-047-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "11\n"
+    },
+    {
+      "id": "strops-048-len",
+      "mode": "exec",
+      "source": "asm/strops-048-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-049-len",
+      "mode": "exec",
+      "source": "asm/strops-049-len.asm",
+      "expect_exit": 0,
+      "expect_stdout": "100\n"
+    },
+    {
+      "id": "strops-050-chrord",
+      "mode": "exec",
+      "source": "asm/strops-050-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-051-chrord",
+      "mode": "exec",
+      "source": "asm/strops-051-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9\n"
+    },
+    {
+      "id": "strops-052-chrord",
+      "mode": "exec",
+      "source": "asm/strops-052-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "10\n"
+    },
+    {
+      "id": "strops-053-chrord",
+      "mode": "exec",
+      "source": "asm/strops-053-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "32\n"
+    },
+    {
+      "id": "strops-054-chrord",
+      "mode": "exec",
+      "source": "asm/strops-054-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "65\n"
+    },
+    {
+      "id": "strops-055-chrord",
+      "mode": "exec",
+      "source": "asm/strops-055-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "97\n"
+    },
+    {
+      "id": "strops-056-chrord",
+      "mode": "exec",
+      "source": "asm/strops-056-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "126\n"
+    },
+    {
+      "id": "strops-057-chrord",
+      "mode": "exec",
+      "source": "asm/strops-057-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "127\n"
+    },
+    {
+      "id": "strops-058-chrord",
+      "mode": "exec",
+      "source": "asm/strops-058-chrord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "255\n"
+    },
+    {
+      "id": "strops-059-chrrange",
+      "mode": "exec",
+      "source": "asm/strops-059-chrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-060-chrrange",
+      "mode": "exec",
+      "source": "asm/strops-060-chrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-061-chrrange",
+      "mode": "exec",
+      "source": "asm/strops-061-chrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-062-chrrange",
+      "mode": "exec",
+      "source": "asm/strops-062-chrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-063-chrrange",
+      "mode": "exec",
+      "source": "asm/strops-063-chrrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-064-ordempty",
+      "mode": "exec",
+      "source": "asm/strops-064-ordempty.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-065-ord",
+      "mode": "exec",
+      "source": "asm/strops-065-ord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "65\n"
+    },
+    {
+      "id": "strops-066-ord",
+      "mode": "exec",
+      "source": "asm/strops-066-ord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "65\n"
+    },
+    {
+      "id": "strops-067-ord",
+      "mode": "exec",
+      "source": "asm/strops-067-ord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "122\n"
+    },
+    {
+      "id": "strops-068-ord",
+      "mode": "exec",
+      "source": "asm/strops-068-ord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "10\n"
+    },
+    {
+      "id": "strops-069-ord",
+      "mode": "exec",
+      "source": "asm/strops-069-ord.asm",
+      "expect_exit": 0,
+      "expect_stdout": "32\n"
+    },
+    {
+      "id": "strops-070-toint",
+      "mode": "exec",
+      "source": "asm/strops-070-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-071-toint",
+      "mode": "exec",
+      "source": "asm/strops-071-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-072-toint",
+      "mode": "exec",
+      "source": "asm/strops-072-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-1\n"
+    },
+    {
+      "id": "strops-073-toint",
+      "mode": "exec",
+      "source": "asm/strops-073-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-074-toint",
+      "mode": "exec",
+      "source": "asm/strops-074-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "42\n"
+    },
+    {
+      "id": "strops-075-toint",
+      "mode": "exec",
+      "source": "asm/strops-075-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-076-toint",
+      "mode": "exec",
+      "source": "asm/strops-076-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "9223372036854775807\n"
+    },
+    {
+      "id": "strops-077-toint",
+      "mode": "exec",
+      "source": "asm/strops-077-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-9223372036854775808\n"
+    },
+    {
+      "id": "strops-078-toint",
+      "mode": "exec",
+      "source": "asm/strops-078-toint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-123\n"
+    },
+    {
+      "id": "strops-079-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-079-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-080-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-080-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-081-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-081-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-082-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-082-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-083-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-083-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-084-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-084-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-085-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-085-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-086-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-086-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-087-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-087-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-088-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-088-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-089-tointbad",
+      "mode": "exec",
+      "source": "asm/strops-089-tointbad.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_VALUE"
+    },
+    {
+      "id": "strops-090-tointrange",
+      "mode": "exec",
+      "source": "asm/strops-090-tointrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-091-tointrange",
+      "mode": "exec",
+      "source": "asm/strops-091-tointrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-092-tointrange",
+      "mode": "exec",
+      "source": "asm/strops-092-tointrange.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_RANGE"
+    },
+    {
+      "id": "strops-093-tointint",
+      "mode": "exec",
+      "source": "asm/strops-093-tointint.asm",
+      "expect_exit": 0,
+      "expect_stdout": "-5\n"
+    },
+    {
+      "id": "strops-094-tointbool",
+      "mode": "exec",
+      "source": "asm/strops-094-tointbool.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-095-tointbool",
+      "mode": "exec",
+      "source": "asm/strops-095-tointbool.asm",
+      "expect_exit": 0,
+      "expect_stdout": "0\n"
+    },
+    {
+      "id": "strops-096-tointtype",
+      "mode": "exec",
+      "source": "asm/strops-096-tointtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-097-tointtype",
+      "mode": "exec",
+      "source": "asm/strops-097-tointtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-098-strtype",
+      "mode": "exec",
+      "source": "asm/strops-098-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-099-strtype",
+      "mode": "exec",
+      "source": "asm/strops-099-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-100-strtype",
+      "mode": "exec",
+      "source": "asm/strops-100-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-101-strtype",
+      "mode": "exec",
+      "source": "asm/strops-101-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-102-strtype",
+      "mode": "exec",
+      "source": "asm/strops-102-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-103-strtype",
+      "mode": "exec",
+      "source": "asm/strops-103-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-104-strtype",
+      "mode": "exec",
+      "source": "asm/strops-104-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-105-strtype",
+      "mode": "exec",
+      "source": "asm/strops-105-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-106-strtype",
+      "mode": "exec",
+      "source": "asm/strops-106-strtype.asm",
+      "expect_exit": 4,
+      "expect_stdout": "",
+      "expect_error": "E_TYPE"
+    },
+    {
+      "id": "strops-107-bytes",
+      "mode": "exec",
+      "source": "asm/strops-107-bytes.asm",
+      "expect_exit": 0,
+      "expect_stdout": "2\n"
+    },
+    {
+      "id": "strops-108-bytes",
+      "mode": "exec",
+      "source": "asm/strops-108-bytes.asm",
+      "expect_exit": 0,
+      "expect_stdout": "1\n"
+    },
+    {
+      "id": "strops-109-bytes",
+      "mode": "exec",
+      "source": "asm/strops-109-bytes.asm",
+      "expect_exit": 0,
+      "expect_stdout": "3\n"
+    },
+    {
+      "id": "strops-110-bytes",
+      "mode": "exec",
+      "source": "asm/strops-110-bytes.asm",
+      "expect_exit": 0,
+      "expect_stdout": "b\n"
+    }
+  ]
+}

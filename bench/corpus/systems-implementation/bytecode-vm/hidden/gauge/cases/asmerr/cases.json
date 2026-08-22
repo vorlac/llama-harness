@@ -1,0 +1,430 @@
+{
+  "group": "asmerr",
+  "description": "Source the assembler must reject, each with exit status 2 and the E_ASM error code.",
+  "case_count": 62,
+  "cases": [
+    {
+      "id": "asmerr-001-unknownop",
+      "mode": "asm",
+      "source": "asm/asmerr-001-unknownop.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-002-missingoperand",
+      "mode": "asm",
+      "source": "asm/asmerr-002-missingoperand.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-003-extraoperand",
+      "mode": "asm",
+      "source": "asm/asmerr-003-extraoperand.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-004-extraoperand2",
+      "mode": "asm",
+      "source": "asm/asmerr-004-extraoperand2.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-005-localrange",
+      "mode": "asm",
+      "source": "asm/asmerr-005-localrange.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-006-localwidth",
+      "mode": "asm",
+      "source": "asm/asmerr-006-localwidth.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-007-localnegative",
+      "mode": "asm",
+      "source": "asm/asmerr-007-localnegative.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-008-callwidth",
+      "mode": "asm",
+      "source": "asm/asmerr-008-callwidth.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-009-arraywidth",
+      "mode": "asm",
+      "source": "asm/asmerr-009-arraywidth.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-010-undefinedlabel",
+      "mode": "asm",
+      "source": "asm/asmerr-010-undefinedlabel.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-011-duplicatelabel",
+      "mode": "asm",
+      "source": "asm/asmerr-011-duplicatelabel.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-012-duplicatefunction",
+      "mode": "asm",
+      "source": "asm/asmerr-012-duplicatefunction.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-013-unknowndirective",
+      "mode": "asm",
+      "source": "asm/asmerr-013-unknowndirective.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-014-missingend",
+      "mode": "asm",
+      "source": "asm/asmerr-014-missingend.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-015-strayend",
+      "mode": "asm",
+      "source": "asm/asmerr-015-strayend.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-016-outsidefunction",
+      "mode": "asm",
+      "source": "asm/asmerr-016-outsidefunction.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-017-nestedfunc",
+      "mode": "asm",
+      "source": "asm/asmerr-017-nestedfunc.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-018-entryarity",
+      "mode": "asm",
+      "source": "asm/asmerr-018-entryarity.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-019-nofunctions",
+      "mode": "asm",
+      "source": "asm/asmerr-019-nofunctions.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-020-emptyfunction",
+      "mode": "asm",
+      "source": "asm/asmerr-020-emptyfunction.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-021-noterminator",
+      "mode": "asm",
+      "source": "asm/asmerr-021-noterminator.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-022-missingarity",
+      "mode": "asm",
+      "source": "asm/asmerr-022-missingarity.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-023-missinglocals",
+      "mode": "asm",
+      "source": "asm/asmerr-023-missinglocals.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-024-badheaderorder",
+      "mode": "asm",
+      "source": "asm/asmerr-024-badheaderorder.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-025-negativelocals",
+      "mode": "asm",
+      "source": "asm/asmerr-025-negativelocals.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-026-hugelocals",
+      "mode": "asm",
+      "source": "asm/asmerr-026-hugelocals.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-027-arityoverlocals",
+      "mode": "asm",
+      "source": "asm/asmerr-027-arityoverlocals.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-028-upvalcount",
+      "mode": "asm",
+      "source": "asm/asmerr-028-upvalcount.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-029-upvalextra",
+      "mode": "asm",
+      "source": "asm/asmerr-029-upvalextra.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-030-upvalkind",
+      "mode": "asm",
+      "source": "asm/asmerr-030-upvalkind.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-031-upvalaftercode",
+      "mode": "asm",
+      "source": "asm/asmerr-031-upvalaftercode.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-032-upvalsource",
+      "mode": "asm",
+      "source": "asm/asmerr-032-upvalsource.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-033-upvalfromupval",
+      "mode": "asm",
+      "source": "asm/asmerr-033-upvalfromupval.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-034-closureunknown",
+      "mode": "asm",
+      "source": "asm/asmerr-034-closureunknown.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-035-closureindex",
+      "mode": "asm",
+      "source": "asm/asmerr-035-closureindex.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-036-unterminatedstring",
+      "mode": "asm",
+      "source": "asm/asmerr-036-unterminatedstring.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-037-badescape",
+      "mode": "asm",
+      "source": "asm/asmerr-037-badescape.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-038-badhexescape",
+      "mode": "asm",
+      "source": "asm/asmerr-038-badhexescape.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-039-shorthexescape",
+      "mode": "asm",
+      "source": "asm/asmerr-039-shorthexescape.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-040-intoverflow",
+      "mode": "asm",
+      "source": "asm/asmerr-040-intoverflow.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-041-intunderflow",
+      "mode": "asm",
+      "source": "asm/asmerr-041-intunderflow.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-042-intnotanumber",
+      "mode": "asm",
+      "source": "asm/asmerr-042-intnotanumber.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-043-strwhereint",
+      "mode": "asm",
+      "source": "asm/asmerr-043-strwhereint.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-044-intwherestr",
+      "mode": "asm",
+      "source": "asm/asmerr-044-intwherestr.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-045-labelonlyline",
+      "mode": "asm",
+      "source": "asm/asmerr-045-labelonlyline.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-046-globalempty",
+      "mode": "asm",
+      "source": "asm/asmerr-046-globalempty.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-047-upvalrangeop",
+      "mode": "asm",
+      "source": "asm/asmerr-047-upvalrangeop.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-048-storeupvalrange",
+      "mode": "asm",
+      "source": "asm/asmerr-048-storeupvalrange.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM"
+    },
+    {
+      "id": "asmerr-049-jumprange",
+      "mode": "asm",
+      "source": "asm/asmerr-049-jumprange.asm",
+      "expect_exit": 2,
+      "expect_error": "E_ASM",
+      "note": "the displacement is 32768, one past the signed 16-bit maximum"
+    },
+    {
+      "id": "asmerr-050-jumprange",
+      "mode": "asm",
+      "source": "asm/asmerr-050-jumprange.asm",
+      "expect_exit": 0,
+      "note": "a displacement that fits is accepted"
+    },
+    {
+      "id": "asmerr-051-accept-caseinsensitive",
+      "mode": "asm",
+      "source": "asm/asmerr-051-accept-caseinsensitive.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-052-accept-crlf",
+      "mode": "asm",
+      "source": "asm/asmerr-052-accept-crlf.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-053-accept-notrailingnewline",
+      "mode": "asm",
+      "source": "asm/asmerr-053-accept-notrailingnewline.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-054-accept-upvalsomitted",
+      "mode": "asm",
+      "source": "asm/asmerr-054-accept-upvalsomitted.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-055-accept-labelbeforeend",
+      "mode": "asm",
+      "source": "asm/asmerr-055-accept-labelbeforeend.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-056-accept-hexescapes",
+      "mode": "asm",
+      "source": "asm/asmerr-056-accept-hexescapes.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-057-accept-nulescape",
+      "mode": "asm",
+      "source": "asm/asmerr-057-accept-nulescape.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-058-accept-hexint",
+      "mode": "asm",
+      "source": "asm/asmerr-058-accept-hexint.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-059-accept-hexintwrap",
+      "mode": "asm",
+      "source": "asm/asmerr-059-accept-hexintwrap.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-060-accept-closurebyindex",
+      "mode": "asm",
+      "source": "asm/asmerr-060-accept-closurebyindex.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-061-accept-entrynotcalledmain",
+      "mode": "asm",
+      "source": "asm/asmerr-061-accept-entrynotcalledmain.asm",
+      "expect_exit": 0
+    },
+    {
+      "id": "asmerr-062-accept-commentonly",
+      "mode": "asm",
+      "source": "asm/asmerr-062-accept-commentonly.asm",
+      "expect_exit": 0
+    }
+  ]
+}

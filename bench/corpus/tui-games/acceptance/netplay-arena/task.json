@@ -1,0 +1,35 @@
+{
+  "id": "netplay-arena",
+  "title": "Netplay Arena — authoritative server, predicted TUI clients, lag-compensated combat",
+  "category": "tui-games",
+  "size": "XL",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-netplay-arena-prompt.md",
+  "difficulty": 9,
+  "timeouts": {
+    "build": 600,
+    "run": 300,
+    "test": 900
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "PROTOCOL.md",
+    "README.md",
+    "NOTES.md",
+    "run.json",
+    "scripts/clean.txt",
+    "scripts/clean.expected.json",
+    "scripts/lossy.txt",
+    "scripts/lossy.expected.json"
+  ]
+}

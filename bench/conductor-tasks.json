@@ -1,5 +1,12 @@
 {
   "version": 1,
+  "expectedTaskCounts": {
+    "T0": 10,
+    "T1": 4,
+    "T2": 3,
+    "T3": 3,
+    "T4": 3
+  },
   "selectionCriteria": {
     "languageMix": "ts, python and cpp each appear at every tier from T0 to T4, so the scope ladder is not confounded with the language.",
     "difficultySpread": "five one-function tasks and eighteen multi-file ones, so a process whose cost is fixed per run is measured against both the work it can help and the work it cannot.",
@@ -11,7 +18,7 @@
     "seedIsGreen": "each seeded repository passes its own visible suite, so a run starts from a green tree and a red visible test is the arm's doing."
   },
   "defaults": {
-    "model": "llamacpp/qwen3.6-27b",
+    "model": "llamacpp/qwen3.8-27b",
     "tierTimeoutSec": {
       "T0": 1800,
       "T1": 2700,
@@ -946,9 +953,9 @@
   ],
   "sweep": {
     "rationale": "The full crossing is not runnable: three arms by five tiers by three tasks by three repetitions is 135 cells for one model, and a T3 cell runs for tens of minutes. Models are swept across T0 and T1, where cells are cheap and numerous and a model difference shows up as a pass-rate difference; T2, T3 and T4 run on the primary model alone, so the tier curve rather than the full crossing carries the scope story. Cells are ordered by model, because one llama-server in multi-model mode swaps weights on demand and an interleaved order would pay a reload per cell.",
-    "primaryModel": "llamacpp/qwen3.6-27b",
+    "primaryModel": "llamacpp/qwen3.8-27b",
     "models": [
-      "llamacpp/qwen3.6-27b"
+      "llamacpp/qwen3.8-27b"
     ],
     "sweptTiers": [
       "T0",

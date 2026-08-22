@@ -1,0 +1,53 @@
+{
+  "id": "game-engine",
+  "title": "Reusable TUI game engine, proven by porting Snake and Tetris onto it",
+  "category": "tui-games",
+  "size": "XXL",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-game-engine-prompt.md",
+  "difficulty": 10,
+  "timeouts": {
+    "build": 900,
+    "run": 300,
+    "test": 1200
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "run.json",
+    "README.md",
+    "NOTES.md",
+    "ENGINE-API.md",
+    "PORTING-NOTES.md",
+    "engine/",
+    "games/snake/",
+    "games/tetris/",
+    "assets/sprites/snake.sprite",
+    "assets/sprites/tetromino.sprite",
+    "assets/levels/snake-classic.level",
+    "assets/levels/tetris-standard.level",
+    "scripts/snake-basic.txt",
+    "scripts/snake-eat.txt",
+    "scripts/snake-death.txt",
+    "scripts/snake-pause.txt",
+    "scripts/tetris-basic.txt",
+    "scripts/tetris-clear.txt",
+    "scripts/tetris-hold.txt",
+    "expected/snake-basic.json",
+    "expected/snake-eat.json",
+    "expected/snake-death.json",
+    "expected/snake-pause.json",
+    "expected/tetris-basic.json",
+    "expected/tetris-clear.json",
+    "expected/tetris-hold.json"
+  ]
+}

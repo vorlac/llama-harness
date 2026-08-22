@@ -532,35 +532,83 @@ test("[9.1-trivial-item] a trivial classification synthesizes its one §2.4 item
 });
 
 // ===========================================================================
-// [9.1-trivial-escalate] — one test per §2.4 violation; each escalates trivial → work
-// even though the skeptic AGREED it was trivial (classifier proposes, handler disposes).
+// [9.1-trivial-escalate] — one test per re-check violation; each escalates
+// trivial → work even though the skeptic AGREED it was trivial (classifier
+// proposes, handler disposes).
 // ===========================================================================
 
-// A shared driver: run classify with a trivial classifier + agreeing skeptic and assert
-// the handler escalated to work (no item synthesized, run stays INTAKE).
+// Run classify with a trivial classifier + an agreeing skeptic and hand back
+// everything the disposition is judged on: the result, any throw, the persisted run
+// and every journal record.
+interface ClassifyRun {
+  result: Awaited<ReturnType<typeof handleClassify>> | null;
+  threw: unknown;
+  store: StateStore;
+  runId: string;
+  records: CaptureRecord[];
+}
+
+async function classifyWithTrivial(root: string, config: Config, trivial: TrivialItem): Promise<ClassifyRun> {
+  const journal = makeJournal();
+  const store = openStore(root, journal.sink, config);
+  const runId = createIntakeRun(store);
+  const wiring = makeClassifyFanout(runId, config, journal.sink, makeClassification("trivial", trivial), makeCheck(true, null, "agrees trivial"));
+  let result: Awaited<ReturnType<typeof handleClassify>> | null = null;
+  let threw: unknown;
+  try {
+    result = await handleClassify({ store, fanout: wiring.fanout, runId, config, journal: journal.sink });
+  } catch (error) {
+    threw = error;
+  }
+  return { result, threw, store, runId, records: journal.records };
+}
+
+// A shared driver: assert the handler escalated to work (no item synthesized, run
+// stays INTAKE), that it did so by DISPOSING rather than throwing, and that the
+// reasons reached both the caller and the journal. Returns those reasons so a row
+// can assert which rule produced them.
 async function assertEscalatesToWork(
   root: string,
   config: Config,
   trivial: TrivialItem,
   ctx: string,
-): Promise<void> {
-  const journal = makeJournal();
-  const store = openStore(root, journal.sink, config);
-  const runId = createIntakeRun(store);
-  const wiring = makeClassifyFanout(runId, config, journal.sink, makeClassification("trivial", trivial), makeCheck(true, null, "agrees trivial"));
-
-  const res = await handleClassify({ store, fanout: wiring.fanout, runId, config, journal: journal.sink });
-
+): Promise<string[]> {
+  const outcome = await classifyWithTrivial(root, config, trivial);
+  assert.equal(
+    outcome.threw,
+    undefined,
+    `${ctx}: the disposition is an escalation, not a throw — a throw persists nothing and leaves conductor_classify legal against the same prompt`,
+  );
+  const res = outcome.result;
+  assert.ok(res !== null, `${ctx}: classify resolved with a result`);
   assert.equal(res.kind, "work", `${ctx}: the handler re-check escalates to work`);
   assert.equal(res.itemId, null, `${ctx}: an escalated run synthesizes no trivial item`);
   assert.equal(res.runState, "INTAKE", `${ctx}: an escalated work run stays in INTAKE`);
   assert.ok(
-    !existsSync(path.join(runDirOf(store, runId), "queue.json")),
+    !existsSync(path.join(runDirOf(outcome.store, outcome.runId), "queue.json")),
     `${ctx}: no queue.json is written when the trivial classification is escalated`,
   );
-  const run = store.loadRun(runId);
+  const run = outcome.store.loadRun(outcome.runId);
   assert.equal(run.classification.kind, "work", `${ctx}: run.json records the escalated kind`);
   assert.equal(run.classification.check.agreed, true, `${ctx}: the skeptic still AGREED — the arithmetic escalated, not the check`);
+  assert.equal(
+    run.classified,
+    true,
+    `${ctx}: the escalated classification is RECORDED — an unrecorded disposition is re-offered against the byte-identical prompt that produced it`,
+  );
+
+  // Visibility: an escalation nobody can see is a guard nobody can watch fail.
+  assert.ok(res.escalation.length > 0, `${ctx}: the escalation NAMES the rule it broke`);
+  const rejects = outcome.records.filter(
+    (r) => r.component === "fsm" && r.event === "guard-reject" && r.data.stage === "classify",
+  );
+  assert.equal(rejects.length, 1, `${ctx}: exactly one fsm/guard-reject record carries the escalation`);
+  assert.deepEqual(
+    rejects[0].data.violations,
+    res.escalation,
+    `${ctx}: the journal carries the same reasons the caller is handed — one spelling of why`,
+  );
+  return res.escalation;
 }
 
 test("[9.1-trivial-escalate] a trivial fileScope exceeding trivialMaxFiles escalates to work", async () => {
@@ -598,6 +646,110 @@ test("[9.1-trivial-escalate] a behavioral:false trivial item whose fileScope int
     await assertEscalatesToWork(root, config, trivial, "behavioral:false ∩ behavioralPaths");
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// [9.1-trivial-escalate-acceptance] / [9.1-classify-cannot-wedge]
+// ===========================================================================
+//
+// §2.10 gives ONE disposition for a trivial item the handler will not synthesize:
+// "any violation escalates to work — the classifier proposes, the handler disposes".
+// The three §2.4 bounds above take it. The §3.2 acceptance table, judged over the
+// SAME synthesized queue, refused by throwing instead — and a throw on this route
+// persists nothing, so `classified` stays false, the phase gate re-offers
+// conductor_classify, and classifierPrompt is a pure function of run.prompt: the
+// next roll is byte-identical input to the same model, and nothing in the loop can
+// converge. Measured live on one request: 43.9 minutes and 337,052 tokens spent
+// without ever leaving INTAKE and with no item written.
+//
+// Escalation converges because `work` has a stage that can learn — conductor_decompose
+// re-prompts the planner once with the named defects — and because the recorded
+// classification makes a second classify ILLEGAL rather than merely discouraged.
+
+test("[9.1-trivial-escalate-acceptance] a synthesized trivial item refused by the §3.2 acceptance table escalates to work carrying core's own reason, instead of throwing and leaving the run to re-roll", async () => {
+  const root = scratchDir();
+  try {
+    const config = makeConfig({ trivialMaxFiles: 5, behavioralPaths: [], modelDefault: "test-model" });
+    // Inside every §2.4 bound — one scope entry under the ceiling, behavioral with a
+    // test path, no behavioralPaths to intersect — and refused by the §3.2 table
+    // alone: a wildcard-headed glob names every path in the repository.
+    const reasons = await assertEscalatesToWork(
+      root,
+      config,
+      makeTrivialItem({ fileScope: ["**"] }),
+      "wildcard-headed fileScope",
+    );
+    assert.ok(
+      reasons.some((reason) => /wildcard-headed|every path in the repository/i.test(reason)),
+      `the escalation carries core's OWN §3.2 reason, not a second spelling of it: ${reasons.join("; ")}`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("[9.1-classify-cannot-wedge] every re-check refusal of a synthesized trivial item RECORDS its classification, and a recorded classification makes conductor_classify illegal — so no refusal on this route can re-roll the prompt that produced it", async () => {
+  const config = makeConfig({ trivialMaxFiles: 5, behavioralPaths: [], modelDefault: "test-model" });
+
+  // CONTROL: an INTAKE run with nothing recorded is exactly where the phase gate
+  // offers conductor_classify, so the rows below measure a door that was open.
+  const unclassified: GateRun = { state: "INTAKE", stop: null, classification: { kind: "work" }, classified: false };
+  assert.ok(
+    legalTools(unclassified, [], [], true).legal.has("conductor_classify"),
+    "control: an unclassified INTAKE run is where conductor_classify is legal",
+  );
+
+  const rows: ReadonlyArray<{ label: string; trivial: TrivialItem; reason: RegExp }> = [
+    {
+      label: "§3.2 wildcard-headed fileScope",
+      trivial: makeTrivialItem({ fileScope: ["**"] }),
+      reason: /wildcard-headed/i,
+    },
+    {
+      label: "§3.2 testScope inside fileScope",
+      trivial: makeTrivialItem({ fileScope: ["src/**"], testScope: ["src/widget.test.ts"] }),
+      reason: /testScope entry/i,
+    },
+    {
+      label: "§3.2 acceptance that is not an observable check",
+      trivial: makeTrivialItem({ acceptance: ["improve the widget"] }),
+      reason: /observable check/i,
+    },
+    {
+      label: "§2.4 behavioral item with no testScope",
+      trivial: makeTrivialItem({ behavioral: true, testScope: [] }),
+      reason: /testScope/i,
+    },
+  ];
+
+  for (const row of rows) {
+    const root = scratchDir();
+    const outcome = await classifyWithTrivial(root, config, row.trivial);
+    assert.equal(outcome.threw, undefined, `${row.label}: refused by disposing, not by throwing`);
+    const run = outcome.store.loadRun(outcome.runId);
+    assert.equal(run.classified, true, `${row.label}: the classification is recorded`);
+    assert.equal(run.classification.kind, "work", `${row.label}: and it is the escalated kind`);
+    assert.match(
+      (outcome.result?.escalation ?? []).join(" | "),
+      row.reason,
+      `${row.label}: the escalation names the rule it broke`,
+    );
+    const after: GateRun = {
+      state: run.state,
+      stop: run.stop === null ? null : { kind: run.stop.kind },
+      classification: { kind: run.classification.kind },
+      classified: run.classified === true,
+    };
+    assert.equal(
+      legalTools(after, [], [], true).legal.has("conductor_classify"),
+      false,
+      `${row.label}: the recorded classification closes the re-roll — a second classify is ILLEGAL, not merely wasteful`,
+    );
+    assert.ok(
+      legalTools(after, [], [], true).legal.has("conductor_decompose"),
+      `${row.label}: and the run's next stage tool is the one with a bounded re-prompt`,
+    );
   }
 });
 

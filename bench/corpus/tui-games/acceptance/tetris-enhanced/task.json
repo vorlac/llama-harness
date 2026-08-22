@@ -1,0 +1,38 @@
+{
+  "id": "tetris-enhanced",
+  "title": "Tetris Enhancements: extend an existing implementation",
+  "category": "tui-games",
+  "size": "M+",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-tetris-enhancements-prompt.md",
+  "difficulty": 7,
+  "timeouts": {
+    "build": 300,
+    "run": 300,
+    "test": 900
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "seed_from_task": "tetris",
+  "seed_note": "Seeded by copying this same run's completed 'tetris' workspace for the same language. If that workspace does not exist or did not pass, the task is SKIPPED rather than attempted from scratch - a from-scratch attempt measures something else entirely.",
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "run.json",
+    "README.md",
+    "NOTES.md",
+    "ARCHITECTURE-NOTES.md",
+    "config/keys.conf",
+    "tests/scripts/basic.txt",
+    "tests/scripts/tspin.txt",
+    "tests/scripts/attack.txt",
+    "tests/replays/basic.rply"
+  ]
+}

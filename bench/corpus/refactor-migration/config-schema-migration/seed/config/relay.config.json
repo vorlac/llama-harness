@@ -1,0 +1,36 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "maxBodyBytes": 262144
+  },
+  "auth": {
+    "required": false,
+    "tokens": []
+  },
+  "rateLimit": {
+    "enabled": true,
+    "windowMs": 1000,
+    "max": 200
+  },
+  "pipeline": {
+    "batchSize": 25,
+    "flushIntervalMs": 500
+  },
+  "sink": {
+    "kind": "null"
+  },
+  "log.level": "info",
+  "log.format": "text",
+  "metrics": {
+    "enabled": true,
+    "prefix": "relay_"
+  },
+  "spool": {
+    "enabled": false,
+    "dir": "./.relay-spool"
+  },
+  "experimental": {
+    "shardCount": 4
+  }
+}

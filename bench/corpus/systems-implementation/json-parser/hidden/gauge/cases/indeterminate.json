@@ -1,0 +1,18 @@
+{
+  "group": "indeterminate",
+  "description": "Cases SPEC.md deliberately leaves implementation-defined. Reported, never scored.",
+  "cases": [
+    {"id": "indeterminate-001", "note": "100000-digit integer: exact decimal handling is unbounded work; E_RESOURCE is an acceptable rejection", "input_repeat": {"prefix": "", "unit": "9", "count": 100000, "suffix": ""}, "expect": "indeterminate"},
+    {"id": "indeterminate-002", "note": "100000-digit fraction", "input_repeat": {"prefix": "0.", "unit": "1", "count": 100000, "suffix": ""}, "expect": "indeterminate"},
+    {"id": "indeterminate-003", "note": "1 MiB string literal", "input_repeat": {"prefix": "\"", "unit": "x", "count": 1048576, "suffix": "\""}, "expect": "indeterminate"},
+    {"id": "indeterminate-004", "note": "100001-element flat array", "input_repeat": {"prefix": "[", "unit": "1,", "count": 100000, "suffix": "1]"}, "expect": "indeterminate"},
+    {"id": "indeterminate-005", "note": "50001 duplicate keys in one object", "input_repeat": {"prefix": "{\"a\":1", "unit": ",\"a\":1", "count": 50000, "suffix": "}"}, "expect": "indeterminate"},
+    {"id": "indeterminate-006", "note": "100000 escape sequences in one string", "input_repeat": {"prefix": "\"", "unit": "\\u0041", "count": 100000, "suffix": "\""}, "expect": "indeterminate"},
+    {"id": "indeterminate-007", "note": "exponent does not fit in a 64-bit integer", "input": "1e99999999999999999999", "expect": "indeterminate"},
+    {"id": "indeterminate-008", "note": "negative exponent does not fit in a 64-bit integer", "input": "-1e-99999999999999999999", "expect": "indeterminate"},
+    {"id": "indeterminate-009", "note": "exponent is exactly 2**63", "input": "1e9223372036854775808", "expect": "indeterminate"},
+    {"id": "indeterminate-010", "note": "1000-digit exponent", "input_repeat": {"prefix": "1e", "unit": "9", "count": 1000, "suffix": ""}, "expect": "indeterminate"},
+    {"id": "indeterminate-011", "note": "64 KiB object value", "input_repeat": {"prefix": "{\"k\":\"", "unit": "y", "count": 65536, "suffix": "\"}"}, "expect": "indeterminate"},
+    {"id": "indeterminate-012", "note": "well-formed surrogate pairs; listed here only as a sanity anchor for the indeterminate machinery (a conforming parser accepts this)", "input": "\"\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\"", "expect": "indeterminate"}
+  ]
+}

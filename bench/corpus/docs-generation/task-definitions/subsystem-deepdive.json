@@ -1,0 +1,38 @@
+{
+  "id": "subsystem-deepdive",
+  "title": "Deep dive on one subsystem",
+  "category": "docs-generation",
+  "description": "Document one named subsystem the way its maintainer would keep it open while working: boundary and responsibilities, type and function inventories, lifecycle, call graph, locking rules, error paths, performance shape, and sharp edges. The subsystem is drawn from the target's \"subsystems\" list in docs-generation/targets/targets.json and substituted into the prompt as {{SUBSYSTEM}}.",
+  "size": "large",
+  "languages": ["markdown"],
+  "prompt": "docs-generation/docs-subsystem-deepdive-prompt.md",
+  "difficulty": 8,
+  "timeouts": {
+    "build": 60,
+    "run": 2400,
+    "test": 600
+  },
+  "verify": "check_docs.py",
+  "verify_target": "SUBSYSTEM-{{SUBSYSTEM}}.md",
+  "verify_args": [
+    "--min-words", "2500",
+    "--max-words", "5000",
+    "--min-mermaid", "2",
+    "--require-section", "Scope and method",
+    "--require-section", "Responsibilities and boundaries",
+    "--require-section", "Type inventory",
+    "--require-section", "Function inventory",
+    "--require-section", "Lifecycle and state machine",
+    "--require-section", "Main entry path call graph",
+    "--require-section", "Concurrency and locking rules",
+    "--require-section", "Error paths and failure modes",
+    "--require-section", "Performance characteristics",
+    "--require-section", "Sharp edges",
+    "--require-section", "Open questions"
+  ],
+  "starting_material": null,
+  "artifacts": ["SUBSYSTEM-{{SUBSYSTEM}}.md"],
+  "workspace_task_id": "{{TARGET}}-{{SUBSYSTEM}}-deepdive",
+  "variables": ["{{TARGET}}", "{{SUBSYSTEM}}"],
+  "targets": ["*"]
+}

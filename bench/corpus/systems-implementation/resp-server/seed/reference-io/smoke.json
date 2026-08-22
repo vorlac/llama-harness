@@ -1,0 +1,211 @@
+{
+ "group": "smoke",
+ "description": "Eight cases covering the harness contract end to end",
+ "cases": [
+  {
+   "name": "smoke-inline-ping",
+   "steps": [
+    {
+     "send": "PING\r\n",
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smoke-multibulk-ping",
+   "steps": [
+    {
+     "send": "*1\r\n$4\r\nPING\r\n",
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smoke-set-and-get",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "missing"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smoke-integers-and-types",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "L",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "L",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "*",
+      [
+       "a",
+       "b"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "L"
+     ],
+     "expect": [
+      "+",
+      "list"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "L"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smoke-errors",
+   "steps": [
+    {
+     "cmd": [
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    },
+    {
+     "cmd": [
+      "NOPE"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'NOPE'"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smoke-pipelining",
+   "steps": [
+    {
+     "send": "*1\r\n$4\r\nPING\r\n*2\r\n$4\r\nECHO\r\n$2\r\nhi\r\n",
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    },
+    {
+     "expect": [
+      "$",
+      "hi"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "smoke-two-connections",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "b"
+    }
+   ]
+  },
+  {
+   "name": "smoke-protocol-error-closes",
+   "steps": [
+    {
+     "send": "*abc\r\n",
+     "expect": [
+      "-",
+      "ERR Protocol error: invalid multibulk length"
+     ]
+    },
+    {
+     "expect_closed": true
+    }
+   ]
+  }
+ ]
+}

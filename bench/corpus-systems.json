@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "selectionCriteria": {
+    "provenance": "Four tasks, ported from the systems-implementation corpus at llama-harness-test-results. Each task's specification, its reference-io material and its conformance suite are the corpus's, unchanged in substance; the seeds' partial implementations, the visible checks that replace the corpus's own runner invocations, and the rewrites that make the material work in a flat work tree with no execute bits, are this repository's.",
+    "whyThisTaskFirst": "json-parser came first because it is the smallest of the five systems-implementation tasks and the only one whose starting material already contained a runnable visible check, so it is the one that could be ported without authoring a visible harness alongside it. The other three each needed one authored.",
+    "whyFour": "Four of the corpus's five systems-implementation tasks are here. The fifth, raft-node, is not, and it is not a matter of effort: its 497-case suite is not internally consistent, so no implementation that conforms to the specification can pass all of it. Three cases prove it. `partition/total-isolation-then-heal` asserts that an isolated leader stops being a leader, while `timer/leader-never-runs-an-election-timer` pins that a leader stays leader through twenty ticks of silence with election_elapsed at zero. `membership/remove-a-server` requires the removed node to converge on the configuration that removed it, while `member/second-change-after-commit-allowed` pins that the AppendEntries following a removal goes only to the remaining members. Two fuzz cases assert that logs converge after a heal with no new proposal, which Raft does not guarantee when a no-op entry on election is forbidden and a follower may hold an uncommitted tail. A binary all-pass gate over that suite scores every arm zero and measures nothing, and narrowing the graded set to the cases that happen to be satisfiable would be authoring a grader rather than porting one.",
+    "gateIsReachable": "For every task here, the hidden suite passing in full was proved by construction before the task was added: the two named blocks were implemented in a throwaway copy of the seed and the suite was run. json-parser 627/627, regex-engine 884/884, resp-server 869/869, bytecode-vm 1077/1077. The driver scores a cell by the hidden command's exit status with no partial credit, so a suite whose all-pass state is unreachable would make its task a constant rather than a measurement.",
+    "scopeLadder": "T2 and T3, and the pin says so. Three tasks ask for two independent requirement blocks in two different files, which is the disjoint-scope shape T2 names. resp-server is T3: its two command families both stand on connection state the workspace does not have, so the work is a chain and not a wave. T0, T1 and T4 are empty - this set is drawn from one corpus category, and that category holds nothing below the multi-file bound and nothing that turns on a file no plan would have scoped.",
+    "hiddenTests": "The measurement lives in gauge/, which is never seeded into the work tree and is materialized only after the model's process has exited. No seed reproduces a case identifier, an expected reply or a hidden file body. Two coincidences are known and are the corpus's own text rather than this repository's: json-parser's SPEC.md publishes nine of its 627 canonical forms as worked examples in its own sections 6.4, 7.3 and 8.3, and resp-server's SPEC.md section 12.6 and reference-io/smoke.json use `set-then-get` and `multibulk-ping`, which are also the names of two hidden cases whose behaviour the smoke file already shows.",
+    "seedIsGreen": "The seeded repository passes its own visible suite, so a run starts from a green tree and a red visible test is the arm's doing.",
+    "languageMix": "python only, and that is a real limitation of this set rather than a choice made task by task. Every corpus runner drives the solution as an opaque subprocess - over stdio, over a socket, or as a command line - so each task is language-neutral, and python is the language whose seed needs no build step in front of it. A comparison drawn from this set says nothing about a model's C++ or TypeScript."
+  },
+  "defaults": {
+    "model": "llamacpp/qwen3.8-27b",
+    "tierTimeoutSec": {
+      "T0": 1800,
+      "T1": 2700,
+      "T2": 3600,
+      "T3": 7200,
+      "T4": 3600
+    }
+  },
+  "expectedTaskCounts": {
+    "T0": 0,
+    "T1": 0,
+    "T2": 3,
+    "T3": 1,
+    "T4": 0
+  },
+  "sweep": {
+    "rationale": "One model, because one model is served. The set holds three T2 tasks and one T3 task, so T2 is the swept tier and every other tier is primary-only - T3 by choice, because its single task carries the longest wall clock in the set, and the rest by vacuity.",
+    "primaryModel": "llamacpp/qwen3.8-27b",
+    "models": [
+      "llamacpp/qwen3.8-27b"
+    ],
+    "sweptTiers": [
+      "T2"
+    ],
+    "primaryOnlyTiers": [
+      "T0",
+      "T1",
+      "T3",
+      "T4"
+    ],
+    "capabilities": [
+      "none"
+    ],
+    "reps": 3
+  },
+  "tasks": [
+    {
+      "id": "json-parser-py",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to two independent items - the UTF-8 well-formedness table in src/utf8.py and the maximal numeric run in src/parser.py - with disjoint fileScopes, and the scheduler dispatches them in one wave",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two named requirements, two files, no shared edit: the wave scheduler has two dependency-ready items with disjoint scopes and can dispatch them together. The measurement is objective and already calibrated - the unmodified seed scores 604 of 627 scored cases, and every one of the 23 failures is attributable to one of the two requirements - so a cell passes exactly when both blocks are right and nothing else regressed.",
+      "prompt": "This workspace holds a partial JSON parser for RFC 8259, specified by SPEC.md. It speaks the harness protocol, it passes the seventeen worked exchanges in reference-io/, and NOTES.md records that its last graded run scored 96.33% on the conformance suite.\n\nTwo requirements from SPEC.md section 15 are unimplemented, and every failure in that run is attributable to one of them:\n\n- R-11, in src/utf8.py: first_ill_formed classifies a lead byte by range and then requires the right number of continuation bytes, so it accepts overlong encodings, encoded surrogates including CESU-8, and the lower half of the E0 and F0 leads. SPEC.md section 5.1 has the table, lead by lead. The reported offset stays the first byte of the ill-formed sequence.\n- R-16, in src/parser.py: _Reader.read_number walks the number grammar left to right and reports at the first byte that does not fit. SPEC.md section 6.2 instead takes the maximal run of bytes drawn from 0123456789+-.eE, requires that whole run to be a number, and locates the fault at the smallest index whose prefix is not a prefix of any valid number. The worked table in 6.2 is the case list.\n\nImplement both. They touch different files and neither depends on the other. Do not regress anything that already works: the specification is normative in full, and the graded run checks every accept and reject verdict, the error code, the byte offset, the line and the column, the canonical form byte for byte, and that canonicalising a canonical form returns it unchanged.\n\nbash test.sh must keep passing. Keep NOTES.md honest: its requirements index is the workspace's own account of itself, so a requirement that stops being unimplemented moves in that table too.\n\nDo not use any JSON parser, from a package or from the standard library, anywhere in the parse or serialise path. Do not special-case an input by its bytes, its length or its identifier.",
+      "seedDir": "bench/corpus/systems-implementation/json-parser/seed",
+      "hiddenDir": "bench/corpus/systems-implementation/json-parser/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/runner.py",
+        "--cwd",
+        ".",
+        "--quiet",
+        "--",
+        "bash",
+        "run.sh",
+        "--harness"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "reference-io/check_io.py",
+        "--cwd",
+        ".",
+        "--",
+        "bash",
+        "run.sh",
+        "--harness"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 3600
+    },
+    {
+      "id": "regex-engine-py",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to two independent items - the thread-list simulation in src/matcher.py and the lazy preference order in src/compile.py - with disjoint fileScopes, and the scheduler dispatches them in one wave",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two named requirements, two files, no shared edit: the wave scheduler has two dependency-ready items with disjoint scopes and can dispatch them together. The measurement is objective and already calibrated - the unmodified seed scores 840 of 884 cases, the 13 failures in the pathological group are the missing linear-time simulation and the other 31 are every case whose pattern carries a lazy quantifier - so a cell passes exactly when both blocks are right and nothing else regressed. runTimeoutSec is 5400 rather than the tier's 3600 because replacing a backtracking executor with a thread-list simulation that carries per-thread capture slots is the largest single item in this set, and a timed-out cell is recorded as process cost rather than as a wrong answer: too short a clock would convert cost into measured quality loss.",
+      "prompt": "This workspace holds a partial regular expression engine for the dialect specified by SPEC.md. It speaks the harness protocol, it passes the six worked sessions in reference-io/, and NOTES.md records that its last graded run scored 95.02% on the 884-case conformance suite.\n\nTwo requirements are unimplemented, and every failure in that run is attributable to one of them:\n\n- SPEC.md sections 10 and 11, in src/matcher.py: run_at walks the compiled program depth first with a backtracking stack, and search finds an unanchored match by trying every start offset in turn. That is O(n^2 * m) at best, and the nested quantifiers of section 11 drive it through an exponential number of paths. What section 10 requires is a thread-list simulation: at each input position a set of program counters, each carrying its own capture slots, held in priority order, with a guard that discards a thread reaching an instruction it has already reached at that position; a single pass for the unanchored search, adding a new lowest-priority start thread at each position and none once a match has been recorded. Section 12 sketches the shape.\n- SPEC.md section 5.3, in src/compile.py: the parser records a quantifier's preference in the node and _emit_rep does not read it, so every split the lowering emits prefers one more iteration and a{m,n}? behaves as a{m,n}. A lazy repetition prefers to leave the loop before trying one more iteration.\n\nImplement both. They touch different files and neither depends on the other. Do not regress anything that already works: the specification is normative in full, and the graded run checks every reply exactly - the match verdict, every capture span including -1 -1 for a group that did not participate, the successive-match scan, every compile error code and its code point position, and the structure of the compiled program.\n\nbash test.sh must keep passing. Keep NOTES.md honest: its requirements index is the workspace's own account of itself, so a requirement that stops being unimplemented moves in that table too.\n\nDo not use a regular expression library anywhere in the engine, from a package or from the standard library. Do not special-case an input by its pattern text, its subject, its length or its identifier.",
+      "seedDir": "bench/corpus/systems-implementation/regex-engine/seed",
+      "hiddenDir": "bench/corpus/systems-implementation/regex-engine/hidden",
+      "hiddenTestCommand": [
+        "/usr/bin/python3",
+        "gauge/run_conformance.py",
+        "--harness",
+        "bash run.sh",
+        "--quiet-stderr",
+        "--max-restarts",
+        "60"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "reference-io/check_io.py",
+        "--cwd",
+        ".",
+        "--",
+        "bash",
+        "run.sh"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 5400
+    },
+    {
+      "id": "resp-server-py",
+      "tier": "T3",
+      "mechanism": "dependency-chain",
+      "expectedTrajectory": "the run produces a chain rather than a wave: the per-connection state the two families need - a queue and a dirty-exec flag, a watch version the store moves only on a real change, a channel registry and a write path to another connection's socket - is one item in src/server.py that both of the later items depend on, so the transaction family and the pub/sub family are dispatched after it and not beside it",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two command families that cannot be built in parallel, because both stand on connection state the workspace does not have: transactions need a queue, a dirty-exec flag and a per-key version that moves only when a command actually changes a key, and pub/sub needs a channel registry and the only path in the specification by which one connection writes to another. That shared foundation is what makes this a chain and not two disjoint scopes, and it is the tier's whole point. The measurement is objective and already calibrated - the unmodified seed scores 752 of 869 cases, and every one of the 117 failures is a case that runs a transaction or a pub/sub command - so a cell passes exactly when both families are right and nothing else regressed. runTimeoutSec is the tier's 7200: this is the largest task in the set, and a timed-out cell is recorded as process cost rather than as a wrong answer.",
+      "prompt": "This workspace holds a partial RESP2 key/value server specified by SPEC.md. The protocol framing, sixteen databases, lazy and active expiration, and the connection, admin, string, keyspace, list, hash and set families are all implemented. It passes the eight smoke cases in reference-io/, and NOTES.md records that its last graded run scored 86.5% on the 869-case conformance suite.\n\nTwo command families are unimplemented, and every failure in that run is a case that runs one of them:\n\n- SPEC.md section 7.8, transactions: MULTI, EXEC, DISCARD, WATCH and UNWATCH are absent from the command table in src/commands.py. Queuing needs a queue and a dirty-exec flag on the connection, and the rule that while queuing every command but the control commands is answered +QUEUED rather than run. Optimistic locking needs a watch keyed by (database index, key) against a version the server moves only when a command actually changes that key - section 7.8.4 lists the no-ops that must not dirty a watch, and section 11.4 pins that a key which simply expires between WATCH and EXEC does not dirty anything.\n- SPEC.md section 7.9, pub/sub: SUBSCRIBE, UNSUBSCRIBE and PUBLISH are absent for the same reason. This is the one family where a command writes to a connection other than the one that issued it, so it needs a channel registry, a per-connection write path that never interleaves a push with a reply, and the registry cleared when a connection closes. Subscribed mode gates the four allowed commands and changes what PING replies.\n\nBoth stand on connection state that src/server.py does not carry yet: Session holds the current database and a closing flag and nothing else. Build that first.\n\nDo not regress anything that already works: the specification is normative in full, and the graded run compares exact bytes over real sockets, resets every database between cases, and opens and closes connections continuously - per-connection state that leaks across connections fails later cases in ways that look unrelated.\n\nbash test.sh must keep passing. Keep NOTES.md honest: its requirements index is the workspace's own account of itself, so a requirement that stops being unimplemented moves in that table too.\n\nDo not use a third-party package. Do not special-case an input by its key, its value or its case name.",
+      "seedDir": "bench/corpus/systems-implementation/resp-server/seed",
+      "hiddenDir": "bench/corpus/systems-implementation/resp-server/hidden",
+      "hiddenTestCommand": [
+        "/bin/bash",
+        "gauge/graded.sh"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "reference-io/smoke.py",
+        "--run-sh",
+        "run.sh"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 7200
+    },
+    {
+      "id": "bytecode-vm-py",
+      "tier": "T2",
+      "mechanism": "parallel-waves",
+      "expectedTrajectory": "the run decomposes to two independent items - the per-instruction module checks in src/module.py and the nested string rendering in src/values.py - with disjoint fileScopes, and the scheduler dispatches them in one wave",
+      "expectedStopKinds": [
+        "done",
+        "REPORTED"
+      ],
+      "language": "python",
+      "difficulty": "multi-file",
+      "behavioral": true,
+      "rationale": "Two named requirements from two different sections of the specification, in two different files, with no shared edit: the wave scheduler has two dependency-ready items with disjoint scopes and can dispatch them together. The measurement is objective and already calibrated - the unmodified seed scores 1039 of 1077 cases, 16 of the 38 failures are the missing per-instruction validation and the other 22 are every case that prints a string inside an array - so a cell passes exactly when both blocks are right and nothing else regressed. runTimeoutSec is 5400 rather than the tier's 3600 because the two items are small but the workspace they sit in is not: ten source modules and a thousand-line normative specification have to be navigated before either can be written, and a timed-out cell is recorded as process cost rather than as a wrong answer.",
+      "prompt": "This workspace holds an implementation of SVM, the stack virtual machine specified by SPEC.md: an assembler, the module format, a disassembler, an interpreter and a mark-and-sweep collector. It passes every worked example in reference-io/, and NOTES.md records that its last graded run scored 96.5% on the 1077-case conformance suite.\n\nTwo requirements are unimplemented, and every failure in that run is attributable to one of them:\n\n- SPEC.md section 13 checks 15 to 20, in src/module.py: read_module runs the structural and per-function checks 1 to 14 and stops there. The remaining checks are about what a decoded instruction refers to - a constant of the right tag that exists, a local or upvalue index inside the function's own count, a CLOSURE naming a function that exists whose upvalue descriptors the creating function can satisfy, and a jump that lands inside the same function's code on the first byte of an instruction - plus the rule that a global name constant is not the empty string. src/asm.py already runs the loader's checks over the module it just built, per section 4.9, so the assembler picks these up at the same time.\n- SPEC.md section 7.5, in src/values.py: _render renders a string the same way at every depth, its bytes verbatim. Inside an array a string element is rendered quoted and escaped instead. The quote function in the same file already produces that form for the disassembler; what is missing is the distinction between the top level and inside an array.\n\nImplement both. They touch different files and neither depends on the other. Do not regress anything that already works: the specification is normative in full, and the graded run checks exit statuses, stdout byte for byte, error codes, module bytes and trace lines.\n\nbash test.sh must keep passing. Keep NOTES.md honest: its requirements index is the workspace's own account of itself, so a requirement that stops being unimplemented moves in that table too.\n\nDo not detect a particular input - by file name, by source text, by a hash, by the exact byte sequence a case uses - and produce the expected answer without implementing the behaviour. SPEC.md section 14.1 calls that an automatic failure of the task whatever the pass rate says.",
+      "seedDir": "bench/corpus/systems-implementation/bytecode-vm/seed",
+      "hiddenDir": "bench/corpus/systems-implementation/bytecode-vm/hidden",
+      "hiddenTestCommand": [
+        "/bin/bash",
+        "gauge/graded.sh",
+        "-q"
+      ],
+      "repoTestCommand": [
+        "/usr/bin/python3",
+        "reference-io/check_refio.py",
+        "--vm",
+        "vm.sh"
+      ],
+      "behavioralPaths": [
+        "src/**"
+      ],
+      "runTimeoutSec": 5400
+    }
+  ]
+}

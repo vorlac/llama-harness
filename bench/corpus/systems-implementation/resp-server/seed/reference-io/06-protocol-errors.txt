@@ -1,0 +1,76 @@
+# 06 - protocol errors (SPEC.md sections 3.2, 3.3, 3.6)
+#
+# Every exchange here starts on a FRESH connection, because each one ends with
+# the server closing the socket. Command errors (WRONGTYPE, arity, unknown
+# command) never close a connection; protocol errors always do.
+
+# A multibulk header that is not a number.
+C: *abc\r\n
+S: -ERR Protocol error: invalid multibulk length\r\n
+S: (connection closed)
+
+# A multibulk count above 1048576.
+C: *1048577\r\n
+S: -ERR Protocol error: invalid multibulk length\r\n
+S: (connection closed)
+
+# A count of zero or below is NOT an error: it is silently discarded.
+C: *0\r\n
+S: (nothing)
+C: *-1\r\n
+S: (nothing)
+C: PING\r\n
+S: +PONG\r\n
+
+# An element that does not start with '$'.
+C: *2\r\n+PING\r\n
+S: -ERR Protocol error: expected '$', got '+'\r\n
+S: (connection closed)
+
+# A non-printable offending byte is rendered as \xNN, lowercase hex.
+C: *1\r\n\x01x\r\n
+S: -ERR Protocol error: expected '$', got '\x01'\r\n
+S: (connection closed)
+
+# A negative bulk length. $-1 is a valid REPLY but never a valid REQUEST.
+C: *1\r\n$-1\r\n
+S: -ERR Protocol error: invalid bulk length\r\n
+S: (connection closed)
+
+# A bulk length above 536870912.
+C: *1\r\n$536870913\r\n
+S: -ERR Protocol error: invalid bulk length\r\n
+S: (connection closed)
+
+# A bulk payload not followed by CRLF. Here $4 is followed by PING then XX.
+C: *1\r\n$4\r\nPINGXX
+S: -ERR Protocol error: invalid bulk length\r\n
+S: (connection closed)
+
+# An unterminated quote in an inline command.
+C: ECHO "abc\r\n
+S: -ERR Protocol error: unbalanced quotes in request\r\n
+S: (connection closed)
+
+# More than 65536 bytes of inline request with no LF.
+C: AAAA... (65600 bytes, no newline)
+S: -ERR Protocol error: too big inline request\r\n
+S: (connection closed)
+
+# --- for contrast: errors that do NOT close the connection -----------------
+C: *1\r\n$3\r\nFOO\r\n
+S: -ERR unknown command 'FOO'\r\n
+C: *1\r\n$3\r\nGET\r\n
+S: -ERR wrong number of arguments for 'get' command\r\n
+C: *3\r\n$5\r\nLPUSH\r\n$1\r\nk\r\n$1\r\na\r\n
+S: :1\r\n
+C: *2\r\n$3\r\nGET\r\n$1\r\nk\r\n
+S: -WRONGTYPE Operation against a key holding the wrong kind of value\r\n
+C: PING\r\n
+S: +PONG\r\n
+
+# An empty bulk command name is an unknown command, not a protocol error.
+C: *1\r\n$0\r\n\r\n
+S: -ERR unknown command ''\r\n
+C: PING\r\n
+S: +PONG\r\n

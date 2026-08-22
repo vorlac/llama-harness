@@ -1,0 +1,3002 @@
+{
+ "group": "errors",
+ "description": "Arity errors, unknown commands and the WRONGTYPE matrix",
+ "cases": [
+  {
+   "name": "arity-ping-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "PING",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'ping' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-echo-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'echo' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-echo-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "ECHO",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'echo' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-select-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'select' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-select-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'select' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-quit-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "QUIT",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'quit' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-flushdb-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "FLUSHDB",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'flushdb' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-dbsize-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "DBSIZE",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'dbsize' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-get-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-get-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "GET",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-set-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'set' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-getset-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "GETSET",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'getset' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-getset-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "GETSET",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'getset' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-append-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "APPEND",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'append' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-append-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "APPEND",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'append' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-incr-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "INCR"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'incr' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-incr-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "INCR",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'incr' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-decr-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "DECR"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'decr' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-decr-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "DECR",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'decr' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-incrby-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'incrby' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-incrby-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "INCRBY",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'incrby' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-decrby-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "DECRBY",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'decrby' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-decrby-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "DECRBY",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'decrby' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-strlen-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "STRLEN"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'strlen' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-strlen-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "STRLEN",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'strlen' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-mget-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "MGET"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'mget' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-mset-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'mset' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-del-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "DEL"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'del' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-exists-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "EXISTS"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'exists' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-expire-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "EXPIRE",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'expire' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-expire-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "EXPIRE",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'expire' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-pexpire-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "PEXPIRE",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'pexpire' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-pexpire-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "PEXPIRE",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'pexpire' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-ttl-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "TTL"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'ttl' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-ttl-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "TTL",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'ttl' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-pttl-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "PTTL"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'pttl' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-pttl-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "PTTL",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'pttl' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-persist-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "PERSIST"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'persist' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-persist-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "PERSIST",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'persist' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-keys-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "KEYS"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'keys' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-keys-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "KEYS",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'keys' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-type-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "TYPE"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'type' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-type-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "TYPE",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'type' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-rename-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "RENAME",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'rename' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-rename-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "RENAME",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'rename' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-scan-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SCAN"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'scan' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lpush-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "LPUSH",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lpush' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-rpush-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'rpush' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lpop-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "LPOP"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lpop' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lpop-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "LPOP",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lpop' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-rpop-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "RPOP"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'rpop' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-rpop-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "RPOP",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'rpop' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lrange-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "LRANGE",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lrange' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lrange-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "LRANGE",
+      "x",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lrange' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-llen-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "LLEN"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'llen' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-llen-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "LLEN",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'llen' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lrem-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "LREM",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lrem' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lrem-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "LREM",
+      "x",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lrem' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lindex-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "LINDEX",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lindex' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-lindex-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "LINDEX",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'lindex' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hset-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hset' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hget-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HGET",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hget' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hget-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HGET",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hget' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hdel-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HDEL",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hdel' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hgetall-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HGETALL"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hgetall' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hgetall-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HGETALL",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hgetall' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hexists-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HEXISTS",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hexists' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hexists-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HEXISTS",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hexists' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hincrby-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HINCRBY",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hincrby' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hincrby-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HINCRBY",
+      "x",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hincrby' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hkeys-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HKEYS"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hkeys' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hkeys-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HKEYS",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hkeys' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hvals-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HVALS"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hvals' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hvals-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HVALS",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hvals' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hlen-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "HLEN"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hlen' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hlen-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "HLEN",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hlen' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-sadd-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'sadd' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-srem-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SREM",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'srem' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-smembers-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SMEMBERS"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'smembers' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-smembers-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "SMEMBERS",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'smembers' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-sismember-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SISMEMBER",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'sismember' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-sismember-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "SISMEMBER",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'sismember' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-scard-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SCARD"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'scard' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-scard-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "SCARD",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'scard' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-sinter-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SINTER"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'sinter' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-sunion-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SUNION"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'sunion' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-sdiff-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SDIFF"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'sdiff' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-multi-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'multi' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-exec-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "EXEC",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'exec' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-discard-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "DISCARD",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'discard' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-watch-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "WATCH"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'watch' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-unwatch-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "UNWATCH",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'unwatch' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-subscribe-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'subscribe' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-publish-too-few",
+   "steps": [
+    {
+     "cmd": [
+      "PUBLISH",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'publish' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-publish-too-many",
+   "steps": [
+    {
+     "cmd": [
+      "PUBLISH",
+      "x",
+      "x",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'publish' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-mset-odd-pairs",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'mset' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-mset-six-arguments-is-fine",
+   "steps": [
+    {
+     "cmd": [
+      "MSET",
+      "a",
+      "1",
+      "b",
+      "2",
+      "c",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hset-odd-pairs",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v",
+      "g"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hset' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-hset-six-arguments-is-fine",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v",
+      "g",
+      "w"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-is-checked-before-anything-else",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k",
+      "extra"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-error-uses-canonical-lowercase-name",
+   "steps": [
+    {
+     "cmd": [
+      "GeT"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    },
+    {
+     "cmd": [
+      "hGeTaLl"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'hgetall' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-error-keeps-connection-open",
+   "steps": [
+    {
+     "cmd": [
+      "GET"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'get' command"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-exec-with-argument-is-arity-not-state",
+   "steps": [
+    {
+     "cmd": [
+      "EXEC",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'exec' command"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "arity-quit-with-argument-does-not-close",
+   "steps": [
+    {
+     "cmd": [
+      "QUIT",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "ERR wrong number of arguments for 'quit' command"
+     ]
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-uppercase",
+   "steps": [
+    {
+     "cmd": [
+      "FOO"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'FOO'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-lowercase-preserved",
+   "steps": [
+    {
+     "cmd": [
+      "foo"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'foo'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-mixed-case-preserved",
+   "steps": [
+    {
+     "cmd": [
+      "FoO"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'FoO'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-with-arguments",
+   "steps": [
+    {
+     "cmd": [
+      "FOO",
+      "bar",
+      "baz"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'FOO'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-close-to-a-real-one",
+   "steps": [
+    {
+     "cmd": [
+      "GETT",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'GETT'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-that-is-a-real-redis-command",
+   "steps": [
+    {
+     "cmd": [
+      "SETEX",
+      "k",
+      "10",
+      "v"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'SETEX'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-hello-is-not-supported",
+   "steps": [
+    {
+     "cmd": [
+      "HELLO",
+      "3"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'HELLO'"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unknown-command-does-not-close-connection",
+   "steps": [
+    {
+     "cmd": [
+      "FOO"
+     ],
+     "expect": [
+      "-",
+      "ERR unknown command 'FOO'"
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-get-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-get-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-get-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-incr-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-incrby-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "INCRBY",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-decr-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DECR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-decrby-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "DECRBY",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-append-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "APPEND",
+      "k",
+      "x"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-strlen-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "STRLEN",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-getset-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GETSET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-lpush-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "LPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-rpush-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-lpop-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LPOP",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-rpop-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "RPOP",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-lrange-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "k",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-llen-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "LLEN",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-lrem-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LREM",
+      "k",
+      "0",
+      "a"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-lindex-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "LINDEX",
+      "k",
+      "0"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hset-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hget-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "k",
+      "f"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hdel-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "k",
+      "f"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hgetall-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hexists-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "k",
+      "f"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hincrby-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "k",
+      "f",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hkeys-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HKEYS",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hvals-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HVALS",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-hlen-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-sadd-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-srem-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SREM",
+      "k",
+      "m"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-smembers-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SMEMBERS",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-sismember-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SISMEMBER",
+      "k",
+      "m"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-scard-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-sinter-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SINTER",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-sunion-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "SUNION",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-sdiff-on-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SDIFF",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-does-not-modify-the-key",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "INCR",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "k",
+      "0",
+      "-1"
+     ],
+     "expect": [
+      "*",
+      [
+       "a"
+      ]
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "k"
+     ],
+     "expect": [
+      "+",
+      "list"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-keeps-connection-open",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "LPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wrongtype-not-raised-for-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "LPUSH",
+      "other",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "LLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "SCARD",
+      "k"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mget-never-raises-wrongtype",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "l",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "h",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SADD",
+      "s",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "SET",
+      "t",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "MGET",
+      "l",
+      "h",
+      "s",
+      "t"
+     ],
+     "expect": [
+      "*",
+      [
+       null,
+       null,
+       null,
+       "v"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "type-check-precedes-integer-parse",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "LPOP",
+      "k",
+      "-1"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "LRANGE",
+      "k",
+      "x",
+      "y"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "LINDEX",
+      "k",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "k",
+      "f",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  }
+ ]
+}

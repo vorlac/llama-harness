@@ -1,0 +1,7 @@
+trace: depth=1 fn=0 pc=0000 op=PUSH_STR sp=0
+trace: depth=1 fn=0 pc=0003 op=PRINT sp=1
+trace: depth=1 fn=0 pc=0004 op=PUSH_INT sp=0
+trace: depth=1 fn=0 pc=0007 op=PUSH_INT sp=1
+trace: depth=1 fn=0 pc=000a op=MUL sp=2
+trace: depth=1 fn=0 pc=000b op=PRINT sp=1
+trace: depth=1 fn=0 pc=000c op=RET sp=0

@@ -45,7 +45,7 @@ import {
   runStageTools,
 } from "../core/mechanics.ts";
 import { legalTools } from "../core/gates-phase.ts";
-import { PLAN_PLACEHOLDER_LABELS, scanPlaceholders } from "../core/planning.ts";
+import { ITEM_MAX_FILES, PLAN_PLACEHOLDER_LABELS, scanPlaceholders } from "../core/planning.ts";
 import type { GateItem, GateRun } from "../core/gates-phase.ts";
 import { TOOL_BINDINGS } from "../core/tool-bindings.ts";
 import { ITEM_STATES } from "../core/fsm-item.ts";
@@ -403,6 +403,58 @@ test("I4B-2C: a dispatch prompt whose pack is missing REFUSES, naming the pack",
       `${row.label} must refuse to dispatch without the doctrine that governs it`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// I4B-2G: the number the dispatch STATES is the number the gate ENFORCES.
+//
+// GAP-005 removes the re-spelled RULES from a prompt; the numbers the rules are
+// parameterised by are still composed here, and a number is as re-spellable as a
+// sentence. decomposePrompt's "as this workspace is configured" line reaches the
+// planner in the same window as decompose.md's generated mechanics block, which
+// derives its file cap from ITEM_MAX_FILES — the constant validateQueue's item-size
+// row actually applies. Sourcing that line from config.workflow.trivialMaxFiles
+// states a DIFFERENT number with a different job (the §2.10 ceiling on how big a
+// request may be and still skip planning), so the two spellings contradict each
+// other in one dispatch and a planner obeying the prompt over-splits every item.
+//
+// The fixture pins trivialMaxFiles AWAY from ITEM_MAX_FILES and reads both numbers,
+// so neither a coincidence nor a later edit to either constant can make this pass.
+// ---------------------------------------------------------------------------
+
+const STATED_FILE_CAP = /the per-item file cap: (\d+) files/;
+
+test("I4B-2G: decomposePrompt states the per-item file cap validateQueue enforces, not the §2.10 trivial ceiling", () => {
+  const base = testConfig();
+  const trivialCeiling = ITEM_MAX_FILES + 1;
+  const config = {
+    ...base,
+    workflow: { ...base.workflow, trivialMaxFiles: trivialCeiling },
+  } as unknown as Config;
+  assert.notEqual(
+    trivialCeiling,
+    ITEM_MAX_FILES,
+    "fixture: the trivial ceiling must differ from the enforced cap, or the row cannot tell them apart",
+  );
+
+  const prompt = decomposePrompt("do the work", config, packMap());
+  const stated = STATED_FILE_CAP.exec(prompt);
+  assert.ok(
+    stated !== null,
+    "decomposePrompt must state the per-item file cap in a shape this row can read; it says: " +
+      prompt.slice(prompt.indexOf("As this workspace is configured"), prompt.indexOf("REQUEST:")),
+  );
+  assert.equal(
+    Number(stated[1]),
+    ITEM_MAX_FILES,
+    "the cap the planner is told is the cap validateQueue's item-size row applies (ITEM_MAX_FILES)",
+  );
+  assert.notEqual(
+    Number(stated[1]),
+    trivialCeiling,
+    "and it is NOT config.workflow.trivialMaxFiles — that ceiling bounds what may skip planning, " +
+      "not how large a planned item may be",
+  );
 });
 
 // The two fail-closed arms of doctrineSlice answer two DIFFERENT questions — "is

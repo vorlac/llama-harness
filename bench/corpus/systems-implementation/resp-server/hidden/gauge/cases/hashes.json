@@ -1,0 +1,2155 @@
+{
+ "group": "hashes",
+ "description": "HSET, HGET, HDEL, HGETALL, HEXISTS, HINCRBY, HKEYS, HVALS, HLEN",
+ "cases": [
+  {
+   "name": "hset-single-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "H"
+     ],
+     "expect": [
+      "+",
+      "hash"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-multiple-fields",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a",
+      "1",
+      "b",
+      "2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-updates-existing-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "w"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "w"
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-counts-only-new-fields",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a",
+      "1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a",
+      "2",
+      "b",
+      "3"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-duplicate-field-in-one-call",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a",
+      "1",
+      "a",
+      "2"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "a"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-empty-field-name",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      ""
+     ],
+     "expect": [
+      "$",
+      "v"
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "H",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-empty-value",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      ""
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-binary-field-and-value",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a\r\nb",
+      "c d"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "a\r\nb"
+     ],
+     "expect": [
+      "$",
+      "c d"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-fields-are-case-sensitive",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "lower",
+      "F",
+      "upper"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "lower"
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "F"
+     ],
+     "expect": [
+      "$",
+      "upper"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-one-hundred-fields",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f000",
+      "v000",
+      "f001",
+      "v001",
+      "f002",
+      "v002",
+      "f003",
+      "v003",
+      "f004",
+      "v004",
+      "f005",
+      "v005",
+      "f006",
+      "v006",
+      "f007",
+      "v007",
+      "f008",
+      "v008",
+      "f009",
+      "v009",
+      "f010",
+      "v010",
+      "f011",
+      "v011",
+      "f012",
+      "v012",
+      "f013",
+      "v013",
+      "f014",
+      "v014",
+      "f015",
+      "v015",
+      "f016",
+      "v016",
+      "f017",
+      "v017",
+      "f018",
+      "v018",
+      "f019",
+      "v019",
+      "f020",
+      "v020",
+      "f021",
+      "v021",
+      "f022",
+      "v022",
+      "f023",
+      "v023",
+      "f024",
+      "v024",
+      "f025",
+      "v025",
+      "f026",
+      "v026",
+      "f027",
+      "v027",
+      "f028",
+      "v028",
+      "f029",
+      "v029",
+      "f030",
+      "v030",
+      "f031",
+      "v031",
+      "f032",
+      "v032",
+      "f033",
+      "v033",
+      "f034",
+      "v034",
+      "f035",
+      "v035",
+      "f036",
+      "v036",
+      "f037",
+      "v037",
+      "f038",
+      "v038",
+      "f039",
+      "v039",
+      "f040",
+      "v040",
+      "f041",
+      "v041",
+      "f042",
+      "v042",
+      "f043",
+      "v043",
+      "f044",
+      "v044",
+      "f045",
+      "v045",
+      "f046",
+      "v046",
+      "f047",
+      "v047",
+      "f048",
+      "v048",
+      "f049",
+      "v049",
+      "f050",
+      "v050",
+      "f051",
+      "v051",
+      "f052",
+      "v052",
+      "f053",
+      "v053",
+      "f054",
+      "v054",
+      "f055",
+      "v055",
+      "f056",
+      "v056",
+      "f057",
+      "v057",
+      "f058",
+      "v058",
+      "f059",
+      "v059",
+      "f060",
+      "v060",
+      "f061",
+      "v061",
+      "f062",
+      "v062",
+      "f063",
+      "v063",
+      "f064",
+      "v064",
+      "f065",
+      "v065",
+      "f066",
+      "v066",
+      "f067",
+      "v067",
+      "f068",
+      "v068",
+      "f069",
+      "v069",
+      "f070",
+      "v070",
+      "f071",
+      "v071",
+      "f072",
+      "v072",
+      "f073",
+      "v073",
+      "f074",
+      "v074",
+      "f075",
+      "v075",
+      "f076",
+      "v076",
+      "f077",
+      "v077",
+      "f078",
+      "v078",
+      "f079",
+      "v079",
+      "f080",
+      "v080",
+      "f081",
+      "v081",
+      "f082",
+      "v082",
+      "f083",
+      "v083",
+      "f084",
+      "v084",
+      "f085",
+      "v085",
+      "f086",
+      "v086",
+      "f087",
+      "v087",
+      "f088",
+      "v088",
+      "f089",
+      "v089",
+      "f090",
+      "v090",
+      "f091",
+      "v091",
+      "f092",
+      "v092",
+      "f093",
+      "v093",
+      "f094",
+      "v094",
+      "f095",
+      "v095",
+      "f096",
+      "v096",
+      "f097",
+      "v097",
+      "f098",
+      "v098",
+      "f099",
+      "v099"
+     ],
+     "expect": [
+      ":",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f099"
+     ],
+     "expect": [
+      "$",
+      "v099"
+     ]
+    },
+    {
+     "cmd": [
+      "HKEYS",
+      "H"
+     ],
+     "expect": [
+      "*n",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "HVALS",
+      "H"
+     ],
+     "expect": [
+      "*n",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "H"
+     ],
+     "expect": [
+      "*n",
+      200
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hget-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HGET",
+      "nope",
+      "f"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hget-missing-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "zzz"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hget-existing-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      "$",
+      "v1"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-single-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      "$",
+      null
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-multiple-fields",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a",
+      "1",
+      "b",
+      "2",
+      "c",
+      "3"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "a",
+      "b"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-missing-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "zzz"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HDEL",
+      "nope",
+      "f"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-partial-match",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f1",
+      "zzz"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-duplicate-field-counted-once",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f1",
+      "f1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-last-field-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "H"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "H"
+     ],
+     "expect": [
+      "+",
+      "none"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-all-fields-deletes-key",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f1",
+      "f2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "H"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hgetall-basic",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "H"
+     ],
+     "expect": [
+      "*p",
+      [
+       "f1",
+       "v1",
+       "f2",
+       "v2"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hgetall-single-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "v"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "H"
+     ],
+     "expect": [
+      "*",
+      [
+       "f",
+       "v"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hgetall-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HGETALL",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hgetall-after-update",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "z"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "H"
+     ],
+     "expect": [
+      "*p",
+      [
+       "f1",
+       "z",
+       "f2",
+       "v2"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hkeys-basic",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HKEYS",
+      "H"
+     ],
+     "expect": [
+      "*u",
+      [
+       "f1",
+       "f2"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hkeys-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HKEYS",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hvals-basic",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HVALS",
+      "H"
+     ],
+     "expect": [
+      "*u",
+      [
+       "v1",
+       "v2"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hvals-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HVALS",
+      "nope"
+     ],
+     "expect": [
+      "*",
+      []
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hvals-keeps-duplicates",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "a",
+      "x",
+      "b",
+      "x"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HVALS",
+      "H"
+     ],
+     "expect": [
+      "*u",
+      [
+       "x",
+       "x"
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hlen-basic",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hlen-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HLEN",
+      "nope"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hlen-after-delete",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hexists-present",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hexists-absent-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "H",
+      "zzz"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hexists-missing-key",
+   "steps": [
+    {
+     "cmd": [
+      "HEXISTS",
+      "nope",
+      "f"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hexists-after-delete",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "H",
+      "f1"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-new-key-and-field",
+   "steps": [
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "5"
+     ],
+     "expect": [
+      ":",
+      5
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "5"
+     ]
+    },
+    {
+     "cmd": [
+      "TYPE",
+      "H"
+     ],
+     "expect": [
+      "+",
+      "hash"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-existing-field",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "10"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "5"
+     ],
+     "expect": [
+      ":",
+      15
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "15"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-negative-increment",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "10"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "-15"
+     ],
+     "expect": [
+      ":",
+      -5
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-zero-increment",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "10"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "0"
+     ],
+     "expect": [
+      ":",
+      10
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-new-field-in-existing-hash",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f1",
+      "v1",
+      "f2",
+      "v2"
+     ],
+     "expect": [
+      ":",
+      2
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "n",
+      "3"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "H"
+     ],
+     "expect": [
+      ":",
+      3
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-non-integer-field-value",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "abc"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "ERR hash value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-leading-zero-field-value",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "01"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "ERR hash value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-empty-field-value",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      ""
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "ERR hash value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-bad-increment",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-increment-leading-zero",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "1"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "01"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-overflow",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "9223372036854775807"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "9223372036854775807"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-underflow",
+   "steps": [
+    {
+     "cmd": [
+      "HSET",
+      "H",
+      "f",
+      "-9223372036854775808"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "-1"
+     ],
+     "expect": [
+      "-",
+      "ERR increment or decrement would overflow"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-canonical-storage",
+   "steps": [
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "100"
+     ],
+     "expect": [
+      ":",
+      100
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "100"
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "-142"
+     ],
+     "expect": [
+      ":",
+      -42
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "H",
+      "f"
+     ],
+     "expect": [
+      "$",
+      "-42"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-does-not-create-key-on-error",
+   "steps": [
+    {
+     "cmd": [
+      "HINCRBY",
+      "H",
+      "f",
+      "abc"
+     ],
+     "expect": [
+      "-",
+      "ERR value is not an integer or out of range"
+     ]
+    },
+    {
+     "cmd": [
+      "EXISTS",
+      "H"
+     ],
+     "expect": [
+      ":",
+      0
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hset-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HSET",
+      "k",
+      "f",
+      "v"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hget-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGET",
+      "k",
+      "f"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hgetall-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HGETALL",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hdel-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HDEL",
+      "k",
+      "f"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hexists-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HEXISTS",
+      "k",
+      "f"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hincrby-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HINCRBY",
+      "k",
+      "f",
+      "1"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hkeys-on-list",
+   "steps": [
+    {
+     "cmd": [
+      "RPUSH",
+      "k",
+      "a"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HKEYS",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hvals-on-set",
+   "steps": [
+    {
+     "cmd": [
+      "SADD",
+      "k",
+      "m"
+     ],
+     "expect": [
+      ":",
+      1
+     ]
+    },
+    {
+     "cmd": [
+      "HVALS",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "hlen-on-string",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ]
+    },
+    {
+     "cmd": [
+      "HLEN",
+      "k"
+     ],
+     "expect": [
+      "-",
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+     ]
+    }
+   ]
+  }
+ ]
+}

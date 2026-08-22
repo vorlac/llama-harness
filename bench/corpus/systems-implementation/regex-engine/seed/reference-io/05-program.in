@@ -1,0 +1,6 @@
+PROGRAM a
+PROGRAM a\x2ab
+PROGRAM (a|b)\x2b
+PROGRAM [a\x2dz]\\d\x3f
+PROGRAM \x5eabc\x24
+PROGRAM (?i)a

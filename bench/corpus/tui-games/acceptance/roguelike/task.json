@@ -1,0 +1,37 @@
+{
+  "id": "roguelike",
+  "title": "Traditional roguelike: 8-level dungeon, shadowcasting FOV, A* AI, energy scheduler, save/load",
+  "category": "tui-games",
+  "size": "L",
+  "languages": [
+    "rust",
+    "go",
+    "cpp",
+    "python",
+    "ts"
+  ],
+  "prompt": "tui-games/tui-roguelike-impl-prompt.md",
+  "difficulty": 8,
+  "timeouts": {
+    "build": 300,
+    "run": 300,
+    "test": 900
+  },
+  "verify": "test.sh",
+  "starting_material": null,
+  "artifacts": [
+    "build.sh",
+    "run.sh",
+    "test.sh",
+    "README.md",
+    "NOTES.md",
+    "MODULES.md",
+    "run.json",
+    "tests/scripts/smoke.keys",
+    "tests/scripts/descend.keys",
+    "tests/scripts/combat.keys",
+    "tests/expected/smoke.json",
+    "tests/expected/descend.json",
+    "tests/expected/combat.json"
+  ]
+}

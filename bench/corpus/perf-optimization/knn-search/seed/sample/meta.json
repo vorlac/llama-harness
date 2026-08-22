@@ -1,0 +1,12 @@
+{
+  "n": 2000,
+  "d": 16,
+  "queries": 32,
+  "k": 10,
+  "seed": 424242,
+  "pattern": "clustered",
+  "dup_rate": 16,
+  "clusters": 1,
+  "duplicate_points": 109,
+  "value_range": [-64, 63]
+}

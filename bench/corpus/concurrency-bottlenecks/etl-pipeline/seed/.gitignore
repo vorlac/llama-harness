@@ -1,0 +1,10 @@
+# Generated workloads and oracle references. Regenerate with
+# tools/gen_workload.py; see README.md. They are hundreds of megabytes.
+data/
+
+# Run output.
+out/
+bench-out/
+
+__pycache__/
+*.pyc

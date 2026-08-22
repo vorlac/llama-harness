@@ -1,0 +1,2607 @@
+{
+ "group": "concurrency",
+ "description": "Multiple simultaneous connections, partial commands, and per-connection state isolation",
+ "cases": [
+  {
+   "name": "partial-multibulk-does-not-block-another-client",
+   "steps": [
+    {
+     "send": "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n",
+     "client": "slow"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "fast"
+    },
+    {
+     "cmd": [
+      "SET",
+      "other",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "fast"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "fast"
+    },
+    {
+     "send": "$5\r\nvalue\r\n",
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "slow"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "value"
+     ],
+     "client": "fast"
+    }
+   ]
+  },
+  {
+   "name": "partial-inline-does-not-block-another-client",
+   "steps": [
+    {
+     "send": "PI",
+     "client": "slow"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "fast"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "still-alive"
+     ],
+     "expect": [
+      "$",
+      "still-alive"
+     ],
+     "client": "fast"
+    },
+    {
+     "send": "NG\r\n",
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "slow"
+    }
+   ]
+  },
+  {
+   "name": "partial-bulk-header-does-not-block",
+   "steps": [
+    {
+     "send": "*2\r\n$4\r\nECHO\r\n$5",
+     "client": "slow"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "fast"
+    },
+    {
+     "send": "\r\nhello\r\n",
+     "expect": [
+      "$",
+      "hello"
+     ],
+     "client": "slow"
+    }
+   ]
+  },
+  {
+   "name": "two-slow-clients-and-one-fast",
+   "steps": [
+    {
+     "send": "*2\r\n$3\r\nGET\r\n",
+     "client": "s1"
+    },
+    {
+     "send": "*2\r\n$4\r\nECHO\r\n",
+     "client": "s2"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "fast"
+    },
+    {
+     "send": "$1\r\nk\r\n",
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "s1"
+    },
+    {
+     "send": "$2\r\nhi\r\n",
+     "expect": [
+      "$",
+      "hi"
+     ],
+     "client": "s2"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "fast"
+    }
+   ]
+  },
+  {
+   "name": "client-that-disconnects-mid-command-does-not-break-the-server",
+   "steps": [
+    {
+     "send": "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n",
+     "client": "dead"
+    },
+    {
+     "close": true,
+     "client": "dead"
+    },
+    {
+     "sleep_ms": 100
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "fast"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "fast"
+    }
+   ]
+  },
+  {
+   "name": "thirty-two-concurrent-clients-ping",
+   "steps": [
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c00"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c01"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c02"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c03"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c04"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c05"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c06"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c07"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c08"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c09"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c10"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c11"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c12"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c13"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c14"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c15"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c16"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c17"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c18"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c19"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c20"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c21"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c22"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c23"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c24"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c25"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c26"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c27"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c28"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c29"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c30"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "c31"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c00"
+     ],
+     "expect": [
+      "$",
+      "c00"
+     ],
+     "client": "c00"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c01"
+     ],
+     "expect": [
+      "$",
+      "c01"
+     ],
+     "client": "c01"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c02"
+     ],
+     "expect": [
+      "$",
+      "c02"
+     ],
+     "client": "c02"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c03"
+     ],
+     "expect": [
+      "$",
+      "c03"
+     ],
+     "client": "c03"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c04"
+     ],
+     "expect": [
+      "$",
+      "c04"
+     ],
+     "client": "c04"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c05"
+     ],
+     "expect": [
+      "$",
+      "c05"
+     ],
+     "client": "c05"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c06"
+     ],
+     "expect": [
+      "$",
+      "c06"
+     ],
+     "client": "c06"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c07"
+     ],
+     "expect": [
+      "$",
+      "c07"
+     ],
+     "client": "c07"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c08"
+     ],
+     "expect": [
+      "$",
+      "c08"
+     ],
+     "client": "c08"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c09"
+     ],
+     "expect": [
+      "$",
+      "c09"
+     ],
+     "client": "c09"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c10"
+     ],
+     "expect": [
+      "$",
+      "c10"
+     ],
+     "client": "c10"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c11"
+     ],
+     "expect": [
+      "$",
+      "c11"
+     ],
+     "client": "c11"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c12"
+     ],
+     "expect": [
+      "$",
+      "c12"
+     ],
+     "client": "c12"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c13"
+     ],
+     "expect": [
+      "$",
+      "c13"
+     ],
+     "client": "c13"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c14"
+     ],
+     "expect": [
+      "$",
+      "c14"
+     ],
+     "client": "c14"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c15"
+     ],
+     "expect": [
+      "$",
+      "c15"
+     ],
+     "client": "c15"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c16"
+     ],
+     "expect": [
+      "$",
+      "c16"
+     ],
+     "client": "c16"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c17"
+     ],
+     "expect": [
+      "$",
+      "c17"
+     ],
+     "client": "c17"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c18"
+     ],
+     "expect": [
+      "$",
+      "c18"
+     ],
+     "client": "c18"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c19"
+     ],
+     "expect": [
+      "$",
+      "c19"
+     ],
+     "client": "c19"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c20"
+     ],
+     "expect": [
+      "$",
+      "c20"
+     ],
+     "client": "c20"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c21"
+     ],
+     "expect": [
+      "$",
+      "c21"
+     ],
+     "client": "c21"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c22"
+     ],
+     "expect": [
+      "$",
+      "c22"
+     ],
+     "client": "c22"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c23"
+     ],
+     "expect": [
+      "$",
+      "c23"
+     ],
+     "client": "c23"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c24"
+     ],
+     "expect": [
+      "$",
+      "c24"
+     ],
+     "client": "c24"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c25"
+     ],
+     "expect": [
+      "$",
+      "c25"
+     ],
+     "client": "c25"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c26"
+     ],
+     "expect": [
+      "$",
+      "c26"
+     ],
+     "client": "c26"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c27"
+     ],
+     "expect": [
+      "$",
+      "c27"
+     ],
+     "client": "c27"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c28"
+     ],
+     "expect": [
+      "$",
+      "c28"
+     ],
+     "client": "c28"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c29"
+     ],
+     "expect": [
+      "$",
+      "c29"
+     ],
+     "client": "c29"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c30"
+     ],
+     "expect": [
+      "$",
+      "c30"
+     ],
+     "client": "c30"
+    },
+    {
+     "cmd": [
+      "ECHO",
+      "c31"
+     ],
+     "expect": [
+      "$",
+      "c31"
+     ],
+     "client": "c31"
+    }
+   ]
+  },
+  {
+   "name": "sixteen-clients-share-the-keyspace",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k00",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w00"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k01",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w01"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k02",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w02"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k03",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w03"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k04",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w04"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k05",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w05"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k06",
+      "6"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w06"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k07",
+      "7"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w07"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k08",
+      "8"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w08"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k09",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w09"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k10",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w10"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k11",
+      "11"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w11"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k12",
+      "12"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w12"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k13",
+      "13"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w13"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k14",
+      "14"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w14"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k15",
+      "15"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w15"
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      16
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k00"
+     ],
+     "expect": [
+      "$",
+      "0"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k01"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k02"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k03"
+     ],
+     "expect": [
+      "$",
+      "3"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k04"
+     ],
+     "expect": [
+      "$",
+      "4"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k05"
+     ],
+     "expect": [
+      "$",
+      "5"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k06"
+     ],
+     "expect": [
+      "$",
+      "6"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k07"
+     ],
+     "expect": [
+      "$",
+      "7"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k08"
+     ],
+     "expect": [
+      "$",
+      "8"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k09"
+     ],
+     "expect": [
+      "$",
+      "9"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k10"
+     ],
+     "expect": [
+      "$",
+      "10"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k11"
+     ],
+     "expect": [
+      "$",
+      "11"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k12"
+     ],
+     "expect": [
+      "$",
+      "12"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k13"
+     ],
+     "expect": [
+      "$",
+      "13"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k14"
+     ],
+     "expect": [
+      "$",
+      "14"
+     ],
+     "client": "reader"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k15"
+     ],
+     "expect": [
+      "$",
+      "15"
+     ],
+     "client": "reader"
+    }
+   ]
+  },
+  {
+   "name": "interleaved-increments-from-two-clients",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "n",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "INCR",
+      "n"
+     ],
+     "expect": [
+      ":",
+      1
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "INCR",
+      "n"
+     ],
+     "expect": [
+      ":",
+      2
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "INCR",
+      "n"
+     ],
+     "expect": [
+      ":",
+      3
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "INCR",
+      "n"
+     ],
+     "expect": [
+      ":",
+      4
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "GET",
+      "n"
+     ],
+     "expect": [
+      "$",
+      "4"
+     ],
+     "client": "a"
+    }
+   ]
+  },
+  {
+   "name": "writes-are-immediately-visible-to-other-clients",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ],
+     "client": "a"
+    }
+   ]
+  },
+  {
+   "name": "pipelined-batch-from-one-client-while-another-works",
+   "steps": [
+    {
+     "send": "*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n*1\r\n$4\r\nPING\r\n",
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "b"
+    },
+    {
+     "expect_repeat": [
+      19,
+      [
+       "+",
+       "PONG"
+      ]
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "v"
+     ],
+     "client": "b"
+    }
+   ]
+  },
+  {
+   "name": "connections-can-be-opened-and-closed-repeatedly",
+   "steps": [
+    {
+     "connect": true,
+     "client": "t00"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t00"
+    },
+    {
+     "close": true,
+     "client": "t00"
+    },
+    {
+     "connect": true,
+     "client": "t01"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t01"
+    },
+    {
+     "close": true,
+     "client": "t01"
+    },
+    {
+     "connect": true,
+     "client": "t02"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t02"
+    },
+    {
+     "close": true,
+     "client": "t02"
+    },
+    {
+     "connect": true,
+     "client": "t03"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t03"
+    },
+    {
+     "close": true,
+     "client": "t03"
+    },
+    {
+     "connect": true,
+     "client": "t04"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t04"
+    },
+    {
+     "close": true,
+     "client": "t04"
+    },
+    {
+     "connect": true,
+     "client": "t05"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t05"
+    },
+    {
+     "close": true,
+     "client": "t05"
+    },
+    {
+     "connect": true,
+     "client": "t06"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "6"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t06"
+    },
+    {
+     "close": true,
+     "client": "t06"
+    },
+    {
+     "connect": true,
+     "client": "t07"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "7"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t07"
+    },
+    {
+     "close": true,
+     "client": "t07"
+    },
+    {
+     "connect": true,
+     "client": "t08"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "8"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t08"
+    },
+    {
+     "close": true,
+     "client": "t08"
+    },
+    {
+     "connect": true,
+     "client": "t09"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t09"
+    },
+    {
+     "close": true,
+     "client": "t09"
+    },
+    {
+     "connect": true,
+     "client": "t10"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t10"
+    },
+    {
+     "close": true,
+     "client": "t10"
+    },
+    {
+     "connect": true,
+     "client": "t11"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "11"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t11"
+    },
+    {
+     "close": true,
+     "client": "t11"
+    },
+    {
+     "connect": true,
+     "client": "t12"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "12"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t12"
+    },
+    {
+     "close": true,
+     "client": "t12"
+    },
+    {
+     "connect": true,
+     "client": "t13"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "13"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t13"
+    },
+    {
+     "close": true,
+     "client": "t13"
+    },
+    {
+     "connect": true,
+     "client": "t14"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "14"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t14"
+    },
+    {
+     "close": true,
+     "client": "t14"
+    },
+    {
+     "connect": true,
+     "client": "t15"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "15"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t15"
+    },
+    {
+     "close": true,
+     "client": "t15"
+    },
+    {
+     "connect": true,
+     "client": "t16"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "16"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t16"
+    },
+    {
+     "close": true,
+     "client": "t16"
+    },
+    {
+     "connect": true,
+     "client": "t17"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "17"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t17"
+    },
+    {
+     "close": true,
+     "client": "t17"
+    },
+    {
+     "connect": true,
+     "client": "t18"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "18"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t18"
+    },
+    {
+     "close": true,
+     "client": "t18"
+    },
+    {
+     "connect": true,
+     "client": "t19"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "19"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "t19"
+    },
+    {
+     "close": true,
+     "client": "t19"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "19"
+     ],
+     "client": "final"
+    }
+   ]
+  },
+  {
+   "name": "per-connection-state-is-not-shared",
+   "steps": [
+    {
+     "cmd": [
+      "SELECT",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "d"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "db0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "c"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      null
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "db0"
+     ],
+     "client": "c"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "PONG"
+       ]
+      ]
+     ],
+     "client": "b"
+    }
+   ]
+  },
+  {
+   "name": "transaction-on-one-client-does-not-block-another",
+   "steps": [
+    {
+     "cmd": [
+      "MULTI"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "QUEUED"
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "SET",
+      "j",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "GET",
+      "j"
+     ],
+     "expect": [
+      "$",
+      "2"
+     ],
+     "client": "b"
+    },
+    {
+     "cmd": [
+      "EXEC"
+     ],
+     "expect": [
+      "*",
+      [
+       [
+        "+",
+        "OK"
+       ]
+      ]
+     ],
+     "client": "a"
+    },
+    {
+     "cmd": [
+      "GET",
+      "k"
+     ],
+     "expect": [
+      "$",
+      "1"
+     ],
+     "client": "b"
+    }
+   ]
+  },
+  {
+   "name": "subscriber-does-not-block-other-clients",
+   "steps": [
+    {
+     "cmd": [
+      "SUBSCRIBE",
+      "ch"
+     ],
+     "expect": [
+      "*",
+      [
+       "subscribe",
+       "ch",
+       1
+      ]
+     ],
+     "client": "sub"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k0",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k1",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k2",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k3",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k4",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k5",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k6",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k7",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k8",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k9",
+      "v"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "w"
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      10
+     ],
+     "client": "w"
+    },
+    {
+     "expect_nothing_ms": 100,
+     "client": "sub"
+    }
+   ]
+  },
+  {
+   "name": "many-clients-then-all-close",
+   "steps": [
+    {
+     "cmd": [
+      "SET",
+      "k00",
+      "0"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m00"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k01",
+      "1"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m01"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k02",
+      "2"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m02"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k03",
+      "3"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m03"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k04",
+      "4"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m04"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k05",
+      "5"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m05"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k06",
+      "6"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m06"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k07",
+      "7"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m07"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k08",
+      "8"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m08"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k09",
+      "9"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m09"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k10",
+      "10"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m10"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k11",
+      "11"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m11"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k12",
+      "12"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m12"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k13",
+      "13"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m13"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k14",
+      "14"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m14"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k15",
+      "15"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m15"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k16",
+      "16"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m16"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k17",
+      "17"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m17"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k18",
+      "18"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m18"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k19",
+      "19"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m19"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k20",
+      "20"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m20"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k21",
+      "21"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m21"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k22",
+      "22"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m22"
+    },
+    {
+     "cmd": [
+      "SET",
+      "k23",
+      "23"
+     ],
+     "expect": [
+      "+",
+      "OK"
+     ],
+     "client": "m23"
+    },
+    {
+     "close": true,
+     "client": "m00"
+    },
+    {
+     "close": true,
+     "client": "m01"
+    },
+    {
+     "close": true,
+     "client": "m02"
+    },
+    {
+     "close": true,
+     "client": "m03"
+    },
+    {
+     "close": true,
+     "client": "m04"
+    },
+    {
+     "close": true,
+     "client": "m05"
+    },
+    {
+     "close": true,
+     "client": "m06"
+    },
+    {
+     "close": true,
+     "client": "m07"
+    },
+    {
+     "close": true,
+     "client": "m08"
+    },
+    {
+     "close": true,
+     "client": "m09"
+    },
+    {
+     "close": true,
+     "client": "m10"
+    },
+    {
+     "close": true,
+     "client": "m11"
+    },
+    {
+     "close": true,
+     "client": "m12"
+    },
+    {
+     "close": true,
+     "client": "m13"
+    },
+    {
+     "close": true,
+     "client": "m14"
+    },
+    {
+     "close": true,
+     "client": "m15"
+    },
+    {
+     "close": true,
+     "client": "m16"
+    },
+    {
+     "close": true,
+     "client": "m17"
+    },
+    {
+     "close": true,
+     "client": "m18"
+    },
+    {
+     "close": true,
+     "client": "m19"
+    },
+    {
+     "close": true,
+     "client": "m20"
+    },
+    {
+     "close": true,
+     "client": "m21"
+    },
+    {
+     "close": true,
+     "client": "m22"
+    },
+    {
+     "close": true,
+     "client": "m23"
+    },
+    {
+     "sleep_ms": 150
+    },
+    {
+     "cmd": [
+      "DBSIZE"
+     ],
+     "expect": [
+      ":",
+      24
+     ],
+     "client": "after"
+    },
+    {
+     "cmd": [
+      "PING"
+     ],
+     "expect": [
+      "+",
+      "PONG"
+     ],
+     "client": "after"
+    }
+   ]
+  }
+ ]
+}

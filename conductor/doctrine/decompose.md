@@ -7,14 +7,11 @@ that fully covers the request — never one giant item, never busywork slices.
 
 ## How to size an item
 
-- **Stay under the caps.** An item is too big when its `fileScope` exceeds the
-  file cap, its read set exceeds the token budget, or its `acceptance` spans more
-  than one cluster — the measured limits the queue gate enforces, named with live
-  numbers in the generated section below. Oversized items get one bounded re-split
-  round, then are rejected outright.
+- **Stay under the caps.** File cap, read-set budget, one acceptance cluster
+  (generated below). An oversized item gets one bounded re-split round, then
+  rejection.
 - **Observable acceptance.** State `acceptance` as observable checks a reader
-  could run ("rejects empty input with a parse error"), never as a mood ("make it
-  better", "improve robustness").
+  could run, never as a mood ("make it better", "improve robustness").
 - **Non-empty edit scope.** An item that writes nothing is not an item.
 
 ## Scope disjointness and the DAG
@@ -47,9 +44,8 @@ a non-behavioral one claims no test paths.
 
 ## Prefer a new test file per item
 
-Give each behavioral item its own test file, not a shared one: a later item's
-tests then quarantine at file granularity without deleting unrelated coverage a
-shared file would have carried.
+Give each behavioral item its own test file: a later quarantine then works at
+file granularity without deleting unrelated coverage a shared file carried.
 
 ## The ponytail ladder — cheapest rung first
 
@@ -104,7 +100,7 @@ The harness re-derives which of these is legal on every request and names the on
 
 - fileScope size is capped at 5 files, counted as the greater of its entry count and the files its globs match — a `**` entry matching forty files counts as forty, a not-yet-created literal path counts as one.
 - The read set is capped at a default 20000 tokens (matched-file bytes / 4); `workflow.readSetTokenBudget` overrides it, 0 disables it. A scope too big to read is refused.
-- acceptance must resolve to one cluster; more than one is a rejection, not a warning.
+- acceptance must resolve to one cluster; more than one is a rejection, not a warning. The gate counts the distinct SUBJECTS the criteria name against the item's files, so open each criterion with what it is about (`parse rejects empty input`, not `rejects empty input`). A criterion NAMING a file, test or symbol it does not change is a guard and costs nothing.
 
 ## When you are stuck
 

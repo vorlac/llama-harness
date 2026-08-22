@@ -1,0 +1,14 @@
+{
+  "legacy_http/__init__.py": "a92a458cd0e9405464bcbc5270636d2d96756ae5e1ff21e743a9df42ebe1df68",
+  "legacy_http/errors.py": "1dc6bb2dbd6486d193a23f1663ab441010c036a95408c7a38dd821122583e239",
+  "legacy_http/hooks.py": "af3e3265e91a88908cf8abbaff5919d7a3024b8bfa967abb34a0e81dfa9aa886",
+  "legacy_http/response.py": "287c266e1e82b6d14e47a34e610eefca969dcb59ee73deced09d65881782f2c9",
+  "legacy_http/session.py": "47edc6fb65ada1cc6dc4acdf832903d5bf4e73a077c45fbe372faa74a5123ea5",
+  "modern_http/__init__.py": "e7bfa59a2b39a0ac32d01f9b9c47f50ccfc66d5e88788177cabf2e54699a85f6",
+  "modern_http/_selfcheck.py": "fc7cb995a00b13cd557858e7a2b0e1647e780cd26942d2c8d14e311c0239dad1",
+  "modern_http/client.py": "a75c09905948aa0b3fea464d876d6ea1231b0195604e58e8a02d898e0b60bec8",
+  "modern_http/errors.py": "a22c9ae73e8e48199346203aad684cc71017a52b6bba93eef4e8c5eec8ebcea7",
+  "modern_http/hooks.py": "9db926f4758507990cc6e3f322f17ff2e43060f2a8f12d1557eb8f75287b9992",
+  "modern_http/models.py": "291eea209e2d5e2feeec93613fb5294dbb8472da035578462dddd0bc7df9950b",
+  "wirenet/__init__.py": "9d144f0610e90dbec1ba8033e6ba47cce7a07a4b3c9bf0b9ed3383406bdf1c24"
+}
