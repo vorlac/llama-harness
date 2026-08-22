@@ -13,6 +13,23 @@ which watching a run can perturb it.
 
 ---
 
+## If you just want to start a benchmark and watch it
+
+`scripts/run_and_watch.py` starts the benchmark and prints this console beside
+two feeds it cannot supply on its own — the driver's own output, and a
+scoreboard of every arm's outcome as each cell is scored. It takes no arguments;
+every setting is a documented constant at the top of the file.
+
+```bash
+/usr/bin/python3 scripts/run_and_watch.py
+```
+
+Reach for the rest of this page when you want the console against a run you did
+not start from there: one already in flight, one that has finished, or a
+preserved journal you are reading after the fact.
+
+---
+
 ## The command
 
 While a bench cell is running, in a second terminal at the repository root:
